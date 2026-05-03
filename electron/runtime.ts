@@ -1,0 +1,1296 @@
+import type { BrowserWindow } from "electron";
+import { prisma } from "../lib/prisma";
+import { computeElapsedSeconds, serializeDisplayState } from "../lib/timer";
+import { CommandSchema, type Command } from "../lib/validation/commands";
+import type {
+  CommandAck,
+  DesktopApiRequest,
+  DesktopApiResponse,
+  ExportFormat,
+  TickPayload,
+} from "../lib/desktop-bridge";
+import type {
+  SponsorLedgerPayload,
+  SponsorTelemetryClipEnd,
+  SponsorTelemetryClipStart,
+} from "../lib/sponsor-telemetry";
+import { handleCommand } from "../server/handlers";
+import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
+import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
+
+type RuntimeOptions = {
+  getControlWindow: () => BrowserWindow | null;
+  getDisplayWindow: () => BrowserWindow | null;
+  log: (line: string) => void;
+};
+
+let opts: RuntimeOptions | null = null;
+let tickInterval: NodeJS.Timeout | null = null;
+
+function requireOpts() {
+  if (!opts) throw new Error("Desktop runtime is not initialized");
+  return opts;
+}
+
+function windows() {
+  const { getControlWindow, getDisplayWindow } = requireOpts();
+  return [getControlWindow(), getDisplayWindow()].filter(
+    (win): win is BrowserWindow => !!win && !win.isDestroyed(),
+  );
+}
+
+function sendAll(channel: string, payload: unknown) {
+  for (const win of windows()) {
+    win.webContents.send(channel, payload);
+  }
+}
+
+function sendControl(channel: string, payload: unknown) {
+  const win = requireOpts().getControlWindow();
+  if (win && !win.isDestroyed()) {
+    win.webContents.send(channel, payload);
+  }
+}
+
+let sponsorLedgerSnapshot: SponsorLedgerPayload | null = null;
+/** Voorkomt dubbele telling bij dubbele effect-cleanups (o.a. React Strict Mode). */
+const sponsorClipEndedSessions = new Set<string>();
+
+export function getSponsorLedgerSnapshot(): SponsorLedgerPayload | null {
+  return sponsorLedgerSnapshot;
+}
+
+function ensureSponsorLedger(matchId: string, segmentKey: string): SponsorLedgerPayload {
+  const now = Date.now();
+  if (
+    !sponsorLedgerSnapshot ||
+    sponsorLedgerSnapshot.matchId !== matchId ||
+    sponsorLedgerSnapshot.segmentKey !== segmentKey
+  ) {
+    sponsorLedgerSnapshot = {
+      matchId,
+      segmentKey,
+      bySponsorSec: {},
+      activeClip: null,
+      updatedAtMs: now,
+    };
+  }
+  return sponsorLedgerSnapshot;
+}
+
+export function sponsorTelemetryClipStart(payload: SponsorTelemetryClipStart): SponsorLedgerPayload {
+  const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
+  const now = Date.now();
+  ledger.activeClip = {
+    sponsorId: payload.sponsorId,
+    mediaId: payload.mediaId,
+    startedAtMs: payload.startedAtMs,
+    expectedPlaySec: payload.expectedPlaySec,
+    clipSessionId: payload.clipSessionId,
+  };
+  ledger.updatedAtMs = now;
+  sponsorLedgerSnapshot = ledger;
+  sendAll("display:sponsorLedger", ledger);
+  return ledger;
+}
+
+export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): SponsorLedgerPayload {
+  if (sponsorClipEndedSessions.has(payload.clipSessionId)) {
+    return sponsorLedgerSnapshot ?? ensureSponsorLedger(payload.matchId, payload.segmentKey);
+  }
+  sponsorClipEndedSessions.add(payload.clipSessionId);
+  if (sponsorClipEndedSessions.size > 4000) {
+    sponsorClipEndedSessions.clear();
+  }
+
+  const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
+  const add = Math.max(0, payload.actualSec);
+  const prev = ledger.bySponsorSec[payload.sponsorId] ?? 0;
+  ledger.bySponsorSec[payload.sponsorId] = prev + add;
+
+  const ac = ledger.activeClip;
+  if (
+    ac &&
+    ac.clipSessionId === payload.clipSessionId &&
+    ac.sponsorId === payload.sponsorId &&
+    ac.mediaId === payload.mediaId
+  ) {
+    ledger.activeClip = null;
+  }
+
+  ledger.updatedAtMs = Date.now();
+  sponsorLedgerSnapshot = ledger;
+  sendAll("display:sponsorLedger", ledger);
+  return ledger;
+}
+
+function broadcastSponsorLedger() {
+  sendAll("display:sponsorLedger", sponsorLedgerSnapshot);
+}
+
+async function ensureSqliteSchema() {
+  const statements = [
+    `CREATE TABLE IF NOT EXISTS "Team" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "name" TEXT NOT NULL,
+      "shortName" TEXT NOT NULL,
+      "logoPath" TEXT,
+      "primaryColor" TEXT NOT NULL,
+      "secondaryColor" TEXT NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS "Player" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "teamId" TEXT NOT NULL,
+      "number" INTEGER NOT NULL,
+      "firstName" TEXT NOT NULL,
+      "lastName" TEXT NOT NULL,
+      "position" TEXT,
+      "photoPath" TEXT,
+      "isCoach" BOOLEAN NOT NULL DEFAULT false,
+      "goalMediaId" TEXT,
+      CONSTRAINT "Player_teamId_fkey"
+        FOREIGN KEY ("teamId") REFERENCES "Team" ("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
+    )`,
+    `CREATE TABLE IF NOT EXISTS "Match" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "homeTeamId" TEXT NOT NULL,
+      "awayTeamId" TEXT NOT NULL,
+      "kickoffAt" DATETIME,
+      "halfDurationSec" INTEGER NOT NULL DEFAULT 2700,
+      "halfBreakSec" INTEGER NOT NULL DEFAULT 900,
+      "status" TEXT NOT NULL DEFAULT 'SETUP',
+      "homeScore" INTEGER NOT NULL DEFAULT 0,
+      "awayScore" INTEGER NOT NULL DEFAULT 0,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "Match_homeTeamId_fkey"
+        FOREIGN KEY ("homeTeamId") REFERENCES "Team" ("id")
+        ON DELETE RESTRICT ON UPDATE CASCADE,
+      CONSTRAINT "Match_awayTeamId_fkey"
+        FOREIGN KEY ("awayTeamId") REFERENCES "Team" ("id")
+        ON DELETE RESTRICT ON UPDATE CASCADE
+    )`,
+    `CREATE TABLE IF NOT EXISTS "MatchEvent" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "matchId" TEXT NOT NULL,
+      "type" TEXT NOT NULL,
+      "minute" INTEGER NOT NULL,
+      "addedTime" INTEGER NOT NULL DEFAULT 0,
+      "teamId" TEXT,
+      "playerInId" TEXT,
+      "playerOutId" TEXT,
+      "note" TEXT,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "MatchEvent_matchId_fkey"
+        FOREIGN KEY ("matchId") REFERENCES "Match" ("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
+    )`,
+    `CREATE TABLE IF NOT EXISTS "MediaItem" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "type" TEXT NOT NULL,
+      "path" TEXT NOT NULL,
+      "title" TEXT NOT NULL,
+      "durationSec" INTEGER NOT NULL,
+      "sponsorName" TEXT,
+      "active" BOOLEAN NOT NULL DEFAULT true,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS "Playlist" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "name" TEXT NOT NULL,
+      "slot" TEXT NOT NULL
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS "Playlist_slot_key" ON "Playlist"("slot")`,
+    `CREATE TABLE IF NOT EXISTS "PlaylistItem" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "playlistId" TEXT NOT NULL,
+      "mediaId" TEXT NOT NULL,
+      "order" INTEGER NOT NULL,
+      "durationOverrideSec" INTEGER,
+      CONSTRAINT "PlaylistItem_playlistId_fkey"
+        FOREIGN KEY ("playlistId") REFERENCES "Playlist" ("id")
+        ON DELETE CASCADE ON UPDATE CASCADE,
+      CONSTRAINT "PlaylistItem_mediaId_fkey"
+        FOREIGN KEY ("mediaId") REFERENCES "MediaItem" ("id")
+        ON DELETE RESTRICT ON UPDATE CASCADE
+    )`,
+    `CREATE TABLE IF NOT EXISTS "DisplayState" (
+      "id" INTEGER NOT NULL PRIMARY KEY DEFAULT 1,
+      "mode" TEXT NOT NULL DEFAULT 'IDLE',
+      "matchId" TEXT,
+      "activePlayerId" TEXT,
+      "activeSubOutId" TEXT,
+      "activeSubInId" TEXT,
+      "activeGoalScorerId" TEXT,
+      "activeMediaId" TEXT,
+      "timerRunning" BOOLEAN NOT NULL DEFAULT false,
+      "timerStartedAt" DATETIME,
+      "timerBaseSec" INTEGER NOT NULL DEFAULT 0,
+      "updatedAt" DATETIME NOT NULL
+    )`,
+    `CREATE TABLE IF NOT EXISTS "AppSettings" (
+      "id" INTEGER NOT NULL PRIMARY KEY DEFAULT 1,
+      "homeTeamId" TEXT
+    )`,
+  ];
+
+  for (const sql of statements) {
+    await prisma.$executeRawUnsafe(sql);
+  }
+
+  await addColumnIfMissing("Player", "goalVideoPath", "TEXT");
+  await addColumnIfMissing("Player", "subImagePath", "TEXT");
+  await addColumnIfMissing("Player", "lineupVideoPath", "TEXT");
+  await addColumnIfMissing("AppSettings", "goalIntroVideoPath", "TEXT");
+  await addColumnIfMissing("AppSettings", "matchLiveScoreboardSec", "INTEGER NOT NULL DEFAULT 45");
+  await addColumnIfMissing("AppSettings", "matchLiveSponsorSec", "INTEGER NOT NULL DEFAULT 15");
+  await addColumnIfMissing("AppSettings", "firstHalfScoreboardSec", "INTEGER NOT NULL DEFAULT 45");
+  await addColumnIfMissing("AppSettings", "firstHalfSponsorSec", "INTEGER NOT NULL DEFAULT 15");
+  await addColumnIfMissing("AppSettings", "halftimeScoreboardSec", "INTEGER NOT NULL DEFAULT 30");
+  await addColumnIfMissing("AppSettings", "halftimeSponsorSec", "INTEGER NOT NULL DEFAULT 15");
+  await addColumnIfMissing("AppSettings", "secondHalfScoreboardSec", "INTEGER NOT NULL DEFAULT 45");
+  await addColumnIfMissing("AppSettings", "secondHalfSponsorSec", "INTEGER NOT NULL DEFAULT 15");
+  await addColumnIfMissing("AppSettings", "liveCycleLegacyImported", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("AppSettings", "scoreboardThemeJson", "TEXT");
+  await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");
+  await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "blackoutResumeMode", "TEXT");
+  await addColumnIfMissing(
+    "DisplayState",
+    "substitutionQueueJson",
+    `TEXT NOT NULL DEFAULT '[]'`,
+  );
+
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Sponsor" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "prematchSeconds" INTEGER NOT NULL DEFAULT 0,
+    "matchSeconds" INTEGER NOT NULL DEFAULT 0,
+    "halftimeSeconds" INTEGER NOT NULL DEFAULT 0,
+    "imageDefaultSec" INTEGER NOT NULL DEFAULT 10,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await addColumnIfMissing("MediaItem", "sponsorId", "TEXT");
+  await addColumnIfMissing("MediaItem", "playAudio", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "homeFieldPlayerIdsJson", "TEXT");
+  await addColumnIfMissing("Match", "awayFieldPlayerIdsJson", "TEXT");
+  await addColumnIfMissing("Match", "matchSponsorMediaId", "TEXT");
+  await addColumnIfMissing("Sponsor", "firstHalfScoreboardSec", "INTEGER");
+  await addColumnIfMissing("Sponsor", "firstHalfSponsorSec", "INTEGER");
+  await addColumnIfMissing("Sponsor", "halftimeScoreboardSec", "INTEGER");
+  await addColumnIfMissing("Sponsor", "halftimeSponsorSec", "INTEGER");
+  await addColumnIfMissing("Sponsor", "secondHalfScoreboardSec", "INTEGER");
+  await addColumnIfMissing("Sponsor", "secondHalfSponsorSec", "INTEGER");
+  await addColumnIfMissing("Sponsor", "matchFirstHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Sponsor", "matchSecondHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
+  await migrateSponsorMatchHalfFromLegacy();
+}
+
+/** Eénmalig: oude enkelvoudige matchSeconds → 1e helft als nieuwe velden nog 0 zijn. */
+async function migrateSponsorMatchHalfFromLegacy() {
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Sponsor" SET "matchFirstHalfSeconds" = "matchSeconds", "matchSecondHalfSeconds" = 0 WHERE "matchFirstHalfSeconds" = 0 AND "matchSecondHalfSeconds" = 0 AND "matchSeconds" > 0`,
+    );
+  } catch {
+    /* tabel/kolom ontbreekt op oudere kopie */
+  }
+}
+
+async function addColumnIfMissing(
+  table: string,
+  column: string,
+  typeDecl: string,
+) {
+  const rows = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+    `PRAGMA table_info("${table}")`,
+  );
+  if (rows.some((r) => r.name === column)) return;
+  await prisma.$executeRawUnsafe(
+    `ALTER TABLE "${table}" ADD COLUMN "${column}" ${typeDecl}`,
+  );
+}
+
+/** Eénmalig oude matchLive*-kolommen naar per-fase velden kopiëren. */
+async function migrateAppSettingsLiveCycleFromLegacy() {
+  const cols = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
+    `PRAGMA table_info("AppSettings")`,
+  );
+  const names = new Set(cols.map((c) => c.name));
+  if (!names.has("liveCycleLegacyImported")) return;
+
+  const flagRows = await prisma.$queryRawUnsafe<Array<{ v: number | null }>>(
+    `SELECT "liveCycleLegacyImported" AS v FROM "AppSettings" WHERE "id" = 1`,
+  );
+  if ((flagRows[0]?.v ?? 0) !== 0) return;
+
+  if (!names.has("matchLiveScoreboardSec")) {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "AppSettings" SET "liveCycleLegacyImported" = 1 WHERE "id" = 1`,
+    );
+    return;
+  }
+
+  await prisma.$executeRawUnsafe(`
+    UPDATE "AppSettings" SET
+      "firstHalfScoreboardSec" = COALESCE("matchLiveScoreboardSec", 45),
+      "firstHalfSponsorSec" = COALESCE("matchLiveSponsorSec", 15),
+      "secondHalfScoreboardSec" = COALESCE("matchLiveScoreboardSec", 45),
+      "secondHalfSponsorSec" = COALESCE("matchLiveSponsorSec", 15),
+      "halftimeScoreboardSec" = 30,
+      "halftimeSponsorSec" = COALESCE("matchLiveSponsorSec", 15),
+      "liveCycleLegacyImported" = 1
+    WHERE "id" = 1
+  `);
+}
+
+async function ensureBaseData() {
+  await prisma.displayState.upsert({
+    where: { id: 1 },
+    create: { id: 1, mode: "IDLE" },
+    update: {},
+  });
+
+  const slots = [
+    { slot: "IDLE", name: "Idle" },
+    { slot: "PREMATCH", name: "Pre-match" },
+    { slot: "HALFTIME", name: "Half-time" },
+    { slot: "POSTMATCH", name: "Post-match" },
+    { slot: "GOAL", name: "Goal celebrations" },
+  ] as const;
+
+  for (const slot of slots) {
+    await prisma.playlist.upsert({
+      where: { slot: slot.slot },
+      create: { slot: slot.slot, name: slot.name },
+      update: { name: slot.name },
+    });
+  }
+
+  await prisma.$executeRawUnsafe(
+    `INSERT OR IGNORE INTO "AppSettings" ("id", "homeTeamId") VALUES (1, NULL)`,
+  );
+}
+
+async function getStateRow() {
+  const state = await prisma.displayState.findUnique({ where: { id: 1 } });
+  if (state) return state;
+  return prisma.displayState.create({ data: { id: 1, mode: "IDLE" } });
+}
+
+type LiveCycleStored = {
+  firstHalfScoreboardSec: number;
+  firstHalfSponsorSec: number;
+  halftimeScoreboardSec: number;
+  halftimeSponsorSec: number;
+  secondHalfScoreboardSec: number;
+  secondHalfSponsorSec: number;
+};
+
+type AppSettingsRow = {
+  id: number;
+  homeTeamId: string | null;
+  goalIntroVideoPath: string | null;
+  firstHalfScoreboardSec?: number | null;
+  firstHalfSponsorSec?: number | null;
+  halftimeScoreboardSec?: number | null;
+  halftimeSponsorSec?: number | null;
+  secondHalfScoreboardSec?: number | null;
+  secondHalfSponsorSec?: number | null;
+  scoreboardThemeJson?: string | null;
+};
+
+function defaultLiveCycle(): LiveCycleStored {
+  return {
+    firstHalfScoreboardSec: 45,
+    firstHalfSponsorSec: 15,
+    halftimeScoreboardSec: 30,
+    halftimeSponsorSec: 15,
+    secondHalfScoreboardSec: 45,
+    secondHalfSponsorSec: 15,
+  };
+}
+
+function clampLiveCyclePhasing(p: LiveCycleStored): LiveCycleStored {
+  const sbPlay = (n: number) => Math.max(5, Math.min(600, Math.floor(n)));
+  const sbHt = (n: number) => Math.max(0, Math.min(600, Math.floor(n)));
+  const sp = (n: number) => Math.max(3, Math.min(300, Math.floor(n)));
+  return {
+    firstHalfScoreboardSec: sbPlay(p.firstHalfScoreboardSec),
+    firstHalfSponsorSec: sp(p.firstHalfSponsorSec),
+    halftimeScoreboardSec: sbHt(p.halftimeScoreboardSec),
+    halftimeSponsorSec: sp(p.halftimeSponsorSec),
+    secondHalfScoreboardSec: sbPlay(p.secondHalfScoreboardSec),
+    secondHalfSponsorSec: sp(p.secondHalfSponsorSec),
+  };
+}
+
+async function getAppSettings(): Promise<{
+  id: number;
+  homeTeamId: string | null;
+  goalIntroVideoPath: string | null;
+  scoreboardThemeJson: string | null;
+} & LiveCycleStored> {
+  const defaults = defaultLiveCycle();
+  const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
+    `SELECT "id", "homeTeamId", "goalIntroVideoPath",
+      "firstHalfScoreboardSec", "firstHalfSponsorSec",
+      "halftimeScoreboardSec", "halftimeSponsorSec",
+      "secondHalfScoreboardSec", "secondHalfSponsorSec",
+      "scoreboardThemeJson"
+     FROM "AppSettings" WHERE "id" = 1`,
+  );
+  const row = rows[0];
+  if (row) {
+    return {
+      id: row.id,
+      homeTeamId: row.homeTeamId,
+      goalIntroVideoPath: row.goalIntroVideoPath,
+      scoreboardThemeJson: row.scoreboardThemeJson ?? null,
+      firstHalfScoreboardSec: row.firstHalfScoreboardSec ?? defaults.firstHalfScoreboardSec,
+      firstHalfSponsorSec: row.firstHalfSponsorSec ?? defaults.firstHalfSponsorSec,
+      halftimeScoreboardSec: row.halftimeScoreboardSec ?? defaults.halftimeScoreboardSec,
+      halftimeSponsorSec: row.halftimeSponsorSec ?? defaults.halftimeSponsorSec,
+      secondHalfScoreboardSec: row.secondHalfScoreboardSec ?? defaults.secondHalfScoreboardSec,
+      secondHalfSponsorSec: row.secondHalfSponsorSec ?? defaults.secondHalfSponsorSec,
+    };
+  }
+  await prisma.$executeRawUnsafe(
+    `INSERT OR IGNORE INTO "AppSettings" ("id", "homeTeamId") VALUES (1, NULL)`,
+  );
+  return {
+    id: 1,
+    homeTeamId: null,
+    goalIntroVideoPath: null,
+    scoreboardThemeJson: null,
+    ...defaults,
+  };
+}
+
+async function setHomeTeamId(homeTeamId: string | null) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "homeTeamId" = ? WHERE "id" = 1`,
+    homeTeamId,
+  );
+}
+
+async function setGoalIntroVideoPath(videoPath: string | null) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "goalIntroVideoPath" = ? WHERE "id" = 1`,
+    videoPath,
+  );
+}
+
+async function setLiveCyclePhasing(next: LiveCycleStored) {
+  const c = clampLiveCyclePhasing(next);
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET
+      "firstHalfScoreboardSec" = ?,
+      "firstHalfSponsorSec" = ?,
+      "halftimeScoreboardSec" = ?,
+      "halftimeSponsorSec" = ?,
+      "secondHalfScoreboardSec" = ?,
+      "secondHalfSponsorSec" = ?
+     WHERE "id" = 1`,
+    c.firstHalfScoreboardSec,
+    c.firstHalfSponsorSec,
+    c.halftimeScoreboardSec,
+    c.halftimeSponsorSec,
+    c.secondHalfScoreboardSec,
+    c.secondHalfSponsorSec,
+  );
+}
+
+async function setScoreboardThemeJson(json: string | null) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "scoreboardThemeJson" = ? WHERE "id" = 1`,
+    json,
+  );
+}
+
+async function touchState() {
+  const state = await getStateRow();
+  await prisma.displayState.update({
+    where: { id: 1 },
+    data: { mode: state.mode },
+  });
+}
+
+/** If DisplayState still points at a deleted match, clear it so the UI never 404-loops. */
+async function repairOrphanDisplayMatchId(): Promise<void> {
+  const state = await prisma.displayState.findUnique({ where: { id: 1 } });
+  if (!state?.matchId) return;
+  const exists = await prisma.match.findUnique({
+    where: { id: state.matchId },
+    select: { id: true },
+  });
+  if (exists) return;
+  await prisma.displayState.update({
+    where: { id: 1 },
+    data: {
+      matchId: null,
+      mode: "IDLE",
+      activePlayerId: null,
+      activeSubOutId: null,
+      activeSubInId: null,
+      substitutionQueueJson: "[]",
+      activeGoalScorerId: null,
+      activeMediaId: null,
+      timerRunning: false,
+      timerStartedAt: null,
+      timerBaseSec: 0,
+    },
+  });
+}
+
+export async function getDisplaySnapshot() {
+  const state = await getStateRow();
+  return serializeDisplayState(state);
+}
+
+export async function broadcastDisplayState() {
+  const state = await getDisplaySnapshot();
+  sendAll("display:state", state);
+  return state;
+}
+
+function startTickLoop() {
+  if (tickInterval) return;
+  tickInterval = setInterval(async () => {
+    try {
+      const state = await getStateRow();
+      const tick: TickPayload = {
+        elapsed: computeElapsedSeconds(state),
+        running: state.timerRunning,
+        startedAt: state.timerStartedAt ? state.timerStartedAt.toISOString() : null,
+        baseSec: state.timerBaseSec,
+        serverNow: Date.now(),
+      };
+      sendAll("display:tick", tick);
+    } catch (err) {
+      requireOpts().log(`[tick] ${String(err)}`);
+    }
+  }, 250);
+}
+
+export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
+  opts = runtimeOptions;
+  await ensureSqliteSchema();
+  await ensureBaseData();
+  await migrateAppSettingsLiveCycleFromLegacy();
+  await repairOrphanDisplayMatchId();
+  startTickLoop();
+  await broadcastDisplayState();
+  broadcastSponsorLedger();
+}
+
+export function disposeDesktopRuntime() {
+  if (tickInterval) {
+    clearInterval(tickInterval);
+    tickInterval = null;
+  }
+  sponsorLedgerSnapshot = null;
+  sponsorClipEndedSessions.clear();
+}
+
+function json(status: number, value: unknown): DesktopApiResponse {
+  return {
+    status,
+    contentType: "application/json; charset=utf-8",
+    json: value,
+  };
+}
+
+function text(status: number, value: string, contentType = "text/plain; charset=utf-8") {
+  return {
+    status,
+    contentType,
+    text: value,
+  } satisfies DesktopApiResponse;
+}
+
+function parseJsonBody(req: DesktopApiRequest) {
+  if (!req.bodyText) return undefined;
+  return JSON.parse(req.bodyText);
+}
+
+export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResponse> {
+  try {
+    const method = req.method.toUpperCase();
+    const url = new URL(`http://desktop${req.path}${req.search ?? ""}`);
+    const { pathname, searchParams } = url;
+
+    if (method === "GET" && pathname === "/api/teams") {
+      const teams = await prisma.team.findMany({
+        include: { players: { orderBy: { number: "asc" } } },
+        orderBy: { name: "asc" },
+      });
+      return json(200, teams);
+    }
+
+    if (method === "POST" && pathname === "/api/teams") {
+      const body = parseJsonBody(req);
+      const team = await prisma.team.create({ data: body });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, team);
+    }
+
+    const teamId = pathname.match(/^\/api\/teams\/([^/]+)$/)?.[1];
+    if (teamId && method === "GET") {
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        include: { players: { orderBy: { number: "asc" } } },
+      });
+      return team ? json(200, team) : json(404, { error: "Not found" });
+    }
+    if (teamId && method === "PATCH") {
+      const team = await prisma.team.update({
+        where: { id: teamId },
+        data: parseJsonBody(req),
+      });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, team);
+    }
+    if (teamId && method === "DELETE") {
+      const stillThere = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: { id: true },
+      });
+      if (!stillThere) return json(404, { error: "Team niet gevonden" });
+      // Match verwijst naar Team zonder onDelete — verwijder eerst wedstrijden met dit team.
+      await prisma.$transaction(async (tx) => {
+        await tx.match.deleteMany({
+          where: {
+            OR: [{ homeTeamId: teamId }, { awayTeamId: teamId }],
+          },
+        });
+        await tx.team.delete({ where: { id: teamId } });
+      });
+      const settings = await getAppSettings();
+      if (settings.homeTeamId === teamId) {
+        await setHomeTeamId(null);
+      }
+      await repairOrphanDisplayMatchId();
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/settings" && method === "GET") {
+      const settings = await getAppSettings();
+      return json(200, {
+        homeTeamId: settings.homeTeamId,
+        goalIntroVideoPath: settings.goalIntroVideoPath,
+        firstHalfScoreboardSec: settings.firstHalfScoreboardSec,
+        firstHalfSponsorSec: settings.firstHalfSponsorSec,
+        halftimeScoreboardSec: settings.halftimeScoreboardSec,
+        halftimeSponsorSec: settings.halftimeSponsorSec,
+        secondHalfScoreboardSec: settings.secondHalfScoreboardSec,
+        secondHalfSponsorSec: settings.secondHalfSponsorSec,
+        scoreboardThemeJson: settings.scoreboardThemeJson,
+      });
+    }
+
+    if (pathname === "/api/settings" && method === "PATCH") {
+      const body =
+        (parseJsonBody(req) as {
+          homeTeamId?: string | null;
+          goalIntroVideoPath?: string | null;
+          matchLiveScoreboardSec?: number;
+          matchLiveSponsorSec?: number;
+          firstHalfScoreboardSec?: number;
+          firstHalfSponsorSec?: number;
+          halftimeScoreboardSec?: number;
+          halftimeSponsorSec?: number;
+          secondHalfScoreboardSec?: number;
+          secondHalfSponsorSec?: number;
+          scoreboardThemeJson?: string | null;
+        }) ?? {};
+      if ("homeTeamId" in body) {
+        const homeTeamId = body.homeTeamId ?? null;
+        if (homeTeamId) {
+          const homeTeam = await prisma.team.findUnique({ where: { id: homeTeamId } });
+          if (!homeTeam) {
+            return json(404, { error: "Home team not found" });
+          }
+        }
+        await setHomeTeamId(homeTeamId);
+      }
+      if ("goalIntroVideoPath" in body) {
+        await setGoalIntroVideoPath(body.goalIntroVideoPath ?? null);
+      }
+      if ("scoreboardThemeJson" in body) {
+        const raw = body.scoreboardThemeJson;
+        await setScoreboardThemeJson(
+          raw === null || raw === undefined ? null : String(raw),
+        );
+      }
+      const patchLiveCycle =
+        "firstHalfScoreboardSec" in body ||
+        "firstHalfSponsorSec" in body ||
+        "halftimeScoreboardSec" in body ||
+        "halftimeSponsorSec" in body ||
+        "secondHalfScoreboardSec" in body ||
+        "secondHalfSponsorSec" in body ||
+        "matchLiveScoreboardSec" in body ||
+        "matchLiveSponsorSec" in body;
+      if (patchLiveCycle) {
+        const cur = await getAppSettings();
+        let next: LiveCycleStored = {
+          firstHalfScoreboardSec:
+            body.firstHalfScoreboardSec ?? cur.firstHalfScoreboardSec,
+          firstHalfSponsorSec: body.firstHalfSponsorSec ?? cur.firstHalfSponsorSec,
+          halftimeScoreboardSec:
+            body.halftimeScoreboardSec ?? cur.halftimeScoreboardSec,
+          halftimeSponsorSec: body.halftimeSponsorSec ?? cur.halftimeSponsorSec,
+          secondHalfScoreboardSec:
+            body.secondHalfScoreboardSec ?? cur.secondHalfScoreboardSec,
+          secondHalfSponsorSec: body.secondHalfSponsorSec ?? cur.secondHalfSponsorSec,
+        };
+        if ("matchLiveScoreboardSec" in body || "matchLiveSponsorSec" in body) {
+          const sb = body.matchLiveScoreboardSec ?? cur.firstHalfScoreboardSec;
+          const sp = body.matchLiveSponsorSec ?? cur.firstHalfSponsorSec;
+          next = {
+            ...next,
+            firstHalfScoreboardSec: sb,
+            firstHalfSponsorSec: sp,
+            secondHalfScoreboardSec: sb,
+            secondHalfSponsorSec: sp,
+          };
+        }
+        await setLiveCyclePhasing(next);
+      }
+      await touchState();
+      await broadcastDisplayState();
+      const settings = await getAppSettings();
+      return json(200, {
+        homeTeamId: settings.homeTeamId,
+        goalIntroVideoPath: settings.goalIntroVideoPath,
+        firstHalfScoreboardSec: settings.firstHalfScoreboardSec,
+        firstHalfSponsorSec: settings.firstHalfSponsorSec,
+        halftimeScoreboardSec: settings.halftimeScoreboardSec,
+        halftimeSponsorSec: settings.halftimeSponsorSec,
+        secondHalfScoreboardSec: settings.secondHalfScoreboardSec,
+        secondHalfSponsorSec: settings.secondHalfSponsorSec,
+        scoreboardThemeJson: settings.scoreboardThemeJson,
+      });
+    }
+
+    if (pathname === "/api/players" && method === "GET") {
+      const teamIdParam = searchParams.get("teamId");
+      const players = await prisma.player.findMany({
+        where: teamIdParam ? { teamId: teamIdParam } : undefined,
+        orderBy: { number: "asc" },
+      });
+      return json(200, players);
+    }
+
+    if (pathname === "/api/players" && method === "POST") {
+      const player = await prisma.player.create({ data: parseJsonBody(req) });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, player);
+    }
+
+    if (pathname === "/api/players/bulk-visuals" && method === "POST") {
+      const body = (parseJsonBody(req) as {
+        field: "goalVideoPath" | "subImagePath" | "lineupVideoPath";
+        assignments: Array<{ playerId: string; filePath: string | null }>;
+      }) ?? { field: "goalVideoPath", assignments: [] };
+      const allowed = new Set(["goalVideoPath", "subImagePath", "lineupVideoPath"]);
+      if (!allowed.has(body.field)) {
+        return json(400, { error: "Invalid field" });
+      }
+      await prisma.$transaction(
+        body.assignments.map((a) =>
+          prisma.player.update({
+            where: { id: a.playerId },
+            data: { [body.field]: a.filePath ?? null },
+          }),
+        ),
+      );
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true, updated: body.assignments.length });
+    }
+
+    const playerId = pathname.match(/^\/api\/players\/([^/]+)$/)?.[1];
+    if (playerId && method === "PATCH") {
+      const player = await prisma.player.update({
+        where: { id: playerId },
+        data: parseJsonBody(req),
+      });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, player);
+    }
+    if (playerId && method === "DELETE") {
+      await prisma.player.delete({ where: { id: playerId } });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/sponsors" && method === "GET") {
+      const sponsors = await prisma.sponsor.findMany({
+        include: { media: { orderBy: { createdAt: "asc" } } },
+        orderBy: { createdAt: "asc" },
+      });
+      return json(200, sponsors);
+    }
+
+    if (pathname === "/api/sponsors" && method === "POST") {
+      const body = parseJsonBody(req) as {
+        name: string;
+        prematchSeconds?: number;
+        matchSeconds?: number;
+        halftimeSeconds?: number;
+        imageDefaultSec?: number;
+        active?: boolean;
+      };
+      const m1 = (body as { matchFirstHalfSeconds?: number }).matchFirstHalfSeconds ?? 0;
+      const m2 = (body as { matchSecondHalfSeconds?: number }).matchSecondHalfSeconds ?? 0;
+      const legacyM = body.matchSeconds ?? 0;
+      const matchSecondsTotal =
+        m1 > 0 || m2 > 0 ? m1 + m2 : legacyM;
+      const sponsor = await prisma.sponsor.create({
+        data: {
+          name: body.name,
+          prematchSeconds: body.prematchSeconds ?? 0,
+          matchSeconds: matchSecondsTotal,
+          matchFirstHalfSeconds: m1 > 0 || m2 > 0 ? m1 : legacyM,
+          matchSecondHalfSeconds: m2,
+          halftimeSeconds: body.halftimeSeconds ?? 0,
+          imageDefaultSec: body.imageDefaultSec ?? 10,
+          active: body.active ?? true,
+        },
+      });
+      return json(200, sponsor);
+    }
+
+    const sponsorId = pathname.match(/^\/api\/sponsors\/([^/]+)$/)?.[1];
+    if (sponsorId && method === "PATCH") {
+      const body = parseJsonBody(req) as Record<string, unknown>;
+      const allowed: Record<string, true> = {
+        name: true,
+        prematchSeconds: true,
+        matchSeconds: true,
+        matchFirstHalfSeconds: true,
+        matchSecondHalfSeconds: true,
+        halftimeSeconds: true,
+        imageDefaultSec: true,
+        active: true,
+      };
+      const data: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(body)) {
+        if (allowed[key]) data[key] = value;
+      }
+      const sponsor = await prisma.sponsor.update({
+        where: { id: sponsorId },
+        data,
+      });
+      return json(200, sponsor);
+    }
+    if (sponsorId && method === "DELETE") {
+      await prisma.sponsor.delete({ where: { id: sponsorId } });
+      return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/matches" && method === "GET") {
+      const matches = await prisma.match.findMany({
+        include: { homeTeam: true, awayTeam: true },
+        orderBy: { createdAt: "desc" },
+      });
+      return json(200, matches);
+    }
+
+    if (pathname === "/api/matches" && method === "POST") {
+      const body = parseJsonBody(req) as {
+        homeTeamId: string;
+        awayTeamId: string;
+        kickoffAt?: string | null;
+        matchSponsorMediaId?: string | null;
+        halfDurationSec?: number;
+        halfBreakSec?: number;
+      };
+      let sponsorId: string | null = null;
+      if (typeof body.matchSponsorMediaId === "string" && body.matchSponsorMediaId.length > 0) {
+        const mi = await prisma.mediaItem.findUnique({ where: { id: body.matchSponsorMediaId } });
+        if (!mi) return json(400, { error: "Matchsponsor-media niet gevonden" });
+        sponsorId = mi.id;
+      }
+      const match = await prisma.match.create({
+        data: {
+          homeTeamId: body.homeTeamId,
+          awayTeamId: body.awayTeamId,
+          kickoffAt: body.kickoffAt ? new Date(body.kickoffAt) : null,
+          matchSponsorMediaId: sponsorId,
+          halfDurationSec: body.halfDurationSec ?? 2700,
+          halfBreakSec: body.halfBreakSec ?? 900,
+        },
+        include: { homeTeam: true, awayTeam: true, matchSponsorMedia: true },
+      });
+      await ensureDefaultMatchFieldLineups(match.id);
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, match);
+    }
+
+    const matchId = pathname.match(/^\/api\/matches\/([^/]+)$/)?.[1];
+    if (matchId && method === "GET") {
+      let match = await prisma.match.findUnique({
+        where: { id: matchId },
+        include: {
+          homeTeam: { include: { players: { orderBy: { number: "asc" } } } },
+          awayTeam: { include: { players: { orderBy: { number: "asc" } } } },
+          events: { orderBy: { createdAt: "desc" } },
+          matchSponsorMedia: true,
+        },
+      });
+      if (!match) return json(404, { error: "Not found" });
+      await ensureDefaultMatchFieldLineups(match.id);
+      match = await prisma.match.findUnique({
+        where: { id: matchId },
+        include: {
+          homeTeam: { include: { players: { orderBy: { number: "asc" } } } },
+          awayTeam: { include: { players: { orderBy: { number: "asc" } } } },
+          events: { orderBy: { createdAt: "desc" } },
+          matchSponsorMedia: true,
+        },
+      });
+      if (!match) return json(404, { error: "Not found" });
+      const {
+        homeFieldPlayerIdsJson,
+        awayFieldPlayerIdsJson,
+        ...rest
+      } = match;
+      return json(200, {
+        ...rest,
+        homeFieldPlayerIds: parsePlayerIdArrayJson(homeFieldPlayerIdsJson),
+        awayFieldPlayerIds: parsePlayerIdArrayJson(awayFieldPlayerIdsJson),
+      });
+    }
+    if (matchId && method === "PATCH") {
+      const body = parseJsonBody(req) as Record<string, unknown>;
+      const cur = await prisma.match.findUnique({
+        where: { id: matchId },
+        include: {
+          homeTeam: { include: { players: true } },
+          awayTeam: { include: { players: true } },
+        },
+      });
+      if (!cur) return json(404, { error: "Not found" });
+
+      const data: Record<string, unknown> = {};
+      if (typeof body.status === "string") data.status = body.status;
+      if (typeof body.homeScore === "number") data.homeScore = body.homeScore;
+      if (typeof body.awayScore === "number") data.awayScore = body.awayScore;
+      if (body.kickoffAt === null) data.kickoffAt = null;
+      else if (typeof body.kickoffAt === "string") data.kickoffAt = new Date(body.kickoffAt);
+
+      if ("matchSponsorMediaId" in body) {
+        if (body.matchSponsorMediaId === null || body.matchSponsorMediaId === "") {
+          data.matchSponsorMediaId = null;
+        } else if (typeof body.matchSponsorMediaId === "string") {
+          const mi = await prisma.mediaItem.findUnique({ where: { id: body.matchSponsorMediaId } });
+          if (!mi) return json(400, { error: "Matchsponsor-media niet gevonden" });
+          data.matchSponsorMediaId = mi.id;
+        }
+      }
+
+      function validateLineup(
+        players: { id: string }[] | undefined,
+        ids: string[],
+        label: string,
+      ) {
+        const allowed = new Set((players ?? []).map((p) => p.id));
+        const uniq = new Set(ids);
+        if (uniq.size !== ids.length) throw new Error(`${label}: dubbele speler`);
+        if (ids.length < 1 || ids.length > 11) {
+          throw new Error(`${label}: kies 1 tot 11 spelers op het veld`);
+        }
+        for (const id of ids) {
+          if (!allowed.has(id)) throw new Error(`${label}: speler hoort niet bij dit team`);
+        }
+      }
+
+      if (Array.isArray(body.homeFieldPlayerIds)) {
+        const ids = body.homeFieldPlayerIds.filter((x): x is string => typeof x === "string");
+        validateLineup(cur.homeTeam.players, ids, "Thuis basis");
+        data.homeFieldPlayerIdsJson = JSON.stringify(ids);
+      }
+      if (Array.isArray(body.awayFieldPlayerIds)) {
+        const ids = body.awayFieldPlayerIds.filter((x): x is string => typeof x === "string");
+        validateLineup(cur.awayTeam.players, ids, "Uit basis");
+        data.awayFieldPlayerIdsJson = JSON.stringify(ids);
+      }
+
+      if (Object.keys(data).length === 0) {
+        return json(400, { error: "Geen geldige velden om bij te werken" });
+      }
+
+      try {
+        const updated = await prisma.match.update({
+          where: { id: matchId },
+          data: data as Parameters<typeof prisma.match.update>[0]["data"],
+          include: {
+            homeTeam: { include: { players: { orderBy: { number: "asc" } } } },
+            awayTeam: { include: { players: { orderBy: { number: "asc" } } } },
+            events: { orderBy: { createdAt: "desc" } },
+            matchSponsorMedia: true,
+          },
+        });
+        const {
+          homeFieldPlayerIdsJson: hJson,
+          awayFieldPlayerIdsJson: aJson,
+          ...rest
+        } = updated;
+        await touchState();
+        await broadcastDisplayState();
+        return json(200, {
+          ...rest,
+          homeFieldPlayerIds: parsePlayerIdArrayJson(hJson),
+          awayFieldPlayerIds: parsePlayerIdArrayJson(aJson),
+        });
+      } catch (e) {
+        return json(400, { error: String(e) });
+      }
+    }
+    if (matchId && method === "DELETE") {
+      await prisma.match.delete({ where: { id: matchId } });
+      await repairOrphanDisplayMatchId();
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/media" && method === "GET") {
+      const media = await prisma.mediaItem.findMany({
+        orderBy: { createdAt: "desc" },
+      });
+      return json(200, media);
+    }
+
+    if (pathname === "/api/media" && method === "POST") {
+      const media = await prisma.mediaItem.create({ data: parseJsonBody(req) });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, media);
+    }
+
+    const mediaId = pathname.match(/^\/api\/media\/([^/]+)$/)?.[1];
+    if (mediaId && method === "PATCH") {
+      const media = await prisma.mediaItem.update({
+        where: { id: mediaId },
+        data: parseJsonBody(req),
+      });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, media);
+    }
+    if (mediaId && method === "DELETE") {
+      await prisma.playlistItem.deleteMany({ where: { mediaId } });
+      await prisma.mediaItem.delete({ where: { id: mediaId } });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/playlists" && method === "GET") {
+      const playlists = await prisma.playlist.findMany({
+        include: {
+          items: {
+            orderBy: { order: "asc" },
+            include: { media: true },
+          },
+        },
+        orderBy: { slot: "asc" },
+      });
+      return json(200, playlists);
+    }
+
+    const playlistSlot = pathname.match(/^\/api\/playlists\/([^/]+)$/)?.[1];
+    if (playlistSlot && method === "POST") {
+      const playlist = await prisma.playlist.findUnique({ where: { slot: playlistSlot } });
+      if (!playlist) return json(404, { error: "No playlist" });
+      const body = parseJsonBody(req) as {
+        mediaId: string;
+        durationOverrideSec?: number | null;
+      };
+      const count = await prisma.playlistItem.count({ where: { playlistId: playlist.id } });
+      const item = await prisma.playlistItem.create({
+        data: {
+          playlistId: playlist.id,
+          mediaId: body.mediaId,
+          order: count,
+          durationOverrideSec: body.durationOverrideSec ?? null,
+        },
+        include: { media: true },
+      });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, item);
+    }
+    if (playlistSlot && method === "PATCH") {
+      const playlist = await prisma.playlist.findUnique({ where: { slot: playlistSlot } });
+      if (!playlist) return json(404, { error: "No playlist" });
+      const body = parseJsonBody(req) as { order: string[] };
+      await prisma.$transaction(
+        body.order.map((id, idx) =>
+          prisma.playlistItem.update({ where: { id }, data: { order: idx } }),
+        ),
+      );
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true });
+    }
+
+    const playlistItemId = pathname.match(/^\/api\/playlists\/items\/([^/]+)$/)?.[1];
+    if (playlistItemId && method === "DELETE") {
+      await prisma.playlistItem.delete({ where: { id: playlistItemId } });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/upload") {
+      return json(501, { error: "Desktop build gebruikt lokale bestandskeuze, geen upload route." });
+    }
+
+    if (pathname === "/api/localfile") {
+      return json(501, { error: "Desktop build gebruikt directe bestands-URL's, geen proxy route." });
+    }
+
+    return json(404, { error: "Unknown API route" });
+  } catch (err) {
+    requireOpts().log(`[api] ${String(err)}`);
+    return json(500, {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+export async function runCommand(input: Command): Promise<CommandAck> {
+  try {
+    const cmd = CommandSchema.parse(input);
+    const result = await handleCommand(cmd);
+    await broadcastDisplayState();
+    if (result.ok && result.warning) {
+      sendControl("display:error", { message: result.warning });
+    }
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    requireOpts().log(`[command] ${message}`);
+    sendControl("display:error", { message });
+    return { ok: false, error: message };
+  }
+}
+
+type ExportMatch = Awaited<ReturnType<typeof prisma.match.findUnique>>;
+
+function renderHtml(
+  match: NonNullable<ExportMatch> & {
+    homeTeam: {
+      players: { id: string; number: number; firstName: string; lastName: string }[];
+      name: string;
+    };
+    awayTeam: {
+      players: { id: string; number: number; firstName: string; lastName: string }[];
+      name: string;
+    };
+    events: {
+      id: string;
+      type: string;
+      minute: number;
+      teamId: string | null;
+      playerInId: string | null;
+      playerOutId: string | null;
+      note: string | null;
+      createdAt: Date;
+    }[];
+  },
+) {
+  const playerMap: Record<string, string> = {};
+  for (const player of match.homeTeam.players) {
+    playerMap[player.id] = `#${player.number} ${player.firstName} ${player.lastName}`;
+  }
+  for (const player of match.awayTeam.players) {
+    playerMap[player.id] = `#${player.number} ${player.firstName} ${player.lastName}`;
+  }
+
+  const rows = match.events
+    .map((event) => {
+      const playerIn = event.playerInId ? playerMap[event.playerInId] : "";
+      const playerOut = event.playerOutId ? playerMap[event.playerOutId] : "";
+      const description =
+        event.type === "GOAL"
+          ? `Goal — ${playerIn}`
+          : event.type === "SUB"
+            ? `Sub: ${playerOut} → ${playerIn}`
+            : event.type === "CARD_YELLOW"
+              ? `Yellow — ${playerIn}`
+              : event.type === "CARD_RED"
+                ? `Red — ${playerIn}`
+                : event.type === "TIMER_ADJUST"
+                  ? `Timer adjust — ${event.note ?? ""}`
+                  : event.type;
+      return `<tr><td>${event.minute}'</td><td>${event.type}</td><td>${description}</td></tr>`;
+    })
+    .join("");
+
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Match summary</title>
+<style>
+  body { font-family: Inter, system-ui, sans-serif; max-width: 800px; margin: 2em auto; padding: 1em; }
+  h1 { font-size: 2em; margin-bottom: 0; }
+  .sub { color:#666; margin-top:0.25em; }
+  .score { font-size: 4em; font-weight: 900; text-align:center; margin: 0.5em 0;}
+  table { width: 100%; border-collapse: collapse; margin-top: 1.5em; }
+  td,th { padding: 0.4em 0.6em; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }
+  th { background: #f5f5f5; }
+  @media print { body { margin: 0; } }
+</style></head>
+<body>
+  <h1>${match.homeTeam.name} vs ${match.awayTeam.name}</h1>
+  <div class="sub">Status: ${match.status} · ${new Date(match.createdAt).toLocaleString()}</div>
+  <div class="score">${match.homeScore} – ${match.awayScore}</div>
+  <table>
+    <thead><tr><th>Min</th><th>Type</th><th>Description</th></tr></thead>
+    <tbody>${rows || '<tr><td colspan="3">No events</td></tr>'}</tbody>
+  </table>
+</body></html>`;
+}
+
+export async function buildMatchExport(matchId: string, format: ExportFormat) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    include: {
+      homeTeam: { include: { players: true } },
+      awayTeam: { include: { players: true } },
+      events: { orderBy: { createdAt: "asc" } },
+    },
+  });
+
+  if (!match) {
+    throw new Error("Match not found");
+  }
+
+  const baseName = `${match.homeTeam.shortName || "home"}-vs-${match.awayTeam.shortName || "away"}-${match.id.slice(0, 8)}`;
+  if (format === "html") {
+    return {
+      suggestedName: `${baseName}.html`,
+      content: renderHtml(match),
+      mimeType: "text/html; charset=utf-8",
+    };
+  }
+
+  return {
+    suggestedName: `${baseName}.json`,
+    content: JSON.stringify(match, null, 2),
+    mimeType: "application/json; charset=utf-8",
+  };
+}

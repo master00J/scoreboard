@@ -1,0 +1,1162 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/form";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useApi } from "@/lib/use-api";
+import type { Match, MediaItem, Playlist, PlaylistSlot, Sponsor } from "@/lib/types";
+import { useDisplayStore } from "@/lib/store";
+import { effectiveMatchPlayRosterSeconds } from "@/lib/sponsor-roster-effective-timeline";
+import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
+import { useLiveTimerSeconds } from "@/lib/use-timer";
+import { sponsorSectionBudgetSeconds } from "@/lib/sponsor-distribution";
+import {
+  applyRosterBudgetCarry,
+  sponsorLiveProgressFromRosterRaw,
+  type RosterCarry,
+} from "@/lib/sponsor-live-roster";
+import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
+import { toast } from "@/components/ui/toast";
+import { sendCommand } from "@/lib/use-socket";
+import { isElectron, selectFilesViaDialog } from "@/lib/electron";
+import { mediaUrl } from "@/lib/media-url";
+
+async function patchMediaJson(
+  mediaId: string,
+  body: Record<string, unknown>,
+): Promise<boolean> {
+  const res = await fetch(`/api/media/${mediaId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return res.ok;
+}
+
+export function MediaPanel() {
+  const displayState = useDisplayStore((s) => s.state);
+  const matchPollUrl =
+    displayState?.matchId != null
+      ? `/api/matches/${displayState.matchId}?_=${encodeURIComponent(displayState.updatedAt ?? "")}`
+      : null;
+  const { data: activeMatch } = useApi<Match>(matchPollUrl);
+  const sponsorBudgetsDriveLive = isLivePlayingMatchStatus(activeMatch?.status);
+
+  const { data: mediaRaw, reload: reloadMedia } = useApi<MediaItem[]>("/api/media");
+  const { data: playlistsRaw, reload: reloadPlaylists } = useApi<Playlist[]>("/api/playlists");
+  const [uploading, setUploading] = useState(false);
+  const [libraryImageDurationSec, setLibraryImageDurationSec] = useState(10);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+
+  const media = mediaRaw ?? [];
+  const playlists = playlistsRaw ?? [];
+
+  /** Register a local file (Electron) — no copying, just store the path. */
+  async function registerLocalFile(filePath: string) {
+    const fileName = filePath.replace(/.*[/\\]/, "");
+    const isVideo = /\.(mp4|webm|mov|avi)$/i.test(fileName);
+    const type = isVideo ? "VIDEO" : "IMAGE";
+    let durationSec = clampMediaDurationSec(libraryImageDurationSec);
+    if (isVideo) {
+      try {
+        durationSec = await readVideoDuration(mediaUrl(filePath));
+      } catch {
+        toast({
+          title: "Videoduur niet gelezen",
+          description: fileName,
+          variant: "error",
+        });
+        return;
+      }
+    }
+    await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        path: filePath,
+        title: fileName,
+        durationSec: Math.round(durationSec),
+      }),
+    });
+  }
+
+  /** Pick files via Electron's native dialog (no upload needed). */
+  async function onSelectLocal() {
+    const paths = await selectFilesViaDialog({
+      title: "Selecteer media bestanden",
+      filters: [
+        { name: "Media", extensions: ["mp4", "webm", "mov", "avi", "jpg", "jpeg", "png", "gif", "webp"] },
+        { name: "Video", extensions: ["mp4", "webm", "mov", "avi"] },
+        { name: "Afbeelding", extensions: ["jpg", "jpeg", "png", "gif", "webp"] },
+      ],
+      multiSelections: true,
+    });
+    if (paths.length === 0) return;
+    setUploading(true);
+    for (const p of paths) await registerLocalFile(p);
+    setUploading(false);
+    reloadMedia();
+  }
+
+  /** Upload via browser file input (fallback when not in Electron). */
+  async function onUpload(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    for (const file of Array.from(files)) {
+      const fd = new FormData();
+      fd.append("file", file);
+      const up = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!up.ok) {
+        toast({ title: `Upload failed: ${file.name}`, variant: "error" });
+        continue;
+      }
+      const uploaded = await up.json();
+      const type = file.type.startsWith("video/") ? "VIDEO" : "IMAGE";
+      let durationSec = clampMediaDurationSec(libraryImageDurationSec);
+      if (type === "VIDEO") {
+        try {
+          durationSec = await readVideoDuration(uploaded.path);
+        } catch {
+          toast({
+            title: "Videoduur niet gelezen",
+            description: file.name,
+            variant: "error",
+          });
+          continue;
+        }
+      }
+      await fetch("/api/media", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type,
+          path: uploaded.path,
+          title: file.name,
+          durationSec: Math.round(durationSec),
+        }),
+      });
+    }
+    setUploading(false);
+    reloadMedia();
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <SponsorsSection
+        allMedia={media}
+        reloadMedia={reloadMedia}
+        activeMatch={activeMatch ?? null}
+      />
+
+      <section className="bg-card border border-border rounded-xl p-6">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-lg font-semibold">Media library</h2>
+            <p className="text-xs text-muted-foreground mt-1 max-w-xl">
+              Video&apos;s: duur wordt automatisch uit het bestand gelezen. Afbeeldingen: kies hier hoe lang
+              ze per keer tonen (je kunt dit later per item aanpassen).
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Label className="text-xs whitespace-nowrap">Duur foto (s)</Label>
+            <Input
+              type="number"
+              min={1}
+              max={600}
+              value={libraryImageDurationSec}
+              onChange={(e) =>
+                setLibraryImageDurationSec(clampMediaDurationSec(Number(e.target.value)))
+              }
+              className="w-20 h-9"
+            />
+          </div>
+        </div>
+        <div className="flex items-center justify-end mb-4">
+          {isElectron ? (
+            <Button onClick={onSelectLocal} disabled={uploading}>
+              {uploading ? "Bezig..." : "Selecteer bestanden…"}
+            </Button>
+          ) : (
+            <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground cursor-pointer text-sm font-semibold hover:opacity-90">
+              {uploading ? "Uploading..." : "Upload media"}
+              <input
+                ref={fileRef}
+                type="file"
+                multiple
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={(e) => onUpload(e.target.files)}
+              />
+            </label>
+          )}
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {media.map((m) => (
+            <MediaCard
+              key={m.id}
+              item={m}
+              onChange={reloadMedia}
+              lockManualSponsorInterrupt={sponsorBudgetsDriveLive}
+            />
+          ))}
+          {media.length === 0 && (
+            <div className="col-span-full text-sm text-muted-foreground">
+              No media yet. Upload 1920×1080 videos or images for sponsor rotations.
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="bg-card border border-border rounded-xl p-6">
+        <div className="text-xs text-muted-foreground max-w-3xl space-y-1.5 mb-4">
+          <p>
+            <strong>Playlists</strong> zijn los van de <strong>sponsor-minuten</strong> hierboven: het zijn vaste
+            clip-lijsten per moment (IDLE, PREMATCH, HALFTIME, …). Het scherm pakt ze vooral als er{" "}
+            <strong>geen</strong> actieve sponsors met schermtijd zijn voor die situatie, of als aanvulling naast het
+            scorebord.
+          </p>
+          <p>
+            Heb je sponsors met ingevulde minuten en gekoppelde media, dan bepaalt vooral het{" "}
+            <strong>sponsor-rooster</strong> wat je ziet tijdens de wedstrijd — niet deze playlists.
+          </p>
+        </div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">Playlists</h2>
+        </div>
+        <Tabs defaultValue="IDLE">
+          <TabsList>
+            {(["IDLE", "PREMATCH", "HALFTIME", "POSTMATCH", "GOAL"] as PlaylistSlot[]).map((slot) => (
+              <TabsTrigger key={slot} value={slot}>{slot}</TabsTrigger>
+            ))}
+          </TabsList>
+          {(["IDLE", "PREMATCH", "HALFTIME", "POSTMATCH", "GOAL"] as PlaylistSlot[]).map((slot) => (
+            <TabsContent key={slot} value={slot}>
+              {slot === "GOAL" && (
+                <div className="text-xs text-muted-foreground mb-2">
+                  Algemene doelpuntclip: alleen als er <strong>geen</strong> algemene goal-video in Setup staat; anders
+                  wint die. Eerste actieve item in deze playlist anders.
+                </div>
+              )}
+              <PlaylistEditor
+                slot={slot}
+                playlist={playlists.find((p) => p.slot === slot) ?? null}
+                media={media}
+                onChange={reloadPlaylists}
+              />
+            </TabsContent>
+          ))}
+        </Tabs>
+      </section>
+    </div>
+  );
+}
+
+function MediaCard({
+  item,
+  onChange,
+  lockManualSponsorInterrupt,
+}: {
+  item: MediaItem;
+  onChange: () => void;
+  lockManualSponsorInterrupt?: boolean;
+}) {
+  const [durDraft, setDurDraft] = useState(String(item.durationSec));
+
+  useEffect(() => {
+    setDurDraft(String(item.durationSec));
+  }, [item.id, item.durationSec]);
+
+  async function saveImageDuration() {
+    const n = parseInt(durDraft, 10);
+    if (!Number.isFinite(n)) {
+      toast({ title: "Ongeldig getal", variant: "error" });
+      return;
+    }
+    const sec = clampMediaDurationSec(n);
+    const ok = await patchMediaJson(item.id, { durationSec: sec });
+    if (ok) {
+      onChange();
+      toast({ title: `Duur opgeslagen (${sec}s)` });
+    } else toast({ title: "Opslaan mislukt", variant: "error" });
+  }
+
+  async function rescanVideoDuration() {
+    try {
+      const sec = await readVideoDuration(mediaUrl(item.path));
+      const ok = await patchMediaJson(item.id, { durationSec: sec });
+      if (ok) {
+        onChange();
+        toast({ title: `Videoduur: ${sec}s` });
+      } else toast({ title: "Opslaan mislukt", variant: "error" });
+    } catch {
+      toast({
+        title: "Videoduur niet gelezen",
+        description: "Controleer het bestand of het pad.",
+        variant: "error",
+      });
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden bg-background">
+      <div className="aspect-video bg-black flex items-center justify-center overflow-hidden">
+        {item.type === "VIDEO" ? (
+          <video src={mediaUrl(item.path)} muted className="w-full h-full object-cover" />
+        ) : (
+          <img src={mediaUrl(item.path)} alt="" className="w-full h-full object-cover" />
+        )}
+      </div>
+      <div className="p-2 text-xs flex flex-col gap-1">
+        <div className="truncate font-semibold">{item.title}</div>
+        {item.type === "VIDEO" ? (
+          <div className="flex flex-col gap-1">
+            <div className="text-muted-foreground">Video · {item.durationSec}s (ingesteld)</div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px]"
+              type="button"
+              onClick={() => void rescanVideoDuration()}
+            >
+              Duur opnieuw uit bestand
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <Label className="text-[10px] text-muted-foreground">Tonen (seconden)</Label>
+            <div className="flex gap-1">
+              <Input
+                type="number"
+                min={1}
+                max={600}
+                value={durDraft}
+                onChange={(e) => setDurDraft(e.target.value)}
+                className="h-7 text-[11px] flex-1 min-w-0"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-[10px] shrink-0"
+                type="button"
+                onClick={() => void saveImageDuration()}
+              >
+                Opslaan
+              </Button>
+            </div>
+          </div>
+        )}
+        {item.type === "VIDEO" && (
+          <label className="flex items-center gap-1.5 text-[10px] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={item.playAudio ?? false}
+              onChange={async (e) => {
+                const ok = await patchMediaJson(item.id, { playAudio: e.target.checked });
+                if (ok) onChange();
+                else toast({ title: "Kon geluid niet opslaan", variant: "error" });
+              }}
+            />
+            Geluid op display
+          </label>
+        )}
+        <div className="flex gap-1">
+          {lockManualSponsorInterrupt ? (
+            <div className="flex-1 text-[9px] text-muted-foreground leading-snug px-1 py-1.5 border border-dashed border-border rounded-md">
+              Tijdens speelhelft: sponsors via Sponsors (seconden per fase) en Display → Scorebord +
+              sponsors.
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1 text-[10px]"
+              onClick={() =>
+                sendCommand({
+                  type: "display:setMode",
+                  mode: "SPONSOR",
+                  meta: { activeMediaId: item.id },
+                })
+              }
+            >
+              Play now
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={async () => {
+              if (!confirm("Delete media?")) return;
+              await fetch(`/api/media/${item.id}`, { method: "DELETE" });
+              onChange();
+            }}
+          >
+            ✕
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlaylistEditor({
+  slot,
+  playlist,
+  media,
+  onChange,
+}: {
+  slot: PlaylistSlot;
+  playlist: Playlist | null;
+  media: MediaItem[];
+  onChange: () => void;
+}) {
+  const [adding, setAdding] = useState(false);
+
+  async function addItem(mediaId: string) {
+    await fetch(`/api/playlists/${slot}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mediaId }),
+    });
+    onChange();
+  }
+
+  async function removeItem(id: string) {
+    await fetch(`/api/playlists/items/${id}`, { method: "DELETE" });
+    onChange();
+  }
+
+  async function move(id: string, dir: -1 | 1) {
+    if (!playlist) return;
+    const order = [...playlist.items].sort((a, b) => a.order - b.order).map((i) => i.id);
+    const idx = order.indexOf(id);
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= order.length) return;
+    [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
+    await fetch(`/api/playlists/${slot}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order }),
+    });
+    onChange();
+  }
+
+  const items = playlist?.items ? [...playlist.items].sort((a, b) => a.order - b.order) : [];
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          {items.length} item(s) · plays during {slot.toLowerCase()}
+        </div>
+        <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>
+          {adding ? "Close" : "Add item"}
+        </Button>
+      </div>
+      {adding && (
+        <div className="border rounded-lg p-2 bg-background max-h-60 overflow-auto">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {media.map((m) => (
+              <button
+                key={m.id}
+                className="rounded border p-2 text-xs text-left hover:bg-secondary"
+                onClick={() => addItem(m.id)}
+              >
+                <div className="aspect-video bg-black rounded mb-1 overflow-hidden">
+                  {m.type === "VIDEO" ? (
+                    <video src={mediaUrl(m.path)} muted className="w-full h-full object-cover" />
+                  ) : (
+                    <img src={mediaUrl(m.path)} alt="" className="w-full h-full object-cover" />
+                  )}
+                </div>
+                <div className="truncate">{m.title}</div>
+              </button>
+            ))}
+            {media.length === 0 && (
+              <div className="text-muted-foreground text-xs">Upload media first.</div>
+            )}
+          </div>
+        </div>
+      )}
+      <div className="flex flex-col gap-1">
+        {items.map((it, idx) => (
+          <div
+            key={it.id}
+            className="flex items-center gap-3 rounded border border-border p-2 text-sm"
+          >
+            <span className="w-8 text-right text-xs text-muted-foreground">{idx + 1}.</span>
+            <div className="w-16 aspect-video bg-black rounded overflow-hidden flex-shrink-0">
+              {it.media.type === "VIDEO" ? (
+                <video src={mediaUrl(it.media.path)} muted className="w-full h-full object-cover" />
+              ) : (
+                <img src={mediaUrl(it.media.path)} alt="" className="w-full h-full object-cover" />
+              )}
+            </div>
+            <div className="flex-1 truncate">
+              <div className="truncate">{it.media.title}</div>
+              <div className="text-xs text-muted-foreground">
+                {it.durationOverrideSec ?? it.media.durationSec}s · {it.media.type}
+              </div>
+            </div>
+            <Button size="sm" variant="ghost" onClick={() => move(it.id, -1)}>
+              ↑
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => move(it.id, 1)}>
+              ↓
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => removeItem(it.id)}>
+              ✕
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SponsorsSection({
+  allMedia,
+  reloadMedia,
+  activeMatch,
+}: {
+  allMedia: MediaItem[];
+  reloadMedia: () => void;
+  activeMatch: Match | null;
+}) {
+  const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
+  const sponsors = sponsorsRaw ?? [];
+  const elapsedSec = useLiveTimerSeconds();
+  const displayMode = useDisplayStore((s) => s.state?.mode);
+  const matchRosterFreezeRef = useRef(0);
+  const halftimeT = useHalftimeSponsorTimelineT(
+    activeMatch?.status,
+    activeMatch?.halfBreakSec ?? 900,
+  );
+  const [newName, setNewName] = useState("");
+
+  useEffect(() => {
+    matchRosterFreezeRef.current = 0;
+  }, [activeMatch?.id, activeMatch?.status]);
+
+  const matchPlayRosterSeconds =
+    activeMatch != null
+      ? effectiveMatchPlayRosterSeconds(
+          elapsedSec,
+          activeMatch.status,
+          activeMatch.halfDurationSec,
+          displayMode,
+          matchRosterFreezeRef,
+        )
+      : 0;
+  const [adding, setAdding] = useState(false);
+
+  async function addSponsor() {
+    const name = newName.trim();
+    if (!name) return;
+    setAdding(true);
+    try {
+      const res = await fetch("/api/sponsors", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        toast({ title: "Kon sponsor niet aanmaken", variant: "error" });
+        return;
+      }
+      setNewName("");
+      reloadSponsors();
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  async function removeSponsor(id: string) {
+    if (!confirm("Sponsor verwijderen? Zijn media blijven in de library staan.")) return;
+    await fetch(`/api/sponsors/${id}`, { method: "DELETE" });
+    reloadSponsors();
+    reloadMedia();
+  }
+
+  return (
+    <section className="bg-card border border-border rounded-xl p-6">
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-lg font-semibold">Sponsors &amp; schermtijd</h2>
+          <div className="text-xs text-muted-foreground max-w-3xl space-y-2">
+            <p>
+              Per sponsor vul je vier blokken in (in <strong>minuten</strong>):{" "}
+              <strong>voor de wedstrijd</strong>, <strong>1e helft</strong>, <strong>2e helft</strong>,{" "}
+              <strong>rust</strong>. Voorbeeld: 5 min pre-game + 10 min tijdens de wedstrijd wordt{" "}
+              <strong>5 min in de 1e helft</strong> en <strong>5 min in de 2e helft</strong> — zo blijft het
+              totaal tijdens het spelen 10 minuten, maar netjes gesplitst.
+            </p>
+            <p>
+              Op het scherm worden die minuten <strong>verspreid over het hele segment</strong> (afwisselen
+              met het scorebord), niet in één lange blok-sessie. Tussen twee sponsor-momenten zie je dus
+              weer het scorebord. Clips mogen langer duren dan één “rooster-seconde”; het scherm houdt de
+              sponsor dan nog even vast (<em>sponsor-hang</em>).
+            </p>
+            <p>
+              Bij <strong>doelpunt</strong> of <strong>wissel</strong> loopt de wedstrijdklok door maar{" "}
+              schuift het sponsorrooster niet verder tijdens die modus.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 relative z-10">
+          <Input
+            placeholder="Nieuwe sponsornaam"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void addSponsor();
+            }}
+            className="w-56"
+          />
+          <Button onClick={addSponsor} disabled={adding || !newName.trim()}>
+            {adding ? "Bezig…" : "Toevoegen"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-4 mt-6">
+        {sponsors.length === 0 && (
+          <div className="text-sm text-muted-foreground">
+            Nog geen sponsors. Voeg er een toe om media en schermtijd in te stellen.
+          </div>
+        )}
+        {sponsors.map((s) => (
+          <SponsorCard
+            key={s.id}
+            sponsor={s}
+            allSponsors={sponsors}
+            allMedia={allMedia}
+            activeMatch={activeMatch}
+            matchPlayRosterSeconds={matchPlayRosterSeconds}
+            prematchTimelineSec={elapsedSec}
+            halftimeTSec={halftimeT}
+            onChange={() => {
+              reloadSponsors();
+              reloadMedia();
+            }}
+            onRemove={() => removeSponsor(s.id)}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function sponsorMatchBudgetTotal(s: Sponsor): number {
+  const m1 = s.matchFirstHalfSeconds ?? 0;
+  const m2 = s.matchSecondHalfSeconds ?? 0;
+  if (m1 > 0 || m2 > 0) return m1 + m2;
+  return s.matchSeconds ?? 0;
+}
+
+function matchHalfMinutesFromSponsor(s: Sponsor): { first: string; second: string } {
+  const m1 = s.matchFirstHalfSeconds ?? 0;
+  const m2 = s.matchSecondHalfSeconds ?? 0;
+  if (m1 > 0 || m2 > 0) {
+    return { first: secondsToMinutesStr(m1), second: secondsToMinutesStr(m2) };
+  }
+  return {
+    first: secondsToMinutesStr(s.matchSeconds),
+    second: secondsToMinutesStr(0),
+  };
+}
+
+function SponsorCard({
+  sponsor,
+  allSponsors,
+  allMedia,
+  activeMatch,
+  matchPlayRosterSeconds,
+  prematchTimelineSec,
+  halftimeTSec,
+  onChange,
+  onRemove,
+}: {
+  sponsor: Sponsor;
+  allSponsors: Sponsor[];
+  allMedia: MediaItem[];
+  activeMatch: Match | null;
+  matchPlayRosterSeconds: number;
+  prematchTimelineSec: number;
+  halftimeTSec: number;
+  onChange: () => void;
+  onRemove: () => void;
+}) {
+  const halves = matchHalfMinutesFromSponsor(sponsor);
+  const [name, setName] = useState(sponsor.name);
+  const [active, setActive] = useState(sponsor.active);
+  const [prematchMin, setPrematchMin] = useState(secondsToMinutesStr(sponsor.prematchSeconds));
+  const [matchFirstMin, setMatchFirstMin] = useState(halves.first);
+  const [matchSecondMin, setMatchSecondMin] = useState(halves.second);
+  const [halftimeMin, setHalftimeMin] = useState(secondsToMinutesStr(sponsor.halftimeSeconds));
+  const [imageSec, setImageSec] = useState(sponsor.imageDefaultSec);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const rosterCarryRef = useRef<RosterCarry | null>(null);
+
+  useEffect(() => {
+    rosterCarryRef.current = null;
+  }, [activeMatch?.id, sponsor.id]);
+
+  useEffect(() => {
+    const h = matchHalfMinutesFromSponsor(sponsor);
+    setName(sponsor.name);
+    setActive(sponsor.active);
+    setPrematchMin(secondsToMinutesStr(sponsor.prematchSeconds));
+    setMatchFirstMin(h.first);
+    setMatchSecondMin(h.second);
+    setHalftimeMin(secondsToMinutesStr(sponsor.halftimeSeconds));
+    setImageSec(sponsor.imageDefaultSec);
+  }, [
+    sponsor.id,
+    sponsor.name,
+    sponsor.active,
+    sponsor.prematchSeconds,
+    sponsor.matchSeconds,
+    sponsor.matchFirstHalfSeconds,
+    sponsor.matchSecondHalfSeconds,
+    sponsor.halftimeSeconds,
+    sponsor.imageDefaultSec,
+  ]);
+
+  const sponsorMedia = allMedia.filter((m) => m.sponsorId === sponsor.id);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const m1s = minutesStrToSeconds(matchFirstMin);
+      const m2s = minutesStrToSeconds(matchSecondMin);
+      await fetch(`/api/sponsors/${sponsor.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          active,
+          prematchSeconds: minutesStrToSeconds(prematchMin),
+          matchFirstHalfSeconds: m1s,
+          matchSecondHalfSeconds: m2s,
+          matchSeconds: m1s + m2s,
+          halftimeSeconds: minutesStrToSeconds(halftimeMin),
+          imageDefaultSec: Math.max(1, Math.round(imageSec)),
+        }),
+      });
+      onChange();
+      toast({ title: "Sponsor opgeslagen" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function registerFile(filePath: string) {
+    const fileName = filePath.replace(/.*[/\\]/, "");
+    const isVideo = /\.(mp4|webm|mov|avi)$/i.test(fileName);
+    const type = isVideo ? "VIDEO" : "IMAGE";
+    let durationSec = clampMediaDurationSec(sponsor.imageDefaultSec);
+    if (isVideo) {
+      try {
+        durationSec = await readVideoDuration(mediaUrl(filePath));
+      } catch {
+        toast({
+          title: "Videoduur niet gelezen",
+          description: fileName,
+          variant: "error",
+        });
+        return;
+      }
+    }
+    await fetch("/api/media", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        path: filePath,
+        title: fileName,
+        durationSec: Math.round(durationSec),
+        sponsorId: sponsor.id,
+        sponsorName: sponsor.name,
+      }),
+    });
+  }
+
+  async function onUploadSponsorFiles() {
+    const paths = await selectFilesViaDialog({
+      title: `Media voor ${sponsor.name}`,
+      filters: [
+        { name: "Media", extensions: ["mp4", "webm", "mov", "avi", "jpg", "jpeg", "png", "gif", "webp"] },
+      ],
+      multiSelections: true,
+    });
+    if (paths.length === 0) return;
+    setUploading(true);
+    for (const p of paths) await registerFile(p);
+    setUploading(false);
+    onChange();
+  }
+
+  async function attachExisting(mediaId: string) {
+    await fetch(`/api/media/${mediaId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sponsorId: sponsor.id, sponsorName: sponsor.name }),
+    });
+    onChange();
+  }
+
+  async function detach(mediaId: string) {
+    await fetch(`/api/media/${mediaId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sponsorId: null }),
+    });
+    onChange();
+  }
+
+  async function deleteMedia(mediaId: string) {
+    if (!confirm("Media definitief verwijderen?")) return;
+    await fetch(`/api/media/${mediaId}`, { method: "DELETE" });
+    onChange();
+  }
+
+  const unassignedMedia = allMedia.filter((m) => !m.sponsorId);
+
+  const rawRoster =
+    activeMatch != null
+      ? sponsorLiveProgressFromRosterRaw(
+          sponsor,
+          allSponsors,
+          activeMatch,
+          matchPlayRosterSeconds,
+          halftimeTSec,
+          prematchTimelineSec,
+        )
+      : null;
+
+  if (!rawRoster) {
+    rosterCarryRef.current = null;
+  }
+
+  let liveRoster: {
+    label: string;
+    consumed: number;
+    budget: number;
+    remaining: number;
+  } | null = null;
+  if (rawRoster && activeMatch) {
+    const st = activeMatch.status;
+    let tClock = prematchTimelineSec;
+    if (st === "FIRST_HALF" || st === "SECOND_HALF" || st === "EXTRA_TIME") {
+      tClock = matchPlayRosterSeconds;
+    } else if (st === "HALF_TIME") {
+      const Hh = Math.max(60, activeMatch.halfBreakSec);
+      tClock = halftimeTSec % Hh;
+    }
+    const { consumed, budget } = applyRosterBudgetCarry(
+      rosterCarryRef,
+      { ...rawRoster, matchId: activeMatch.id },
+      tClock,
+    );
+    liveRoster = {
+      label: rawRoster.label,
+      consumed,
+      budget,
+      remaining: Math.max(0, budget - consumed),
+    };
+  }
+
+  return (
+    <div className="rounded-lg border border-border p-4 bg-background flex flex-col gap-4">
+      {liveRoster != null && (
+        <div className="rounded-md border border-border/80 bg-muted/40 px-3 py-2 text-xs">
+          <span className="font-medium text-foreground">{liveRoster.label}</span>
+          <span className="text-muted-foreground">
+            {" "}
+            · schermtijd verbruikt {formatMin(liveRoster.consumed)} · rest {formatMin(liveRoster.remaining)} · budget{" "}
+            {formatMin(liveRoster.budget)}
+          </span>
+        </div>
+      )}
+      <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+        <div className="text-xs font-semibold text-foreground">Schermtijd per segment (minuten)</div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div>
+            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+              Voor wedstrijd
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.5"
+              value={prematchMin}
+              onChange={(e) => setPrematchMin(e.target.value)}
+              className="mt-1 w-full"
+            />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+              1e helft (spel)
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.5"
+              value={matchFirstMin}
+              onChange={(e) => setMatchFirstMin(e.target.value)}
+              className="mt-1 w-full"
+            />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+              2e helft (spel)
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.5"
+              value={matchSecondMin}
+              onChange={(e) => setMatchSecondMin(e.target.value)}
+              className="mt-1 w-full"
+            />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+              Rust
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.5"
+              value={halftimeMin}
+              onChange={(e) => setHalftimeMin(e.target.value)}
+              className="mt-1 w-full"
+            />
+          </div>
+        </div>
+        <p className="text-[10px] text-muted-foreground leading-snug">
+          Alleen actieve sponsors met media tellen mee. Leeg = 0. Bestaande sponsors met alleen één
+          wedstrijdtijd in de database: vul die minuten in bij <strong>1e helft</strong>;{" "}
+          <strong>2e helft</strong> op 0 tenzij je bewust splitst.
+        </p>
+      </div>
+
+      <div className="flex items-start gap-3 flex-wrap">
+        <div className="flex-1 min-w-[220px]">
+          <Label className="text-xs">Sponsornaam</Label>
+          <Input value={name} onChange={(e) => setName(e.target.value)} />
+        </div>
+        <div>
+          <Label className="text-xs">
+            Standaard duur foto&apos;s (s)
+            <span className="block font-normal text-muted-foreground normal-case">
+              Nieuwe uploads bij deze sponsor; video&apos;s volgen het bestand.
+            </span>
+          </Label>
+          <Input
+            type="number"
+            min={1}
+            value={imageSec}
+            onChange={(e) => setImageSec(Number(e.target.value) || 10)}
+            className="w-20"
+          />
+        </div>
+        <div className="flex items-end gap-2">
+          <label className="inline-flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={active}
+              onChange={(e) => setActive(e.target.checked)}
+            />
+            Actief
+          </label>
+          <Button size="sm" onClick={save} disabled={saving}>
+            {saving ? "Opslaan…" : "Opslaan"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onRemove}>
+            ✕
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <div className="text-xs text-muted-foreground">
+          {sponsorMedia.length} bestand(en) gekoppeld · schermtijd totaal{" "}
+          {formatMin(
+            sponsor.prematchSeconds +
+              sponsorMatchBudgetTotal(sponsor) +
+              sponsor.halftimeSeconds
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          {isElectron && (
+            <Button size="sm" variant="outline" onClick={onUploadSponsorFiles} disabled={uploading}>
+              {uploading ? "Bezig…" : "Bestanden toevoegen…"}
+            </Button>
+          )}
+          {unassignedMedia.length > 0 && (
+            <AttachExistingDropdown media={unassignedMedia} onPick={attachExisting} />
+          )}
+        </div>
+      </div>
+
+      {sponsorMedia.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {sponsorMedia.map((m) => (
+            <div key={m.id} className="rounded-lg border border-border overflow-hidden bg-card">
+              <div className="aspect-video bg-black flex items-center justify-center">
+                {m.type === "VIDEO" ? (
+                  <video src={mediaUrl(m.path)} muted className="w-full h-full object-cover" />
+                ) : (
+                  <img src={mediaUrl(m.path)} alt="" className="w-full h-full object-cover" />
+                )}
+              </div>
+              <div className="p-2 text-xs flex flex-col gap-1">
+                <div className="truncate font-semibold">{m.title}</div>
+                <div className="text-muted-foreground">
+                  {m.type} · {m.durationSec}s
+                </div>
+                {m.type === "VIDEO" && (
+                  <label className="flex items-center gap-1.5 text-[10px] cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={m.playAudio ?? false}
+                      onChange={async (e) => {
+                        const ok = await patchMediaJson(m.id, { playAudio: e.target.checked });
+                        if (ok) onChange();
+                        else toast({ title: "Kon geluid niet opslaan", variant: "error" });
+                      }}
+                    />
+                    Geluid op display
+                  </label>
+                )}
+                <div className="flex gap-1">
+                  <Button size="sm" variant="ghost" className="flex-1 text-[10px]" onClick={() => detach(m.id)}>
+                    Ontkoppel
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => deleteMedia(m.id)}>
+                    ✕
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttachExistingDropdown({
+  media,
+  onPick,
+}: {
+  media: MediaItem[];
+  onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <Button size="sm" variant="outline" onClick={() => setOpen((v) => !v)}>
+        {open ? "Sluiten" : "Bestaande media koppelen"}
+      </Button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-10 w-72 max-h-72 overflow-auto rounded-lg border border-border bg-popover shadow-xl p-2">
+          {media.map((m) => (
+            <button
+              key={m.id}
+              className="w-full text-left text-xs px-2 py-1 hover:bg-secondary rounded flex items-center gap-2"
+              onClick={() => {
+                onPick(m.id);
+                setOpen(false);
+              }}
+            >
+              <span className="truncate flex-1">{m.title}</span>
+              <span className="text-muted-foreground">{m.type}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function secondsToMinutesStr(sec: number): string {
+  if (!sec) return "0";
+  const m = sec / 60;
+  return Number.isInteger(m) ? String(m) : m.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function minutesStrToSeconds(value: string): number {
+  const n = parseFloat(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Math.round(n * 60);
+}
+
+function formatMin(sec: number): string {
+  if (!sec) return "0m";
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s === 0 ? `${m}m` : `${m}m${s}s`;
+}
+
+/** Afbeelding / afgeronde videoseconds voor opslag (1 … 600). */
+function clampMediaDurationSec(n: number): number {
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(600, Math.max(1, Math.round(n)));
+}
+
+/**
+ * Leest werkelijke mediaduur uit het videobestand (metadata). Geen fallback:
+ * bij falen reject zodat we geen verkeerde duur opslaan.
+ */
+function readVideoDuration(src: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    v.preload = "metadata";
+    let settled = false;
+    const cleanup = () => {
+      try {
+        v.removeAttribute("src");
+        v.load();
+      } catch {
+        /* ignore */
+      }
+    };
+    const finishErr = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+    const finishOk = (sec: number) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(sec);
+    };
+
+    const to = window.setTimeout(() => finishErr(new Error("timeout")), 15000);
+
+    v.onloadedmetadata = () => {
+      window.clearTimeout(to);
+      const d = v.duration;
+      if (Number.isFinite(d) && d > 0) {
+        finishOk(clampMediaDurationSec(d));
+      } else {
+        finishErr(new Error("invalid duration"));
+      }
+    };
+    v.onerror = () => {
+      window.clearTimeout(to);
+      finishErr(new Error("video error"));
+    };
+
+    v.src = src;
+  });
+}

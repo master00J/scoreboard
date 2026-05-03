@@ -1,0 +1,101 @@
+{
+  "name": "stadium-scoreboard",
+  "version": "0.1.0",
+  "private": true,
+  "main": "electron-dist/electron/main.js",
+  "scripts": {
+    "dev": "npm run electron:dev",
+    "build": "npm run electron:build",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "postinstall": "prisma generate",
+    "electron:dev": "node scripts/electron-dev.mjs",
+    "renderer:build": "node scripts/build-renderer.mjs",
+    "electron:compile": "tsc -p electron/tsconfig.json",
+    "electron:build": "node scripts/pre-electron-build.mjs && npm run renderer:build && npm run electron:compile && electron-builder",
+    "electron:pack": "npm run renderer:build && npm run electron:compile && electron-builder --dir"
+  },
+  "build": {
+    "forceCodeSigning": false,
+    "appId": "com.stadium.scoreboard",
+    "productName": "Stadium Scoreboard",
+    "copyright": "Stadium Scoreboard",
+    "directories": {
+      "output": "dist"
+    },
+    "portable": {
+      "artifactName": "Stadium-Scoreboard.${ext}"
+    },
+    "win": {
+      "sign": null,
+      "signAndEditExecutable": false,
+      "signDlls": false,
+      "verifyUpdateCodeSignature": false,
+      "target": [
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "nsis", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "nl-NL",
+        "en-US"
+      ],
+      "language": "1043"
+    },
+    "asar": false,
+    "files": [
+      "electron-dist/**/*",
+      "renderer-dist/**/*",
+      "public/**/*",
+      "prisma/**/*",
+      "node_modules/**/*",
+      {
+        "from": "node_modules/.prisma",
+        "to": "node_modules/.prisma",
+        "filter": ["**/*"]
+      },
+      "package.json"
+    ]
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.9.1",
+    "@prisma/client": "^5.22.0",
+    "@radix-ui/react-dialog": "^1.1.2",
+    "@radix-ui/react-dropdown-menu": "^2.1.2",
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-select": "^2.1.2",
+    "@radix-ui/react-slot": "^1.1.0",
+    "@radix-ui/react-tabs": "^1.1.1",
+    "@radix-ui/react-toast": "^1.2.2",
+    "class-variance-authority": "^0.7.0",
+    "clsx": "^2.1.1",
+    "framer-motion": "^11.11.11",
+    "lucide-react": "^0.460.0",
+    "react": "19.0.0-rc-66855b96-20241106",
+    "react-dom": "19.0.0-rc-66855b96-20241106",
+    "react-hook-form": "^7.53.2",
+    "tailwind-merge": "^2.5.4",
+    "tailwindcss-animate": "^1.0.7",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "esbuild": "^0.25.0",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "eslint": "^9.14.0",
+    "postcss": "^8.4.49",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.14",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}

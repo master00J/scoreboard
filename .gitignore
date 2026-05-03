@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+dist/
+dist-*/
+server-dist/
+electron-dist/
+renderer-dist/
+data/*.db
+data/*.db-journal
+public/uploads/*
+!public/uploads/.gitkeep
+logs/*.log
+*.log
+.env
+.env.local
+.env.production
