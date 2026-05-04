@@ -6,6 +6,7 @@ import type {
   ElectronBridge,
   ExportFormat,
 } from "../lib/desktop-bridge";
+import * as licenseSvc from "./license-service";
 
 const IS_DEV = !app.isPackaged;
 
@@ -388,6 +389,98 @@ function registerIpc() {
       return { canceled: false, filePath: saveResult.filePath };
     },
   );
+
+  ipcMain.handle("license:getStatus", async () => {
+    if (licenseSvc.skipLicenseGateFromEnv()) {
+      return { gate: false, organizationLabel: null };
+    }
+    if (!desktopContext) {
+      return { gate: true, machinePreview: "—", message: "Desktop niet geïnitialiseerd." };
+    }
+    const dir = desktopContext.userDataDir;
+    const mid = licenseSvc.getOrCreateMachineId(dir);
+    const preview = licenseSvc.machinePreview(mid);
+    const base = licenseSvc.getLicenseApiBase();
+    const prev = licenseSvc.readStoredLicense(dir);
+    if (!prev) {
+      return { gate: true, machinePreview: preview, prefillLicenseKey: null };
+    }
+    const r = await licenseSvc.remoteLicenseCheck(base, prev.licenseKey, mid);
+    if (r.kind === "network") {
+      if (licenseSvc.withinGrace(prev.lastVerifiedAt)) {
+        return {
+          gate: false,
+          organizationLabel: prev.organizationLabel ?? null,
+          offlineGrace: true,
+        };
+      }
+      return {
+        gate: true,
+        machinePreview: preview,
+        message:
+          "Geen verbinding met de licentie-server. Controleer internet of probeer later. (Offline: max. 7 dagen na laatste geslaagde online check.)",
+        prefillLicenseKey: prev.licenseKey,
+      };
+    }
+    if (r.kind === "error") {
+      return {
+        gate: true,
+        machinePreview: preview,
+        message: r.message,
+        prefillLicenseKey: prev.licenseKey,
+      };
+    }
+    if (!r.activated) {
+      return {
+        gate: true,
+        machinePreview: preview,
+        message:
+          "Deze pc is nog niet gekoppeld aan je licentie. Voer je sleutel in en klik op Activeren op deze pc.",
+        prefillLicenseKey: prev.licenseKey,
+      };
+    }
+    licenseSvc.writeStoredLicense(dir, {
+      licenseKey: prev.licenseKey,
+      lastVerifiedAt: new Date().toISOString(),
+      organizationLabel: r.organizationLabel,
+    });
+    return {
+      gate: false,
+      organizationLabel: r.organizationLabel,
+    };
+  });
+
+  ipcMain.handle("license:activate", async (_, opts: { licenseKey?: string }) => {
+    if (!desktopContext) {
+      return { ok: false, message: "Desktop niet geïnitialiseerd." };
+    }
+    const raw = typeof opts?.licenseKey === "string" ? opts.licenseKey : "";
+    const key = raw.trim().toUpperCase();
+    if (key.length < 8) {
+      return { ok: false, message: "Voer een geldige licentiesleutel in." };
+    }
+    const dir = desktopContext.userDataDir;
+    const mid = licenseSvc.getOrCreateMachineId(dir);
+    const label = licenseSvc.defaultDeviceLabel();
+    const base = licenseSvc.getLicenseApiBase();
+    const r = await licenseSvc.remoteLicenseActivate(base, key, mid, label);
+    if (r.kind === "network") {
+      return { ok: false, message: "Netwerkfout. Controleer internet." };
+    }
+    if (r.kind === "error") {
+      return { ok: false, message: r.message, reason: r.reason };
+    }
+    licenseSvc.writeStoredLicense(dir, {
+      licenseKey: key,
+      lastVerifiedAt: new Date().toISOString(),
+      organizationLabel: r.organizationLabel,
+    });
+    return {
+      ok: true,
+      organizationLabel: r.organizationLabel,
+      status: r.status,
+    };
+  });
 }
 
 const gotLock = app.requestSingleInstanceLock();

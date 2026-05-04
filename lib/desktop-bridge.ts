@@ -60,6 +60,19 @@ export type FolderPickResult = {
   files: Array<{ name: string; path: string }>;
 };
 
+export type LicenseGetStatusResult =
+  | { gate: false; organizationLabel: string | null; offlineGrace?: boolean }
+  | {
+      gate: true;
+      machinePreview: string;
+      message?: string;
+      prefillLicenseKey?: string | null;
+    };
+
+export type LicenseActivateResult =
+  | { ok: true; organizationLabel: string | null; status: "activated" | "already_activated" }
+  | { ok: false; message: string; reason?: string };
+
 export type ElectronBridge = {
   context: DesktopContext;
   selectFile: (opts: {
@@ -91,4 +104,7 @@ export type ElectronBridge = {
   getAppVersion: () => Promise<string>;
   /** Opent een https:-URL in de standaardbrowser (downloadpagina). */
   openExternalUrl: (url: string) => Promise<{ ok: boolean }>;
+  /** ArenaCue-licentie: status (gate vs ok). */
+  licenseGetStatus: () => Promise<LicenseGetStatusResult>;
+  licenseActivate: (opts: { licenseKey: string }) => Promise<LicenseActivateResult>;
 };

@@ -59,7 +59,12 @@ export function UpdateNudgeBanner() {
           return;
         }
 
-        const current = (await window.electronAPI.getAppVersion()).trim();
+        const api = window.electronAPI;
+        if (!api) {
+          setState({ kind: "hidden" });
+          return;
+        }
+        const current = (await api.getAppVersion()).trim();
         const res = await fetch(FEED_URL, { cache: "no-store" });
         if (!res.ok) {
           localStorage.setItem(LS_LAST_CHECK, String(now));

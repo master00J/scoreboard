@@ -17,6 +17,7 @@ import { PlayerIntroLauncher } from "./_components/player-intro-launcher";
 import { CrashRecoveryBanner } from "./_components/crash-recovery";
 import { SponsorPhaseHud } from "./_components/sponsor-phase-hud";
 import { UpdateNudgeBanner } from "./_components/update-nudge-banner";
+import { LicenseActivationGate } from "./_components/license-activation-gate";
 import type { Match } from "@/lib/types";
 import type { MatchStatusT } from "@/lib/validation/commands";
 import { isFullMatch } from "@/lib/is-full-match";
@@ -45,7 +46,8 @@ export default function ControlPage() {
   }, []);
 
   return (
-    <main className="min-h-screen w-full max-w-none px-4 py-6 sm:px-6">
+    <LicenseActivationGate>
+      <main className="min-h-screen w-full max-w-none px-4 py-6 sm:px-6">
       <ToastViewport />
 
       <UpdateNudgeBanner />
@@ -120,6 +122,7 @@ export default function ControlPage() {
         </TabsContent>
       </Tabs>
     </main>
+    </LicenseActivationGate>
   );
 }
 

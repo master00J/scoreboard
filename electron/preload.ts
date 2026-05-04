@@ -43,6 +43,8 @@ const bridge: ElectronBridge = {
   getSponsorLedgerSnapshot: () => ipcRenderer.invoke("display:getSponsorLedger"),
   getAppVersion: () => ipcRenderer.invoke("app:getVersion"),
   openExternalUrl: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
+  licenseGetStatus: () => ipcRenderer.invoke("license:getStatus"),
+  licenseActivate: (opts: { licenseKey: string }) => ipcRenderer.invoke("license:activate", opts),
 };
 
 try {
