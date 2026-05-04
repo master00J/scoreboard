@@ -13,7 +13,7 @@
     "electron:dev": "node scripts/electron-dev.mjs",
     "renderer:build": "node scripts/build-renderer.mjs",
     "electron:compile": "tsc -p electron/tsconfig.json",
-    "electron:build": "node scripts/pre-electron-build.mjs && npm run renderer:build && npm run electron:compile && electron-builder",
+    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-windows-icon.mjs && npm run renderer:build && npm run electron:compile && electron-builder",
     "electron:pack": "npm run renderer:build && npm run electron:compile && electron-builder --dir"
   },
   "build": {
@@ -21,6 +21,7 @@
     "appId": "com.stadium.scoreboard",
     "productName": "Stadium Scoreboard",
     "copyright": "Stadium Scoreboard",
+    "icon": "build/icon.ico",
     "directories": {
       "output": "dist"
     },
@@ -33,8 +34,18 @@
       "signDlls": false,
       "verifyUpdateCodeSignature": false,
       "target": [
-        { "target": "portable", "arch": ["x64"] },
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
@@ -56,7 +67,9 @@
       {
         "from": "node_modules/.prisma",
         "to": "node_modules/.prisma",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       "package.json"
     ]
@@ -88,13 +101,15 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "autoprefixer": "^10.4.20",
-    "esbuild": "^0.25.0",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "esbuild": "^0.25.0",
     "eslint": "^9.14.0",
     "postcss": "^8.4.49",
     "prisma": "^5.22.0",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.14",
+    "to-ico": "^1.1.5",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3"
   }
