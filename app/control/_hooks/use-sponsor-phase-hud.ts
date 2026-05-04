@@ -8,8 +8,8 @@ import {
   activeSponsorsForSection,
   buildSponsorSlotMap,
   halfWindowElapsed,
+  holdSecondsCappedBySlotRun,
   lookupSponsorAtSecond,
-  holdSecondsForSponsorPhase,
   resolveSponsorSpreadPhase,
 } from "@/lib/sponsor-distribution";
 import {
@@ -142,8 +142,16 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   }, [sponsors]);
 
   const tInterruptFrozen = useRef(0);
-  const sponsorPhaseHangRef = useRef<{ sponsorId: string; untilMs: number } | null>(null);
-  const prematchPhaseHangRef = useRef<{ sponsorId: string; untilMs: number } | null>(null);
+  const sponsorPhaseHangRef = useRef<{
+    sponsorId: string;
+    untilMs: number;
+    startedAtMs: number;
+  } | null>(null);
+  const prematchPhaseHangRef = useRef<{
+    sponsorId: string;
+    untilMs: number;
+    startedAtMs: number;
+  } | null>(null);
   const prematchOriginRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -151,6 +159,10 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     prematchPhaseHangRef.current = null;
     prematchOriginRef.current = null;
   }, [match?.id]);
+
+  useEffect(() => {
+    sponsorPhaseHangRef.current = null;
+  }, [match?.status, liveAutoBeside, liveAutoHalftime]);
 
   useEffect(() => {
     if (!prematchSpreadActive) {
@@ -177,7 +189,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       const v = lookupSponsorAtSecond(sponsorSlotMapMatch, t);
       const section = sectionForStatus(match.status);
       return resolveSponsorSpreadPhase(v, sponsors, section, match.status, now, sponsorPhaseHangRef, {
-        unifiedRotation: true,
+        slotMap: sponsorSlotMapMatch,
+        slotT: t,
       });
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
@@ -185,7 +198,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       const t = ((Date.now() - rustEpochRef.current) / 1000) % H;
       const v = lookupSponsorAtSecond(sponsorSlotMapHalftime, t);
       return resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
-        unifiedRotation: true,
+        slotMap: sponsorSlotMapHalftime,
+        slotT: t,
       });
     }
     sponsorPhaseHangRef.current = null;
@@ -211,7 +225,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     const t = ((now - prematchOriginRef.current) / 1000) % H;
     const v = lookupSponsorAtSecond(sponsorSlotMapPrematch, t);
     return resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
-      unifiedRotation: true,
+      slotMap: sponsorSlotMapPrematch,
+      slotT: t,
     });
   }, [prematchSpreadActive, sponsorSlotMapPrematch, sponsors, phaseTick]);
 
@@ -249,9 +264,20 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       dist: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null },
       slotMap: (string | null)[],
       t: number,
-      hangRef: MutableRefObject<{ sponsorId: string; untilMs: number } | null>,
+      hangRef: MutableRefObject<{
+        sponsorId: string;
+        untilMs: number;
+        startedAtMs: number;
+      } | null>,
     ): SponsorPhaseHudModel {
-      const holdSec = holdSecondsForSponsorPhase(sponsors, section, matchStatus, dist.sponsorFilterId);
+      const holdSec = holdSecondsCappedBySlotRun(
+        sponsors,
+        section,
+        matchStatus,
+        dist.sponsorFilterId,
+        slotMap,
+        t,
+      );
       const name =
         dist.phase === "sponsor" && dist.sponsorFilterId == null
           ? "Alle sponsors"
@@ -265,8 +291,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
       const hang = hangRef.current;
       if (dist.phase === "sponsor" && hang && now < hang.untilMs) {
-        const totalMs = holdSec * 1000;
-        const elapsedMs = totalMs - (hang.untilMs - now);
+        const totalMs = hang.untilMs - hang.startedAtMs;
+        const elapsedMs = now - hang.startedAtMs;
         sponsorClipProgress = Math.min(1, Math.max(0, elapsedMs / totalMs));
         clipRemainingSec = Math.max(0, (hang.untilMs - now) / 1000);
       }

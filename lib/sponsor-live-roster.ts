@@ -38,7 +38,6 @@ export function sponsorLiveProgressFromRosterRaw(
       status,
       t,
       sponsor.id,
-      { unifiedHangDuration: true },
     );
     const label =
       status === "FIRST_HALF"
@@ -64,7 +63,6 @@ export function sponsorLiveProgressFromRosterRaw(
       undefined,
       t,
       sponsor.id,
-      { unifiedHangDuration: true },
     );
     const carryKey = `${match.id}:halftime:${sponsor.id}`;
     const label = "Rust (rooster)";
@@ -91,7 +89,6 @@ export function sponsorLiveProgressFromRosterRaw(
             undefined,
             prematchTimelineSec,
             sponsor.id,
-            { unifiedHangDuration: true },
           );
     const carryKey = `${match.id}:prematch:${sponsor.id}`;
     const label = "Prematch (rooster)";

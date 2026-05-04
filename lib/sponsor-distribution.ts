@@ -95,6 +95,42 @@ export function maxSponsorClipSecondsForSection(
   return Math.min(Math.max(m, 1), 600);
 }
 
+/** Minimum hang bij sponsor-spread (voorkomt flitsen aan slotgrenzen). */
+export const MIN_SPREAD_HOLD_SEC = 1.5;
+
+/**
+ * Seconden tot de slotmap vanaf `tSec` een andere waarde kiest (andere sponsor-id of scorebord).
+ * Gebruikt om hang niet over het volgende map-segment te laten lopen.
+ */
+export function secondsUntilSponsorRunEnds(map: (string | null)[], tSec: number): number {
+  if (map.length === 0) return 1;
+  const i0 = Math.min(map.length - 1, Math.max(0, Math.floor(tSec)));
+  const cur = map[i0];
+  let j = i0 + 1;
+  while (j < map.length) {
+    if (map[j] !== cur) break;
+    j++;
+  }
+  return Math.max(0.01, j - tSec);
+}
+
+/** Langste clip voor sponsor, begrensd tot het resterende run-segment op de slotmap. */
+export function holdSecondsCappedBySlotRun(
+  sponsors: Sponsor[],
+  section: SponsorSection,
+  matchStatus: string | undefined,
+  sponsorId: string | null | undefined,
+  slotMap: (string | null)[] | undefined,
+  slotT: number | undefined,
+): number {
+  let h = holdSecondsForSponsorPhase(sponsors, section, matchStatus, sponsorId);
+  if (slotMap && slotMap.length > 0 && slotT !== undefined && Number.isFinite(slotT)) {
+    const run = secondsUntilSponsorRunEnds(slotMap, slotT);
+    h = Math.min(h, Math.max(MIN_SPREAD_HOLD_SEC, run));
+  }
+  return h;
+}
+
 /** Seconden sinds start van de actuele helft / blok (0 … H). */
 export function halfWindowElapsed(
   elapsed: number,
@@ -255,15 +291,13 @@ export function buildSponsorSlotMap(
 
 /** Ref voor vol te houden sponsor-slide terwijl de slotmap al naar scorebord zou gaan. */
 export type SponsorPhaseHangRef = {
-  current: { sponsorId: string; untilMs: number } | null;
+  current: { sponsorId: string; untilMs: number; startedAtMs: number } | null;
 };
 
 export type ResolveSponsorSpreadOptions = {
-  /**
-   * Één gemengd sponsorblok: geen filter per tijdslot; alle sponsors rouleren samen.
-   * Hang-duur = langste clip in de sectie (past bij wisselende clips in de roulering).
-   */
-  unifiedRotation?: boolean;
+  /** Slotmap + huidige tijd `t` (zelfde eenheid als `lookupSponsorAtSecond`): cap hang per segment. */
+  slotMap?: (string | null)[];
+  slotT?: number;
 };
 
 /**
@@ -278,26 +312,30 @@ export function resolveSponsorSpreadPhase(
   hangRef: SponsorPhaseHangRef,
   options?: ResolveSponsorSpreadOptions,
 ): { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } {
-  const unified = options?.unifiedRotation ?? false;
   const hang = hangRef.current;
   if (hang && nowMs < hang.untilMs) {
     return {
       phase: "sponsor",
-      sponsorFilterId: unified ? null : hang.sponsorId,
+      sponsorFilterId: hang.sponsorId,
     };
   }
   hangRef.current = null;
   if (raw.phase === "sponsor" && raw.sponsorId) {
-    const holdSec = unified
-      ? maxSponsorClipSecondsForSection(sponsors, section, matchStatus)
-      : holdSecondsForSponsorPhase(sponsors, section, matchStatus, raw.sponsorId);
+    const holdSec = holdSecondsCappedBySlotRun(
+      sponsors,
+      section,
+      matchStatus,
+      raw.sponsorId,
+      options?.slotMap,
+      options?.slotT,
+    );
     hangRef.current = {
       sponsorId: raw.sponsorId,
       untilMs: nowMs + holdSec * 1000,
+      startedAtMs: nowMs,
     };
   }
-  const filterOut =
-    unified && raw.phase === "sponsor" ? null : raw.sponsorId;
+  const filterOut = raw.phase === "sponsor" ? raw.sponsorId : null;
   return { phase: raw.phase, sponsorFilterId: filterOut };
 }
 
@@ -314,18 +352,9 @@ export function lookupSponsorAtSecond(
   return { phase: "sponsor", sponsorId: id };
 }
 
-export type SponsorScreenConsumedOptions = {
-  /**
-   * Zelfde als display met unifiedRotation: hang-lengte = langste clip in de sectie.
-   * Schermtijd telt alleen voor de sponsor die op de slotmap aan het begin van die hang staat
-   * (niet proportioneel verdelen over alle sponsors).
-   */
-  unifiedHangDuration?: boolean;
-};
-
 /**
  * Cumulatieve schermtijd (seconden) voor één sponsor tot wedstrijdtijd `tEnd` op de tijdlijn,
- * met hang-regels als het display (één slot kan een clip van meerdere seconden zijn).
+ * met hang-regels als het display (per-sponsor clip, begrensd tot slotmap-run).
  */
 export function sponsorScreenSecondsConsumed(
   map: (string | null)[],
@@ -334,10 +363,8 @@ export function sponsorScreenSecondsConsumed(
   matchStatus: string | undefined,
   tEnd: number,
   sponsorId: string,
-  options?: SponsorScreenConsumedOptions,
 ): number {
   if (map.length === 0 || tEnd <= 0) return 0;
-  const unifiedHang = options?.unifiedHangDuration ?? false;
   let t = 0;
   let consumed = 0;
   let hangUntil = -1;
@@ -358,11 +385,16 @@ export function sponsorScreenSecondsConsumed(
 
     const raw = lookupSponsorAtSecond(map, t);
     if (raw.phase === "sponsor" && raw.sponsorId) {
-      const hold = unifiedHang
-        ? maxSponsorClipSecondsForSection(sponsors, section, matchStatus)
-        : holdSecondsForSponsorPhase(sponsors, section, matchStatus, raw.sponsorId);
+      const hold = holdSecondsCappedBySlotRun(
+        sponsors,
+        section,
+        matchStatus,
+        raw.sponsorId,
+        map,
+        t,
+      );
       hangFor = raw.sponsorId;
-      hangUntil = t + Math.max(1, hold);
+      hangUntil = t + hold;
       continue;
     }
 

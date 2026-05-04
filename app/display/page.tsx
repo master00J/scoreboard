@@ -345,12 +345,16 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const tInterruptFrozen = useRef(0);
 
   /** Slotmap = 1 sponsor-index per wedstrijdseconde; slides duren langer → fase vasthouden. */
-  const sponsorPhaseHangRef = useRef<{ sponsorId: string; untilMs: number } | null>(
-    null,
-  );
-  const prematchPhaseHangRef = useRef<{ sponsorId: string; untilMs: number } | null>(
-    null,
-  );
+  const sponsorPhaseHangRef = useRef<{
+    sponsorId: string;
+    untilMs: number;
+    startedAtMs: number;
+  } | null>(null);
+  const prematchPhaseHangRef = useRef<{
+    sponsorId: string;
+    untilMs: number;
+    startedAtMs: number;
+  } | null>(null);
   const prematchOriginRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -358,6 +362,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     prematchPhaseHangRef.current = null;
     prematchOriginRef.current = null;
   }, [match?.id]);
+
+  /** Nieuwe fase (bijv. helft → rust): hang uit vorig segment mag niet doorlopen. */
+  useEffect(() => {
+    sponsorPhaseHangRef.current = null;
+  }, [match?.status, liveAutoBeside, liveAutoHalftime]);
 
   useEffect(() => {
     if (!prematchSpreadActive) {
@@ -384,7 +393,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       const v = lookupSponsorAtSecond(sponsorSlotMapMatch, t);
       const section = sectionForStatus(match.status);
       return resolveSponsorSpreadPhase(v, sponsors, section, match.status, now, sponsorPhaseHangRef, {
-        unifiedRotation: true,
+        slotMap: sponsorSlotMapMatch,
+        slotT: t,
       });
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
@@ -392,7 +402,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       const t = ((Date.now() - rustEpochRef.current) / 1000) % H;
       const v = lookupSponsorAtSecond(sponsorSlotMapHalftime, t);
       return resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
-        unifiedRotation: true,
+        slotMap: sponsorSlotMapHalftime,
+        slotT: t,
       });
     }
     sponsorPhaseHangRef.current = null;
@@ -418,7 +429,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const t = ((now - prematchOriginRef.current) / 1000) % H;
     const v = lookupSponsorAtSecond(sponsorSlotMapPrematch, t);
     return resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
-      unifiedRotation: true,
+      slotMap: sponsorSlotMapPrematch,
+      slotT: t,
     });
   }, [prematchSpreadActive, sponsorSlotMapPrematch, sponsors, phaseTick]);
 
