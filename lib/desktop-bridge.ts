@@ -87,4 +87,8 @@ export type ElectronBridge = {
   reportSponsorClipStart: (payload: SponsorTelemetryClipStart) => Promise<{ ok: boolean }>;
   reportSponsorClipEnd: (payload: SponsorTelemetryClipEnd) => Promise<{ ok: boolean }>;
   getSponsorLedgerSnapshot: () => Promise<SponsorLedgerPayload | null>;
+  /** Huidige app-versie (package.json), voor update-melding. */
+  getAppVersion: () => Promise<string>;
+  /** Opent een https:-URL in de standaardbrowser (downloadpagina). */
+  openExternalUrl: (url: string) => Promise<{ ok: boolean }>;
 };

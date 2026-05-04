@@ -36,6 +36,19 @@ function rendererEntryPath(): string {
   return path.join(appRoot(), "renderer-dist", "index.html");
 }
 
+/** ArenaCue-icoon voor vensters (.exe-icoon komt van electron-builder `build.icon`). */
+function windowIconPath(): string | undefined {
+  const p = path.join(appRoot(), "public", "app-icon.png");
+  try {
+    if (fs.existsSync(p)) {
+      return p;
+    }
+  } catch {
+    /* ignore */
+  }
+  return undefined;
+}
+
 function prismaDatabaseUrl(dbPath: string): string {
   return `file:${dbPath.replace(/\\/g, "/")}`;
 }
@@ -114,6 +127,8 @@ function applyDisplayFullscreen(win: BrowserWindow | null) {
 function createWindows() {
   const preload = path.join(__dirname, "preload.js");
 
+  const winIcon = windowIconPath();
+
   controlWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -122,6 +137,7 @@ function createWindows() {
     title: "Stadium Scoreboard — Control",
     backgroundColor: "#09090b",
     show: true,
+    ...(winIcon ? { icon: winIcon } : {}),
     webPreferences: { preload, contextIsolation: true, nodeIntegration: false },
   });
   void loadView(controlWindow, "control");
@@ -139,6 +155,7 @@ function createWindows() {
     frame: false,
     show: false,
     fullscreenable: true,
+    ...(winIcon ? { icon: winIcon } : {}),
     /** Windows: resize-rand i.p.v. alleen `maximize()` bij frameless. */
     thickFrame: true,
     webPreferences: { preload, contextIsolation: true, nodeIntegration: false },
@@ -227,6 +244,20 @@ function registerIpc() {
 
   ipcMain.on("app:getContext", (event) => {
     event.returnValue = desktopContext;
+  });
+
+  ipcMain.handle("app:getVersion", () => app.getVersion());
+
+  ipcMain.handle("shell:openExternal", async (_, url: unknown) => {
+    if (typeof url !== "string" || !/^https:\/\//i.test(url.trim())) {
+      return { ok: false };
+    }
+    try {
+      await shell.openExternal(url.trim());
+      return { ok: true };
+    } catch {
+      return { ok: false };
+    }
   });
 
   ipcMain.handle(

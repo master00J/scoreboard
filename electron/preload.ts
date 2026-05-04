@@ -41,6 +41,8 @@ const bridge: ElectronBridge = {
   reportSponsorClipStart: (payload) => ipcRenderer.invoke("display:sponsorClipStart", payload),
   reportSponsorClipEnd: (payload) => ipcRenderer.invoke("display:sponsorClipEnd", payload),
   getSponsorLedgerSnapshot: () => ipcRenderer.invoke("display:getSponsorLedger"),
+  getAppVersion: () => ipcRenderer.invoke("app:getVersion"),
+  openExternalUrl: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
 };
 
 try {

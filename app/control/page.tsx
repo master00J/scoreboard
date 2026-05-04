@@ -16,6 +16,7 @@ import { ExternalCapturePanel } from "./_components/external-capture-panel";
 import { PlayerIntroLauncher } from "./_components/player-intro-launcher";
 import { CrashRecoveryBanner } from "./_components/crash-recovery";
 import { SponsorPhaseHud } from "./_components/sponsor-phase-hud";
+import { UpdateNudgeBanner } from "./_components/update-nudge-banner";
 import type { Match } from "@/lib/types";
 import type { MatchStatusT } from "@/lib/validation/commands";
 import { isFullMatch } from "@/lib/is-full-match";
@@ -46,6 +47,8 @@ export default function ControlPage() {
   return (
     <main className="min-h-screen w-full max-w-none px-4 py-6 sm:px-6">
       <ToastViewport />
+
+      <UpdateNudgeBanner />
 
       <header className="flex items-center justify-between mb-6">
         <div>
