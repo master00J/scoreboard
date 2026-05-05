@@ -483,7 +483,7 @@ h2 {
 
 .feature-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 14px;
 }
 
@@ -522,9 +522,15 @@ h2 {
 
 .split-section {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 400px);
   gap: 42px;
   align-items: center;
+}
+
+.download-cards-stack {
+  display: grid;
+  gap: 14px;
+  align-content: start;
 }
 
 .split-section h2,
@@ -574,8 +580,12 @@ h2 {
   box-shadow: 0 0 38px rgba(25, 216, 255, 0.18);
 }
 
-.primary-button.full {
+.primary-button.full,
+.secondary-button.full {
   width: 100%;
+}
+
+.download-card .primary-button.full {
   margin-top: 20px;
 }
 

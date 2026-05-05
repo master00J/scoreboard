@@ -1,8 +1,6 @@
 /**
- * Vult `public/downloads/Stadium-Scoreboard.exe` vóór `next build`.
- * 1) `PORTABLE_EXE_FETCH_URL` — directe HTTPS-URL (aanbevolen op Vercel; .exe >100 MB past niet in Git).
- * 2) Kopie uit monorepo (in volgorde): `../dist-latest/Stadium-Scoreboard.exe` (jullie “laatste build”),
- *    anders `../dist/Stadium-Scoreboard.exe`.
+ * Vult `public/downloads/*.exe` vóór `next build`.
+ * Per artefact: eerst env-FETCH_URL (HTTPS), anders kopie uit monorepo-paden.
  */
 import fs from "fs";
 import path from "path";
@@ -10,54 +8,78 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.join(__dirname, "..", "..");
-const portableName = "Stadium-Scoreboard.exe";
-const localPortableCandidates = [
-  path.join(repoRoot, "dist-latest", portableName),
-  path.join(repoRoot, "dist", portableName),
-];
 const destDir = path.join(__dirname, "..", "public", "downloads");
-const dest = path.join(destDir, portableName);
 
-const MIN_BYTES = 50 * 1024 * 1024;
+const MIN_BYTES_SCOREBOARD = 50 * 1024 * 1024;
+const MIN_BYTES_LEDBOARDING = 20 * 1024 * 1024;
 
-async function fetchToFile(url) {
+/** @type {{ fileName: string; localCandidates: string[]; fetchEnv: string; minBytes: number; label: string }[]} */
+const artifacts = [
+  {
+    fileName: "Stadium-Scoreboard.exe",
+    localCandidates: [
+      path.join(repoRoot, "dist-latest", "Stadium-Scoreboard.exe"),
+      path.join(repoRoot, "dist", "Stadium-Scoreboard.exe"),
+    ],
+    fetchEnv: "PORTABLE_EXE_FETCH_URL",
+    minBytes: MIN_BYTES_SCOREBOARD,
+    label: "scoreboard",
+  },
+  {
+    fileName: "ArenaCue-Ledboarding.exe",
+    localCandidates: [
+      path.join(repoRoot, "ledboarding", "dist-latest", "ArenaCue-Ledboarding.exe"),
+      path.join(repoRoot, "ledboarding", "dist", "ArenaCue-Ledboarding.exe"),
+    ],
+    fetchEnv: "PORTABLE_LEDBOARDING_FETCH_URL",
+    minBytes: MIN_BYTES_LEDBOARDING,
+    label: "LED boarding",
+  },
+];
+
+async function fetchToFile(url, dest, minBytes) {
   const res = await fetch(url, { redirect: "follow" });
   if (!res.ok) {
-    throw new Error(`PORTABLE_EXE_FETCH_URL HTTP ${res.status}`);
+    throw new Error(`HTTP ${res.status}`);
   }
   const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length < MIN_BYTES) {
+  if (buf.length < minBytes) {
     throw new Error(`Download te klein (${buf.length} bytes); controleer de URL.`);
   }
   fs.mkdirSync(destDir, { recursive: true });
   fs.writeFileSync(dest, buf);
-  console.log(`[ensure-portable] gedownload (${Math.round(buf.length / 1024 / 1024)} MB) → public/downloads/`);
+  console.log(`[ensure-portable:${path.basename(dest)}] gedownload (${Math.round(buf.length / 1024 / 1024)} MB)`);
 }
 
-function copyIfExists() {
-  for (const src of localPortableCandidates) {
+function copyIfExists(localCandidates, dest, minBytes, tag) {
+  for (const src of localCandidates) {
     if (!fs.existsSync(src)) {
       continue;
     }
     const st = fs.statSync(src);
-    if (st.size < MIN_BYTES) {
-      console.warn(`[ensure-portable] ${src} lijkt te klein, volgende bron proberen.`);
+    if (st.size < minBytes) {
+      console.warn(`[ensure-portable:${tag}] ${src} lijkt te klein, volgende bron proberen.`);
       continue;
     }
     fs.mkdirSync(destDir, { recursive: true });
     fs.copyFileSync(src, dest);
     const label = src.includes(`${path.sep}dist-latest${path.sep}`) ? "dist-latest" : "dist";
-    console.log(`[ensure-portable] gekopieerd (${Math.round(st.size / 1024 / 1024)} MB) van ${label}/`);
+    console.log(`[ensure-portable:${tag}] gekopieerd (${Math.round(st.size / 1024 / 1024)} MB) van ${label}/`);
     return true;
   }
   return false;
 }
 
-async function main() {
+/**
+ * @param {{ fileName: string; localCandidates: string[]; fetchEnv: string; minBytes: number; label: string }} art
+ */
+async function ensureOne(art) {
+  const dest = path.join(destDir, art.fileName);
+
   if (fs.existsSync(dest)) {
     const st = fs.statSync(dest);
-    if (st.size >= MIN_BYTES) {
-      console.log("[ensure-portable] bestand bestaat al.");
+    if (st.size >= art.minBytes) {
+      console.log(`[ensure-portable:${art.label}] ${art.fileName} bestaat al.`);
       return;
     }
     try {
@@ -67,19 +89,30 @@ async function main() {
     }
   }
 
-  const fetchUrl = process.env.PORTABLE_EXE_FETCH_URL?.trim();
+  const fetchUrl = process.env[art.fetchEnv]?.trim();
   if (fetchUrl) {
-    await fetchToFile(fetchUrl);
-    return;
+    try {
+      await fetchToFile(fetchUrl, dest, art.minBytes);
+      return;
+    } catch (e) {
+      console.error(`[ensure-portable:${art.label}] ${art.fetchEnv}:`, e?.message ?? e);
+      throw e;
+    }
   }
 
-  if (copyIfExists()) {
+  if (copyIfExists(art.localCandidates, dest, art.minBytes, art.label)) {
     return;
   }
 
   console.warn(
-    "[ensure-portable] Geen portable .exe: zet PORTABLE_EXE_FETCH_URL op Vercel, of zet Stadium-Scoreboard.exe in scoreboard/dist-latest/ (of dist/) en run `npm run build` opnieuw vanaf Website.",
+    `[ensure-portable:${art.label}] Geen portable ${art.fileName}: zet ${art.fetchEnv} op Vercel, of plaats de build in een van: ${art.localCandidates.join(", ")}`,
   );
+}
+
+async function main() {
+  for (const art of artifacts) {
+    await ensureOne(art);
+  }
 }
 
 main().catch((e) => {

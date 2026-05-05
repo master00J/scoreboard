@@ -10,3 +10,4 @@ dist/
 
 # Portable Windows-build (~100 MB+); ingevuld door scripts/ensure-portable-exe.mjs, niet in Git.
 public/downloads/Stadium-Scoreboard.exe
+public/downloads/ArenaCue-Ledboarding.exe

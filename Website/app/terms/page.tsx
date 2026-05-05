@@ -19,7 +19,7 @@ export default function TermsPage() {
         />
         <span>
           <strong>Arena<span>Cue</span></strong>
-          <small>Scoreboard & Display Control</small>
+          <small>Scoreboard, LED boarding &amp; Display Control</small>
         </span>
       </a>
       <article className="legal-card">

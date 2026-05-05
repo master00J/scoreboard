@@ -11,6 +11,8 @@ type PortalLicense = {
   usedActivations: number;
   downloadUrl?: string | null;
   downloadLabel?: string | null;
+  ledboardingDownloadUrl?: string | null;
+  ledboardingDownloadLabel?: string | null;
   installations: {
     deviceLabel: string;
     machinePreview: string;
@@ -158,24 +160,49 @@ export function LicensePortalForm({
               }}
             >
               <h3 style={{ margin: "0 0 10px", fontSize: "0.95rem", color: "var(--muted)" }}>Download</h3>
-              {data.downloadUrl ? (
+              {data.downloadUrl || data.ledboardingDownloadUrl ? (
                 <>
-                  <a
-                    className="primary-button"
-                    href={data.downloadUrl}
-                    {...(data.downloadUrl.startsWith("http://") || data.downloadUrl.startsWith("https://")
-                      ? { target: "_blank", rel: "noopener noreferrer" }
-                      : {})}
-                  >
-                    {data.downloadLabel?.trim() || "Download"}
-                  </a>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                    {data.downloadUrl ? (
+                      <a
+                        className="primary-button"
+                        href={data.downloadUrl}
+                        {...(data.downloadUrl.startsWith("http://") || data.downloadUrl.startsWith("https://")
+                          ? { target: "_blank", rel: "noopener noreferrer" }
+                          : {})}
+                      >
+                        {data.downloadLabel?.trim() || "Download"}
+                      </a>
+                    ) : null}
+                    {data.ledboardingDownloadUrl ? (
+                      <a
+                        className="primary-button"
+                        href={data.ledboardingDownloadUrl}
+                        {...(data.ledboardingDownloadUrl.startsWith("http://") ||
+                        data.ledboardingDownloadUrl.startsWith("https://")
+                          ? { target: "_blank", rel: "noopener noreferrer" }
+                          : {})}
+                        style={
+                          data.downloadUrl
+                            ? {
+                                background: "linear-gradient(135deg, rgba(25, 216, 255, 0.22), rgba(33, 243, 107, 0.18))",
+                                border: "1px solid rgba(25, 216, 255, 0.35)",
+                                color: "var(--text)",
+                              }
+                            : undefined
+                        }
+                      >
+                        {data.ledboardingDownloadLabel?.trim() || "ArenaCue LED boarding"}
+                      </a>
+                    ) : null}
+                  </div>
                   <p className="form-hint" style={{ marginTop: 12, marginBottom: 0 }}>
-                    Installeer ArenaCue op je Windows-pc met deze download. Bij vragen:{" "}
+                    Installeer ArenaCue op je Windows-pc met deze download(s). Bij vragen:{" "}
                     <a href="mailto:info@arenacue.be">info@arenacue.be</a>.
                     {portalReleaseVersion ? (
                       <>
                         {" "}
-                        Publicatie op dit portaal:{" "}
+                        Publicatie scoreboard op dit portaal:{" "}
                         <strong style={{ fontFamily: "ui-monospace", color: "var(--text)" }}>
                           v{portalReleaseVersion}
                         </strong>
@@ -188,7 +215,9 @@ export function LicensePortalForm({
                 <p className="form-hint" style={{ margin: 0 }}>
                   Er is nog geen downloadlink geconfigureerd voor dit portaal. Neem contact op met ArenaCue of
                   vraag je beheerder om een link in te stellen (
-                  <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_DOWNLOAD_URL</code> of per licentie).
+                  <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_DOWNLOAD_URL</code>, optioneel{" "}
+                  <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_LEDBOARDING_DOWNLOAD_URL</code>, of per
+                  licentie).
                 </p>
               )}
             </div>

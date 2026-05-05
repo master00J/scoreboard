@@ -46,3 +46,10 @@ export function portalDownloadLabel(): string {
   const s = raw && raw.length > 0 ? raw : "ArenaCue voor Windows";
   return s.length > 80 ? s.slice(0, 80) : s;
 }
+
+/** Tweede downloadknop op het licentieportaal (LED boarding), alleen als URL gezet is. */
+export function portalLedboardingDownloadLabel(): string {
+  const raw = process.env.NEXT_PUBLIC_PORTAL_LEDBOARDING_DOWNLOAD_LABEL?.trim();
+  const s = raw && raw.length > 0 ? raw : "ArenaCue LED boarding";
+  return s.length > 80 ? s.slice(0, 80) : s;
+}

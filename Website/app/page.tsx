@@ -15,13 +15,17 @@ const features = [
     body: "Toon visuals fullscreen of naast het scorebord op een vaste 16:9 display-output.",
   },
   {
+    title: "LED boarding",
+    body: "Aparte ArenaCue-app voor perimeter- en tribuneschermen: zones, playlists en sponsorlogo's op een configureerbare pixelcanvas.",
+  },
+  {
     title: "Media & spelers",
     body: "Beheer teamlogo's, spelersvisuals, goalvideo's, wissels, kaarten en intro's lokaal.",
   },
 ];
 
 const workflow = [
-  "Installeer ArenaCue op de regie-laptop.",
+  "Installeer ArenaCue Scoreboard (en optioneel LED boarding) op de regie-laptop.",
   "Verbind het scherm of display-systeem via HDMI, capture of LAN.",
   "Maak teams, wedstrijd en sponsors aan.",
   "Bedien de volledige match live vanuit het control panel.",
@@ -50,7 +54,7 @@ export default function Home() {
             />
             <span>
               <strong>Arena<span>Cue</span></strong>
-              <small>Scoreboard & Display Control</small>
+              <small>Scoreboard, LED boarding &amp; Display Control</small>
             </span>
           </a>
           <nav aria-label="Hoofdnavigatie">
@@ -169,7 +173,9 @@ export default function Home() {
           <p className="section-kicker">Software delivery</p>
           <h2>Downloadbaar, eenvoudig te installeren en klaar voor wedstrijddagen.</h2>
           <p>
-            ArenaCue wordt geleverd als Windows-installer of portable build.
+            ArenaCue wordt geleverd als Windows-installer of portable build voor het scoreboard;{" "}
+            <strong>ArenaCue LED boarding</strong> is een aparte download voor lint- en LED-schermen
+            (zelfde distributiepatroon).
             Clubs hoeven geen complexe serveromgeving op te zetten: installeren,
             wedstrijd aanmaken, display openen en starten.
           </p>
@@ -179,21 +185,37 @@ export default function Home() {
             ))}
           </ul>
         </div>
-        <div className="download-card">
-          <Image
-            src="/assets/arenacue-icon.png"
-            alt=""
-            width={96}
-            height={96}
-          />
-          <h3>ArenaCue for Windows</h3>
-          <p>
-            Installer en portable versie voor clubs die snel willen starten met
-            scoreboard- en sponsorcontrole.
-          </p>
-          <a className="primary-button full" href="#contact">
-            Vraag download aan
-          </a>
+        <div className="download-cards-stack">
+          <div className="download-card">
+            <Image
+              src="/assets/arenacue-icon.png"
+              alt=""
+              width={96}
+              height={96}
+            />
+            <h3>ArenaCue Scoreboard</h3>
+            <p>
+              Installer en portable versie voor scoreboard-, sponsor- en displaycontrole tijdens de match.
+            </p>
+            <a className="primary-button full" href="#contact">
+              Vraag download aan
+            </a>
+          </div>
+          <div className="download-card">
+            <Image
+              src="/assets/arenacue-icon.png"
+              alt=""
+              width={96}
+              height={96}
+            />
+            <h3>ArenaCue LED boarding</h3>
+            <p>
+              Losstaande app voor perimeter/tribune-LED: zones, playlists en sponsors op pixelprecieze output.
+            </p>
+            <a className="primary-button full" href="#contact">
+              Vraag download aan
+            </a>
+          </div>
         </div>
       </section>
 
@@ -248,7 +270,7 @@ export default function Home() {
 
       <footer className="footer">
         <span>© {new Date().getFullYear()} ArenaCue</span>
-        <span>Stadium Scoreboard & Display Control</span>
+        <span>Scoreboard, LED boarding &amp; Display Control</span>
         <span className="footer-links">
           <a href="/portal">Klantportaal</a>
           <a href="/privacy">Privacy</a>

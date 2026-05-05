@@ -6,9 +6,9 @@ const siteUrl = getSiteUrl();
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
-  title: "ArenaCue | Stadium Scoreboard & Display Control",
+  title: "ArenaCue | Scoreboard, LED boarding & Display Control",
   description:
-    "ArenaCue is professionele Windows-software voor live scoreboards, sponsorrotatie, matchstatus en stadiondisplay control.",
+    "ArenaCue is professionele Windows-software voor live scoreboards, LED boarding, sponsorrotatie, matchstatus en stadiondisplay control.",
   icons: {
     icon: "/assets/arenacue-icon.png",
     apple: "/assets/arenacue-icon.png",
@@ -19,9 +19,9 @@ export const metadata: Metadata = {
     follow: true,
   },
   openGraph: {
-    title: "ArenaCue | Stadium Scoreboard & Display Control",
+    title: "ArenaCue | Scoreboard, LED boarding & Display Control",
     description:
-      "Control every moment. Display every detail. Professionele scoreboardsoftware voor sportclubs en stadions.",
+      "Control every moment. Display every detail. Scoreboard- en LED-boardingsoftware voor sportclubs en stadions.",
     type: "website",
     locale: "nl_BE",
     siteName: "ArenaCue",
@@ -29,9 +29,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "ArenaCue | Stadium Scoreboard & Display Control",
+    title: "ArenaCue | Scoreboard, LED boarding & Display Control",
     description:
-      "Professionele Windows-software voor scoreboards, sponsorrotatie en stadionvisuals.",
+      "Professionele Windows-software voor scoreboards, LED perimeter/tribune-output, sponsorrotatie en stadionvisuals.",
     images: ["/assets/arenacue-icon.png"],
   },
 };
