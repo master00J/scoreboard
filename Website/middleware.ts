@@ -20,6 +20,13 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  if (pathname === "/licentie" || pathname.startsWith("/licentie/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/portal";
+    url.hash = "";
+    return NextResponse.redirect(url, 308);
+  }
+
   if (pathname.startsWith("/api")) {
     return NextResponse.next();
   }

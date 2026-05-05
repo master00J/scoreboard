@@ -1,26 +1,5 @@
-"use client";
-
-import { useState } from "react";
-
-type PortalLicense = {
-  organizationLabel: string;
-  plan: string;
-  planLabel?: string;
-  validUntil: string | null;
-  status: "active" | "revoked" | "expired";
-  maxActivations: number;
-  usedActivations: number;
-  downloadUrl?: string | null;
-  downloadLabel?: string | null;
-  ledboardingDownloadUrl?: string | null;
-  ledboardingDownloadLabel?: string | null;
-  installations: {
-    deviceLabel: string;
-    machinePreview: string;
-    activatedAt: string;
-    lastSeenAt: string;
-  }[];
-};
+import type { PortalLicenseCardView } from "@/lib/portal-dashboard-data";
+import { PortalLogoutButton } from "@/components/portal-logout-button";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -30,7 +9,7 @@ function fmtDate(iso: string): string {
   return d.toLocaleString("nl-BE", { dateStyle: "medium", timeStyle: "short" });
 }
 
-function statusLabel(s: PortalLicense["status"]): { text: string; cls: string } {
+function statusLabel(s: PortalLicenseCardView["status"]): { text: string; cls: string } {
   if (s === "active") {
     return { text: "Actief", cls: "badge-ok" };
   }
@@ -40,89 +19,59 @@ function statusLabel(s: PortalLicense["status"]): { text: string; cls: string } 
   return { text: "Verlopen", cls: "badge-warn" };
 }
 
-export function LicensePortalForm({
-  portalReleaseVersion = null,
+export function PortalDashboard({
+  email,
+  licenses,
+  portalReleaseVersion,
 }: {
-  /** Zelfde bron als /api/app/release (optioneel regel bij download). */
-  portalReleaseVersion?: string | null;
-} = {}) {
-  const [licenseKey, setLicenseKey] = useState("");
-  const [ownerEmail, setOwnerEmail] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<PortalLicense | null>(null);
-
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setData(null);
-    setLoading(true);
-    try {
-      const res = await fetch("/api/license/portal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          licenseKey: licenseKey.trim(),
-          ownerEmail: ownerEmail.trim(),
-        }),
-      });
-      const json = (await res.json()) as { ok?: boolean; message?: string; license?: PortalLicense };
-      if (!json.ok || !json.license) {
-        setError(json.message ?? "Kon status niet ophalen.");
-        return;
-      }
-      setData(json.license);
-    } catch {
-      setError("Netwerkfout. Probeer later opnieuw.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
+  email: string;
+  licenses: PortalLicenseCardView[];
+  portalReleaseVersion: string | null;
+}) {
   return (
-    <div>
-      <div className="data-card">
-        <h1 style={{ margin: "0 0 8px", fontSize: "1.55rem", letterSpacing: "-0.03em" }}>Licentiestatus</h1>
-        <p className="form-hint" style={{ marginBottom: 22 }}>
-          Vul de licentiesleutel en het e-mailadres in dat bij je licentie hoort (zoals door ArenaCue
-          meegedeeld).
-        </p>
-        <form className="form-stack" onSubmit={(e) => void onSubmit(e)} style={{ maxWidth: 480 }}>
-          <label>
-            Licentiesleutel
-            <input
-              value={licenseKey}
-              onChange={(e) => setLicenseKey(e.target.value)}
-              autoComplete="off"
-              placeholder="ARENA-…"
-              required
-            />
-          </label>
-          <label>
-            E-mailadres
-            <input
-              type="email"
-              value={ownerEmail}
-              onChange={(e) => setOwnerEmail(e.target.value)}
-              autoComplete="email"
-              required
-            />
-          </label>
-          {error && <p className="form-error">{error}</p>}
-          <button className="primary-button" type="submit" disabled={loading}>
-            {loading ? "Bezig…" : "Toon status"}
-          </button>
-        </form>
+    <>
+      <div className="data-card" style={{ marginBottom: 22 }}>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 14,
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <p style={{ margin: 0 }} className="form-hint">
+            Ingelogd als <strong style={{ color: "var(--text)" }}>{email}</strong>
+          </p>
+          <PortalLogoutButton />
+        </div>
       </div>
 
-      {data && (
-        <div className="portal-result data-card">
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 12 }}>
+      {licenses.length === 0 ? (
+        <div className="data-card">
+          <p className="form-hint" style={{ margin: 0 }}>
+            Er zijn geen licenties gekoppeld aan dit adres. Klopt dat niet? Neem contact op via{" "}
+            <a href="mailto:info@arenacue.be">info@arenacue.be</a>.
+          </p>
+        </div>
+      ) : null}
+
+      {licenses.map((data) => (
+        <div key={data.licenseKey} className="portal-result data-card" style={{ marginBottom: 22 }}>
+          <div
+            style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 12 }}
+          >
             <h2 style={{ margin: 0, fontSize: "1.2rem" }}>{data.organizationLabel || "—"}</h2>
             <span className={`badge ${statusLabel(data.status).cls}`}>{statusLabel(data.status).text}</span>
           </div>
+          <p className="form-hint" style={{ marginBottom: 12 }}>
+            Sleutel:{" "}
+            <strong style={{ fontFamily: "ui-monospace, monospace", color: "var(--text)" }}>
+              {data.licenseKey}
+            </strong>
+          </p>
           <p className="form-hint" style={{ marginBottom: 16 }}>
-            Plan: <strong style={{ color: "var(--text)" }}>{data.planLabel?.trim() || data.plan}</strong>
+            Plan: <strong style={{ color: "var(--text)" }}>{data.planLabel}</strong>
             {" · "}
             Installaties:{" "}
             <strong style={{ color: "var(--text)" }}>
@@ -142,15 +91,15 @@ export function LicensePortalForm({
             )}
           </p>
 
-          {data.status !== "active" && (
+          {data.status !== "active" ? (
             <p className="form-error" style={{ marginBottom: 16 }}>
               {data.status === "revoked"
                 ? "Deze licentie is ingetrokken. Neem contact op met ArenaCue."
                 : "Deze licentie is verlopen. Neem contact op met ArenaCue om te verlengen."}
             </p>
-          )}
+          ) : null}
 
-          {data.status === "active" && (
+          {data.status === "active" ? (
             <div
               style={{
                 marginBottom: 20,
@@ -186,7 +135,8 @@ export function LicensePortalForm({
                         style={
                           data.downloadUrl
                             ? {
-                                background: "linear-gradient(135deg, rgba(25, 216, 255, 0.22), rgba(33, 243, 107, 0.18))",
+                                background:
+                                  "linear-gradient(135deg, rgba(25, 216, 255, 0.22), rgba(33, 243, 107, 0.18))",
                                 border: "1px solid rgba(25, 216, 255, 0.35)",
                                 color: "var(--text)",
                               }
@@ -214,17 +164,19 @@ export function LicensePortalForm({
                 </>
               ) : (
                 <p className="form-hint" style={{ margin: 0 }}>
-                  Er is nog geen downloadlink geconfigureerd voor dit portaal. Neem contact op met ArenaCue of
-                  vraag je beheerder om een link in te stellen (
+                  Er is nog geen downloadlink geconfigureerd voor dit portaal. Neem contact op met ArenaCue of vraag je
+                  beheerder om een link in te stellen (
                   <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_DOWNLOAD_URL</code>, optioneel{" "}
                   <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_LEDBOARDING_DOWNLOAD_URL</code>, of per
                   licentie).
                 </p>
               )}
             </div>
-          )}
+          ) : null}
 
-          <h3 style={{ margin: "18px 0 10px", fontSize: "0.95rem", color: "var(--muted)" }}>Geactiveerde machines</h3>
+          <h3 style={{ margin: "18px 0 10px", fontSize: "0.95rem", color: "var(--muted)" }}>
+            Geactiveerde machines
+          </h3>
           {data.installations.length === 0 ? (
             <p className="form-hint">Nog geen installaties geregistreerd.</p>
           ) : (
@@ -250,7 +202,7 @@ export function LicensePortalForm({
             </div>
           )}
         </div>
-      )}
-    </div>
+      ))}
+    </>
   );
 }

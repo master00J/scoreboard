@@ -4,9 +4,13 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "ArenaCue",
     short_name: "ArenaCue",
-    description: "Scoreboard, LED boarding & Display Control",
+    description:
+      "ArenaCue — scoreboard, LED boarding en display control voor clubs en stadions (Windows).",
+    lang: "nl-BE",
+    dir: "ltr",
     start_url: "/",
     display: "standalone",
+    categories: ["sports", "business"],
     background_color: "#020617",
     theme_color: "#020617",
     icons: [

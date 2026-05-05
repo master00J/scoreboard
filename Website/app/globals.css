@@ -331,6 +331,32 @@ main {
   margin-top: 18px;
 }
 
+.demo-policy-note {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(250, 204, 21, 0.32);
+  background: rgba(250, 204, 21, 0.07);
+  color: #e2e8f0;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.demo-policy-note strong {
+  color: #fde68a;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.demo-policy-note ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.demo-policy-note li {
+  margin-bottom: 6px;
+}
+
 .team-card,
 .clock-card,
 .panel-grid > div,

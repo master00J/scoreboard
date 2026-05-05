@@ -11,6 +11,7 @@ import {
   resolvePortalDownloadUrl,
   sanitizePortalDownloadUrl,
 } from "@/lib/portal-download-url";
+import { toPublicLicenseSnapshot } from "@/lib/license-plans";
 
 const portalBody = licensePortalBodySchema;
 
@@ -118,13 +119,13 @@ export async function POST(request: Request) {
       ? sanitizePortalDownloadUrl(process.env.NEXT_PUBLIC_PORTAL_LEDBOARDING_DOWNLOAD_URL)
       : null;
 
+  const snapshot = toPublicLicenseSnapshot(row);
+
   return NextResponse.json(
     {
       ok: true,
       license: {
-        organizationLabel: row.organization_label,
-        plan: row.plan,
-        validUntil: row.valid_until,
+        ...snapshot,
         status,
         maxActivations: row.max_activations,
         usedActivations: installs.length,

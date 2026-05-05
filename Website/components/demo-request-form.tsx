@@ -70,6 +70,17 @@ export function DemoRequestForm() {
 
   return (
     <form className="contact-form" onSubmit={submit}>
+      <div className="demo-policy-note" role="note">
+        <strong>Demo&apos;s zijn beperkt</strong>
+        <ul>
+          <li>Je kunt maar één keer een demo aanvragen met hetzelfde e-mailadres.</li>
+          <li>Op elk apparaat geldt maximaal één ArenaCue-demo; een tweede demo-sleutel werkt op dat toestel niet.</li>
+          <li>
+            Na een demo kun je wél verder met een <strong>volledige licentie</strong> op hetzelfde apparaat — daarvoor
+            neem je best contact op.
+          </li>
+        </ul>
+      </div>
       <div className="form-grid">
         <label>
           Naam
