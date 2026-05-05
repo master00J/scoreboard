@@ -17,3 +17,6 @@ logs/*.log
 .env.local
 .env.production
 *.tsbuildinfo
+
+# Apart project (eigen Git-repo): github.com/master00J/ledboarding
+ledboarding/
