@@ -213,10 +213,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   useEffect(() => {
     if (!state) return;
-    // For GOAL_PLAYER_VIDEO, prefer the real video length when we know it.
-    let playerVideoMs = 9000;
+    /** GOAL_PLAYER_VIDEO: gebruik de echte clipduur (+klein eindbufferke) i.p.v. lange default. */
+    let playerVideoMs = 5000;
     if (state.mode === "GOAL_PLAYER_VIDEO" && activeMedia?.durationSec) {
-      playerVideoMs = Math.max(4000, activeMedia.durationSec * 1000 + 500);
+      playerVideoMs = Math.max(2500, activeMedia.durationSec * 1000 + 150);
     }
     const transitions: Record<string, { ms: number; next: string }> = {
       GOAL: { ms: 8000, next: "SPONSOR_ROTATION" },
@@ -381,12 +381,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     untilMs: number;
     startedAtMs: number;
     startedAtSlotIdx?: number;
+    lastSeenAtMs?: number;
   } | null>(null);
   const prematchPhaseHangRef = useRef<{
     sponsorId: string;
     untilMs: number;
     startedAtMs: number;
     startedAtSlotIdx?: number;
+    lastSeenAtMs?: number;
   } | null>(null);
   const prematchOriginRef = useRef<number | null>(null);
 
@@ -414,6 +416,17 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     }
   }, [prematchSpreadActive]);
 
+  /** Tijdens deze modi loopt een overlay (goal/speler/kaart/wissel/halftime/fulltime).
+   * Sponsor-hang vriest dan in zodat de clip later volledig kan afspelen. */
+  const sponsorInterrupted =
+    mode === "GOAL" ||
+    mode === "GOAL_INTRO_VIDEO" ||
+    mode === "GOAL_PLAYER_VIDEO" ||
+    mode === "SUBSTITUTION" ||
+    mode === "CARD" ||
+    mode === "HALFTIME" ||
+    mode === "FULLTIME";
+
   const sponsorDistView = useMemo(() => {
     const now = Date.now();
 
@@ -428,6 +441,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       return resolveSponsorSpreadPhase(v, sponsors, section, match.status, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapMatch,
         slotT: t,
+        interrupted: sponsorInterrupted,
       });
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
@@ -437,6 +451,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       return resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapHalftime,
         slotT: t,
+        interrupted: sponsorInterrupted,
       });
     }
     sponsorPhaseHangRef.current = null;
@@ -448,6 +463,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsors,
     elapsed,
     mode,
+    sponsorInterrupted,
     sponsorSlotMapMatch,
     sponsorSlotMapHalftime,
     phaseTick,
@@ -791,6 +807,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             key={`goal-player-${activeMedia.id}`}
             media={activeMedia}
             showPreviewProgress={embedInControl}
+            onVideoEnded={() => {
+              if (embedInControl) return;
+              sendCommand({ type: "display:setMode", mode: "SPONSOR_ROTATION" });
+            }}
           />
         )}
 
@@ -974,6 +994,7 @@ function SingleMediaMode({
   fallback,
   showPreviewProgress = false,
   previewProgressWallClock,
+  onVideoEnded,
 }: {
   media: MediaItem | null;
   loop?: boolean;
@@ -985,6 +1006,8 @@ function SingleMediaMode({
     windowEndMs: number;
     tick: number;
   };
+  /** Callback wanneer de video natuurlijk eindigt (alleen relevant zonder loop). */
+  onVideoEnded?: () => void;
 }) {
   const [videoElapsed01, setVideoElapsed01] = useState(0);
   const [videoDurSec, setVideoDurSec] = useState(0);
@@ -1062,6 +1085,9 @@ function SingleMediaMode({
             if (d > 0 && Number.isFinite(d)) {
               setVideoElapsed01(Math.min(1, v.currentTime / d));
             }
+          }}
+          onEnded={() => {
+            if (!loop) onVideoEnded?.();
           }}
         />
       ) : (

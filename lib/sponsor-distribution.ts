@@ -295,6 +295,8 @@ export type SponsorPhaseHangRef = {
     startedAtMs: number;
     /** Slot-index op de slotmap waar deze hang oorspronkelijk gestart is (voor pauze-detectie). */
     startedAtSlotIdx?: number;
+    /** Laatste tick-tijd waarop deze hang is geëvalueerd (voor interrupt-vriesklok). */
+    lastSeenAtMs?: number;
   } | null;
 };
 
@@ -302,6 +304,11 @@ export type ResolveSponsorSpreadOptions = {
   /** Slotmap + huidige tijd `t` (zelfde eenheid als `lookupSponsorAtSecond`): cap hang per segment. */
   slotMap?: (string | null)[];
   slotT?: number;
+  /**
+   * Onderbreking actief (bv. doelpunt-, speler- of kaart-overlay): de hang-klok vriest in.
+   * Resterende hangtijd schuift mee zodat de sponsor zijn volle clip krijgt na de overlay.
+   */
+  interrupted?: boolean;
 };
 
 /**
@@ -320,9 +327,28 @@ export function resolveSponsorSpreadPhase(
     options?.slotMap && options.slotT !== undefined && options.slotMap.length > 0
       ? Math.min(options.slotMap.length - 1, Math.max(0, Math.floor(options.slotT)))
       : undefined;
+  const interrupted = options?.interrupted === true;
 
   const hang = hangRef.current;
+
+  /**
+   * Onderbreking (goal-overlay, spelervideo, kaart, wissel): hang-klok bevriezen door
+   * `untilMs` per tick met de werkelijke deltatijd op te schuiven. Zo speelt de sponsor
+   * zijn volledige clip uit nadat de overlay weer weg is.
+   */
+  if (interrupted && hang) {
+    const lastSeen = hang.lastSeenAtMs ?? nowMs;
+    const dt = Math.max(0, nowMs - lastSeen);
+    if (dt > 0) {
+      hang.untilMs += dt;
+      hang.startedAtMs += dt;
+    }
+    hang.lastSeenAtMs = nowMs;
+    return { phase: "sponsor", sponsorFilterId: hang.sponsorId };
+  }
+
   if (hang && nowMs < hang.untilMs) {
+    hang.lastSeenAtMs = nowMs;
     return {
       phase: "sponsor",
       sponsorFilterId: hang.sponsorId,
@@ -361,6 +387,7 @@ export function resolveSponsorSpreadPhase(
       untilMs: nowMs + holdSec * 1000,
       startedAtMs: nowMs,
       startedAtSlotIdx: slotIdx,
+      lastSeenAtMs: nowMs,
     };
   }
   const filterOut = raw.phase === "sponsor" ? raw.sponsorId : null;
