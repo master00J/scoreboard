@@ -22,6 +22,11 @@ export type StoredLicense = {
   /** ISO timestamp laatste geslaagde online check (activated=true). */
   lastVerifiedAt?: string;
   organizationLabel?: string | null;
+  /** Genormaliseerde plan-code (trial | standard | club | enterprise). */
+  plan?: string;
+  planLabel?: string;
+  /** Snapshot van server-featurevlaggen bij laatste geslaagde check. */
+  features?: Record<string, boolean>;
 };
 
 export function skipLicenseGateFromEnv(): boolean {
@@ -75,6 +80,32 @@ export function machinePreview(machineId: string): string {
   return `${machineId.slice(0, 6)}…${machineId.slice(-4)}`;
 }
 
+function parseLicenseFeaturesJson(v: unknown): Record<string, boolean> | undefined {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
+  const rec = v as Record<string, unknown>;
+  const out: Record<string, boolean> = {};
+  for (const [key, val] of Object.entries(rec)) {
+    if (typeof val === "boolean") out[key] = val;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function parsePublicLicenseBundle(lic: Record<string, unknown>): {
+  organizationLabel: string | null;
+  validUntil: string | null;
+  plan?: string;
+  planLabel?: string;
+  features?: Record<string, boolean>;
+} {
+  const organizationLabel = typeof lic.organizationLabel === "string" ? lic.organizationLabel : null;
+  const validUntil =
+    lic.validUntil === null ? null : typeof lic.validUntil === "string" ? lic.validUntil : null;
+  const plan = typeof lic.plan === "string" ? lic.plan : undefined;
+  const planLabel = typeof lic.planLabel === "string" ? lic.planLabel : undefined;
+  const features = parseLicenseFeaturesJson(lic.features);
+  return { organizationLabel, validUntil, plan, planLabel, features };
+}
+
 async function postJson(url: string, body: unknown): Promise<{ ok: boolean; status: number; json: unknown }> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -97,7 +128,15 @@ export async function remoteLicenseCheck(
   licenseKey: string,
   machineId: string,
 ): Promise<
-  | { kind: "ok"; activated: boolean; organizationLabel: string | null; validUntil: string | null }
+  | {
+      kind: "ok";
+      activated: boolean;
+      organizationLabel: string | null;
+      validUntil: string | null;
+      plan?: string;
+      planLabel?: string;
+      features?: Record<string, boolean>;
+    }
   | { kind: "error"; message: string; reason?: string }
   | { kind: "network" }
 > {
@@ -116,14 +155,15 @@ export async function remoteLicenseCheck(
       };
     }
     const lic = (o.license ?? {}) as Record<string, unknown>;
-    const organizationLabel = typeof lic.organizationLabel === "string" ? lic.organizationLabel : null;
-    const validUntil =
-      lic.validUntil === null ? null : typeof lic.validUntil === "string" ? lic.validUntil : null;
+    const snap = parsePublicLicenseBundle(lic);
     return {
       kind: "ok",
       activated: Boolean(o.activated),
-      organizationLabel,
-      validUntil,
+      organizationLabel: snap.organizationLabel,
+      validUntil: snap.validUntil,
+      ...(snap.plan !== undefined ? { plan: snap.plan } : {}),
+      ...(snap.planLabel !== undefined ? { planLabel: snap.planLabel } : {}),
+      ...(snap.features !== undefined ? { features: snap.features } : {}),
     };
   } catch {
     return { kind: "network" };
@@ -136,7 +176,15 @@ export async function remoteLicenseActivate(
   machineId: string,
   deviceLabel: string,
 ): Promise<
-  | { kind: "ok"; status: "activated" | "already_activated"; organizationLabel: string | null; validUntil: string | null }
+  | {
+      kind: "ok";
+      status: "activated" | "already_activated";
+      organizationLabel: string | null;
+      validUntil: string | null;
+      plan?: string;
+      planLabel?: string;
+      features?: Record<string, boolean>;
+    }
   | { kind: "error"; message: string; reason?: string }
   | { kind: "network" }
 > {
@@ -155,11 +203,15 @@ export async function remoteLicenseActivate(
       };
     }
     const lic = (o.license ?? {}) as Record<string, unknown>;
+    const snap = parsePublicLicenseBundle(lic);
     return {
       kind: "ok",
       status: o.status === "already_activated" ? "already_activated" : "activated",
-      organizationLabel: typeof lic.organizationLabel === "string" ? lic.organizationLabel : null,
-      validUntil: typeof lic.validUntil === "string" ? lic.validUntil : lic.validUntil === null ? null : null,
+      organizationLabel: snap.organizationLabel,
+      validUntil: snap.validUntil,
+      ...(snap.plan !== undefined ? { plan: snap.plan } : {}),
+      ...(snap.planLabel !== undefined ? { planLabel: snap.planLabel } : {}),
+      ...(snap.features !== undefined ? { features: snap.features } : {}),
     };
   } catch {
     return { kind: "network" };

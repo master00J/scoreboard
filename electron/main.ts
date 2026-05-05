@@ -443,6 +443,9 @@ function registerIpc() {
       licenseKey: prev.licenseKey,
       lastVerifiedAt: new Date().toISOString(),
       organizationLabel: r.organizationLabel,
+      ...(r.plan !== undefined ? { plan: r.plan } : {}),
+      ...(r.planLabel !== undefined ? { planLabel: r.planLabel } : {}),
+      ...(r.features !== undefined ? { features: r.features } : {}),
     });
     return {
       gate: false,
@@ -474,6 +477,9 @@ function registerIpc() {
       licenseKey: key,
       lastVerifiedAt: new Date().toISOString(),
       organizationLabel: r.organizationLabel,
+      ...(r.plan !== undefined ? { plan: r.plan } : {}),
+      ...(r.planLabel !== undefined ? { planLabel: r.planLabel } : {}),
+      ...(r.features !== undefined ? { features: r.features } : {}),
     });
     return {
       ok: true,
