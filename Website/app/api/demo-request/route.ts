@@ -1,9 +1,19 @@
 import { NextResponse } from "next/server";
-import { sendDemoRequestEmails } from "@/lib/demo-request-emails";
+import {
+  adminAnyWebsiteDemoLicenseForOwnerEmail,
+  adminDemoRequestExistsForEmail,
+} from "@/lib/license-admin-data";
+import { getSupabaseAdminHeaders } from "@/lib/supabase-admin";
+import { provisionWebsiteDemoLicense } from "@/lib/demo-license-provision";
+import { sendDemoRequestEmails, type DemoRequestEmailExtras } from "@/lib/demo-request-emails";
 import { validateDemoRequest } from "@/lib/demo-request";
+import { getSiteUrl } from "@/lib/site-url";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+const DEMO_DUPLICATE_MSG =
+  "Er is al een demo-aanvraag voor dit e-mailadres. Voor verlenging of een volledige licentie: neem contact op via info@arenacue.be.";
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -34,6 +44,24 @@ export async function POST(request: Request) {
     );
   }
 
+  const emailLower = parsed.value.email.trim().toLowerCase();
+
+  if (getSupabaseAdminHeaders()) {
+    const [hasReq, hasLic] = await Promise.all([
+      adminDemoRequestExistsForEmail(emailLower),
+      adminAnyWebsiteDemoLicenseForOwnerEmail(emailLower),
+    ]);
+    if (hasReq === null || hasLic === null) {
+      return NextResponse.json(
+        { ok: false, message: "Kon je aanvraag niet controleren. Probeer later opnieuw." },
+        { status: 503 },
+      );
+    }
+    if (hasReq || hasLic) {
+      return NextResponse.json({ ok: false, message: DEMO_DUPLICATE_MSG }, { status: 422 });
+    }
+  }
+
   const insertResponse = await fetch(`${supabaseUrl}/rest/v1/demo_requests`, {
     method: "POST",
     headers: {
@@ -53,6 +81,9 @@ export async function POST(request: Request) {
   });
 
   if (!insertResponse.ok) {
+    if (insertResponse.status === 409) {
+      return NextResponse.json({ ok: false, message: DEMO_DUPLICATE_MSG }, { status: 422 });
+    }
     const details = await insertResponse.text().catch(() => "");
     console.error("Supabase demo_requests insert failed", {
       status: insertResponse.status,
@@ -67,7 +98,23 @@ export async function POST(request: Request) {
     );
   }
 
-  await sendDemoRequestEmails(parsed.value).catch((err) => {
+  let emailExtras: DemoRequestEmailExtras | undefined;
+  try {
+    const prov = await provisionWebsiteDemoLicense({
+      ownerEmail: parsed.value.email,
+      organizationLabel: parsed.value.club.trim() || parsed.value.name.trim(),
+    });
+    if (prov) {
+      emailExtras = {
+        licenseKey: prov.licenseKey,
+        portalUrl: `${getSiteUrl().replace(/\/$/, "")}/portal`,
+      };
+    }
+  } catch (err) {
+    console.error("provisionWebsiteDemoLicense unexpected error", err);
+  }
+
+  await sendDemoRequestEmails(parsed.value, emailExtras).catch((err) => {
     console.error("sendDemoRequestEmails unexpected error", err);
   });
 
