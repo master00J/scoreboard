@@ -61,7 +61,14 @@ export function sponsorTelemetryConsumedSec(
   let total = ledger.bySponsorSec[sponsorId] ?? 0;
   const ac = ledger.activeClip;
   if (ac && ac.sponsorId === sponsorId) {
-    total += Math.max(0, (nowMs - ac.startedAtMs) / 1000);
+    /**
+     * Live progress maximaal tot de **verwachte** clipduur — voorkomt dat de teller
+     * doortikt terwijl er een goal-/spelervideo over de sponsor heen wordt gelegd
+     * (waardoor `bySponsorSec` later met de echte playback-duur lager uitvalt).
+     */
+    const elapsedSec = Math.max(0, (nowMs - ac.startedAtMs) / 1000);
+    const cap = Math.max(0, ac.expectedPlaySec || 0);
+    total += cap > 0 ? Math.min(elapsedSec, cap) : elapsedSec;
   }
   return total;
 }

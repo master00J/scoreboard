@@ -94,7 +94,7 @@ export default function ControlPage() {
           <TabsTrigger value="media">Media</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="match">
+        <TabsContent value="match" forceMount>
           <MatchTabGrid
             panels={{
               timer: <TimerPanel />,
@@ -113,11 +113,11 @@ export default function ControlPage() {
           />
         </TabsContent>
 
-        <TabsContent value="setup">
+        <TabsContent value="setup" forceMount>
           <SetupPanel />
         </TabsContent>
 
-        <TabsContent value="media">
+        <TabsContent value="media" forceMount>
           <MediaPanel />
         </TabsContent>
       </Tabs>

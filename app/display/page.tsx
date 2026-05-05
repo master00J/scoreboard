@@ -47,6 +47,7 @@ import {
   sponsorHalftimeShowsPanel,
   sponsorRotationBesideScoreboard,
 } from "@/lib/sponsor-display-helpers";
+import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
 import { LeftScoreboardLayout } from "./_modes/left-scoreboard-layout";
 import { MatchScoreboardFull } from "./_modes/match-scoreboard-full";
 import { GoalMode } from "./_modes/goal";
@@ -84,6 +85,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   const state = useDisplayStore((s) => s.state);
   const connected = useDisplayStore((s) => s.connected);
+  const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
   const elapsed = useLiveTimerSeconds();
 
   const [match, setMatch] = useState<Match | null>(null);
@@ -194,6 +196,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       !embedInControl && match ? { matchId: match.id, matchStatus: match.status } : null,
     [embedInControl, match?.id, match?.status],
   );
+  const previewFollowClip = useMemo(() => {
+    if (!embedInControl || !match || !sponsorLedger) return null;
+    const section = sectionForStatus(match.status);
+    const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, section);
+    if (!segmentKey) return null;
+    if (sponsorLedger.matchId !== match.id || sponsorLedger.segmentKey !== segmentKey) return null;
+    return sponsorLedger.activeClip;
+  }, [embedInControl, match, sponsorLedger]);
 
   const [prematchClock, setPrematchClock] = useState(0);
   useEffect(() => {
@@ -325,7 +335,6 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const prematchSpreadActive = useMemo(() => {
     if (!state) return false;
     if (activeSponsorsForSection(sponsors, "prematch").length === 0) return false;
-    if (mode === "IDLE") return true;
     return !!(
       mode === "SPONSOR_ROTATION" &&
       match &&
@@ -515,6 +524,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             matchStatus={match.status}
             sponsorIdFilter={sponsorBudgetSponsorFilter}
             playbackTelemetry={sponsorPlaybackTelemetry}
+            followPlayback={embedInControl}
+            followClip={previewFollowClip}
             showPreviewProgress={embedInControl}
             fallback={sponsorBudgetFallbackScoreboard}
             cycleBudgetForever={sponsorRepeatBudgetCycles}
@@ -584,6 +595,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     elapsed,
     period,
     sponsorPlaybackTelemetry,
+    previewFollowClip,
     scoreboardTheme,
     sponsorBudgetFallbackScoreboard,
     sponsorRepeatBudgetCycles,
@@ -607,6 +619,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   section="prematch"
                   sponsorIdFilter={prematchDistView.sponsorFilterId ?? undefined}
                   playbackTelemetry={sponsorPlaybackTelemetry}
+                  followPlayback={embedInControl}
+                  followClip={previewFollowClip}
                   showPreviewProgress={embedInControl}
                   fallback={sponsorBudgetFallbackScoreboard}
                   cycleBudgetForever={sponsorRepeatBudgetCycles}
@@ -654,6 +668,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               sponsors={sponsors}
               showPreviewProgress={embedInControl}
               playbackTelemetry={sponsorPlaybackTelemetry}
+              followPlayback={embedInControl}
+              followClip={previewFollowClip}
               prematchSpread={prematchSpreadActive ? prematchDistView : null}
               sponsorBudgetFallback={sponsorBudgetFallbackScoreboard}
               cycleBudgetForever={sponsorRepeatBudgetCycles}
@@ -698,6 +714,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 section="halftime"
                 sponsorIdFilter={sponsorDistView.sponsorFilterId}
                 playbackTelemetry={sponsorPlaybackTelemetry}
+                followPlayback={embedInControl}
+                followClip={previewFollowClip}
                 showPreviewProgress={embedInControl}
                 fallback={halftimeSponsorFallback}
                 cycleBudgetForever={sponsorRepeatBudgetCycles}
@@ -900,6 +918,8 @@ function SponsorRotationLiveContent({
   sponsors,
   showPreviewProgress = false,
   playbackTelemetry = null,
+  followPlayback = false,
+  followClip = null,
   prematchSpread = null,
   sponsorBudgetFallback = null,
   cycleBudgetForever = false,
@@ -909,6 +929,14 @@ function SponsorRotationLiveContent({
   sponsors: Sponsor[];
   showPreviewProgress?: boolean;
   playbackTelemetry?: { matchId: string; matchStatus: string } | null;
+  followPlayback?: boolean;
+  followClip?: {
+    sponsorId: string;
+    mediaId: string;
+    startedAtMs: number;
+    expectedPlaySec: number;
+    clipSessionId: string;
+  } | null;
   prematchSpread?: {
     phase: "scoreboard" | "sponsor";
     sponsorFilterId: string | null;
@@ -937,6 +965,8 @@ function SponsorRotationLiveContent({
           section="prematch"
           sponsorIdFilter={prematchSpread.sponsorFilterId ?? undefined}
           playbackTelemetry={playbackTelemetry}
+          followPlayback={followPlayback}
+          followClip={followClip}
           showPreviewProgress={showPreviewProgress}
           fallback={sponsorBudgetFallback ?? undefined}
           cycleBudgetForever={cycleBudgetForever}
@@ -957,6 +987,8 @@ function SponsorRotationLiveContent({
         section={section}
         matchStatus={match.status}
         playbackTelemetry={playbackTelemetry}
+        followPlayback={followPlayback}
+        followClip={followClip}
         showPreviewProgress={showPreviewProgress}
         fallback={sponsorBudgetFallback ?? undefined}
         cycleBudgetForever={cycleBudgetForever}

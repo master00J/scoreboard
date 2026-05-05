@@ -83,6 +83,8 @@ export type MediaItem = {
   active: boolean;
   /** Alleen voor VIDEO: geluid op het stadionscherm (display). */
   playAudio?: boolean;
+  /** JSON array met sponsor-fases waarvoor dit media-item mag draaien. Null/leeg = alle fases. */
+  sponsorPhaseTagsJson?: string | null;
   createdAt: string;
 };
 

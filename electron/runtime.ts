@@ -128,6 +128,16 @@ function broadcastSponsorLedger() {
   sendAll("display:sponsorLedger", sponsorLedgerSnapshot);
 }
 
+/**
+ * Wist de telemetrie-ledger volledig — bedoeld voor match-resets en fasewissels:
+ * dan moet "schermtijd verbruikt" weer op 0 starten i.p.v. opgespaarde waarden tonen.
+ */
+export function resetSponsorLedger(): void {
+  sponsorLedgerSnapshot = null;
+  sponsorClipEndedSessions.clear();
+  sendAll("display:sponsorLedger", null);
+}
+
 async function ensureSqliteSchema() {
   const statements = [
     `CREATE TABLE IF NOT EXISTS "Team" (
@@ -273,6 +283,7 @@ async function ensureSqliteSchema() {
   )`);
   await addColumnIfMissing("MediaItem", "sponsorId", "TEXT");
   await addColumnIfMissing("MediaItem", "playAudio", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("MediaItem", "sponsorPhaseTagsJson", "TEXT");
   await addColumnIfMissing("Match", "homeFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "awayFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "matchSponsorMediaId", "TEXT");
@@ -517,6 +528,21 @@ async function touchState() {
   });
 }
 
+/** Bij app-opstart niet automatisch opnieuw sponsorrotatie starten uit de vorige sessie. */
+async function resetAutoSponsorModeOnStartup(): Promise<void> {
+  const state = await getStateRow();
+  if (!state.matchId) return;
+  if (state.mode !== "SPONSOR_ROTATION" && state.mode !== "SPONSOR") return;
+  await prisma.displayState.update({
+    where: { id: 1 },
+    data: {
+      mode: "MATCH",
+      activeMediaId: null,
+    },
+  });
+  resetSponsorLedger();
+}
+
 /** If DisplayState still points at a deleted match, clear it so the UI never 404-loops. */
 async function repairOrphanDisplayMatchId(): Promise<void> {
   const state = await prisma.displayState.findUnique({ where: { id: 1 } });
@@ -580,6 +606,7 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   await ensureBaseData();
   await migrateAppSettingsLiveCycleFromLegacy();
   await repairOrphanDisplayMatchId();
+  await resetAutoSponsorModeOnStartup();
   startTickLoop();
   await broadcastDisplayState();
   broadcastSponsorLedger();
@@ -868,6 +895,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           active: body.active ?? true,
         },
       });
+      await touchState();
+      await broadcastDisplayState();
       return json(200, sponsor);
     }
 
@@ -892,10 +921,14 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         where: { id: sponsorId },
         data,
       });
+      await touchState();
+      await broadcastDisplayState();
       return json(200, sponsor);
     }
     if (sponsorId && method === "DELETE") {
       await prisma.sponsor.delete({ where: { id: sponsorId } });
+      await touchState();
+      await broadcastDisplayState();
       return json(200, { ok: true });
     }
 
@@ -1173,10 +1206,30 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
   }
 }
 
+/**
+ * Commando's die het sponsor-segment effectief opnieuw starten — telemetrie-ledger
+ * moet dan leeg, anders blijft "schermtijd verbruikt" oude waarden tonen na een reset.
+ */
+function commandResetsSponsorTelemetry(cmd: Command): boolean {
+  switch (cmd.type) {
+    case "match:setStatus":
+    case "match:setActive":
+    case "timer:preset":
+      return true;
+    case "timer:set":
+      return cmd.seconds === 0;
+    default:
+      return false;
+  }
+}
+
 export async function runCommand(input: Command): Promise<CommandAck> {
   try {
     const cmd = CommandSchema.parse(input);
     const result = await handleCommand(cmd);
+    if (result.ok && commandResetsSponsorTelemetry(cmd)) {
+      resetSponsorLedger();
+    }
     await broadcastDisplayState();
     if (result.ok && result.warning) {
       sendControl("display:error", { message: result.warning });

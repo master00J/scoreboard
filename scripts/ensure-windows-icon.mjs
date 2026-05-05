@@ -33,24 +33,29 @@ async function main() {
   const outDir = path.join(root, "build");
   const outIco = path.join(outDir, "icon.ico");
 
-  const sizes = [256, 128, 64, 48, 32, 16];
-  const buffers = [];
-  for (const s of sizes) {
-    const buf = await sharp(src)
-      .resize(s, s, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .png()
-      .toBuffer();
-    buffers.push(buf);
-  }
+  /**
+   * Eén 256×256-PNG; to-ico mag zelf alle vereiste maten afleiden (resize: true).
+   * Los zeven losse sharp-schaalstappen vermeden: sommige .ico-combinaties geven in
+   * Verkenners/Eigenschappen strepen/noise, terwijl de .exe wél een geldige PE is.
+   */
+  const buf256 = await sharp(src)
+    .resize(256, 256, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .ensureAlpha()
+    .png()
+    .toBuffer();
 
   fs.mkdirSync(outDir, { recursive: true });
-  const ico = await toIco(buffers);
+  const ico = await toIco([buf256], {
+    resize: true,
+    sizes: [16, 24, 32, 48, 64, 128, 256],
+  });
   fs.writeFileSync(outIco, ico);
 
-  await sharp(src)
+  const appIconPng = await sharp(src)
     .resize(512, 512, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png()
-    .toFile(outPng);
+    .toBuffer();
+  fs.writeFileSync(outPng, appIconPng);
 
   console.log("[icon] bron:", path.relative(root, src));
   console.log("[icon] geschreven:", path.relative(root, outIco), path.relative(root, outPng));

@@ -11,7 +11,11 @@ import {
   holdSecondsCappedBySlotRun,
   lookupSponsorAtSecond,
   resolveSponsorSpreadPhase,
+  sponsorScreenSecondsConsumed,
+  sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
+import { sponsorRepeatBudgetCyclesFromThemeJson } from "@/lib/scoreboard-theme";
+import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
 import {
   hasSponsorsForSection,
   secondsUntilNextSponsorSlot,
@@ -44,6 +48,7 @@ const EMPTY_PLAYLISTS: Record<PlaylistSlot, Playlist | null> = {
 
 export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   const state = useDisplayStore((s) => s.state);
+  const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
   const mode = state?.mode ?? "IDLE";
   const elapsed = useLiveTimerSeconds();
 
@@ -56,6 +61,23 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       .then((r) => r.json())
       .then((list: Sponsor[]) => setSponsors(list ?? []))
       .catch(() => setSponsors([]));
+  }, [state?.updatedAt]);
+
+  /**
+   * Detecteer of de display geconfigureerd is om sponsorbudgetten oneindig te herhalen.
+   * Bepaalt of de HUD bij budget-uitputting "klaar" toont (rotatie stopte → scorebord)
+   * of doorgaat met balk-visualisatie (oneindige cyclus).
+   */
+  const [cycleBudgetForever, setCycleBudgetForever] = useState(false);
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((s: { scoreboardThemeJson?: string | null } | null) => {
+        setCycleBudgetForever(
+          sponsorRepeatBudgetCyclesFromThemeJson(s?.scoreboardThemeJson ?? null),
+        );
+      })
+      .catch(() => setCycleBudgetForever(false));
   }, [state?.updatedAt]);
 
   useEffect(() => {
@@ -94,7 +116,6 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   const prematchSpreadActive = useMemo(() => {
     if (!state) return false;
     if (activeSponsorsForSection(sponsors, "prematch").length === 0) return false;
-    if (mode === "IDLE") return true;
     return !!(
       mode === "SPONSOR_ROTATION" &&
       match &&
@@ -263,6 +284,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       contextLabel: string,
       section: SponsorSection,
       matchStatus: string | undefined,
+      telemetrySegmentKey: string | null,
       dist: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null },
       slotMap: (string | null)[],
       t: number,
@@ -273,7 +295,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         startedAtSlotIdx?: number;
       } | null>,
     ): SponsorPhaseHudModel {
-      const holdSec = holdSecondsCappedBySlotRun(
+      void holdSecondsCappedBySlotRun(
         sponsors,
         section,
         matchStatus,
@@ -281,32 +303,92 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         slotMap,
         t,
       );
+
+      /**
+       * Budget-check: als de actuele sponsor zijn budget al volledig benut heeft (op basis
+       * van de slotmap), is er op het hoofdscherm geen rotatie meer (tenzij `cycleBudgetForever`).
+       * In dat geval tonen we hetzelfde als wat de display toont: de scoreboard-fallback.
+       */
+      let effectivePhase: "scoreboard" | "sponsor" = dist.phase;
+      let effectiveSponsorId = dist.sponsorFilterId;
+      const ledgerMatchesSegment =
+        !!match &&
+        !!sponsorLedger &&
+        telemetrySegmentKey != null &&
+        sponsorLedger.matchId === match.id &&
+        sponsorLedger.segmentKey === telemetrySegmentKey;
+
+      if (ledgerMatchesSegment) {
+        const ac = sponsorLedger!.activeClip;
+        if (ac) {
+          effectivePhase = "sponsor";
+          effectiveSponsorId = ac.sponsorId;
+        } else {
+          effectivePhase = "scoreboard";
+          effectiveSponsorId = null;
+          hangRef.current = null;
+        }
+      }
+      if (
+        !cycleBudgetForever &&
+        dist.phase === "sponsor" &&
+        dist.sponsorFilterId
+      ) {
+        const sponsor = sponsors.find((s) => s.id === dist.sponsorFilterId);
+        if (sponsor) {
+          const budget = sponsorSectionBudgetSeconds(sponsor, section, matchStatus);
+          const consumed = sponsorScreenSecondsConsumed(
+            slotMap,
+            sponsors,
+            section,
+            matchStatus,
+            t,
+            sponsor.id,
+          );
+          if (budget > 0 && consumed >= budget) {
+            effectivePhase = "scoreboard";
+            effectiveSponsorId = null;
+            hangRef.current = null;
+          }
+        }
+      }
+
       const name =
-        dist.phase === "sponsor" && dist.sponsorFilterId == null
+        effectivePhase === "sponsor" && effectiveSponsorId == null
           ? "Alle sponsors"
-          : dist.sponsorFilterId != null
-            ? (sponsors.find((s) => s.id === dist.sponsorFilterId)?.name ?? dist.sponsorFilterId)
+          : effectiveSponsorId != null
+            ? (sponsors.find((s) => s.id === effectiveSponsorId)?.name ?? effectiveSponsorId)
             : null;
 
       let sponsorClipProgress: number | null = null;
       let clipRemainingSec: number | null = null;
       let nextSlotEtaSec: number | null = null;
 
-      const hang = hangRef.current;
-      if (dist.phase === "sponsor" && hang && now < hang.untilMs) {
-        const totalMs = hang.untilMs - hang.startedAtMs;
-        const elapsedMs = now - hang.startedAtMs;
-        sponsorClipProgress = Math.min(1, Math.max(0, elapsedMs / totalMs));
-        clipRemainingSec = Math.max(0, (hang.untilMs - now) / 1000);
+      if (ledgerMatchesSegment) {
+        const ac = sponsorLedger!.activeClip;
+        if (effectivePhase === "sponsor" && ac) {
+          const elapsedSec = Math.max(0, (now - ac.startedAtMs) / 1000);
+          const totalSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
+          sponsorClipProgress = Math.min(1, elapsedSec / totalSec);
+          clipRemainingSec = Math.max(0, totalSec - elapsedSec);
+        }
+      } else {
+        const hang = hangRef.current;
+        if (effectivePhase === "sponsor" && hang && now < hang.untilMs) {
+          const totalMs = hang.untilMs - hang.startedAtMs;
+          const elapsedMs = now - hang.startedAtMs;
+          sponsorClipProgress = Math.min(1, Math.max(0, elapsedMs / totalMs));
+          clipRemainingSec = Math.max(0, (hang.untilMs - now) / 1000);
+        }
       }
-      if (dist.phase === "scoreboard") {
+      if (effectivePhase === "scoreboard") {
         nextSlotEtaSec = secondsUntilNextSponsorSlot(slotMap, t);
       }
 
       return {
         kind: "roster" as const,
         contextLabel,
-        phase: dist.phase,
+        phase: effectivePhase,
         sponsorName: name,
         sponsorClipProgress,
         nextSlotEtaSec,
@@ -328,6 +410,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         label,
         section,
         match.status,
+        sponsorTelemetrySegmentKey(match.id, match.status, section),
         sponsorDistView,
         sponsorSlotMapMatch,
         t,
@@ -347,6 +430,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         "Rust",
         "halftime",
         undefined,
+        sponsorTelemetrySegmentKey(match.id, match.status, "halftime"),
         sponsorDistView,
         sponsorSlotMapHalftime,
         t,
@@ -365,6 +449,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         "Voor wedstrijd",
         "prematch",
         undefined,
+        match ? sponsorTelemetrySegmentKey(match.id, match.status, "prematch") : null,
         prematchDistView,
         sponsorSlotMapPrematch,
         t,
@@ -387,6 +472,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     sponsorSlotMapMatch,
     sponsorSlotMapHalftime,
     sponsorSlotMapPrematch,
+    sponsorLedger,
+    cycleBudgetForever,
     phaseTick,
   ]);
 }

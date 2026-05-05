@@ -84,6 +84,18 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
     carryMapRef.current.clear();
   }, [activeMatch?.id]);
 
+  /**
+   * Server reset de sponsor-ledger bij fase-/timer-resets (zie `electron/runtime.ts`).
+   * Wanneer de ledger naar `null` springt, ook de lokale roster-carry leegmaken zodat
+   * de "schermtijd verbruikt" weer op 0 begint i.p.v. opgespaarde waarden te tonen.
+   */
+  useEffect(() => {
+    if (sponsorLedger === null) {
+      carryMapRef.current.clear();
+      matchRosterFreezeRef.current = 0;
+    }
+  }, [sponsorLedger]);
+
   useEffect(() => {
     matchRosterFreezeRef.current = 0;
   }, [activeMatch?.id, activeMatch?.status]);

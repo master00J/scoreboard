@@ -22,6 +22,13 @@ import { toast } from "@/components/ui/toast";
 import { sendCommand } from "@/lib/use-socket";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
+import {
+  parseSponsorMediaPhaseTags,
+  serializeSponsorMediaPhaseTags,
+  sponsorMediaPhaseLabel,
+  SPONSOR_MEDIA_PHASES,
+  type SponsorMediaPhase,
+} from "@/lib/sponsor-media-phases";
 
 async function patchMediaJson(
   mediaId: string,
@@ -48,10 +55,20 @@ export function MediaPanel() {
   const { data: playlistsRaw, reload: reloadPlaylists } = useApi<Playlist[]>("/api/playlists");
   const [uploading, setUploading] = useState(false);
   const [libraryImageDurationSec, setLibraryImageDurationSec] = useState(10);
+  const [mediaSearch, setMediaSearch] = useState("");
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const media = mediaRaw ?? [];
   const playlists = playlistsRaw ?? [];
+  const visibleMedia = media.filter((m) => {
+    const q = mediaSearch.trim().toLowerCase();
+    if (!q) return true;
+    return (
+      m.title.toLowerCase().includes(q) ||
+      m.type.toLowerCase().includes(q) ||
+      (m.sponsorName ?? "").toLowerCase().includes(q)
+    );
+  });
 
   /** Register a local file (Electron) — no copying, just store the path. */
   async function registerLocalFile(filePath: string) {
@@ -145,17 +162,61 @@ export function MediaPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <SponsorsSection
-        allMedia={media}
-        reloadMedia={reloadMedia}
-        activeMatch={activeMatch ?? null}
-      />
+    <div className="flex flex-col gap-4">
+      <section className="rounded-xl border border-border bg-card p-5">
+        <h2 className="text-lg font-semibold">Media instellen</h2>
+        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+          Werk stap voor stap: koppel sponsorbestanden en minuten, beheer losse bestanden in de bibliotheek,
+          en gebruik playlists alleen voor vaste momenten zoals idle, rust of goal.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">1. Sponsors</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Belangrijkste workflow voor wedstrijdsponsoring: minuten per fase + media per sponsor.
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">2. Bibliotheek</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Alle losse video&apos;s en beelden beheren, testen, duur corrigeren en eventueel later koppelen.
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">3. Playlists</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Vaste clip-lijsten voor momenten zonder sponsorbudget of voor algemene goalclips.
+            </p>
+          </div>
+        </div>
+      </section>
 
+      <Tabs defaultValue="sponsors" className="space-y-4">
+        <TabsList className="h-auto w-full flex-wrap justify-start">
+          <TabsTrigger value="sponsors" className="min-w-36">
+            Sponsors
+          </TabsTrigger>
+          <TabsTrigger value="library" className="min-w-36">
+            Bibliotheek
+          </TabsTrigger>
+          <TabsTrigger value="playlists" className="min-w-36">
+            Playlists
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="sponsors" className="mt-0">
+          <SponsorsSection
+            allMedia={media}
+            reloadMedia={reloadMedia}
+            activeMatch={activeMatch ?? null}
+          />
+        </TabsContent>
+
+        <TabsContent value="library" className="mt-0">
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-lg font-semibold">Media library</h2>
+            <h2 className="text-lg font-semibold">Bibliotheek</h2>
             <p className="text-xs text-muted-foreground mt-1 max-w-xl">
               Video&apos;s: duur wordt automatisch uit het bestand gelezen. Afbeeldingen: kies hier hoe lang
               ze per keer tonen (je kunt dit later per item aanpassen).
@@ -175,7 +236,14 @@ export function MediaPanel() {
             />
           </div>
         </div>
-        <div className="flex items-center justify-end mb-4">
+        <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+          <Input
+            type="search"
+            placeholder="Zoek op titel, type of sponsor…"
+            value={mediaSearch}
+            onChange={(e) => setMediaSearch(e.target.value)}
+            className="h-10"
+          />
           {isElectron ? (
             <Button onClick={onSelectLocal} disabled={uploading}>
               {uploading ? "Bezig..." : "Selecteer bestanden…"}
@@ -194,8 +262,11 @@ export function MediaPanel() {
             </label>
           )}
         </div>
+        <div className="mb-3 text-xs text-muted-foreground">
+          {visibleMedia.length} van {media.length} media-items zichtbaar.
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {media.map((m) => (
+          {visibleMedia.map((m) => (
             <MediaCard
               key={m.id}
               item={m}
@@ -208,9 +279,16 @@ export function MediaPanel() {
               No media yet. Upload 1920×1080 videos or images for sponsor rotations.
             </div>
           )}
+          {media.length > 0 && visibleMedia.length === 0 && (
+            <div className="col-span-full text-sm text-muted-foreground">
+              Geen media gevonden voor deze zoekterm.
+            </div>
+          )}
         </div>
       </section>
+        </TabsContent>
 
+        <TabsContent value="playlists" className="mt-0">
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="text-xs text-muted-foreground max-w-3xl space-y-1.5 mb-4">
           <p>
@@ -251,6 +329,8 @@ export function MediaPanel() {
           ))}
         </Tabs>
       </section>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -363,6 +443,7 @@ function MediaCard({
             Geluid op display
           </label>
         )}
+        <SponsorMediaPhasePicker media={item} onChange={onChange} />
         <div className="flex gap-1">
           {lockManualSponsorInterrupt ? (
             <div className="flex-1 text-[9px] text-muted-foreground leading-snug px-1 py-1.5 border border-dashed border-border rounded-md">
@@ -536,10 +617,18 @@ function SponsorsSection({
     activeMatch?.halfBreakSec ?? 900,
   );
   const [newName, setNewName] = useState("");
+  const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
 
   useEffect(() => {
     matchRosterFreezeRef.current = 0;
   }, [activeMatch?.id, activeMatch?.status]);
+
+  /** Bij server-side ledger-reset ook de bevroren rooster-tijd loslaten. */
+  useEffect(() => {
+    if (sponsorLedger === null) {
+      matchRosterFreezeRef.current = 0;
+    }
+  }, [sponsorLedger]);
 
   const matchPlayRosterSeconds =
     activeMatch != null
@@ -586,24 +675,25 @@ function SponsorsSection({
       <div className="flex items-start justify-between gap-4 mb-4">
         <div className="flex-1 min-w-0">
           <h2 className="text-lg font-semibold">Sponsors &amp; schermtijd</h2>
-          <div className="text-xs text-muted-foreground max-w-3xl space-y-2">
-            <p>
-              Per sponsor vul je vier blokken in (in <strong>minuten</strong>):{" "}
-              <strong>voor de wedstrijd</strong>, <strong>1e helft</strong>, <strong>2e helft</strong>,{" "}
-              <strong>rust</strong>. Voorbeeld: 5 min pre-game + 10 min tijdens de wedstrijd wordt{" "}
-              <strong>5 min in de 1e helft</strong> en <strong>5 min in de 2e helft</strong> — zo blijft het
-              totaal tijdens het spelen 10 minuten, maar netjes gesplitst.
-            </p>
-            <p>
-              Op het scherm worden die minuten <strong>verspreid over het hele segment</strong> (afwisselen
-              met het scorebord), niet in één lange blok-sessie. Tussen twee sponsor-momenten zie je dus
-              weer het scorebord. Clips mogen langer duren dan één “rooster-seconde”; het scherm houdt de
-              sponsor dan nog even vast (<em>sponsor-hang</em>).
-            </p>
-            <p>
-              Bij <strong>doelpunt</strong> of <strong>wissel</strong> loopt de wedstrijdklok door maar{" "}
-              schuift het sponsorrooster niet verder tijdens die modus.
-            </p>
+          <div className="mt-3 grid max-w-4xl gap-2 text-xs md:grid-cols-3">
+            <div className="rounded-lg border border-border bg-muted/25 p-3">
+              <div className="font-semibold text-foreground">1. Minuten invullen</div>
+              <p className="mt-1 text-muted-foreground">
+                Voor wedstrijd, 1e helft, 2e helft en rust. Alles is in minuten.
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-muted/25 p-3">
+              <div className="font-semibold text-foreground">2. Media koppelen</div>
+              <p className="mt-1 text-muted-foreground">
+                Voeg bestanden toe bij de sponsor of koppel bestaande media uit de bibliotheek.
+              </p>
+            </div>
+            <div className="rounded-lg border border-border bg-muted/25 p-3">
+              <div className="font-semibold text-foreground">3. Fases kiezen</div>
+              <p className="mt-1 text-muted-foreground">
+                Per bestand kun je bepalen in welke wedstrijdfase het mag verschijnen.
+              </p>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 relative z-10">
@@ -701,10 +791,21 @@ function SponsorCard({
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const rosterCarryRef = useRef<RosterCarry | null>(null);
+  const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
 
   useEffect(() => {
     rosterCarryRef.current = null;
   }, [activeMatch?.id, sponsor.id]);
+
+  /**
+   * Server reset de telemetry-ledger bij fase-/timer-resets — dan ook hier de
+   * monotone roster-carry leegmaken zodat "schermtijd verbruikt" weer op 0 begint.
+   */
+  useEffect(() => {
+    if (sponsorLedger === null) {
+      rosterCarryRef.current = null;
+    }
+  }, [sponsorLedger]);
 
   useEffect(() => {
     const h = matchHalfMinutesFromSponsor(sponsor);
@@ -1035,6 +1136,7 @@ function SponsorCard({
                     Geluid op display
                   </label>
                 )}
+                <SponsorMediaPhasePicker media={m} onChange={onChange} />
                 <div className="flex gap-1">
                   <Button size="sm" variant="ghost" className="flex-1 text-[10px]" onClick={() => detach(m.id)}>
                     Ontkoppel
@@ -1080,6 +1182,72 @@ function AttachExistingDropdown({
               <span className="text-muted-foreground">{m.type}</span>
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SponsorMediaPhasePicker({
+  media,
+  onChange,
+}: {
+  media: MediaItem;
+  onChange: () => void;
+}) {
+  const tags = parseSponsorMediaPhaseTags(media.sponsorPhaseTagsJson);
+  const allPhases = tags.length === 0;
+
+  async function save(next: SponsorMediaPhase[]) {
+    const ok = await patchMediaJson(media.id, {
+      sponsorPhaseTagsJson: serializeSponsorMediaPhaseTags(next),
+    });
+    if (ok) onChange();
+    else toast({ title: "Kon fases niet opslaan", variant: "error" });
+  }
+
+  async function toggle(tag: SponsorMediaPhase, checked: boolean) {
+    const base = allPhases ? SPONSOR_MEDIA_PHASES.map((p) => p.id) : tags;
+    const current = new Set(base);
+    if (checked) current.add(tag);
+    else current.delete(tag);
+    await save([...current]);
+  }
+
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-[10px] font-medium text-foreground">Sponsor-fases</div>
+          <div className="text-[9px] text-muted-foreground">
+            {sponsorMediaPhaseLabel(media.sponsorPhaseTagsJson)}
+          </div>
+        </div>
+        <Button
+          size="sm"
+          variant={allPhases ? "default" : "outline"}
+          className="h-6 px-2 text-[9px] shrink-0"
+          type="button"
+          onClick={() => void save([])}
+        >
+          Alle
+        </Button>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1">
+        {SPONSOR_MEDIA_PHASES.map((phase) => (
+          <label key={phase.id} className="flex items-center gap-1 text-[9px] cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={allPhases || tags.includes(phase.id)}
+              onChange={(e) => void toggle(phase.id, e.target.checked)}
+            />
+            {phase.label}
+          </label>
+        ))}
+      </div>
+      {allPhases && (
+        <div className="mt-1 text-[9px] text-muted-foreground">
+          Alle fases actief. Vink een fase uit/aan om specifiek te kiezen.
         </div>
       )}
     </div>

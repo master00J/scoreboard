@@ -87,6 +87,8 @@ model MediaItem {
   active      Boolean        @default(true)
   /// VIDEO: op het display-geluid aan (indien het bestand audio bevat).
   playAudio   Boolean        @default(false)
+  /// JSON array met sponsor-fases waarvoor dit media-item mag draaien. Null/leeg = alle fases.
+  sponsorPhaseTagsJson String?
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")

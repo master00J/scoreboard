@@ -16,6 +16,14 @@ export function effectiveMatchPlayRosterSeconds(
     return halfWindowElapsed(elapsedSec, status, halfDurationSec);
   }
   const tLive = halfWindowElapsed(elapsedSec, status, halfDurationSec);
+  /**
+   * Klok-reset (tijd plots fors lager dan bevroren waarde): freeze loslaten zodat
+   * de teller correct mee terugspringt — bv. wanneer de gebruiker handmatig naar
+   * FIRST_HALF schakelt op 0:00.
+   */
+  if (tLive + 0.5 < freezeRef.current) {
+    freezeRef.current = tLive;
+  }
   if (displayMode === "SPONSOR_ROTATION") {
     freezeRef.current = tLive;
     return tLive;

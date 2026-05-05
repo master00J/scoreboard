@@ -103,6 +103,10 @@ export type RosterCarry = {
   budget: number;
   slotsCeiling: number | null;
   tAtCeiling: number;
+  /** Monotonic floor: getoonde verbruikswaarde nooit terug laten springen binnen dezelfde fase. */
+  consumedFloor: number;
+  /** Laatst geziene tClock — gebruikt om reset/terugspring te detecteren. */
+  lastTClock: number;
 };
 
 export function applyRosterBudgetCarry(
@@ -112,6 +116,16 @@ export function applyRosterBudgetCarry(
 ): { consumed: number; budget: number } {
   const { carryKey, budget, slotsUsed, matchId } = raw;
   let e = ref.current;
+
+  /**
+   * Match-reset of fase-terugspring: tClock viel terug onder de vorige stand.
+   * Behandel alsof we voor het eerst in deze fase komen → alle state (en floor) wissen.
+   */
+  if (e && e.carryKey === carryKey && e.matchId === matchId && tClock + 0.25 < e.lastTClock) {
+    e = null;
+    ref.current = null;
+  }
+
   if (!e || e.carryKey !== carryKey || e.matchId !== matchId) {
     const consumed = Math.min(budget, slotsUsed);
     ref.current = {
@@ -120,6 +134,8 @@ export function applyRosterBudgetCarry(
       budget,
       slotsCeiling: null,
       tAtCeiling: tClock,
+      consumedFloor: consumed,
+      lastTClock: tClock,
     };
     return { consumed, budget };
   }
@@ -131,20 +147,25 @@ export function applyRosterBudgetCarry(
       budget,
       slotsCeiling: null,
       tAtCeiling: tClock,
+      consumedFloor: Math.min(budget, consumed),
+      lastTClock: tClock,
     };
     return { consumed, budget };
   }
   if (budget > e.budget) {
     const oldBudget = e.budget;
     const consumed = Math.min(budget, slotsUsed, oldBudget);
+    const floor = Math.max(e.consumedFloor, consumed);
     ref.current = {
       matchId,
       carryKey,
       budget,
       slotsCeiling: oldBudget,
       tAtCeiling: tClock,
+      consumedFloor: floor,
+      lastTClock: tClock,
     };
-    return { consumed, budget };
+    return { consumed: floor, budget };
   }
   if (e.slotsCeiling != null && tClock >= e.tAtCeiling + 1) {
     ref.current = {
@@ -156,11 +177,12 @@ export function applyRosterBudgetCarry(
     e = ref.current;
   }
   const rawConsumed = Math.min(budget, slotsUsed);
+  let consumed = rawConsumed;
   if (e.slotsCeiling != null) {
-    const consumed = Math.min(rawConsumed, e.slotsCeiling);
-    ref.current = { ...e, budget };
-    return { consumed, budget };
+    consumed = Math.min(rawConsumed, e.slotsCeiling);
   }
-  ref.current = { ...e, budget };
-  return { consumed: rawConsumed, budget };
+  /** Nooit zakken: zo blijft "30s" staan ook als de echte clip-gemeten tijd lager terug komt. */
+  const floor = Math.max(e.consumedFloor, consumed);
+  ref.current = { ...e, budget, consumedFloor: floor, lastTClock: tClock };
+  return { consumed: floor, budget };
 }

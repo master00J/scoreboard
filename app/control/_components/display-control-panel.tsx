@@ -55,7 +55,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
 
   const applyPhase = useCallback(async (status: MatchStatusT) => {
     await sendCommand({ type: "match:setStatus", status });
-    await sendCommand({ type: "display:setMode", mode: "SPONSOR_ROTATION" });
+    await sendCommand({ type: "display:setMode", mode: "MATCH" });
   }, []);
 
   async function playMediaOnce() {
@@ -92,8 +92,8 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
       <section className="space-y-2">
         <div className="text-xs font-medium text-foreground/90">Wedstrijdfase</div>
         <p className="text-[11px] text-muted-foreground leading-snug">
-          Zet de fase van de wedstrijd; het scherm gaat naar <strong>scorebord + sponsors</strong> (automatische
-          afwisseling volgens je instellingen en sponsorbudgetten). Geen actieve wedstrijd? Activeer eerst een match.
+          Zet de fase van de wedstrijd; het scherm blijft op <strong>alleen scorebord</strong>.
+          Start sponsors daarna manueel met <strong>Scorebord + sponsors</strong>. Geen actieve wedstrijd? Activeer eerst een match.
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {PHASES.map((p) => (

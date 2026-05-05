@@ -87,13 +87,38 @@ export function TabsContent({
   value,
   children,
   className,
+  forceMount = false,
 }: {
   value: string;
   children: React.ReactNode;
   className?: string;
+  /**
+   * Houd content gemount wanneer de tab niet actief is. Inactieve content wordt
+   * offscreen geplaatst i.p.v. `display:none`, zodat timers/video-preview blijven lopen.
+   */
+  forceMount?: boolean;
 }) {
   const ctx = React.useContext(Ctx);
   if (!ctx) throw new Error("TabsContent must be inside Tabs");
-  if (ctx.value !== value) return null;
-  return <div className={cn("mt-4", className)}>{children}</div>;
+  const active = ctx.value === value;
+  if (!active && !forceMount) return null;
+  return (
+    <div
+      className={cn("mt-4", className)}
+      aria-hidden={!active}
+      style={
+        active
+          ? undefined
+          : {
+              position: "absolute",
+              left: "-100000px",
+              top: 0,
+              width: "100%",
+              pointerEvents: "none",
+            }
+      }
+    >
+      {children}
+    </div>
+  );
 }

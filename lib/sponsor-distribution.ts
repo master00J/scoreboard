@@ -1,4 +1,5 @@
 import type { Sponsor, SponsorSection } from "./types";
+import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 
 /** Schermtijd tijdens speelhelft: aparte budgets, anders legacy `matchSeconds` voor beide. */
 export function matchPlayBudgetSeconds(s: Sponsor, matchStatus: string | undefined): number {
@@ -41,17 +42,22 @@ export function activeSponsorsForSection(
     (s) =>
       s.active &&
       sponsorSectionBudgetSeconds(s, section, matchStatus) > 0 &&
-      (s.media?.some((m) => m.active) ?? false),
+      (s.media?.some((m) => m.active && mediaAllowedForSponsorPhase(m, section, matchStatus)) ?? false),
   );
 }
 
 /**
  * Langste actieve clip voor één sponsor (video = duur uit bestand; afbeelding = item of sponsor-default).
  */
-export function maxClipSecondsForSponsor(s: Sponsor): number {
+export function maxClipSecondsForSponsor(
+  s: Sponsor,
+  section?: SponsorSection,
+  matchStatus?: string,
+): number {
   let m = Math.max(1, s.imageDefaultSec ?? 10);
   for (const media of s.media ?? []) {
     if (!media.active) continue;
+    if (section && !mediaAllowedForSponsorPhase(media, section, matchStatus)) continue;
     if (media.type === "VIDEO") {
       m = Math.max(m, Math.max(1, media.durationSec > 0 ? media.durationSec : 10));
     } else {
@@ -77,7 +83,7 @@ export function holdSecondsForSponsorPhase(
 ): number {
   if (sponsorId) {
     const s = sponsors.find((x) => x.id === sponsorId);
-    if (s) return maxClipSecondsForSponsor(s);
+    if (s) return maxClipSecondsForSponsor(s, section, matchStatus);
   }
   return maxSponsorClipSecondsForSection(sponsors, section, matchStatus);
 }
@@ -90,7 +96,7 @@ export function maxSponsorClipSecondsForSection(
   const active = activeSponsorsForSection(sponsors, section, matchStatus);
   let m = 10;
   for (const s of active) {
-    m = Math.max(m, maxClipSecondsForSponsor(s));
+    m = Math.max(m, maxClipSecondsForSponsor(s, section, matchStatus));
   }
   return Math.min(Math.max(m, 1), 600);
 }

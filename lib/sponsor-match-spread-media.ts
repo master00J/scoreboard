@@ -1,4 +1,5 @@
 import type { MediaItem, SponsorSection } from "@/lib/types";
+import { mediaAllowedForSponsorPhase } from "@/lib/sponsor-media-phases";
 
 /**
  * Naast het scorebord wordt sponsortijd gekoppeld aan een per-seconde slotmap.
@@ -17,8 +18,12 @@ export function mediaAllowedForMatchSpreadPanel(m: MediaItem): boolean {
 export function filterMediaForSponsorSpreadSection(
   media: MediaItem[],
   section: SponsorSection,
+  matchStatus?: string,
 ): MediaItem[] {
-  if (section !== "match") return media;
-  const shortOk = media.filter(mediaAllowedForMatchSpreadPanel);
-  return shortOk.length > 0 ? shortOk : media;
+  const phaseOk = media.filter((m) => mediaAllowedForSponsorPhase(m, section, matchStatus));
+  if (phaseOk.length === 0) return [];
+
+  if (section !== "match") return phaseOk;
+  const shortOk = phaseOk.filter(mediaAllowedForMatchSpreadPanel);
+  return shortOk.length > 0 ? shortOk : phaseOk;
 }
