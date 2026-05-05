@@ -11,13 +11,13 @@
   --blue: #2087ff;
   --green: #21f36b;
   --shadow: 0 28px 90px rgba(0, 132, 255, 0.22);
-  /* Smalle schermen: binnen viewport; grote PC: breder raster zodat de pagina het scherm vult */
-  --layout-max: min(1180px, calc(100vw - 48px));
+  /* Binnen viewport; op brede schermen meer horizontale ruimte voor alle pagina’s */
+  --layout-max: min(1280px, calc(100vw - 40px));
 }
 
 @media (min-width: 1280px) {
   :root {
-    --layout-max: min(1680px, calc(100vw - 96px));
+    --layout-max: min(1920px, calc(100vw - 48px));
   }
 }
 
@@ -781,8 +781,67 @@ h2 {
   color: var(--text);
 }
 
+/* Footer op legal/functies-pagina’s: gelijk aan hoofdpagina-styling */
+.legal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  margin-top: auto;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.legal-footer-links {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 18px;
+}
+
+.legal-footer-links > a {
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.legal-footer-links > a:hover {
+  color: var(--text);
+}
+
+.cookie-settings-trigger {
+  margin: 0;
+  padding: 8px 18px;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--cyan);
+  background: rgba(25, 216, 255, 0.08);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.cookie-settings-trigger:hover {
+  background: rgba(25, 216, 255, 0.14);
+  border-color: rgba(34, 211, 238, 0.55);
+  color: var(--text);
+}
+
+.cookie-settings-trigger:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+
 .legal-page {
-  max-width: 920px;
+  max-width: var(--layout-max);
+  width: 100%;
   margin: 0 auto;
   padding: 42px 24px 86px;
 }
@@ -1084,7 +1143,8 @@ h2 {
 
 /* —— Functies (diepte-pagina, twee producten) —— */
 .features-deep-page {
-  max-width: 920px;
+  max-width: var(--layout-max);
+  width: 100%;
   margin: 0 auto;
   padding: 42px 24px 86px;
 }
