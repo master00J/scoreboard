@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type SyntheticEvent,
 } from "react";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
@@ -15,6 +16,7 @@ import { matchPlayBudgetSeconds } from "@/lib/sponsor-distribution";
 import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
 import { reportSponsorClipEnd, reportSponsorClipStart } from "@/lib/use-socket";
 import { mediaUrl } from "@/lib/media-url";
+import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
 import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
@@ -43,11 +45,14 @@ function estimatePlaySec(item: MediaItem, sponsor: Sponsor): number {
 /**
  * Sponsorroulering met budget per sectie (prematch / wedstrijd / rust).
  *
- * - Budget (seconden) = gewenste schermtijd in die sectie.
+ * - Budget (seconden) = gewenste schermtijd in die sectie (minimum; clips lopen altijd uit).
  * - Per clip: sponsor met laagste gebruiksgraad (spent/budget) eerst;
  *   bij gelijke stand round-robin zodat niet steeds dezelfde sponsor wint.
- * - Afbeelding: duur via timer. Video: doorspelen tot `ended`, met lange fallback-timeout.
+ * - Afbeelding: duur via timer. Video: doorspelen tot `ended`, met fallback-timeout.
  * - Verbruik (spent) wordt pas bij het einde van de clip bijgeschreven (werkelijke videolengte).
+ * - Als elke actieve sponsor zijn budget gehaald heeft: rotatie stopt, tenzij `cycleBudgetForever`
+ *   (nieuwe ronde / doorlopende loop tot de fase wisselt).
+ * - Optioneel `fallback` wanneer budget op is en niet opnieuw wordt gestart (typisch scorebord).
  */
 export function SponsorBudgetRotation({
   sponsors,
@@ -57,6 +62,8 @@ export function SponsorBudgetRotation({
   playbackTelemetry = null,
   mediaObjectFit = "cover",
   showPreviewProgress = false,
+  fallback = null,
+  cycleBudgetForever = false,
 }: {
   sponsors: Sponsor[];
   section: SponsorSection;
@@ -65,6 +72,10 @@ export function SponsorBudgetRotation({
   playbackTelemetry?: { matchId: string; matchStatus: string } | null;
   mediaObjectFit?: "cover" | "contain";
   showPreviewProgress?: boolean;
+  /** Getoond nadat minstens één clip is gespeeld en er geen budget meer over is. */
+  fallback?: ReactNode;
+  /** Zet spent terug naar nul zodra iedereen zijn quotum haalde — oneindige cyclus binnen de fase. */
+  cycleBudgetForever?: boolean;
 }) {
   const activeSponsors = useMemo(() => {
     let list = sponsors.filter(
@@ -93,6 +104,7 @@ export function SponsorBudgetRotation({
   });
   const tieBreakCursorRef = useRef(0);
   const videoFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playedClipRef = useRef(false);
 
   useEffect(() => {
     stateRef.current = {
@@ -100,6 +112,7 @@ export function SponsorBudgetRotation({
       spentPerSponsor: {},
     };
     tieBreakCursorRef.current = 0;
+    playedClipRef.current = false;
     setCycleId((c) => c + 1);
     setSlideTick(0);
     setCurrent(null);
@@ -114,16 +127,15 @@ export function SponsorBudgetRotation({
   const pickNext = useCallback((): Plan | null => {
     const st = stateRef.current;
 
-    const anyRemaining = activeSponsors.some(
+    let eligibleAll = activeSponsors.filter(
       (s) => (st.spentPerSponsor[s.id] ?? 0) < budgetFn(s),
     );
-    if (!anyRemaining) {
+    if (eligibleAll.length === 0 && cycleBudgetForever) {
       st.spentPerSponsor = {};
+      eligibleAll = activeSponsors.filter(
+        (s) => (st.spentPerSponsor[s.id] ?? 0) < budgetFn(s),
+      );
     }
-
-    const eligibleAll = activeSponsors.filter(
-      (s) => (st.spentPerSponsor[s.id] ?? 0) < budgetFn(s),
-    );
     if (eligibleAll.length === 0) return null;
 
     eligibleAll.sort((a, b) => {
@@ -149,7 +161,10 @@ export function SponsorBudgetRotation({
     const idx = tieBreakCursorRef.current % tied.length;
     const sponsor = tied[idx]!;
 
-    const media = (sponsor.media ?? []).filter((m) => m.active);
+    const media = filterMediaForSponsorSpreadSection(
+      (sponsor.media ?? []).filter((m) => m.active),
+      section,
+    );
     if (media.length === 0) return null;
 
     const mi = (st.mediaCursor[sponsor.id] ?? 0) % media.length;
@@ -163,7 +178,7 @@ export function SponsorBudgetRotation({
       mediaIndex: mi,
       playSec,
     };
-  }, [activeSponsors, budgetFn]);
+  }, [activeSponsors, budgetFn, section, cycleBudgetForever]);
 
   const advanceAfterSlide = useCallback(
     (sponsorId: string, mediaIndex: number, seconds: number) => {
@@ -205,13 +220,18 @@ export function SponsorBudgetRotation({
     if (!current || activeSponsors.length === 0) return;
 
     if (current.item.type === "VIDEO") {
+      const expectedMs = Math.max(5_000, current.playSec * 1000);
       const fallbackMs = Math.min(
         900_000,
-        Math.max(45_000, current.playSec * 1000 * 2, 120_000),
+        Math.max(8_000, expectedMs + 20_000),
       );
       videoFallbackTimerRef.current = setTimeout(() => {
         videoFallbackTimerRef.current = null;
-        advanceAfterSlide(current.sponsorId, current.mediaIndex, fallbackMs / 1000);
+        advanceAfterSlide(
+          current.sponsorId,
+          current.mediaIndex,
+          current.playSec,
+        );
       }, fallbackMs);
       return () => {
         if (videoFallbackTimerRef.current != null) {
@@ -279,6 +299,10 @@ export function SponsorBudgetRotation({
     };
   }, [current, slideTick, section, playbackTelemetry]);
 
+  useEffect(() => {
+    if (current) playedClipRef.current = true;
+  }, [current]);
+
   const slideMs =
     current != null
       ? current.item.type === "VIDEO" && videoProgressDurationMs > 0
@@ -298,9 +322,18 @@ export function SponsorBudgetRotation({
     );
   }
 
+  const showBudgetFallback =
+    fallback != null &&
+    !cycleBudgetForever &&
+    !current &&
+    playedClipRef.current;
+
   return (
     <div className="absolute inset-0 overflow-hidden bg-black">
-      <AnimatePresence mode="sync">
+      {showBudgetFallback ? (
+        <div className="absolute inset-0 size-full">{fallback}</div>
+      ) : (
+        <AnimatePresence mode="sync">
         {current && (
           <motion.div
             key={`${current.sponsorId}-${current.mediaId}-${cycleId}-${slideTick}`}
@@ -314,6 +347,18 @@ export function SponsorBudgetRotation({
               item={current.item}
               objectFit={mediaObjectFit}
               onVideoEnded={handleVideoEnded}
+              onVideoPlaybackFault={() => {
+                if (!current || current.item.type !== "VIDEO") return;
+                if (videoFallbackTimerRef.current != null) {
+                  clearTimeout(videoFallbackTimerRef.current);
+                  videoFallbackTimerRef.current = null;
+                }
+                advanceAfterSlide(
+                  current.sponsorId,
+                  current.mediaIndex,
+                  current.playSec,
+                );
+              }}
               onVideoDurationMs={(ms) => {
                 if (ms > 0) setVideoProgressDurationMs(ms);
               }}
@@ -321,6 +366,7 @@ export function SponsorBudgetRotation({
           </motion.div>
         )}
       </AnimatePresence>
+      )}
       {showPreviewProgress && current && slideMs > 0 && (
         <PreviewSlideProgressBar elapsed01={slideElapsed} totalMs={slideMs} />
       )}
@@ -338,11 +384,14 @@ function MediaRenderer({
   item,
   objectFit,
   onVideoEnded,
+  onVideoPlaybackFault,
   onVideoDurationMs,
 }: {
   item: MediaItem;
   objectFit: "cover" | "contain";
   onVideoEnded: (actualSec: number) => void;
+  /** Decode-/netwerkfout: clip kan geen `ended` geven; ga door zonder volledige buffertime-out. */
+  onVideoPlaybackFault?: () => void;
   onVideoDurationMs?: (ms: number) => void;
 }) {
   const src = mediaUrl(item.path);
@@ -386,6 +435,12 @@ function MediaRenderer({
     },
     onEnded: (e: SyntheticEvent<HTMLVideoElement>) => {
       fireEndedOnce(e.currentTarget);
+    },
+    onError: () => {
+      if (!onVideoPlaybackFault) return;
+      if (endedRef.current) return;
+      endedRef.current = true;
+      onVideoPlaybackFault();
     },
   };
 

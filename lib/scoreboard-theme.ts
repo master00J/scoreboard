@@ -36,6 +36,11 @@ export type ScoreboardTheme = {
   stripPeriodPx?: number;
   timerRunningColor?: string;
   timerPausedColor?: string;
+  /**
+   * Als true: sponsorrotatie met budget start een nieuwe tellerronde zodra iedereen zijn quotum
+   * heeft gehaald (doorlopende loop tot de fase wisselt). Zie ook playlist voor losse video-loops.
+   */
+  sponsorRepeatBudgetCycles?: boolean;
 };
 
 export type ResolvedScoreboardTheme = Required<
@@ -114,6 +119,19 @@ function normalizeOrder(order: unknown): LeftStripSegment[] {
     if (!out.includes(seg)) out.push(seg);
   }
   return out;
+}
+
+/** Leest optionele display-voorkeuren uit dezelfde JSON als het scorebordthema. */
+export function sponsorRepeatBudgetCyclesFromThemeJson(
+  raw: string | null | undefined,
+): boolean {
+  if (!raw || typeof raw !== "string" || !raw.trim()) return false;
+  try {
+    const patch = JSON.parse(raw) as ScoreboardTheme;
+    return patch.sponsorRepeatBudgetCycles === true;
+  } catch {
+    return false;
+  }
 }
 
 export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedScoreboardTheme {

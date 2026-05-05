@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { AppSettings } from "@/lib/types";
 import {
   mergeScoreboardTheme,
+  sponsorRepeatBudgetCyclesFromThemeJson,
   type LeftStripSegment,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
@@ -41,16 +42,28 @@ export function SetupScoreboardThemeSection({
   );
   const [draft, setDraft] = useState<ResolvedScoreboardTheme>(resolved);
 
+  const [repeatSponsorBudgetCycles, setRepeatSponsorBudgetCycles] = useState(false);
+
   useEffect(() => {
     setDraft(resolved);
   }, [resolved]);
 
+  useEffect(() => {
+    setRepeatSponsorBudgetCycles(
+      sponsorRepeatBudgetCyclesFromThemeJson(settings?.scoreboardThemeJson ?? null),
+    );
+  }, [settings?.scoreboardThemeJson]);
+
   async function save() {
+    const themePayload: Record<string, unknown> = { ...draft };
+    if (repeatSponsorBudgetCycles) {
+      themePayload.sponsorRepeatBudgetCycles = true;
+    }
     const res = await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        scoreboardThemeJson: JSON.stringify(draft),
+        scoreboardThemeJson: JSON.stringify(themePayload),
       }),
     });
     if (!res.ok) {
@@ -173,6 +186,21 @@ export function SetupScoreboardThemeSection({
             {timerColor("Klok: actief (kleur)", "timerRunningColor")}
             {timerColor("Klok: pauze (kleur)", "timerPausedColor")}
           </div>
+          <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 shrink-0 rounded border-border"
+              checked={repeatSponsorBudgetCycles}
+              onChange={(e) => setRepeatSponsorBudgetCycles(e.target.checked)}
+            />
+            <span className="text-sm leading-snug">
+              <span className="font-medium text-foreground">Sponsor-budget opnieuw starten na volledige ronde</span>
+              <span className="block text-muted-foreground mt-1">
+                Als alle sponsors hun geplande tijd gehaald hebben, begint de rotatie opnieuw tot de fase wisselt.
+                Uitzetten (standaard): daarna scorebord tenzij je alleen een playlist met twee clips gebruikt voor een eindeloze loop.
+              </span>
+            </span>
+          </label>
         </div>
 
         <div className="space-y-4 rounded-lg border border-border p-4">

@@ -1,34 +1,39 @@
 # Stadium Scoreboard
 
-Production-grade football stadium display control system. Runs fully offline on LAN.
+Production-grade football stadium display control system. **Desktop-app (Electron)** — draait volledig offline; geen LAN-webserver meer nodig voor bediening.
 
 ## Architecture
 
-- **`/control`** — operator panel (laptop / tablet)
-- **`/display`** — fullscreen output for the big screen (fixed 1920×1080 canvas, auto-scales to any 16:9 screen)
-- Custom Next.js 15 server + Socket.IO for <100 ms state sync
-- Prisma + SQLite (local file, `./data/stadium.db`) — zero external deps
+- **Electron main process** — SQLite-database in de gebruikersmap (`userData/data/stadium.db`), IPC-bridge voor veilige `/api`-achtige calls, twee vensters (control + display).
+- **`/control`** — operatorpanel (laptop / tablet).
+- **`/display`** — fullscreen-output voor het grote scherm (canvas 1920×1080, schaalt naar 16:9).
+- **Renderer** — React UI uit `app/` wordt met esbuild naar `renderer-dist/` gebundeld (geen klassieke Next.js-devserver in productie).
+- **Prisma + SQLite** — lokaal bestand, geen externe database vereist.
 
 ## Stack
 
-Next.js 15 · TypeScript · Tailwind · shadcn/ui · Framer Motion · Socket.IO · Prisma · Zod · Zustand
+Electron · React · TypeScript · Tailwind · shadcn/ui · Framer Motion · Prisma · Zod · Zustand · esbuild
 
 ## Setup
 
 ```bash
 npm install
-npm run db:push         # creates data/stadium.db from prisma schema
-npm run db:seed         # creates default playlists + a demo match
-npm run dev
+npm run db:push         # databasepad wordt bij eerste start door Electron gezet (zie logs)
+npm run db:seed         # optioneel: default playlists + demo match
+npm run dev             # Electron development build
 ```
 
-Then:
-- Control panel: http://localhost:3000/control (on operator laptop)
-- Big screen:    http://<host-ip>:3000/display (on display machine, fullscreen browser)
+Daarna opent de app het control- en displayvenster lokaal.
 
-Because the server binds to `0.0.0.0`, the display machine on the same LAN can connect over Wi-Fi or ethernet. No internet required.
+## Production build
 
-## Build phases
+```bash
+npm run build
+```
+
+Produceert Windows-artifacts onder `dist/` (o.a. portable / NSIS via electron-builder).
+
+## Build phases (functioneel)
 
 - [x] **Phase 1** — scaffold + timer sync backbone
 - [x] **Phase 2** — teams, players, match setup
@@ -41,25 +46,26 @@ Because the server binds to `0.0.0.0`, the display machine on the same LAN can c
 ## File layout
 
 ```
-app/             Next.js App Router (control + display pages)
-components/      UI components (incl. ScaleContainer, shadcn)
-lib/             prisma, socket client, timer math, zod schemas
-server/          custom Next.js server + Socket.IO handlers
+electron/        Electron main process, preload, IPC
+scripts/         dev server, renderer bundle, build helpers
+app/             React routes (control + display)
+components/      UI (ScaleContainer, shadcn, …)
+lib/             prisma client usage, schemas, sponsor/timer helpers
 prisma/          schema.prisma + seed.ts
-data/            stadium.db (gitignored)
-public/uploads/  user-uploaded media (gitignored)
-logs/            rotating command log (gitignored)
+renderer-dist/   build output (gitignored)
+public/uploads/  user media (gitignored)
 ```
 
 ## Keyboard shortcuts (control panel)
 
 - `Space` — start / pause timer
-- more coming in later phases
 
 ## Reliability
 
-- Every command is validated with Zod before mutating state
-- Socket handlers wrapped in try/catch — one bad event cannot crash the server
-- Every mutation is written to SQLite immediately (no in-memory drift)
-- Command log streamed to `logs/commands.log` for post-match audit
-- Timer is computed authoritatively on the server; display interpolates locally for smoothness
+- Commands validated with Zod before mutating state
+- IPC handlers guarded — een foutmelding crash’t de app niet volledig
+- Mutaties naar SQLite; timer server-side / authoritative waar van toepassing
+
+## Dubbele marketingwebsite
+
+Er staat ook een `Website/`-submap (ArenaCue-site). De levende marketingbron staat in de aparte repo **Arenacue**; houd releases synchroon of verwijder een van de twee om drift te voorkomen.

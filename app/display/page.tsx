@@ -23,6 +23,7 @@ import type {
 } from "@/lib/types";
 import {
   mergeScoreboardTheme,
+  sponsorRepeatBudgetCyclesFromThemeJson,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
 import { mediaUrl } from "@/lib/media-url";
@@ -99,6 +100,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const [scoreboardTheme, setScoreboardTheme] = useState<ResolvedScoreboardTheme>(() =>
     mergeScoreboardTheme(null),
   );
+  const [sponsorRepeatBudgetCycles, setSponsorRepeatBudgetCycles] = useState(false);
 
   useEffect(() => {
     if (previewIframe) return;
@@ -108,6 +110,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       .then((s: AppSettings) => {
         if (cancelled) return;
         setScoreboardTheme(mergeScoreboardTheme(s.scoreboardThemeJson ?? null));
+        setSponsorRepeatBudgetCycles(
+          sponsorRepeatBudgetCyclesFromThemeJson(s.scoreboardThemeJson ?? null),
+        );
       })
       .catch(() => {});
     return () => {
@@ -269,6 +274,32 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const cardPlayer = activePlayer;
   const period = humanPeriod(match?.status);
   const currentMinute = Math.floor(elapsed / 60);
+
+  const sponsorBudgetFallbackScoreboard = useMemo(() => {
+    if (!state) return null;
+    if (match) {
+      return (
+        <MatchScoreboardFull
+          match={match}
+          elapsed={elapsed}
+          running={state.timerRunning ?? false}
+          period={period}
+          theme={scoreboardTheme}
+        />
+      );
+    }
+    return (
+      <SponsorRotation
+        playlist={playlists.PREMATCH ?? playlists.IDLE}
+        showPreviewProgress={embedInControl}
+      />
+    );
+  }, [state, match, elapsed, period, scoreboardTheme, playlists, embedInControl]);
+
+  const halftimeSponsorFallback = useMemo(() => {
+    if (!match) return null;
+    return <HalfTimeMode match={match} />;
+  }, [match]);
 
   const liveAutoBeside = useMemo(
     () =>
@@ -467,6 +498,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             sponsorIdFilter={sponsorBudgetSponsorFilter}
             playbackTelemetry={sponsorPlaybackTelemetry}
             showPreviewProgress={embedInControl}
+            fallback={sponsorBudgetFallbackScoreboard}
+            cycleBudgetForever={sponsorRepeatBudgetCycles}
           />
         );
       }
@@ -534,6 +567,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     period,
     sponsorPlaybackTelemetry,
     scoreboardTheme,
+    sponsorBudgetFallbackScoreboard,
+    sponsorRepeatBudgetCycles,
   ]);
 
   return (
@@ -555,6 +590,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   sponsorIdFilter={prematchDistView.sponsorFilterId ?? undefined}
                   playbackTelemetry={sponsorPlaybackTelemetry}
                   showPreviewProgress={embedInControl}
+                  fallback={sponsorBudgetFallbackScoreboard}
+                  cycleBudgetForever={sponsorRepeatBudgetCycles}
                 />
               );
             }
@@ -600,6 +637,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               showPreviewProgress={embedInControl}
               playbackTelemetry={sponsorPlaybackTelemetry}
               prematchSpread={prematchSpreadActive ? prematchDistView : null}
+              sponsorBudgetFallback={sponsorBudgetFallbackScoreboard}
+              cycleBudgetForever={sponsorRepeatBudgetCycles}
             />
           )}
 
@@ -642,6 +681,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 sponsorIdFilter={sponsorDistView.sponsorFilterId}
                 playbackTelemetry={sponsorPlaybackTelemetry}
                 showPreviewProgress={embedInControl}
+                fallback={halftimeSponsorFallback}
+                cycleBudgetForever={sponsorRepeatBudgetCycles}
               />
             ) : (
               <SponsorRotationLiveContent
@@ -838,6 +879,8 @@ function SponsorRotationLiveContent({
   showPreviewProgress = false,
   playbackTelemetry = null,
   prematchSpread = null,
+  sponsorBudgetFallback = null,
+  cycleBudgetForever = false,
 }: {
   match: Match | null;
   playlists: Record<PlaylistSlot, Playlist | null>;
@@ -848,6 +891,8 @@ function SponsorRotationLiveContent({
     phase: "scoreboard" | "sponsor";
     sponsorFilterId: string | null;
   } | null;
+  sponsorBudgetFallback?: ReactNode;
+  cycleBudgetForever?: boolean;
 }) {
   if (!match) {
     return (
@@ -871,6 +916,8 @@ function SponsorRotationLiveContent({
           sponsorIdFilter={prematchSpread.sponsorFilterId ?? undefined}
           playbackTelemetry={playbackTelemetry}
           showPreviewProgress={showPreviewProgress}
+          fallback={sponsorBudgetFallback ?? undefined}
+          cycleBudgetForever={cycleBudgetForever}
         />
       );
     }
@@ -889,6 +936,8 @@ function SponsorRotationLiveContent({
         matchStatus={match.status}
         playbackTelemetry={playbackTelemetry}
         showPreviewProgress={showPreviewProgress}
+        fallback={sponsorBudgetFallback ?? undefined}
+        cycleBudgetForever={cycleBudgetForever}
       />
     );
   }

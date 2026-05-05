@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import type { Playlist, PlaylistItemFull } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
@@ -26,7 +26,10 @@ export function SponsorRotation({
   /** Alleen in control-ingebouwde preview: voortgang resterende slidetijd. */
   showPreviewProgress?: boolean;
 }) {
-  const items = playlist?.items.filter((i) => i.media.active) ?? [];
+  const items = useMemo(
+    () => playlist?.items.filter((i) => i.media.active) ?? [],
+    [playlist?.id, playlist?.items],
+  );
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
@@ -39,17 +42,27 @@ export function SponsorRotation({
     if (idx >= 0) setIndex(idx);
   }, [preferredItemId, items]);
 
+  const currentForTimer = items[index];
+
   useEffect(() => {
-    if (items.length === 0) return;
-    const current = items[index];
-    if (!current) return;
-    const dur =
-      (current.durationOverrideSec ?? current.media.durationSec) * 1000;
+    if (items.length === 0 || !currentForTimer) return;
+    const durMs = Math.max(
+      1500,
+      (currentForTimer.durationOverrideSec ??
+        currentForTimer.media.durationSec) *
+        1000,
+    );
     const id = setTimeout(() => {
       setIndex((i) => (i + 1) % items.length);
-    }, Math.max(1500, dur));
+    }, durMs);
     return () => clearTimeout(id);
-  }, [index, items]);
+  }, [
+    items.length,
+    index,
+    currentForTimer?.id,
+    currentForTimer?.durationOverrideSec,
+    currentForTimer?.media.durationSec,
+  ]);
 
   const current = items[index];
   const slideMs =
