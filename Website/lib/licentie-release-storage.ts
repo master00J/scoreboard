@@ -1,4 +1,4 @@
-/** localStorage: laatst “gekende” app-publicatie op /licentie (semver-string). */
+/** localStorage: laatst “gekende” app-publicatie op het klantportaal /portal (semver-string). */
 export const LICENTIE_PORTAL_RELEASE_SEEN_KEY = "arenacue-licentie-release-seen";
 
 export function seedLicentieReleaseSeenIfEmpty(version: string) {

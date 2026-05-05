@@ -71,7 +71,7 @@ export function LicenseActivationGate(props: { children: React.ReactNode }) {
   }
 
   async function openPortal() {
-    await window.electronAPI?.openExternalUrl("https://arenacue.be/licentie");
+    await window.electronAPI?.openExternalUrl("https://arenacue.be/portal");
   }
 
   if (!isElectron || phase === "ok") {
@@ -126,7 +126,7 @@ export function LicenseActivationGate(props: { children: React.ReactNode }) {
         </div>
         <p className="text-xs text-muted-foreground">
           Na activeren kun je je installaties bekijken op{" "}
-          <span className="text-foreground">arenacue.be/licentie</span> met dezelfde sleutel en je e-mailadres.
+          <span className="text-foreground">arenacue.be/portal</span> met dezelfde sleutel en je e-mailadres.
         </p>
       </div>
     </div>

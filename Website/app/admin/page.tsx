@@ -54,7 +54,7 @@ export default async function AdminDashboardPage() {
           <strong>ArenaCue — Licenties</strong>
           <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
             <Link href="/">Website</Link>
-            <Link href="/licentie">Klantportaal</Link>
+            <Link href="/portal">Klantportaal</Link>
             <Link href={`${getAdminPathPrefix()}/licenses/new`}>+ Nieuwe licentie</Link>
             <AdminLogoutButton />
           </div>

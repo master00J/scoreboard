@@ -21,10 +21,9 @@ npm run build
 
 Deploy naar Vercel en koppel de repository `https://github.com/master00J/Arenacue`.
 
-Zet in Vercel deze environment variables:
+Zet in Vercel deze environment variables. De canonieke live-site is **https://arenacue.be** (vast in `lib/site-url.ts`).
 
 ```env
-NEXT_PUBLIC_SITE_URL=https://arenacue.be
 NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 ```

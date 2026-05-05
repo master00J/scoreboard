@@ -64,7 +64,7 @@ export function AdminNewLicenseForm() {
       <h1 style={{ margin: "0 0 8px", fontSize: "1.5rem", letterSpacing: "-0.03em" }}>Nieuwe licentie</h1>
       <p className="form-hint" style={{ marginBottom: 22 }}>
         Vul het e-mailadres van de klant in zodat ze hun status kunnen bekijken op{" "}
-        <Link href="/licentie">/licentie</Link>.
+        <Link href="/portal">/portal</Link>.
       </p>
       <form className="form-stack" onSubmit={onSubmit} style={{ maxWidth: 560 }}>
         <label>

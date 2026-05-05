@@ -250,7 +250,7 @@ export default function Home() {
         <span>© {new Date().getFullYear()} ArenaCue</span>
         <span>Stadium Scoreboard & Display Control</span>
         <span className="footer-links">
-          <a href="/licentie">Licentie</a>
+          <a href="/portal">Klantportaal</a>
           <a href="/privacy">Privacy</a>
           <a href="/terms">Voorwaarden</a>
         </span>
