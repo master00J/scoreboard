@@ -1081,3 +1081,100 @@ h2 {
 .portal-result {
   margin-top: 22px;
 }
+
+/* —— Functies (diepte-pagina, twee producten) —— */
+.features-deep-page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 42px 24px 86px;
+}
+
+.features-deep-brand {
+  display: inline-flex;
+}
+
+.features-deep-card {
+  margin-top: 28px;
+}
+
+.features-deep-lead {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.78;
+  font-size: 1.02rem;
+}
+
+.features-deep-lead.tight {
+  font-size: 0.98rem;
+}
+
+.features-product-block {
+  margin-top: 40px;
+  padding-top: 36px;
+  border-top: 1px solid var(--line-strong);
+}
+
+.features-product-block:first-of-type {
+  margin-top: 28px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.features-product-title {
+  margin: 0 0 14px;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  letter-spacing: -0.04em;
+  color: var(--text);
+}
+
+.features-deep-section {
+  margin-top: 38px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+
+.features-product-block > .features-deep-section:first-of-type {
+  margin-top: 22px;
+  padding-top: 0;
+  border-top: none;
+}
+
+.features-deep-section h3 {
+  margin: 0 0 14px;
+  font-size: clamp(1.22rem, 2.4vw, 1.55rem);
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.features-deep-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+  line-height: 1.72;
+}
+
+.features-deep-list li {
+  margin-bottom: 12px;
+}
+
+.features-deep-list strong {
+  color: #d8e6f6;
+}
+
+.features-deep-list a {
+  color: var(--cyan);
+}
+
+.features-cta-row {
+  margin-top: 22px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+@media (max-width: 680px) {
+  .features-deep-page {
+    padding: 28px 18px 64px;
+  }
+}
