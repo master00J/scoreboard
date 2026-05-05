@@ -255,6 +255,9 @@ export function SetupScoreboardThemeSection({
           </div>
 
           <div className="font-semibold text-sm pt-2">Fullscreen scorebord</div>
+          <p className="text-xs text-muted-foreground">
+            Typografie hierboven (lettertype en klokkleuren) geldt ook voor het volledige scherm.
+          </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
               <Label>Logo (px)</Label>
@@ -272,6 +275,91 @@ export function SetupScoreboardThemeSection({
               <Label>Periode (px)</Label>
               {num("fullPeriodPx")}
             </div>
+            <div>
+              <Label>Middenkolom breedte (px)</Label>
+              {num("fullCenterWidthPx")}
+            </div>
+            <div>
+              <Label>Zij-padding teams (px)</Label>
+              {num("fullSidePaddingPx")}
+            </div>
+            <div>
+              <Label>Ruimte logo ↔ score (px)</Label>
+              {num("fullTeamStackGapPx")}
+            </div>
+            <div>
+              <Label>Ruimte middenblok (px)</Label>
+              {num("fullCenterStackGapPx")}
+            </div>
+            <div className="sm:col-span-2">
+              <Label>Teamkleur op achtergrond (hex alpha, 00–ff)</Label>
+              <Input
+                className="mt-1 font-mono text-sm uppercase max-w-[8rem]"
+                maxLength={2}
+                value={draft.fullTeamRadialAlphaHex}
+                placeholder="2a"
+                onChange={(e) => {
+                  const v = e.target.value.replace(/[^0-9a-fA-F]/g, "").slice(0, 2);
+                  setDraft((d) => ({ ...d, fullTeamRadialAlphaHex: v }));
+                }}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Hoger = sterkere gloed in clubkleuren langs de randen. Ongeldige waarden worden bij opslaan naar standaard gezet.
+              </p>
+            </div>
+            <div>
+              <Label>Clubnaam (px)</Label>
+              {num("fullTeamNamePx")}
+            </div>
+          </div>
+          <div className="grid gap-2 pt-1">
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
+                checked={draft.fullShowPeriod}
+                onChange={(e) => setDraft((d) => ({ ...d, fullShowPeriod: e.target.checked }))}
+              />
+              <span className="text-sm leading-snug">
+                <span className="font-medium text-foreground">Periode tonen</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
+                checked={draft.fullShowAddedTime}
+                onChange={(e) => setDraft((d) => ({ ...d, fullShowAddedTime: e.target.checked }))}
+              />
+              <span className="text-sm leading-snug">
+                <span className="font-medium text-foreground">Extratijd (+min) tonen</span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
+                checked={draft.fullShowTeamNames}
+                onChange={(e) => setDraft((d) => ({ ...d, fullShowTeamNames: e.target.checked }))}
+              />
+              <span className="text-sm leading-snug">
+                <span className="font-medium text-foreground">Clubnaam tonen (korte naam)</span>
+                <span className="block text-muted-foreground mt-1">
+                  Tussen logo en score; gebruikt het veld “korte naam” van de club waar mogelijk.
+                </span>
+              </span>
+            </label>
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
+                checked={draft.fullTeamNameUppercase}
+                onChange={(e) => setDraft((d) => ({ ...d, fullTeamNameUppercase: e.target.checked }))}
+              />
+              <span className="text-sm leading-snug">
+                <span className="font-medium text-foreground">Clubnaam in hoofdletters</span>
+              </span>
+            </label>
           </div>
         </div>
       </div>

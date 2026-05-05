@@ -40,8 +40,8 @@ export function MatchScoreboardFull({
       style={{
         fontFamily: theme.fontFamily,
         background: `
-          radial-gradient(ellipse 55% 70% at 18% 50%, ${match.homeTeam.primaryColor}2a 0%, transparent 65%),
-          radial-gradient(ellipse 55% 70% at 82% 50%, ${match.awayTeam.primaryColor}2a 0%, transparent 65%),
+          radial-gradient(ellipse 55% 70% at 18% 50%, ${match.homeTeam.primaryColor}${theme.fullTeamRadialAlphaHex} 0%, transparent 65%),
+          radial-gradient(ellipse 55% 70% at 82% 50%, ${match.awayTeam.primaryColor}${theme.fullTeamRadialAlphaHex} 0%, transparent 65%),
           ${theme.contentAreaBg}`,
       }}
     >
@@ -68,8 +68,26 @@ function TeamSide({
   theme: ResolvedScoreboardTheme;
 }) {
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-6 z-10 px-8">
+    <div
+      className="flex flex-1 flex-col items-center justify-center z-10 min-w-0"
+      style={{
+        gap: theme.fullTeamStackGapPx,
+        paddingLeft: theme.fullSidePaddingPx,
+        paddingRight: theme.fullSidePaddingPx,
+      }}
+    >
       <TeamLogo team={team} size={theme.fullLogoPx} />
+      {theme.fullShowTeamNames && (
+        <div
+          className={`max-w-full px-2 text-center font-bold leading-tight text-white/88 ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
+          style={{
+            fontSize: theme.fullTeamNamePx,
+            textShadow: "0 4px 24px rgba(0,0,0,0.45)",
+          }}
+        >
+          <span className="line-clamp-3">{team.shortName || team.name}</span>
+        </div>
+      )}
       <div
         className="font-black tabular-nums leading-none text-white"
         style={{
@@ -98,13 +116,21 @@ function CenterBlock({
 }) {
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
   return (
-    <div className="flex w-[520px] shrink-0 flex-col items-center justify-center gap-3 z-10">
-      <div
-        className="uppercase leading-none tracking-[0.35em] text-white/55"
-        style={{ fontSize: theme.fullPeriodPx }}
-      >
-        {period}
-      </div>
+    <div
+      className="flex shrink-0 flex-col items-center justify-center z-10 min-w-0"
+      style={{
+        width: theme.fullCenterWidthPx,
+        gap: theme.fullCenterStackGapPx,
+      }}
+    >
+      {theme.fullShowPeriod && (
+        <div
+          className="uppercase leading-none tracking-[0.35em] text-white/55"
+          style={{ fontSize: theme.fullPeriodPx }}
+        >
+          {period}
+        </div>
+      )}
       <div
         className="font-black tabular-nums leading-none text-white"
         style={{
@@ -116,7 +142,7 @@ function CenterBlock({
       >
         {formatTime(elapsed)}
       </div>
-      {addedTime > 0 && (
+      {theme.fullShowAddedTime && addedTime > 0 && (
         <div
           className="rounded-md px-4 py-2 font-black tabular-nums"
           style={{

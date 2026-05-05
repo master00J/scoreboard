@@ -28,6 +28,21 @@ export type ScoreboardTheme = {
   fullScorePx?: number;
   fullTimerPx?: number;
   fullPeriodPx?: number;
+  /** Vaste breedte middenkolom (timer + periode), px */
+  fullCenterWidthPx?: number;
+  /** Horizontale padding aan de teamzijden (px) */
+  fullSidePaddingPx?: number;
+  /** Verticale ruimte tussen logo, optionele naam en score (px) */
+  fullTeamStackGapPx?: number;
+  /** Ruimte tussen periode, klok en extratijd in het midden (px) */
+  fullCenterStackGapPx?: number;
+  /** Twee hex-cijfers (00–ff): alpha van de team-radialen op de achtergrond */
+  fullTeamRadialAlphaHex?: string;
+  fullShowPeriod?: boolean;
+  fullShowAddedTime?: boolean;
+  fullShowTeamNames?: boolean;
+  fullTeamNamePx?: number;
+  fullTeamNameUppercase?: boolean;
   /** Onderstrip (indien later gebruikt) */
   stripHeightPx?: number;
   stripLogoPx?: number;
@@ -63,6 +78,16 @@ export type ResolvedScoreboardTheme = Required<
     | "fullScorePx"
     | "fullTimerPx"
     | "fullPeriodPx"
+    | "fullCenterWidthPx"
+    | "fullSidePaddingPx"
+    | "fullTeamStackGapPx"
+    | "fullCenterStackGapPx"
+    | "fullTeamRadialAlphaHex"
+    | "fullShowPeriod"
+    | "fullShowAddedTime"
+    | "fullShowTeamNames"
+    | "fullTeamNamePx"
+    | "fullTeamNameUppercase"
     | "stripHeightPx"
     | "stripLogoPx"
     | "stripScorePx"
@@ -94,6 +119,16 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
   fullScorePx: 200,
   fullTimerPx: 132,
   fullPeriodPx: 22,
+  fullCenterWidthPx: 520,
+  fullSidePaddingPx: 32,
+  fullTeamStackGapPx: 24,
+  fullCenterStackGapPx: 12,
+  fullTeamRadialAlphaHex: "2a",
+  fullShowPeriod: true,
+  fullShowAddedTime: true,
+  fullShowTeamNames: false,
+  fullTeamNamePx: 28,
+  fullTeamNameUppercase: true,
   stripHeightPx: 180,
   stripLogoPx: 120,
   stripScorePx: 120,
@@ -105,6 +140,11 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
+}
+
+function normalizeTeamRadialAlphaHex(raw: string | undefined, fallback: string): string {
+  if (raw && /^[0-9a-fA-F]{2}$/.test(raw.trim())) return raw.trim().toLowerCase();
+  return fallback;
 }
 
 function normalizeOrder(order: unknown): LeftStripSegment[] {
@@ -166,6 +206,39 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
     fullScorePx: clamp(Math.round(patch.fullScorePx ?? DEFAULT_SCOREBOARD_THEME.fullScorePx), 96, 280),
     fullTimerPx: clamp(Math.round(patch.fullTimerPx ?? DEFAULT_SCOREBOARD_THEME.fullTimerPx), 64, 200),
     fullPeriodPx: clamp(Math.round(patch.fullPeriodPx ?? DEFAULT_SCOREBOARD_THEME.fullPeriodPx), 14, 40),
+    fullCenterWidthPx: clamp(
+      Math.round(patch.fullCenterWidthPx ?? DEFAULT_SCOREBOARD_THEME.fullCenterWidthPx),
+      280,
+      960,
+    ),
+    fullSidePaddingPx: clamp(
+      Math.round(patch.fullSidePaddingPx ?? DEFAULT_SCOREBOARD_THEME.fullSidePaddingPx),
+      8,
+      120,
+    ),
+    fullTeamStackGapPx: clamp(
+      Math.round(patch.fullTeamStackGapPx ?? DEFAULT_SCOREBOARD_THEME.fullTeamStackGapPx),
+      4,
+      64,
+    ),
+    fullCenterStackGapPx: clamp(
+      Math.round(patch.fullCenterStackGapPx ?? DEFAULT_SCOREBOARD_THEME.fullCenterStackGapPx),
+      4,
+      48,
+    ),
+    fullTeamRadialAlphaHex: normalizeTeamRadialAlphaHex(
+      patch.fullTeamRadialAlphaHex,
+      DEFAULT_SCOREBOARD_THEME.fullTeamRadialAlphaHex,
+    ),
+    fullShowPeriod: patch.fullShowPeriod !== false,
+    fullShowAddedTime: patch.fullShowAddedTime !== false,
+    fullShowTeamNames: patch.fullShowTeamNames === true,
+    fullTeamNamePx: clamp(
+      Math.round(patch.fullTeamNamePx ?? DEFAULT_SCOREBOARD_THEME.fullTeamNamePx),
+      14,
+      72,
+    ),
+    fullTeamNameUppercase: patch.fullTeamNameUppercase !== false,
     stripHeightPx: clamp(Math.round(patch.stripHeightPx ?? DEFAULT_SCOREBOARD_THEME.stripHeightPx), 120, 280),
     stripLogoPx: clamp(Math.round(patch.stripLogoPx ?? DEFAULT_SCOREBOARD_THEME.stripLogoPx), 64, 200),
     stripScorePx: clamp(Math.round(patch.stripScorePx ?? DEFAULT_SCOREBOARD_THEME.stripScorePx), 48, 200),
