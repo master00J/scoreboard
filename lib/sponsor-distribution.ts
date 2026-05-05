@@ -95,12 +95,10 @@ export function maxSponsorClipSecondsForSection(
   return Math.min(Math.max(m, 1), 600);
 }
 
-/** Minimum hang bij sponsor-spread (voorkomt flitsen aan slotgrenzen). */
-export const MIN_SPREAD_HOLD_SEC = 1.5;
-
 /**
  * Seconden tot de slotmap vanaf `tSec` een andere waarde kiest (andere sponsor-id of scorebord).
- * Gebruikt om hang niet over het volgende map-segment te laten lopen.
+ * Niet meer gebruikt om hang in te korten — clips moeten volledig spelen — maar handig voor
+ * roster/voorspelling.
  */
 export function secondsUntilSponsorRunEnds(map: (string | null)[], tSec: number): number {
   if (map.length === 0) return 1;
@@ -114,21 +112,21 @@ export function secondsUntilSponsorRunEnds(map: (string | null)[], tSec: number)
   return Math.max(0.01, j - tSec);
 }
 
-/** Langste clip voor sponsor, begrensd tot het resterende run-segment op de slotmap. */
+/**
+ * Hang-duur = volledige langste clip van deze sponsor (clip mag nooit afgekapt worden door
+ * de slotmap-tikken). Slotmap-info wordt genegeerd; signature blijft compatibel.
+ */
 export function holdSecondsCappedBySlotRun(
   sponsors: Sponsor[],
   section: SponsorSection,
   matchStatus: string | undefined,
   sponsorId: string | null | undefined,
-  slotMap: (string | null)[] | undefined,
-  slotT: number | undefined,
+  _slotMap?: (string | null)[],
+  _slotT?: number,
 ): number {
-  let h = holdSecondsForSponsorPhase(sponsors, section, matchStatus, sponsorId);
-  if (slotMap && slotMap.length > 0 && slotT !== undefined && Number.isFinite(slotT)) {
-    const run = secondsUntilSponsorRunEnds(slotMap, slotT);
-    h = Math.min(h, Math.max(MIN_SPREAD_HOLD_SEC, run));
-  }
-  return h;
+  void _slotMap;
+  void _slotT;
+  return holdSecondsForSponsorPhase(sponsors, section, matchStatus, sponsorId);
 }
 
 /** Seconden sinds start van de actuele helft / blok (0 … H). */
@@ -291,7 +289,13 @@ export function buildSponsorSlotMap(
 
 /** Ref voor vol te houden sponsor-slide terwijl de slotmap al naar scorebord zou gaan. */
 export type SponsorPhaseHangRef = {
-  current: { sponsorId: string; untilMs: number; startedAtMs: number } | null;
+  current: {
+    sponsorId: string;
+    untilMs: number;
+    startedAtMs: number;
+    /** Slot-index op de slotmap waar deze hang oorspronkelijk gestart is (voor pauze-detectie). */
+    startedAtSlotIdx?: number;
+  } | null;
 };
 
 export type ResolveSponsorSpreadOptions = {
@@ -312,6 +316,11 @@ export function resolveSponsorSpreadPhase(
   hangRef: SponsorPhaseHangRef,
   options?: ResolveSponsorSpreadOptions,
 ): { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } {
+  const slotIdx =
+    options?.slotMap && options.slotT !== undefined && options.slotMap.length > 0
+      ? Math.min(options.slotMap.length - 1, Math.max(0, Math.floor(options.slotT)))
+      : undefined;
+
   const hang = hangRef.current;
   if (hang && nowMs < hang.untilMs) {
     return {
@@ -319,6 +328,24 @@ export function resolveSponsorSpreadPhase(
       sponsorFilterId: hang.sponsorId,
     };
   }
+
+  /**
+   * Pauze-bescherming: als de wedstrijdklok niet beweegt blijft de slotmap dezelfde sponsor
+   * teruggeven. Net-gestopt-hang + zelfde slot-index + zelfde sponsor-id ⇒ geen nieuwe hang
+   * starten (anders flitst de progressbar naar 0). Pas her-trigger toelaten als de slot-index
+   * effectief verandert (klok loopt weer).
+   */
+  if (
+    hang &&
+    raw.phase === "sponsor" &&
+    raw.sponsorId === hang.sponsorId &&
+    slotIdx !== undefined &&
+    hang.startedAtSlotIdx === slotIdx
+  ) {
+    hangRef.current = null;
+    return { phase: "scoreboard", sponsorFilterId: null };
+  }
+
   hangRef.current = null;
   if (raw.phase === "sponsor" && raw.sponsorId) {
     const holdSec = holdSecondsCappedBySlotRun(
@@ -333,6 +360,7 @@ export function resolveSponsorSpreadPhase(
       sponsorId: raw.sponsorId,
       untilMs: nowMs + holdSec * 1000,
       startedAtMs: nowMs,
+      startedAtSlotIdx: slotIdx,
     };
   }
   const filterOut = raw.phase === "sponsor" ? raw.sponsorId : null;

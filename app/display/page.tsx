@@ -380,11 +380,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsorId: string;
     untilMs: number;
     startedAtMs: number;
+    startedAtSlotIdx?: number;
   } | null>(null);
   const prematchPhaseHangRef = useRef<{
     sponsorId: string;
     untilMs: number;
     startedAtMs: number;
+    startedAtSlotIdx?: number;
   } | null>(null);
   const prematchOriginRef = useRef<number | null>(null);
 

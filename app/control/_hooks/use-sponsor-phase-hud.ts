@@ -146,11 +146,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     sponsorId: string;
     untilMs: number;
     startedAtMs: number;
+    startedAtSlotIdx?: number;
   } | null>(null);
   const prematchPhaseHangRef = useRef<{
     sponsorId: string;
     untilMs: number;
     startedAtMs: number;
+    startedAtSlotIdx?: number;
   } | null>(null);
   const prematchOriginRef = useRef<number | null>(null);
 
@@ -268,6 +270,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         sponsorId: string;
         untilMs: number;
         startedAtMs: number;
+        startedAtSlotIdx?: number;
       } | null>,
     ): SponsorPhaseHudModel {
       const holdSec = holdSecondsCappedBySlotRun(
