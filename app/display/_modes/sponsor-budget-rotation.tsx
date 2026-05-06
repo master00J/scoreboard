@@ -587,6 +587,26 @@ function MediaRenderer({
     endedRef.current = false;
   }, [item.id, item.path]);
 
+  // Decode-watchdog: als een video niet binnen 4s metadata aanlevert,
+  // beschouwen we hem als hangend en triggeren we onVideoPlaybackFault zodat
+  // de rotatie naar de volgende clip kan. Voorkomt dat het scherm vastloopt
+  // op een corrupte of trage clip tijdens een live wedstrijd.
+  useEffect(() => {
+    if (item.type !== "VIDEO") return;
+    if (syncPlaybackMs != null) return; // preview volgt main, niet zelf timer-bewaking
+    const v = videoRef.current;
+    if (!v) return;
+    const watchdog = window.setTimeout(() => {
+      if (endedRef.current) return;
+      if (Number.isFinite(v.duration) && v.duration > 0) return;
+      if (!onVideoPlaybackFault) return;
+      endedRef.current = true;
+      console.warn("[sponsor] video decode-watchdog gevuurd voor", item.title);
+      onVideoPlaybackFault();
+    }, 4000);
+    return () => window.clearTimeout(watchdog);
+  }, [item.id, item.path, item.type, syncPlaybackMs, onVideoPlaybackFault, item.title]);
+
   useEffect(() => {
     if (item.type !== "VIDEO" || syncPlaybackMs == null) return;
     const v = videoRef.current;

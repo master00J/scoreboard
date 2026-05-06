@@ -110,6 +110,10 @@ export const CommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("display:requestSnapshot") }),
   z.object({
+    type: z.literal("display:setSafeMode"),
+    enabled: z.boolean(),
+  }),
+  z.object({
     type: z.literal("event:undo"),
     eventId: z.string(),
   }),

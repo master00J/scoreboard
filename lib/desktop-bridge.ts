@@ -108,6 +108,7 @@ export type ElectronBridge = {
   onSponsorLedger: (listener: (ledger: SponsorLedgerPayload | null) => void) => () => void;
   onDisplayError: (listener: (payload: { message: string }) => void) => () => void;
   focusDisplayWindow: () => Promise<void>;
+  reloadDisplayWindow: () => Promise<{ ok: boolean }>;
   exportMatch: (opts: {
     matchId: string;
     format: ExportFormat;

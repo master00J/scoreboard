@@ -159,6 +159,8 @@ model DisplayState {
   timerBaseSec       Int       @default(0)
   externalCaptureSourceId  String?
   externalCaptureToDisplay Boolean @default(false)
+  /// Veilige modus: forceert pure scoreboard, overrulet alle media/overlays voor noodgevallen tijdens live wedstrijd.
+  safeMode                 Boolean @default(false)
   /// Modus om naar terug te keren na BLACKOUT (toggle).
   blackoutResumeMode String?
   updatedAt          DateTime  @updatedAt

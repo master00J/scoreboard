@@ -8,9 +8,15 @@ import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 export function ExternalCaptureVideo({
   sourceId,
   className = "",
+  audio = false,
+  preferHighRes = true,
 }: {
   sourceId: string;
   className?: string;
+  /** Audio doorgeven aan output (bv. vMix-feed met commentaar). Standaard uit. */
+  audio?: boolean;
+  /** Forceer HD-resolutie op cameras/capture-kaarten. Standaard aan. */
+  preferHighRes?: boolean;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -20,9 +26,10 @@ export function ExternalCaptureVideo({
 
     void (async () => {
       try {
-        stream = await getCaptureStream(sourceId);
+        stream = await getCaptureStream(sourceId, { audio, preferHighRes });
         if (cancelled || !videoRef.current) return;
         videoRef.current.srcObject = stream;
+        videoRef.current.muted = !audio;
         await videoRef.current.play().catch(() => {});
       } catch (err) {
         console.error("[ExternalCaptureVideo]", err);
@@ -34,12 +41,12 @@ export function ExternalCaptureVideo({
       stream?.getTracks().forEach((t) => t.stop());
       if (videoRef.current) videoRef.current.srcObject = null;
     };
-  }, [sourceId]);
+  }, [sourceId, audio, preferHighRes]);
 
   return (
     <video
       ref={videoRef}
-      muted
+      muted={!audio}
       playsInline
       autoPlay
       className={className}

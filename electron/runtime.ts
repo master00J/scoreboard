@@ -292,6 +292,7 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("AppSettings", "scoreboardThemeJson", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "safeMode", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "blackoutResumeMode", "TEXT");
   await addColumnIfMissing(
     "DisplayState",

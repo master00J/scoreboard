@@ -431,6 +431,20 @@ function registerIpc() {
     setImmediate(() => applyDisplayFullscreen(displayWindow));
   });
 
+  ipcMain.handle("window:reloadDisplay", async () => {
+    if (!displayWindow) return { ok: false };
+    try {
+      displayWindow.webContents.reloadIgnoringCache();
+      setImmediate(() => {
+        if (displayWindow) applyDisplayFullscreen(displayWindow);
+      });
+      return { ok: true };
+    } catch (err) {
+      console.error("[main] reload display failed", err);
+      return { ok: false };
+    }
+  });
+
   ipcMain.handle(
     "match:export",
     async (_, payload: { matchId: string; format: ExportFormat }) => {

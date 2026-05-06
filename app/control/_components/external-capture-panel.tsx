@@ -14,6 +14,8 @@ type UnifiedCaptureSource = DesktopCaptureSourceInfo & {
   category: "desktop" | "camera";
 };
 
+const AUDIO_STORAGE_KEY = "arenacue_external_capture_audio_v1";
+
 export function ExternalCapturePanel() {
   const state = useDisplayStore((s) => s.state);
   const sourceId = state?.externalCaptureSourceId ?? null;
@@ -23,6 +25,26 @@ export function ExternalCapturePanel() {
   const [loadingSources, setLoadingSources] = useState(false);
   const [previewOn, setPreviewOn] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [audioPassthrough, setAudioPassthrough] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      setAudioPassthrough(window.localStorage.getItem(AUDIO_STORAGE_KEY) === "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const setAudioPersisted = useCallback((next: boolean) => {
+    setAudioPassthrough(next);
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(AUDIO_STORAGE_KEY, next ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const refreshSources = useCallback(async () => {
     if (!isElectron || !window.electronAPI?.getDesktopCaptureSources) {
@@ -65,13 +87,13 @@ export function ExternalCapturePanel() {
     <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-3">
       <div>
         <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-          Extern beeld (SDI / capture / webcam)
+          Extern beeld (SDI / HDMI / capture-kaart / webcam)
         </div>
         <p className="text-[11px] text-muted-foreground leading-snug">
-          Vernieuw de lijst en kies een <strong>scherm</strong> of <strong>venster</strong> (capture / OBS /
-          SDI-software), of een <strong>webcam</strong> / capturekaart onder “Camera&apos;s”. Bij eerste gebruik
-          van camera&apos;s kan Windows om cameratoegang vragen. Preview hier, daarna fullscreen op het
-          scorebord.
+          Voor pro <strong>HDMI/SDI capture-kaarten</strong> (Magewell, Elgato, Blackmagic): kies de
+          kaart onder <em>Camera&apos;s &amp; video-invoer</em>. ArenaCue probeert automatisch
+          1920×1080@30 op te halen. Je kan ook een <strong>scherm/venster</strong> kiezen voor vMix,
+          OBS of andere SDI-software op deze PC. Preview hier, daarna fullscreen op het scorebord.
         </p>
       </div>
 
@@ -165,11 +187,29 @@ export function ExternalCapturePanel() {
         >
           {toDisplay ? "Stop op scorebord" : "Fullscreen op scorebord"}
         </Button>
+        <label className="ml-auto flex items-center gap-2 text-[11px] text-foreground/80 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="h-3.5 w-3.5"
+            checked={audioPassthrough}
+            onChange={(e) => setAudioPersisted(e.target.checked)}
+          />
+          <span>
+            Audio doorzetten
+            <span className="block text-muted-foreground text-[10px]">
+              voor capture-kaart met geluid (vMix/zendwagen)
+            </span>
+          </span>
+        </label>
       </div>
 
       {previewOn && sourceId && (
         <div className="relative aspect-video w-full overflow-hidden rounded-lg border border-border bg-black">
-          <ExternalCaptureVideo sourceId={sourceId} className="h-full w-full" />
+          <ExternalCaptureVideo
+            sourceId={sourceId}
+            className="h-full w-full"
+            audio={audioPassthrough}
+          />
         </div>
       )}
 

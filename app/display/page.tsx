@@ -76,6 +76,17 @@ type SponsorScheduleClock = {
   wasFrozen: boolean;
 };
 
+const EXTERNAL_CAPTURE_AUDIO_PREF_KEY = "arenacue_external_capture_audio_v1";
+
+function readExternalCaptureAudioPref(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(EXTERNAL_CAPTURE_AUDIO_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 function isPreviewIframe(): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -817,6 +828,34 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsorRepeatBudgetCycles,
   ]);
 
+  if (state?.safeMode) {
+    return (
+      <ScaleContainer variant={embedInControl ? "embedded" : "fullscreen"}>
+        {!embedInControl && <DisplayWatchdog />}
+        {match ? (
+          <MatchScoreboardFull
+            key="safe-mode-scoreboard"
+            match={match}
+            elapsed={elapsed}
+            running={state.timerRunning ?? false}
+            period={period}
+            theme={scoreboardTheme}
+          />
+        ) : (
+          <IdleScreen key="safe-idle" connecting={!connected} />
+        )}
+        {!embedInControl && (
+          <div
+            className="absolute top-4 right-4 z-[120] rounded-md bg-red-600 px-3 py-1.5 text-xs font-bold uppercase tracking-widest text-white shadow-lg"
+            style={{ letterSpacing: "0.18em" }}
+          >
+            Veilige modus
+          </div>
+        )}
+      </ScaleContainer>
+    );
+  }
+
   return (
     <ScaleContainer variant={embedInControl ? "embedded" : "fullscreen"}>
       {!embedInControl && <DisplayWatchdog />}
@@ -1158,7 +1197,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         state.externalCaptureSourceId &&
         mode !== "BLACKOUT" && (
           <div className="absolute inset-0 z-[55] bg-black">
-            <ExternalCaptureVideo sourceId={state.externalCaptureSourceId} />
+            <ExternalCaptureVideo
+              sourceId={state.externalCaptureSourceId}
+              audio={readExternalCaptureAudioPref()}
+            />
           </div>
         )}
     </ScaleContainer>

@@ -538,6 +538,10 @@ export async function handleCommand(cmd: Command) {
       await updateState({ externalCaptureToDisplay: cmd.enabled });
       return { ok: true };
     }
+    case "display:setSafeMode": {
+      await updateState({ safeMode: cmd.enabled });
+      return { ok: true };
+    }
     case "display:requestSnapshot": {
       return { ok: true };
     }

@@ -36,6 +36,7 @@ const bridge: ElectronBridge = {
     subscribe<SponsorLedgerPayload | null>("display:sponsorLedger", listener),
   onDisplayError: (listener) => subscribe("display:error", listener),
   focusDisplayWindow: () => ipcRenderer.invoke("window:focusDisplay"),
+  reloadDisplayWindow: () => ipcRenderer.invoke("window:reloadDisplay"),
   exportMatch: (opts) => ipcRenderer.invoke("match:export", opts),
   getDesktopCaptureSources: () => ipcRenderer.invoke("desktop:getCaptureSources"),
   reportSponsorClipStart: (payload) => ipcRenderer.invoke("display:sponsorClipStart", payload),

@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useDisplayStore } from "@/lib/store";
 import { sendCommand } from "@/lib/use-socket";
 import { useApi } from "@/lib/use-api";
+import { isElectron } from "@/lib/electron";
 import type { Match, MatchEvent, Player, MediaItem } from "@/lib/types";
 import type { MatchStatusT } from "@/lib/validation/commands";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
@@ -32,8 +33,42 @@ function phaseButtonActive(phaseStatus: MatchStatusT, current?: string): boolean
 
 export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null }) {
   const state = useDisplayStore((s) => s.state);
+  const tick = useDisplayStore((s) => s.tick);
   const mode = state?.mode ?? "IDLE";
+  const safeMode = state?.safeMode ?? false;
   const livePlay = isLivePlayingMatchStatus(activeMatch?.status);
+
+  // Heartbeat: detecteer of het display al lang geen tick meer stuurt terwijl
+  // de timer wél zou moeten lopen. In dat geval is het waarschijnlijk vastgelopen.
+  const [now, setNow] = useState(() => Date.now());
+  const [lastTickAt, setLastTickAt] = useState<number>(0);
+  useEffect(() => {
+    if (tick) setLastTickAt(Date.now());
+  }, [tick]);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 2000);
+    return () => clearInterval(id);
+  }, []);
+  const heartbeatStaleMs =
+    state?.timerRunning && lastTickAt > 0 ? now - lastTickAt : 0;
+  const displayLikelyStuck = heartbeatStaleMs > 8000;
+
+  const reloadDisplay = useCallback(async () => {
+    if (!isElectron || !window.electronAPI?.reloadDisplayWindow) return;
+    await window.electronAPI.reloadDisplayWindow();
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey && e.shiftKey)) return;
+      if (e.key !== "S" && e.key !== "s") return;
+      if (isEditable(e.target)) return;
+      e.preventDefault();
+      void sendCommand({ type: "display:setSafeMode", enabled: !safeMode });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [safeMode]);
   const { data: mediaRaw } = useApi<MediaItem[]>("/api/media");
   const mediaList = useMemo(
     () => (mediaRaw ?? []).filter((m) => m.active).sort((a, b) => a.title.localeCompare(b.title)),
@@ -88,6 +123,83 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           </span>
         </div>
       </div>
+
+      {safeMode && (
+        <div className="rounded-md border border-red-500/60 bg-red-500/10 p-3 text-xs leading-snug">
+          <p className="font-bold uppercase tracking-widest text-red-600 dark:text-red-400">
+            Veilige modus actief
+          </p>
+          <p className="mt-1 text-foreground/90">
+            Het scherm toont enkel het scorebord. Geen sponsors, geen overlays, geen externe capture.
+            Druk <kbd className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px]">Ctrl+Shift+S</kbd> of de knop hieronder om uit te schakelen.
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            className="mt-2 w-full border-red-500/60 hover:bg-red-500/20"
+            onClick={() => void sendCommand({ type: "display:setSafeMode", enabled: false })}
+          >
+            Veilige modus uitschakelen
+          </Button>
+        </div>
+      )}
+
+      {!safeMode && (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-[11px] h-8 border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-700 dark:hover:text-red-300"
+            title="Forceert pure scoreboard. Sneltoets: Ctrl+Shift+S"
+            onClick={() => void sendCommand({ type: "display:setSafeMode", enabled: true })}
+          >
+            Noodknop: veilige modus (Ctrl+Shift+S)
+          </Button>
+          {isElectron && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-[11px] h-8"
+              title="Herstart enkel het display-venster (handig als het scherm vastgelopen lijkt)"
+              onClick={() => void reloadDisplay()}
+            >
+              Display herstarten
+            </Button>
+          )}
+        </div>
+      )}
+
+      {displayLikelyStuck && !safeMode && (
+        <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-3 text-xs leading-snug">
+          <p className="font-bold uppercase tracking-widest text-amber-700 dark:text-amber-300">
+            Display lijkt vastgelopen
+          </p>
+          <p className="mt-1 text-foreground/90">
+            Het scherm stuurt al {Math.round(heartbeatStaleMs / 1000)}s geen update meer terwijl
+            de timer loopt. Activeer de noodknop of herstart het display-venster.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-amber-500/60"
+              onClick={() => void sendCommand({ type: "display:setSafeMode", enabled: true })}
+            >
+              Veilige modus aan
+            </Button>
+            {isElectron && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-amber-500/60"
+                onClick={() => void reloadDisplay()}
+              >
+                Display herstarten
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       <section className="space-y-2">
         <div className="text-xs font-medium text-foreground/90">Wedstrijdfase</div>
