@@ -156,6 +156,16 @@ export function ProofOfPlayPanel() {
               Filter en exporteer naar CSV om aan adverteerders te bezorgen of
               voor facturatie.
             </p>
+            {totalPlays === 0 && !loading && (
+              <p className="mt-2 text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-snug rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                <strong>Waarom staat alles op 0?</strong> De totalen hieronder zijn de som van{" "}
+                <em>werkelijk afgeronde</em> sponsorclips op het stadiondisplay — niet je
+                geconfigureerde sponsor-seconden in Media. Zolang er in deze filter nog geen clip
+                is afgelopen (of je filter sluit die logs uit), blijven aantal, schermtijd en
+                realisatiegraad 0. Laat sponsors draaien op het display tot een clip eindigt, of
+                wijd het datumbereik uit en kies eventueel “Alle wedstrijden”.
+              </p>
+            )}
           </div>
           <Button variant="outline" size="sm" onClick={() => void reload()}>
             Vernieuwen
@@ -247,15 +257,20 @@ export function ProofOfPlayPanel() {
 
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
           <Stat label="Aantal afspeelbeurten" value={String(totalPlays)} />
-          <Stat label="Totale schermtijd" value={formatSec(totalActualSec)} />
+          <Stat
+            label="Totale schermtijd"
+            value={formatSec(totalActualSec)}
+            hint="werkelijk afgespeeld"
+          />
           <Stat
             label="Verwachte schermtijd"
             value={formatSec(totalExpectedSec)}
+            hint="per gelogde clip, niet je sponsor-budget"
           />
           <Stat
             label="Realisatiegraad"
             value={`${avgFulfillment}%`}
-            hint="werkelijk / verwacht"
+            hint="werkelijk ÷ verwacht (logs)"
           />
         </div>
       </section>
