@@ -73,7 +73,7 @@ export default function PrivacyPage() {
 
         <h2 id="cookies">Cookies en lokale opslag</h2>
         <p>
-          Via het cookiebanner op de website kun je kiezen welke niet-noodzakelijke categorieën je
+          Via de cookiebanner op de website kun je kiezen welke niet-noodzakelijke categorieën je
           toestaat. Je voorkeur bewaren we in de browser (<code>localStorage</code>) zodat we je bij
           een volgend bezoek niet opnieuw hoeven te vragen, tenzij je je cache wist of we de policy
           inhoudelijk wijzigen.
@@ -133,12 +133,12 @@ export default function PrivacyPage() {
             en licentieverzoeken op te volgen.
           </li>
           <li>
-            <strong>Gerechtvaardigd belang:</strong> beveiliging van de website, fraudpreventie en
+            <strong>Gerechtvaardigd belang:</strong> beveiliging van de website, fraudepreventie en
             verbetering van de dienstverlening, telkens in evenwicht met je rechten.
           </li>
           <li>
             <strong>Toestemming:</strong> voor niet-noodzakelijke cookies en vergelijkbare technieken,
-            waar de wet dat vereist (via het cookiebanner).
+            waar de wet dat vereist (via de cookiebanner).
           </li>
         </ul>
 
