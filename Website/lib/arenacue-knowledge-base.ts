@@ -138,7 +138,7 @@ Onder Setup → "LED / Display canvas" stel je de logische resolutie van het sta
 - **Safe-zone overlay**: groen kader met instelbare marge — handig tijdens setup als de LED-cabinets randen wegnemen. Schakel uit voor de wedstrijd.
 
 ### Proof-of-play (sponsor-rapporten)
-Elke voltooide sponsor-clipweergave wordt automatisch gelogd in een aparte tabel `SponsorPlayLog` met sponsor, media, wedstrijd, fase, verwachte vs werkelijke schermtijd, start- en eindtijd, en een unieke sessie-id. In tab **Rapporten** in het control panel:
+Elke voltooide sponsor-clipweergave wordt automatisch gelogd in een aparte tabel \`SponsorPlayLog\` met sponsor, media, wedstrijd, fase, verwachte vs werkelijke schermtijd, start- en eindtijd, en een unieke sessie-id. In tab **Rapporten** in het control panel:
 - Filteren op wedstrijd, sponsor, match-fase (voor wedstrijd, 1e helft, rust, 2e helft, verlenging) en datumbereik.
 - Samenvatting per sponsor: aantal afspeelbeurten, totale schermtijd, verwachte tijd, realisatiegraad.
 - Detaillijst van laatste afspeelbeurten met tijdstempel.
