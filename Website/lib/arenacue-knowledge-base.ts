@@ -127,6 +127,25 @@ Als een sponsorvideo niet binnen 4 seconden metadata levert (corrupt bestand, co
 ### Pre-match media-check
 In Setup-tab → "Pre-match check" kun je vóór een wedstrijd alle actieve media testen. ArenaCue laadt elk bestand kort om codec-/leesfouten en trage clips op te sporen. Resultaten per bestand: ✓ OK, ⚠ traag (>1.5s), ✗ fout (corrupt of timeout). Aan te raden 30 minuten voor kickoff te draaien.
 
+### Pixel-perfect LED-output / configureerbaar canvas
+Onder Setup → "LED / Display canvas" stel je de logische resolutie van het stadiondisplay in.
+- **Snelle keuzes**: Full HD 1920×1080, 4K UHD 3840×2160, brede LED-strip 1920×360, vierkante cube 1024×1024, grote stadion-LED 2304×1296, etc.
+- **Custom afmeting**: voor exotische LED-formaten kun je elke breedte/hoogte invullen. Aspect ratio wordt automatisch berekend.
+- **Scaling-modus**:
+  - *Cover* (standaard): vult het venster, kan een minieme rand croppen bij afwijkende aspect.
+  - *Contain*: hele inhoud zichtbaar, eventueel zwarte rand.
+  - *Pixel-perfect (1:1)*: geen browser-scaling. Logische resolutie = fysieke LED-resolutie. Voorkomt blur en video-stretching, ideaal voor pro LED-walls (Daktronics, Yaham, Unilumin).
+- **Safe-zone overlay**: groen kader met instelbare marge — handig tijdens setup als de LED-cabinets randen wegnemen. Schakel uit voor de wedstrijd.
+
+### Proof-of-play (sponsor-rapporten)
+Elke voltooide sponsor-clipweergave wordt automatisch gelogd in een aparte tabel `SponsorPlayLog` met sponsor, media, wedstrijd, fase, verwachte vs werkelijke schermtijd, start- en eindtijd, en een unieke sessie-id. In tab **Rapporten** in het control panel:
+- Filteren op wedstrijd, sponsor, match-fase (voor wedstrijd, 1e helft, rust, 2e helft, verlenging) en datumbereik.
+- Samenvatting per sponsor: aantal afspeelbeurten, totale schermtijd, verwachte tijd, realisatiegraad.
+- Detaillijst van laatste afspeelbeurten met tijdstempel.
+- **CSV-export** met UTF-8 BOM (correct in Excel/Numbers/Google Sheets) — bevat sponsor, media, wedstrijd, kickoff, fase, verwachte/werkelijke seconden, ISO-tijden en sessie-id voor audit.
+- Snapshot-velden (sponsorName, mediaTitle) zorgen dat rapporten leesbaar blijven na verwijdering van een sponsor of media-item.
+- Te gebruiken voor adverteerderfacturatie en transparantie naar sponsoren over werkelijk geleverde schermtijd.
+
 ### Mobiele bridge – LAN
 - De desktop start een lokale server (poort 17890 standaard) met **pairing code** (6 cijfers) en **operator-PIN** (4 cijfers), beide automatisch gegenereerd of via env vastgezet.
 - In het control panel zie je een QR-code in formaat \`ACPAIR:local|<bridge-url>|<pairing-code>|<operator-pin>\`.
@@ -280,6 +299,10 @@ Onderaan het control panel staat de huidige versie. De update-banner toont de ni
 - **Veilige modus**: noodoverride die het stadionscherm forceert naar pure scoreboard. Sneltoets Ctrl+Shift+S.
 - **Decode-watchdog**: automatische skip naar volgende sponsorclip als de huidige binnen 4s geen metadata levert.
 - **Heartbeat-bewaking**: het control panel waarschuwt en biedt herstart aan als het display 8+ seconden geen update meer stuurt terwijl de timer loopt.
+- **Logisch canvas**: configureerbare resolutie van het stadiondisplay (default 1920×1080), past zich aan aan elke LED-wall.
+- **Pixel-perfect (1:1)**: scaling-modus die geen browser-scaling toepast — logische pixels = fysieke LED-pixels.
+- **Safe zone**: visuele hulplijn (groen kader) tijdens LED-setup om aan te tonen welk gebied gegarandeerd zichtbaar is buiten de cabinet-randen.
+- **Proof-of-play**: persistente log van elke sponsor-clipweergave (sponsorName, mediaTitle, fase, verwachte/werkelijke seconden, sessie-id) voor adverteerderfacturatie en audit-rapporten.
 
 ---
 

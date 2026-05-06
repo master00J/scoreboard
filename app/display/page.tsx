@@ -128,6 +128,19 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     mergeScoreboardTheme(null),
   );
   const [sponsorRepeatBudgetCycles, setSponsorRepeatBudgetCycles] = useState(false);
+  const [displayCanvas, setDisplayCanvas] = useState<{
+    width: number;
+    height: number;
+    mode: "cover" | "contain" | "exact";
+    safeZoneVisible: boolean;
+    safeZoneMarginPx: number;
+  }>({
+    width: 1920,
+    height: 1080,
+    mode: "cover",
+    safeZoneVisible: false,
+    safeZoneMarginPx: 40,
+  });
 
   useEffect(() => {
     if (previewIframe) return;
@@ -140,6 +153,21 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         setSponsorRepeatBudgetCycles(
           sponsorRepeatBudgetCyclesFromThemeJson(s.scoreboardThemeJson ?? null),
         );
+        const w = Math.max(320, Number(s.displayCanvasWidth ?? 1920));
+        const h = Math.max(240, Number(s.displayCanvasHeight ?? 1080));
+        const rawMode = (s.displayScalingMode ?? "cover") as
+          | "cover"
+          | "contain"
+          | "exact";
+        const mode: "cover" | "contain" | "exact" =
+          rawMode === "contain" || rawMode === "exact" ? rawMode : "cover";
+        setDisplayCanvas({
+          width: w,
+          height: h,
+          mode,
+          safeZoneVisible: !!s.displaySafeZoneVisible,
+          safeZoneMarginPx: Math.max(0, Number(s.displaySafeZoneMarginPx ?? 40)),
+        });
       })
       .catch(() => {});
     return () => {
@@ -830,7 +858,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   if (state?.safeMode) {
     return (
-      <ScaleContainer variant={embedInControl ? "embedded" : "fullscreen"}>
+      <ScaleContainer
+        variant={embedInControl ? "embedded" : "fullscreen"}
+        width={displayCanvas.width}
+        height={displayCanvas.height}
+        scalingMode={displayCanvas.mode}
+      >
         {!embedInControl && <DisplayWatchdog />}
         {match ? (
           <MatchScoreboardFull
@@ -857,7 +890,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   }
 
   return (
-    <ScaleContainer variant={embedInControl ? "embedded" : "fullscreen"}>
+    <ScaleContainer
+      variant={embedInControl ? "embedded" : "fullscreen"}
+      width={displayCanvas.width}
+      height={displayCanvas.height}
+      scalingMode={displayCanvas.mode}
+      safeZoneVisible={displayCanvas.safeZoneVisible && !embedInControl}
+      safeZoneMarginPx={displayCanvas.safeZoneMarginPx}
+    >
       {!embedInControl && <DisplayWatchdog />}
 
       {/* Fullscreen modes */}

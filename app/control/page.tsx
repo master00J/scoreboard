@@ -11,6 +11,7 @@ import { TimerPanel } from "./_components/timer-panel";
 import { MatchLivePanel } from "./_components/match-live-panel";
 import { SetupPanel } from "./_components/setup-panel";
 import { MediaPanel } from "./_components/media-panel";
+import { ProofOfPlayPanel } from "./_components/proof-of-play-panel";
 import { DisplayControlPanel, EventLog } from "./_components/display-control-panel";
 import { SponsorLiveOverview } from "./_components/sponsor-live-overview";
 import { ExternalCapturePanel } from "./_components/external-capture-panel";
@@ -110,6 +111,7 @@ export default function ControlPage() {
           <TabsTrigger value="match">Match</TabsTrigger>
           <TabsTrigger value="setup">Setup</TabsTrigger>
           <TabsTrigger value="media">Media</TabsTrigger>
+          <TabsTrigger value="reports">Rapporten</TabsTrigger>
         </TabsList>
 
         <TabsContent value="match" forceMount>
@@ -137,6 +139,10 @@ export default function ControlPage() {
 
         <TabsContent value="media" forceMount>
           <MediaPanel />
+        </TabsContent>
+
+        <TabsContent value="reports">
+          <ProofOfPlayPanel />
         </TabsContent>
       </Tabs>
     </main>

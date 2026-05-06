@@ -124,19 +124,71 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
   ledger.bySponsorSec[payload.sponsorId] = prev + add;
 
   const ac = ledger.activeClip;
+  let expectedSecForLog = 0;
   if (
     ac &&
     ac.clipSessionId === payload.clipSessionId &&
     ac.sponsorId === payload.sponsorId &&
     ac.mediaId === payload.mediaId
   ) {
+    expectedSecForLog = Math.max(0, Math.round(ac.expectedPlaySec || 0));
     ledger.activeClip = null;
   }
 
   ledger.updatedAtMs = Date.now();
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
+
+  // Proof-of-play: persistente log voor rapporten naar adverteerders.
+  void persistSponsorPlayLog(payload, expectedSecForLog).catch((err) => {
+    console.warn("[runtime] kon proof-of-play niet opslaan", err);
+  });
+
   return ledger;
+}
+
+async function persistSponsorPlayLog(
+  payload: SponsorTelemetryClipEnd,
+  expectedSec: number,
+): Promise<void> {
+  const [sponsor, media, match] = await Promise.all([
+    prisma.sponsor.findUnique({
+      where: { id: payload.sponsorId },
+      select: { name: true },
+    }),
+    prisma.mediaItem.findUnique({
+      where: { id: payload.mediaId },
+      select: { title: true, durationSec: true },
+    }),
+    prisma.match.findUnique({
+      where: { id: payload.matchId },
+      select: { status: true },
+    }),
+  ]);
+
+  await prisma.sponsorPlayLog.upsert({
+    where: { clipSessionId: payload.clipSessionId },
+    create: {
+      matchId: payload.matchId,
+      sponsorId: payload.sponsorId,
+      mediaId: payload.mediaId,
+      sponsorName: sponsor?.name ?? "(verwijderd)",
+      mediaTitle: media?.title ?? "(verwijderd)",
+      segmentKey: payload.segmentKey,
+      matchStatus: match?.status ?? null,
+      expectedSec: expectedSec || media?.durationSec || 0,
+      actualSec: Math.max(0, Math.round(payload.actualSec)),
+      startedAt: new Date(payload.startedAtMs),
+      endedAt: new Date(),
+      clipSessionId: payload.clipSessionId,
+    },
+    update: {
+      // Idempotent: bij rare retries niet opnieuw boeken, maar wel actualSec verhogen
+      // als we een correctere meting hebben.
+      actualSec: Math.max(0, Math.round(payload.actualSec)),
+      endedAt: new Date(),
+    },
+  });
 }
 
 function broadcastSponsorLedger() {
@@ -290,6 +342,11 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("AppSettings", "secondHalfSponsorSec", "INTEGER NOT NULL DEFAULT 15");
   await addColumnIfMissing("AppSettings", "liveCycleLegacyImported", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("AppSettings", "scoreboardThemeJson", "TEXT");
+  await addColumnIfMissing("AppSettings", "displayCanvasWidth", "INTEGER NOT NULL DEFAULT 1920");
+  await addColumnIfMissing("AppSettings", "displayCanvasHeight", "INTEGER NOT NULL DEFAULT 1080");
+  await addColumnIfMissing("AppSettings", "displayScalingMode", `TEXT NOT NULL DEFAULT 'cover'`);
+  await addColumnIfMissing("AppSettings", "displaySafeZoneVisible", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("AppSettings", "displaySafeZoneMarginPx", "INTEGER NOT NULL DEFAULT 40");
   await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "safeMode", "BOOLEAN NOT NULL DEFAULT 0");
@@ -325,6 +382,43 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("Sponsor", "matchFirstHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Sponsor", "matchSecondHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
   await migrateSponsorMatchHalfFromLegacy();
+
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPlayLog" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "matchId" TEXT,
+    "sponsorId" TEXT,
+    "mediaId" TEXT,
+    "sponsorName" TEXT NOT NULL,
+    "mediaTitle" TEXT NOT NULL,
+    "segmentKey" TEXT NOT NULL,
+    "matchStatus" TEXT,
+    "expectedSec" INTEGER NOT NULL,
+    "actualSec" INTEGER NOT NULL,
+    "startedAt" DATETIME NOT NULL,
+    "endedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "clipSessionId" TEXT NOT NULL,
+    CONSTRAINT "SponsorPlayLog_matchId_fkey"
+      FOREIGN KEY ("matchId") REFERENCES "Match" ("id")
+      ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "SponsorPlayLog_sponsorId_fkey"
+      FOREIGN KEY ("sponsorId") REFERENCES "Sponsor" ("id")
+      ON DELETE SET NULL ON UPDATE CASCADE,
+    CONSTRAINT "SponsorPlayLog_mediaId_fkey"
+      FOREIGN KEY ("mediaId") REFERENCES "MediaItem" ("id")
+      ON DELETE SET NULL ON UPDATE CASCADE
+  )`);
+  await prisma.$executeRawUnsafe(
+    `CREATE UNIQUE INDEX IF NOT EXISTS "SponsorPlayLog_clipSessionId_key" ON "SponsorPlayLog" ("clipSessionId")`,
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_matchId_idx" ON "SponsorPlayLog" ("matchId")`,
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_sponsorId_idx" ON "SponsorPlayLog" ("sponsorId")`,
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_endedAt_idx" ON "SponsorPlayLog" ("endedAt")`,
+  );
 }
 
 /** Eénmalig: oude enkelvoudige matchSeconds → 1e helft als nieuwe velden nog 0 zijn. */
@@ -441,6 +535,11 @@ type AppSettingsRow = {
   secondHalfScoreboardSec?: number | null;
   secondHalfSponsorSec?: number | null;
   scoreboardThemeJson?: string | null;
+  displayCanvasWidth?: number | null;
+  displayCanvasHeight?: number | null;
+  displayScalingMode?: string | null;
+  displaySafeZoneVisible?: boolean | number | null;
+  displaySafeZoneMarginPx?: number | null;
 };
 
 function defaultLiveCycle(): LiveCycleStored {
@@ -475,6 +574,11 @@ async function getAppSettings(): Promise<{
   goalVisualHomeEnabled: boolean;
   goalVisualAwayEnabled: boolean;
   scoreboardThemeJson: string | null;
+  displayCanvasWidth: number;
+  displayCanvasHeight: number;
+  displayScalingMode: "cover" | "contain" | "exact";
+  displaySafeZoneVisible: boolean;
+  displaySafeZoneMarginPx: number;
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
@@ -483,10 +587,14 @@ async function getAppSettings(): Promise<{
       "firstHalfScoreboardSec", "firstHalfSponsorSec",
       "halftimeScoreboardSec", "halftimeSponsorSec",
       "secondHalfScoreboardSec", "secondHalfSponsorSec",
-      "scoreboardThemeJson"
+      "scoreboardThemeJson",
+      "displayCanvasWidth", "displayCanvasHeight",
+      "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx"
      FROM "AppSettings" WHERE "id" = 1`,
   );
   const row = rows[0];
+  const normalizeMode = (raw: string | null | undefined): "cover" | "contain" | "exact" =>
+    raw === "contain" || raw === "exact" ? raw : "cover";
   if (row) {
     return {
       id: row.id,
@@ -501,6 +609,12 @@ async function getAppSettings(): Promise<{
       halftimeSponsorSec: row.halftimeSponsorSec ?? defaults.halftimeSponsorSec,
       secondHalfScoreboardSec: row.secondHalfScoreboardSec ?? defaults.secondHalfScoreboardSec,
       secondHalfSponsorSec: row.secondHalfSponsorSec ?? defaults.secondHalfSponsorSec,
+      displayCanvasWidth: row.displayCanvasWidth ?? 1920,
+      displayCanvasHeight: row.displayCanvasHeight ?? 1080,
+      displayScalingMode: normalizeMode(row.displayScalingMode),
+      displaySafeZoneVisible:
+        row.displaySafeZoneVisible == null ? false : Boolean(row.displaySafeZoneVisible),
+      displaySafeZoneMarginPx: row.displaySafeZoneMarginPx ?? 40,
     };
   }
   await prisma.$executeRawUnsafe(
@@ -513,6 +627,11 @@ async function getAppSettings(): Promise<{
     goalVisualHomeEnabled: true,
     goalVisualAwayEnabled: false,
     scoreboardThemeJson: null,
+    displayCanvasWidth: 1920,
+    displayCanvasHeight: 1080,
+    displayScalingMode: "cover",
+    displaySafeZoneVisible: false,
+    displaySafeZoneMarginPx: 40,
     ...defaults,
   };
 }
@@ -536,6 +655,45 @@ async function setGoalVisualEnabled(side: "home" | "away", enabled: boolean) {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "${column}" = ? WHERE "id" = 1`,
     enabled ? 1 : 0,
+  );
+}
+
+async function setDisplayCanvas(patch: {
+  width?: number;
+  height?: number;
+  mode?: "cover" | "contain" | "exact";
+  safeZoneVisible?: boolean;
+  safeZoneMarginPx?: number;
+}) {
+  const columns: string[] = [];
+  const values: (number | string)[] = [];
+  if (typeof patch.width === "number" && Number.isFinite(patch.width)) {
+    columns.push(`"displayCanvasWidth" = ?`);
+    values.push(Math.max(320, Math.round(patch.width)));
+  }
+  if (typeof patch.height === "number" && Number.isFinite(patch.height)) {
+    columns.push(`"displayCanvasHeight" = ?`);
+    values.push(Math.max(240, Math.round(patch.height)));
+  }
+  if (patch.mode === "cover" || patch.mode === "contain" || patch.mode === "exact") {
+    columns.push(`"displayScalingMode" = ?`);
+    values.push(patch.mode);
+  }
+  if (typeof patch.safeZoneVisible === "boolean") {
+    columns.push(`"displaySafeZoneVisible" = ?`);
+    values.push(patch.safeZoneVisible ? 1 : 0);
+  }
+  if (
+    typeof patch.safeZoneMarginPx === "number" &&
+    Number.isFinite(patch.safeZoneMarginPx)
+  ) {
+    columns.push(`"displaySafeZoneMarginPx" = ?`);
+    values.push(Math.max(0, Math.round(patch.safeZoneMarginPx)));
+  }
+  if (columns.length === 0) return;
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET ${columns.join(", ")} WHERE "id" = 1`,
+    ...values,
   );
 }
 
@@ -667,6 +825,156 @@ export function disposeDesktopRuntime() {
   sponsorClipEndedSessions.clear();
 }
 
+type SponsorPlayFilters = {
+  matchId?: string;
+  sponsorId?: string;
+  segmentKey?: string;
+  fromIso?: string;
+  toIso?: string;
+};
+
+function parseSponsorPlayFilters(params: URLSearchParams): SponsorPlayFilters {
+  return {
+    matchId: params.get("matchId") ?? undefined,
+    sponsorId: params.get("sponsorId") ?? undefined,
+    segmentKey: params.get("segmentKey") ?? undefined,
+    fromIso: params.get("from") ?? undefined,
+    toIso: params.get("to") ?? undefined,
+  };
+}
+
+function buildSponsorPlayWhere(f: SponsorPlayFilters) {
+  const where: Record<string, unknown> = {};
+  if (f.matchId) where.matchId = f.matchId;
+  if (f.sponsorId) where.sponsorId = f.sponsorId;
+  if (f.segmentKey) where.segmentKey = { startsWith: f.segmentKey };
+  if (f.fromIso || f.toIso) {
+    const range: Record<string, Date> = {};
+    if (f.fromIso) {
+      const d = new Date(f.fromIso);
+      if (!Number.isNaN(d.valueOf())) range.gte = d;
+    }
+    if (f.toIso) {
+      const d = new Date(f.toIso);
+      if (!Number.isNaN(d.valueOf())) range.lte = d;
+    }
+    if (Object.keys(range).length > 0) where.endedAt = range;
+  }
+  return where;
+}
+
+async function handleSponsorPlaysList(
+  params: URLSearchParams,
+): Promise<DesktopApiResponse> {
+  const filters = parseSponsorPlayFilters(params);
+  const limit = Math.min(2000, Math.max(1, Number(params.get("limit") ?? 500)));
+  const rows = await prisma.sponsorPlayLog.findMany({
+    where: buildSponsorPlayWhere(filters),
+    orderBy: { endedAt: "desc" },
+    take: limit,
+    include: {
+      match: {
+        select: {
+          id: true,
+          kickoffAt: true,
+          homeTeam: { select: { name: true, shortName: true } },
+          awayTeam: { select: { name: true, shortName: true } },
+        },
+      },
+    },
+  });
+  return json(200, { rows });
+}
+
+async function handleSponsorPlaysSummary(
+  params: URLSearchParams,
+): Promise<DesktopApiResponse> {
+  const filters = parseSponsorPlayFilters(params);
+  const grouped = await prisma.sponsorPlayLog.groupBy({
+    by: ["sponsorId", "sponsorName"],
+    where: buildSponsorPlayWhere(filters),
+    _count: { _all: true },
+    _sum: { actualSec: true, expectedSec: true },
+  });
+  const rows = grouped
+    .map((g) => ({
+      sponsorId: g.sponsorId,
+      sponsorName: g.sponsorName,
+      plays: g._count._all,
+      actualSec: g._sum.actualSec ?? 0,
+      expectedSec: g._sum.expectedSec ?? 0,
+    }))
+    .sort((a, b) => b.actualSec - a.actualSec);
+  return json(200, { rows });
+}
+
+function csvEscape(value: unknown): string {
+  if (value == null) return "";
+  const s = String(value);
+  if (/[",\n;]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+async function handleSponsorPlaysCsv(
+  params: URLSearchParams,
+): Promise<DesktopApiResponse> {
+  const filters = parseSponsorPlayFilters(params);
+  const rows = await prisma.sponsorPlayLog.findMany({
+    where: buildSponsorPlayWhere(filters),
+    orderBy: { endedAt: "asc" },
+    include: {
+      match: {
+        select: {
+          kickoffAt: true,
+          homeTeam: { select: { name: true } },
+          awayTeam: { select: { name: true } },
+        },
+      },
+    },
+  });
+
+  const header = [
+    "Sponsor",
+    "Media",
+    "Wedstrijd",
+    "Kickoff",
+    "Match-fase",
+    "Match-status",
+    "Verwacht (s)",
+    "Werkelijk (s)",
+    "Gestart op",
+    "Beëindigd op",
+    "Sessie-id",
+  ];
+  const lines: string[] = [header.map(csvEscape).join(",")];
+  for (const r of rows) {
+    const matchLabel = r.match
+      ? `${r.match.homeTeam.name} vs ${r.match.awayTeam.name}`
+      : "";
+    const kickoff = r.match?.kickoffAt ? r.match.kickoffAt.toISOString() : "";
+    lines.push(
+      [
+        r.sponsorName,
+        r.mediaTitle,
+        matchLabel,
+        kickoff,
+        r.segmentKey,
+        r.matchStatus ?? "",
+        r.expectedSec,
+        r.actualSec,
+        r.startedAt.toISOString(),
+        r.endedAt.toISOString(),
+        r.clipSessionId,
+      ]
+        .map(csvEscape)
+        .join(","),
+    );
+  }
+  // BOM zodat Excel/Numbers UTF-8 correct interpreteert.
+  const csv = "\ufeff" + lines.join("\r\n");
+  return text(200, csv, "text/csv; charset=utf-8");
+}
+
 function json(status: number, value: unknown): DesktopApiResponse {
   return {
     status,
@@ -766,6 +1074,11 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         secondHalfScoreboardSec: settings.secondHalfScoreboardSec,
         secondHalfSponsorSec: settings.secondHalfSponsorSec,
         scoreboardThemeJson: settings.scoreboardThemeJson,
+        displayCanvasWidth: settings.displayCanvasWidth,
+        displayCanvasHeight: settings.displayCanvasHeight,
+        displayScalingMode: settings.displayScalingMode,
+        displaySafeZoneVisible: settings.displaySafeZoneVisible,
+        displaySafeZoneMarginPx: settings.displaySafeZoneMarginPx,
       });
     }
 
@@ -785,6 +1098,11 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           secondHalfScoreboardSec?: number;
           secondHalfSponsorSec?: number;
           scoreboardThemeJson?: string | null;
+          displayCanvasWidth?: number;
+          displayCanvasHeight?: number;
+          displayScalingMode?: "cover" | "contain" | "exact";
+          displaySafeZoneVisible?: boolean;
+          displaySafeZoneMarginPx?: number;
         }) ?? {};
       if ("homeTeamId" in body) {
         const homeTeamId = body.homeTeamId ?? null;
@@ -820,6 +1138,21 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         "secondHalfSponsorSec" in body ||
         "matchLiveScoreboardSec" in body ||
         "matchLiveSponsorSec" in body;
+      if (
+        "displayCanvasWidth" in body ||
+        "displayCanvasHeight" in body ||
+        "displayScalingMode" in body ||
+        "displaySafeZoneVisible" in body ||
+        "displaySafeZoneMarginPx" in body
+      ) {
+        await setDisplayCanvas({
+          width: body.displayCanvasWidth,
+          height: body.displayCanvasHeight,
+          mode: body.displayScalingMode,
+          safeZoneVisible: body.displaySafeZoneVisible,
+          safeZoneMarginPx: body.displaySafeZoneMarginPx,
+        });
+      }
       if (patchLiveCycle) {
         const cur = await getAppSettings();
         let next: LiveCycleStored = {
@@ -861,6 +1194,11 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         secondHalfScoreboardSec: settings.secondHalfScoreboardSec,
         secondHalfSponsorSec: settings.secondHalfSponsorSec,
         scoreboardThemeJson: settings.scoreboardThemeJson,
+        displayCanvasWidth: settings.displayCanvasWidth,
+        displayCanvasHeight: settings.displayCanvasHeight,
+        displayScalingMode: settings.displayScalingMode,
+        displaySafeZoneVisible: settings.displaySafeZoneVisible,
+        displaySafeZoneMarginPx: settings.displaySafeZoneMarginPx,
       });
     }
 
@@ -1385,6 +1723,16 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
 
     if (pathname === "/api/localfile") {
       return json(501, { error: "Desktop build gebruikt directe bestands-URL's, geen proxy route." });
+    }
+
+    if (pathname === "/api/sponsor-plays" && method === "GET") {
+      return await handleSponsorPlaysList(searchParams);
+    }
+    if (pathname === "/api/sponsor-plays/export.csv" && method === "GET") {
+      return await handleSponsorPlaysCsv(searchParams);
+    }
+    if (pathname === "/api/sponsor-plays/summary" && method === "GET") {
+      return await handleSponsorPlaysSummary(searchParams);
     }
 
     return json(404, { error: "Unknown API route" });

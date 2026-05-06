@@ -23,6 +23,14 @@ export type AppSettings = {
   secondHalfSponsorSec: number;
   /** JSON-string; zie lib/scoreboard-theme.ts */
   scoreboardThemeJson?: string | null;
+  /** Logisch canvas voor stadiondisplay (default 1920×1080). Pas aan voor exotische LED-formaten. */
+  displayCanvasWidth?: number;
+  displayCanvasHeight?: number;
+  /** Scaling-modus: 'cover' (vult, kan croppen), 'contain' (alles zichtbaar, mogelijk rand), 'exact' (1:1, pixel-perfect). */
+  displayScalingMode?: "cover" | "contain" | "exact";
+  /** Toon safe-zone overlay op stadiondisplay (handig tijdens setup van LED-cabinets). */
+  displaySafeZoneVisible?: boolean;
+  displaySafeZoneMarginPx?: number;
 };
 
 export type Player = {

@@ -58,6 +58,7 @@ model Match {
   /// JSON string[] — spelers op het veld (uit).
   awayFieldPlayerIdsJson String?
   events          MatchEvent[]
+  sponsorPlays    SponsorPlayLog[]
   createdAt       DateTime     @default(now())
 }
 
@@ -93,6 +94,7 @@ model MediaItem {
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
   scheduledCues ScheduledMediaCue[]
+  playLogs    SponsorPlayLog[]
 }
 
 model ScheduledMediaCue {
@@ -124,6 +126,7 @@ model Sponsor {
   secondHalfSponsorSec     Int?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
+  playLogs          SponsorPlayLog[]
 }
 
 model Playlist {
@@ -185,4 +188,44 @@ model AppSettings {
   liveCycleLegacyImported  Int     @default(0)
   /// JSON ScoreboardTheme — kleuren, lettertype, afmetingen, volgorde blokken scorebord.
   scoreboardThemeJson      String?
+  /// Logische canvas-breedte voor LED-output (default 1920). Pas aan voor exotische LED-formaten.
+  displayCanvasWidth       Int     @default(1920)
+  displayCanvasHeight      Int     @default(1080)
+  /// Scaling-modus voor het stadiondisplay: 'cover' (vult, kan croppen), 'contain' (volledig zichtbaar, zwarte rand), 'exact' (geen scaling, pixel-perfect 1:1).
+  displayScalingMode       String  @default("cover")
+  /// Toon safe-zone overlay (alleen tijdens setup) als hulplijn voor LED-canvas.
+  displaySafeZoneVisible   Boolean @default(false)
+  /// Safe-zone marges in pixels van het logische canvas.
+  displaySafeZoneMarginPx  Int     @default(40)
+}
+
+/// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.
+/// Voor rapportering naar adverteerders en facturatie.
+model SponsorPlayLog {
+  id             String   @id @default(cuid())
+  matchId        String?
+  match          Match?   @relation(fields: [matchId], references: [id], onDelete: SetNull)
+  sponsorId      String?
+  sponsor        Sponsor? @relation(fields: [sponsorId], references: [id], onDelete: SetNull)
+  mediaId        String?
+  media          MediaItem? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  /// Snapshot van de naam/titel zodat rapporten leesbaar blijven na verwijdering.
+  sponsorName    String
+  mediaTitle     String
+  /// Match-fase op moment van afspelen: prematch / match / halftime / postmatch.
+  segmentKey     String
+  matchStatus    String?
+  /// Verwachte clipduur (uit media-instellingen).
+  expectedSec    Int
+  /// Werkelijke afgespeelde tijd in seconden (afgekapt op werkelijke duur door interrupts).
+  actualSec      Int
+  /// Begin- en eindtijdstempel voor audit-trail.
+  startedAt      DateTime
+  endedAt        DateTime @default(now())
+  /// Unieke sessie-id voor deduplicatie.
+  clipSessionId  String   @unique
+
+  @@index([matchId])
+  @@index([sponsorId])
+  @@index([endedAt])
 }

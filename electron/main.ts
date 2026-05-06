@@ -446,6 +446,41 @@ function registerIpc() {
   });
 
   ipcMain.handle(
+    "sponsorPlays:export",
+    async (_, payload: { queryString?: string }) => {
+      if (!runtime) throw new Error("Runtime not initialized");
+      const search = payload.queryString
+        ? payload.queryString.startsWith("?")
+          ? payload.queryString
+          : `?${payload.queryString}`
+        : "";
+      const res = await runtime.apiRequest({
+        method: "GET",
+        path: "/api/sponsor-plays/export.csv",
+        search,
+      });
+      if (res.status !== 200 || typeof res.text !== "string") {
+        return { canceled: true };
+      }
+      const win = BrowserWindow.getFocusedWindow() ?? controlWindow;
+      const stamp = new Date().toISOString().slice(0, 10);
+      const options = {
+        defaultPath: `proof-of-play-${stamp}.csv`,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      };
+      const saveResult = win
+        ? await dialog.showSaveDialog(win, options)
+        : await dialog.showSaveDialog(options);
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { canceled: true };
+      }
+      fs.writeFileSync(saveResult.filePath, res.text, "utf8");
+      await shell.showItemInFolder(saveResult.filePath);
+      return { canceled: false, filePath: saveResult.filePath };
+    },
+  );
+
+  ipcMain.handle(
     "match:export",
     async (_, payload: { matchId: string; format: ExportFormat }) => {
       if (!runtime) throw new Error("Runtime not initialized");

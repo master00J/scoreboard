@@ -14,6 +14,7 @@ import { isElectron, selectFilesViaDialog, selectFolderViaDialog } from "@/lib/e
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
 import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
+import { SetupDisplayCanvasSection } from "./setup-display-canvas";
 import { AssetHealthCheck } from "./asset-health-check";
 
 type VisualField = "goalVideoPath" | "subImagePath" | "lineupVideoPath";
@@ -237,6 +238,8 @@ export function SetupPanel() {
       </section>
 
       <SetupScoreboardThemeSection settings={settings} reloadSettings={reloadSettings} />
+
+      <SetupDisplayCanvasSection settings={settings ?? null} reloadSettings={reloadSettings} />
 
       <section className="bg-card border border-border rounded-xl p-6">
         <h2 className="text-lg font-semibold mb-3">Pre-match check</h2>

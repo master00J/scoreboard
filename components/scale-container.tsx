@@ -3,20 +3,36 @@
 import { useEffect, useRef, useState } from "react";
 
 type ScaleVariant = "fullscreen" | "embedded";
+export type ScalingMode = "cover" | "contain" | "exact";
 
 /**
- * Fixed 1920×1080 logisch canvas.
- * - `fullscreen` (projector): schaal **cover** (`Math.max`) — vult het venster, geen zwarte rand door aspectverschil.
- * - `embedded` (live preview in control): **contain** (`Math.min`) — hele scorebord zichtbaar in het vak.
+ * Configureerbaar logisch canvas voor LED/projectie-output.
+ * - `fullscreen` (stadiondisplay): standaard **cover** (vult, kan croppen).
+ *   Met scalingMode=`contain`: alles zichtbaar, eventueel zwarte rand bij afwijkende aspect.
+ *   Met scalingMode=`exact`: geen scaling, pixel-perfect 1:1 (ideaal voor native LED-resolutie).
+ * - `embedded` (preview): altijd `contain` voor controlepaneel.
+ *
+ * Safe zone: optionele rand-overlay (alleen tijdens setup) als hulplijn voor LED-canvas
+ * waarbij randen door de cabinets niet zichtbaar zijn.
  */
 export function ScaleContainer({
   children,
   background = "#000",
   variant = "fullscreen",
+  width = 1920,
+  height = 1080,
+  scalingMode = "cover",
+  safeZoneVisible = false,
+  safeZoneMarginPx = 40,
 }: {
   children: React.ReactNode;
   background?: string;
   variant?: ScaleVariant;
+  width?: number;
+  height?: number;
+  scalingMode?: ScalingMode;
+  safeZoneVisible?: boolean;
+  safeZoneMarginPx?: number;
 }) {
   const outerRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
@@ -24,15 +40,23 @@ export function ScaleContainer({
   useEffect(() => {
     function update() {
       if (variant === "fullscreen") {
+        if (scalingMode === "exact") {
+          setScale(1);
+          return;
+        }
         const w = window.innerWidth;
         const h = window.innerHeight;
-        setScale(Math.max(w / 1920, h / 1080) || 1);
+        const calc =
+          scalingMode === "contain"
+            ? Math.min(w / width, h / height)
+            : Math.max(w / width, h / height);
+        setScale(calc || 1);
         return;
       }
       const el = outerRef.current;
       if (!el) return;
       const r = el.getBoundingClientRect();
-      const s = Math.min(r.width / 1920, r.height / 1080);
+      const s = Math.min(r.width / width, r.height / height);
       setScale(s > 0 ? s : 1);
     }
 
@@ -51,10 +75,44 @@ export function ScaleContainer({
       ro.disconnect();
       window.removeEventListener("resize", update);
     };
-  }, [variant]);
+  }, [variant, width, height, scalingMode]);
 
-  const clipW = 1920 * scale;
-  const clipH = 1080 * scale;
+  const clipW = width * scale;
+  const clipH = height * scale;
+
+  const safeZone = safeZoneVisible ? (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        left: safeZoneMarginPx,
+        top: safeZoneMarginPx,
+        right: safeZoneMarginPx,
+        bottom: safeZoneMarginPx,
+        border: "2px dashed rgba(34, 197, 94, 0.85)",
+        borderRadius: 6,
+        pointerEvents: "none",
+        zIndex: 200,
+        boxShadow: "0 0 0 9999px rgba(220, 38, 38, 0.10)",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          top: 4,
+          left: 8,
+          fontFamily: "ui-monospace, monospace",
+          fontSize: 14,
+          color: "rgba(34, 197, 94, 0.95)",
+          background: "rgba(0,0,0,0.55)",
+          padding: "2px 6px",
+          borderRadius: 4,
+        }}
+      >
+        SAFE ZONE · {width}×{height}
+      </div>
+    </div>
+  ) : null;
 
   const scaledLogical = (
     <div
@@ -67,8 +125,8 @@ export function ScaleContainer({
     >
       <div
         style={{
-          width: 1920,
-          height: 1080,
+          width,
+          height,
           transform: `scale(${scale})`,
           transformOrigin: "0 0",
           position: "absolute",
@@ -78,6 +136,7 @@ export function ScaleContainer({
         }}
       >
         {children}
+        {safeZone}
       </div>
     </div>
   );

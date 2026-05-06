@@ -37,6 +37,7 @@ const bridge: ElectronBridge = {
   onDisplayError: (listener) => subscribe("display:error", listener),
   focusDisplayWindow: () => ipcRenderer.invoke("window:focusDisplay"),
   reloadDisplayWindow: () => ipcRenderer.invoke("window:reloadDisplay"),
+  exportSponsorPlays: (opts) => ipcRenderer.invoke("sponsorPlays:export", opts),
   exportMatch: (opts) => ipcRenderer.invoke("match:export", opts),
   getDesktopCaptureSources: () => ipcRenderer.invoke("desktop:getCaptureSources"),
   reportSponsorClipStart: (payload) => ipcRenderer.invoke("display:sponsorClipStart", payload),
