@@ -1059,6 +1059,215 @@ h2 {
   outline-offset: 3px;
 }
 
+.cookie-banner {
+  position: fixed;
+  inset: auto 16px 16px 16px;
+  z-index: 70;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.cookie-banner-inner {
+  pointer-events: auto;
+  width: min(880px, 100%);
+  background: linear-gradient(
+    180deg,
+    rgba(13, 21, 33, 0.96),
+    rgba(8, 14, 23, 0.96)
+  );
+  border: 1px solid var(--line-strong);
+  border-radius: 22px;
+  padding: 22px 24px;
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(34, 211, 238, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.cookie-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cookie-banner-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: var(--text);
+}
+
+.cookie-banner-lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
+.cookie-banner-lead a {
+  color: var(--cyan);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(34, 211, 238, 0.45);
+  padding-bottom: 1px;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.cookie-banner-lead a:hover {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.cookie-banner-preferences {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(8, 14, 23, 0.6);
+}
+
+.cookie-toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 0.92rem;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.cookie-toggle-row input[type="checkbox"] {
+  margin-top: 4px;
+  width: 18px;
+  height: 18px;
+  accent-color: #22d3ee;
+  cursor: pointer;
+}
+
+.cookie-toggle-row input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.cookie-toggle-row span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.4;
+}
+
+.cookie-toggle-row strong {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.cookie-toggle-row small {
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.cookie-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.cookie-btn {
+  margin: 0;
+  padding: 10px 20px;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border-radius: 999px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.15s ease;
+}
+
+.cookie-btn:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+}
+
+.cookie-btn.ghost {
+  background: transparent;
+  border-color: var(--line-strong);
+  color: var(--muted);
+}
+
+.cookie-btn.ghost:hover {
+  color: var(--text);
+  border-color: rgba(34, 211, 238, 0.45);
+  background: rgba(25, 216, 255, 0.06);
+}
+
+.cookie-btn.secondary {
+  background: rgba(25, 216, 255, 0.08);
+  border-color: var(--line-strong);
+  color: var(--cyan);
+}
+
+.cookie-btn.secondary:hover {
+  background: rgba(25, 216, 255, 0.16);
+  border-color: rgba(34, 211, 238, 0.6);
+  color: var(--text);
+}
+
+.cookie-btn.primary {
+  background: linear-gradient(135deg, #22d3ee, #34d399);
+  color: #03121b;
+  border-color: transparent;
+  box-shadow: 0 12px 28px rgba(34, 211, 238, 0.25);
+}
+
+.cookie-btn.primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px rgba(34, 211, 238, 0.35);
+}
+
+.cookie-btn.close-only {
+  margin-left: auto;
+}
+
+@media (max-width: 600px) {
+  .cookie-banner {
+    inset: auto 8px 8px 8px;
+  }
+
+  .cookie-banner-inner {
+    padding: 18px 18px 16px;
+    border-radius: 18px;
+  }
+
+  .cookie-banner-actions {
+    justify-content: stretch;
+  }
+
+  .cookie-btn {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .cookie-btn.close-only {
+    margin-left: 0;
+  }
+}
+
 .legal-page {
   max-width: var(--layout-max);
   width: 100%;
