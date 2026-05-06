@@ -13,6 +13,21 @@ function fullName(player) {
   return `#${player.number} ${player.firstName} ${player.lastName}`;
 }
 
+function applyCustomerPairCode(raw) {
+  const input = (raw ?? "").trim();
+  if (!input.startsWith("ACPAIR:")) {
+    throw new Error("Geen geldige ACPAIR-code.");
+  }
+  const payload = input.slice("ACPAIR:".length);
+  const [rawBaseUrl, rawVenueId] = payload.split("|");
+  const baseUrl = decodeURIComponent(String(rawBaseUrl ?? "")).trim();
+  const venueId = decodeURIComponent(String(rawVenueId ?? "")).trim();
+  if (!baseUrl || !venueId) {
+    throw new Error("ACPAIR-code mist baseUrl of venueId.");
+  }
+  return { baseUrl, venueId };
+}
+
 async function callBridge(baseUrl, sessionToken, path, method = "GET", body) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
@@ -34,6 +49,7 @@ export default function App() {
   const [connectionMode, setConnectionMode] = useState("cloud");
   const [venueId, setVenueId] = useState(defaultVenueId);
   const [pairingCode, setPairingCode] = useState(defaultPairingCode);
+  const [customerPairCode, setCustomerPairCode] = useState("");
   const [operatorPin, setOperatorPin] = useState("");
   const [role, setRole] = useState("viewer");
   const [sessionToken, setSessionToken] = useState("");
@@ -166,6 +182,18 @@ export default function App() {
     }
   }
 
+  function applyPairCodeFromInput() {
+    try {
+      const parsed = applyCustomerPairCode(customerPairCode);
+      setConnectionMode("cloud");
+      setBaseUrl(parsed.baseUrl);
+      setVenueId(parsed.venueId);
+      setStatus("Koppelcode toegepast. Kies rol en klik Koppel toestel.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -254,6 +282,18 @@ export default function App() {
             placeholder="http://192.168.x.x:17890"
             placeholderTextColor="#666"
           />
+          <Text style={styles.label}>Klant-koppelcode (aanbevolen)</Text>
+          <TextInput
+            style={styles.input}
+            value={customerPairCode}
+            onChangeText={setCustomerPairCode}
+            autoCapitalize="none"
+            placeholder="ACPAIR:..."
+            placeholderTextColor="#666"
+          />
+          <Pressable style={styles.buttonSecondary} onPress={applyPairCodeFromInput}>
+            <Text style={styles.buttonText}>Gebruik koppelcode</Text>
+          </Pressable>
           <Text style={styles.label}>Connectiemodus</Text>
           <View style={styles.row}>
             <Pressable style={[styles.buttonSecondary, connectionMode === "cloud" ? styles.activeBorder : null]} onPress={() => setConnectionMode("cloud")}>

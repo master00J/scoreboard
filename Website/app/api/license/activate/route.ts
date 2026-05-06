@@ -14,6 +14,15 @@ const cors = {
   "Access-Control-Allow-Headers": "Content-Type",
 } as const;
 
+function controlConfigFor(machineId: string, licenseId: string) {
+  const desktopKey = process.env.CONTROL_DESKTOP_KEY?.trim();
+  if (!desktopKey) return null;
+  const baseUrl =
+    process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "") || "https://arenacue.be";
+  const venueId = `v-${licenseId.slice(0, 8)}-${machineId.slice(0, 6)}`.toLowerCase();
+  return { cloudBaseUrl: baseUrl, desktopKey, venueId };
+}
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: cors });
 }
@@ -86,6 +95,7 @@ export async function POST(request: Request) {
           plan: lic.row.plan,
           validUntil: lic.row.valid_until,
         },
+        control: controlConfigFor(machineId, lic.row.id),
       },
       { headers: cors },
     );
@@ -125,6 +135,7 @@ export async function POST(request: Request) {
               plan: lic.row.plan,
               validUntil: lic.row.valid_until,
             },
+            control: controlConfigFor(machineId, lic.row.id),
           },
           { headers: cors },
         );
@@ -146,6 +157,7 @@ export async function POST(request: Request) {
         plan: lic.row.plan,
         validUntil: lic.row.valid_until,
       },
+      control: controlConfigFor(machineId, lic.row.id),
     },
     { headers: cors },
   );

@@ -27,6 +27,10 @@ export type StoredLicense = {
   planLabel?: string;
   /** Snapshot van server-featurevlaggen bij laatste geslaagde check. */
   features?: Record<string, boolean>;
+  /** Auto-provisioned cloud-control config (licentie-activate/check). */
+  controlCloudBaseUrl?: string;
+  controlDesktopKey?: string;
+  controlVenueId?: string;
 };
 
 export function skipLicenseGateFromEnv(): boolean {
@@ -106,6 +110,23 @@ function parsePublicLicenseBundle(lic: Record<string, unknown>): {
   return { organizationLabel, validUntil, plan, planLabel, features };
 }
 
+function parseControlBundle(v: unknown): {
+  controlCloudBaseUrl?: string;
+  controlDesktopKey?: string;
+  controlVenueId?: string;
+} {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+  const rec = v as Record<string, unknown>;
+  const cloudBaseUrl = typeof rec.cloudBaseUrl === "string" ? rec.cloudBaseUrl.trim() : "";
+  const desktopKey = typeof rec.desktopKey === "string" ? rec.desktopKey.trim() : "";
+  const venueId = typeof rec.venueId === "string" ? rec.venueId.trim() : "";
+  return {
+    ...(cloudBaseUrl ? { controlCloudBaseUrl: cloudBaseUrl.replace(/\/+$/, "") } : {}),
+    ...(desktopKey ? { controlDesktopKey: desktopKey } : {}),
+    ...(venueId ? { controlVenueId: venueId } : {}),
+  };
+}
+
 async function postJson(url: string, body: unknown): Promise<{ ok: boolean; status: number; json: unknown }> {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -136,6 +157,9 @@ export async function remoteLicenseCheck(
       plan?: string;
       planLabel?: string;
       features?: Record<string, boolean>;
+      controlCloudBaseUrl?: string;
+      controlDesktopKey?: string;
+      controlVenueId?: string;
     }
   | { kind: "error"; message: string; reason?: string }
   | { kind: "network" }
@@ -164,6 +188,7 @@ export async function remoteLicenseCheck(
       ...(snap.plan !== undefined ? { plan: snap.plan } : {}),
       ...(snap.planLabel !== undefined ? { planLabel: snap.planLabel } : {}),
       ...(snap.features !== undefined ? { features: snap.features } : {}),
+      ...parseControlBundle(o.control),
     };
   } catch {
     return { kind: "network" };
@@ -184,6 +209,9 @@ export async function remoteLicenseActivate(
       plan?: string;
       planLabel?: string;
       features?: Record<string, boolean>;
+      controlCloudBaseUrl?: string;
+      controlDesktopKey?: string;
+      controlVenueId?: string;
     }
   | { kind: "error"; message: string; reason?: string }
   | { kind: "network" }
@@ -212,6 +240,7 @@ export async function remoteLicenseActivate(
       ...(snap.plan !== undefined ? { plan: snap.plan } : {}),
       ...(snap.planLabel !== undefined ? { planLabel: snap.planLabel } : {}),
       ...(snap.features !== undefined ? { features: snap.features } : {}),
+      ...parseControlBundle(o.control),
     };
   } catch {
     return { kind: "network" };

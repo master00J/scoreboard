@@ -33,6 +33,12 @@ Voor cloudmodus (Optie A):
 - Vul `Venue ID` in
 - Log in als viewer/operator (operator met PIN)
 
+Sneller voor klanten:
+
+- gebruik de `ACPAIR:...` koppelcode uit de desktop `boot.log`
+- plak die in de app bij `Klant-koppelcode`
+- klik `Gebruik koppelcode`
+
 ## Netwerkvoorwaarden
 
 - Pc en telefoon op hetzelfde wifi-netwerk
@@ -76,9 +82,12 @@ Vereiste Website env vars:
 
 Vereiste desktop env vars:
 
-- `CONTROL_CLOUD_BASE_URL`
-- `CONTROL_DESKTOP_KEY`
-- `CONTROL_VENUE_ID`
+- Geen verplichte env vars per klant-pc als licentie online geactiveerd wordt:
+  desktop ontvangt cloud config automatisch via `/api/license/activate` en `/api/license/check`.
+- Alleen nodig als override/debug:
+  - `CONTROL_CLOUD_BASE_URL`
+  - `CONTROL_DESKTOP_KEY`
+  - `CONTROL_VENUE_ID`
 
 ## APK/AAB build (zonder Expo Go)
 

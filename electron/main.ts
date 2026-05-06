@@ -460,6 +460,7 @@ function registerIpc() {
         prefillLicenseKey: prev.licenseKey,
       };
     }
+    const prevLicense = licenseSvc.readStoredLicense(dir);
     licenseSvc.writeStoredLicense(dir, {
       licenseKey: prev.licenseKey,
       lastVerifiedAt: new Date().toISOString(),
@@ -467,6 +468,21 @@ function registerIpc() {
       ...(r.plan !== undefined ? { plan: r.plan } : {}),
       ...(r.planLabel !== undefined ? { planLabel: r.planLabel } : {}),
       ...(r.features !== undefined ? { features: r.features } : {}),
+      ...(r.controlCloudBaseUrl !== undefined
+        ? { controlCloudBaseUrl: r.controlCloudBaseUrl }
+        : prevLicense?.controlCloudBaseUrl !== undefined
+          ? { controlCloudBaseUrl: prevLicense.controlCloudBaseUrl }
+          : {}),
+      ...(r.controlDesktopKey !== undefined
+        ? { controlDesktopKey: r.controlDesktopKey }
+        : prevLicense?.controlDesktopKey !== undefined
+          ? { controlDesktopKey: prevLicense.controlDesktopKey }
+          : {}),
+      ...(r.controlVenueId !== undefined
+        ? { controlVenueId: r.controlVenueId }
+        : prevLicense?.controlVenueId !== undefined
+          ? { controlVenueId: prevLicense.controlVenueId }
+          : {}),
     });
     return {
       gate: false,
@@ -501,6 +517,9 @@ function registerIpc() {
       ...(r.plan !== undefined ? { plan: r.plan } : {}),
       ...(r.planLabel !== undefined ? { planLabel: r.planLabel } : {}),
       ...(r.features !== undefined ? { features: r.features } : {}),
+      ...(r.controlCloudBaseUrl !== undefined ? { controlCloudBaseUrl: r.controlCloudBaseUrl } : {}),
+      ...(r.controlDesktopKey !== undefined ? { controlDesktopKey: r.controlDesktopKey } : {}),
+      ...(r.controlVenueId !== undefined ? { controlVenueId: r.controlVenueId } : {}),
     });
     return {
       ok: true,

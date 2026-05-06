@@ -1,3 +1,6 @@
+import { app } from "electron";
+import { readStoredLicense } from "./license-service";
+
 type CloudRuntime = {
   getDisplaySnapshot: () => Promise<unknown>;
   runCommand: (command: unknown) => Promise<unknown>;
@@ -18,13 +21,20 @@ export type CloudAgentHandle = {
 };
 
 export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHandle | null {
-  const baseUrl = process.env.CONTROL_CLOUD_BASE_URL?.trim()?.replace(/\/$/, "");
-  const desktopKey = process.env.CONTROL_DESKTOP_KEY?.trim();
-  const venueId = process.env.CONTROL_VENUE_ID?.trim();
+  const stored = readStoredLicense(app.getPath("userData"));
+  const baseUrl = (
+    process.env.CONTROL_CLOUD_BASE_URL?.trim() ||
+    stored?.controlCloudBaseUrl ||
+    ""
+  ).replace(/\/$/, "");
+  const desktopKey = process.env.CONTROL_DESKTOP_KEY?.trim() || stored?.controlDesktopKey;
+  const venueId = process.env.CONTROL_VENUE_ID?.trim() || stored?.controlVenueId;
   if (!baseUrl || !desktopKey || !venueId) {
     options.log("[cloud-control] uitgeschakeld (CONTROL_CLOUD_BASE_URL/CONTROL_DESKTOP_KEY/CONTROL_VENUE_ID ontbreekt).");
     return null;
   }
+
+  const customerPairCode = `ACPAIR:${encodeURIComponent(baseUrl)}|${encodeURIComponent(venueId)}`;
 
   let disposed = false;
   let busy = false;
@@ -106,6 +116,7 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
   }, 1500);
   void tick();
   options.log(`[cloud-control] actief voor venue=${venueId}`);
+  options.log(`[cloud-control] klant-koppelcode: ${customerPairCode}`);
 
   return {
     stop: () => {

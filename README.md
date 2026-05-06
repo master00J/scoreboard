@@ -70,9 +70,11 @@ public/uploads/  user media (gitignored)
 
 Desktop kan optioneel cloud-gestuurd draaien (mobiel hoeft dan niet op hetzelfde netwerk):
 
-- `CONTROL_CLOUD_BASE_URL` (bijv. `https://arenacue.be`)
-- `CONTROL_DESKTOP_KEY` (zelfde secret als op Website)
-- `CONTROL_VENUE_ID` (bijv. `genk-a`)
+- **Auto-provisioned via licentie-activatie** (aanbevolen; geen handmatige desktop-config per klant).
+- Optioneel overriden met env:
+  - `CONTROL_CLOUD_BASE_URL` (bijv. `https://arenacue.be`)
+  - `CONTROL_DESKTOP_KEY`
+  - `CONTROL_VENUE_ID`
 
 De desktop-agent pusht state naar de cloud en voert gequeue’de commando’s uit.
 
