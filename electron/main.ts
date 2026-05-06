@@ -446,27 +446,24 @@ function registerIpc() {
   });
 
   ipcMain.handle(
-    "sponsorPlays:export",
-    async (_, payload: { queryString?: string }) => {
-      if (!runtime) throw new Error("Runtime not initialized");
-      const search = payload.queryString
-        ? payload.queryString.startsWith("?")
-          ? payload.queryString
-          : `?${payload.queryString}`
-        : "";
-      const res = await runtime.apiRequest({
-        method: "GET",
-        path: "/api/sponsor-plays/export.csv",
-        search,
-      });
-      if (res.status !== 200 || typeof res.text !== "string") {
-        return { canceled: true };
+    "sponsorPlays:saveExport",
+    async (
+      _,
+      payload: { base64: string; defaultFileName: string; format: "pdf" | "xlsx" },
+    ) => {
+      const ext = payload.format === "pdf" ? "pdf" : "xlsx";
+      let defaultPath = payload.defaultFileName.trim() || `proof-of-play.${ext}`;
+      if (!defaultPath.toLowerCase().endsWith(`.${ext}`)) {
+        defaultPath = `${defaultPath.replace(/\.(pdf|xlsx)$/i, "")}.${ext}`;
       }
       const win = BrowserWindow.getFocusedWindow() ?? controlWindow;
-      const stamp = new Date().toISOString().slice(0, 10);
       const options = {
-        defaultPath: `proof-of-play-${stamp}.csv`,
-        filters: [{ name: "CSV", extensions: ["csv"] }],
+        defaultPath,
+        filters: [
+          payload.format === "pdf"
+            ? { name: "PDF", extensions: ["pdf"] }
+            : { name: "Excel", extensions: ["xlsx"] },
+        ],
       };
       const saveResult = win
         ? await dialog.showSaveDialog(win, options)
@@ -474,7 +471,13 @@ function registerIpc() {
       if (saveResult.canceled || !saveResult.filePath) {
         return { canceled: true };
       }
-      fs.writeFileSync(saveResult.filePath, res.text, "utf8");
+      try {
+        const buf = Buffer.from(payload.base64, "base64");
+        fs.writeFileSync(saveResult.filePath, buf);
+      } catch (err) {
+        console.error("[main] sponsorPlays:saveExport write failed", err);
+        return { canceled: true };
+      }
       await shell.showItemInFolder(saveResult.filePath);
       return { canceled: false, filePath: saveResult.filePath };
     },

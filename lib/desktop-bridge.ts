@@ -109,8 +109,11 @@ export type ElectronBridge = {
   onDisplayError: (listener: (payload: { message: string }) => void) => () => void;
   focusDisplayWindow: () => Promise<void>;
   reloadDisplayWindow: () => Promise<{ ok: boolean }>;
-  exportSponsorPlays: (opts: {
-    queryString?: string;
+  /** Proof-of-play: sla renderer-gegenereerde PDF of Excel op (save dialog). */
+  saveProofOfPlayExport: (opts: {
+    base64: string;
+    defaultFileName: string;
+    format: "pdf" | "xlsx";
   }) => Promise<{ canceled: boolean; filePath?: string }>;
   exportMatch: (opts: {
     matchId: string;

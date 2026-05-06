@@ -142,7 +142,7 @@ Elke voltooide sponsor-clipweergave wordt automatisch gelogd in een aparte tabel
 - Filteren op wedstrijd, sponsor, match-fase (voor wedstrijd, 1e helft, rust, 2e helft, verlenging) en datumbereik.
 - Samenvatting per sponsor: aantal afspeelbeurten, totale schermtijd, verwachte tijd, realisatiegraad.
 - Detaillijst van laatste afspeelbeurten met tijdstempel.
-- **CSV-export** met UTF-8 BOM (correct in Excel/Numbers/Google Sheets) — bevat sponsor, media, wedstrijd, kickoff, fase, verwachte/werkelijke seconden, ISO-tijden en sessie-id voor audit.
+- **Export** als professioneel opgemaakte **Excel** (.xlsx, bladen Rapport + Detail) of **PDF** (samenvatting + detail, kant-en-klaar voor sponsors) — gegenereerd in de app; desktop opent een kies-locatie-dialoog. Optioneel blijft \`/api/sponsor-plays/export.csv\` beschikbaar voor integraties.
 - Snapshot-velden (sponsorName, mediaTitle) zorgen dat rapporten leesbaar blijven na verwijdering van een sponsor of media-item.
 - Te gebruiken voor adverteerderfacturatie en transparantie naar sponsoren over werkelijk geleverde schermtijd.
 
