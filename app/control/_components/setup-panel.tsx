@@ -95,6 +95,21 @@ export function SetupPanel() {
     reloadSettings();
   }
 
+  async function setGoalVisualEnabled(side: "home" | "away", enabled: boolean) {
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        [side === "home" ? "goalVisualHomeEnabled" : "goalVisualAwayEnabled"]: enabled,
+      }),
+    });
+    if (!res.ok) {
+      toast({ title: "Goalvisual-instelling opslaan mislukt", variant: "error" });
+      return;
+    }
+    reloadSettings();
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <section className="bg-card border border-border rounded-xl p-6">
@@ -167,6 +182,30 @@ export function SetupPanel() {
                 <Button size="sm" variant="outline" className="mt-3" onClick={pickGoalIntroVideo}>
                   {settings?.goalIntroVideoPath ? "Video vervangen…" : "Video kiezen…"}
                 </Button>
+                <div className="mt-4 border-t border-border pt-3">
+                  <div className="font-semibold text-sm">GOAL +1 gedrag</div>
+                  <div className="mt-1 text-xs text-muted-foreground">
+                    Kies per ploeg of de goal-knop een visual start of enkel de score verhoogt.
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    <label className="flex items-center justify-between gap-3 rounded-md border border-border p-2 text-xs">
+                      <span>Thuisploeg: visual tonen bij goal</span>
+                      <input
+                        type="checkbox"
+                        checked={settings?.goalVisualHomeEnabled ?? true}
+                        onChange={(e) => void setGoalVisualEnabled("home", e.target.checked)}
+                      />
+                    </label>
+                    <label className="flex items-center justify-between gap-3 rounded-md border border-border p-2 text-xs">
+                      <span>Uitploeg: visual tonen bij goal</span>
+                      <input
+                        type="checkbox"
+                        checked={settings?.goalVisualAwayEnabled ?? false}
+                        onChange={(e) => void setGoalVisualEnabled("away", e.target.checked)}
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
 
               <div className="rounded-lg border border-border p-4">

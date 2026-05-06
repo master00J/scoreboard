@@ -11,6 +11,9 @@ export type Team = {
 export type AppSettings = {
   homeTeamId: string | null;
   goalIntroVideoPath: string | null;
+  /** GOAL +1 gedrag: true = score + visual, false = alleen score. */
+  goalVisualHomeEnabled?: boolean;
+  goalVisualAwayEnabled?: boolean;
   /** Legacy DB-kolommen; niet meer gebruikt in de display-logica. */
   firstHalfScoreboardSec: number;
   firstHalfSponsorSec: number;
@@ -85,6 +88,18 @@ export type MediaItem = {
   playAudio?: boolean;
   /** JSON array met sponsor-fases waarvoor dit media-item mag draaien. Null/leeg = alle fases. */
   sponsorPhaseTagsJson?: string | null;
+  createdAt: string;
+};
+
+export type ScheduledMediaCue = {
+  id: string;
+  mediaId: string;
+  media: MediaItem;
+  /** Wedstrijdfase waarin deze cue mag afgaan, bv. FIRST_HALF of SECOND_HALF. */
+  matchStatus: string;
+  /** Matchklok in seconden vanaf start van die fase. */
+  triggerSec: number;
+  enabled: boolean;
   createdAt: string;
 };
 

@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { signControlToken, isControlAuthConfigured, type ControlRole } from "@/lib/control-auth";
+import {
+  signControlToken,
+  isControlAuthConfigured,
+  verifyOperatorPairToken,
+  type ControlRole,
+} from "@/lib/control-auth";
 
 export async function POST(request: Request) {
   if (!isControlAuthConfigured()) {
@@ -20,6 +25,7 @@ export async function POST(request: Request) {
     venueId?: string;
     role?: ControlRole;
     pin?: string;
+    pairToken?: string;
   };
 
   const venueId = (input.venueId ?? "").trim();
@@ -29,6 +35,10 @@ export async function POST(request: Request) {
 
   const role: ControlRole = input.role === "operator" ? "operator" : "viewer";
   if (role === "operator") {
+    if (verifyOperatorPairToken(venueId, input.pairToken)) {
+      const token = await signControlToken({ role, venueId });
+      return NextResponse.json({ ok: true, token, role, venueId });
+    }
     const expectedPin = process.env.CONTROL_OPERATOR_PIN?.trim();
     if (!expectedPin) {
       return NextResponse.json(

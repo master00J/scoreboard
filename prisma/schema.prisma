@@ -92,6 +92,17 @@ model MediaItem {
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
+  scheduledCues ScheduledMediaCue[]
+}
+
+model ScheduledMediaCue {
+  id          String    @id @default(cuid())
+  mediaId     String
+  media       MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  matchStatus String
+  triggerSec  Int
+  enabled     Boolean   @default(true)
+  createdAt   DateTime  @default(now())
 }
 
 model Sponsor {
@@ -157,6 +168,9 @@ model AppSettings {
   id                       Int     @id @default(1)
   homeTeamId               String?
   goalIntroVideoPath       String?
+  /// GOAL +1 gedrag: thuis standaard visual, uit standaard enkel score.
+  goalVisualHomeEnabled    Boolean @default(true)
+  goalVisualAwayEnabled    Boolean @default(false)
   /// Oud; alleen nog aanwezig in bestaande SQLite DB, migratie in electron/runtime.
   matchLiveScoreboardSec   Int     @default(45)
   matchLiveSponsorSec      Int     @default(15)

@@ -17,6 +17,7 @@ logs/*.log
 .env.local
 .env.production
 *.tsbuildinfo
+MobileApp/.expo/
 
 # Apart project (eigen Git-repo): github.com/master00J/ledboarding
 ledboarding/

@@ -1,5 +1,6 @@
 import { app } from "electron";
 import { readStoredLicense } from "./license-service";
+import { computeElapsedSeconds } from "../lib/timer";
 
 type CloudRuntime = {
   getDisplaySnapshot: () => Promise<unknown>;
@@ -17,8 +18,37 @@ type PendingCommand = {
 };
 
 export type CloudAgentHandle = {
+  baseUrl: string;
+  venueId: string;
+  customerPairCode: string;
   stop: () => void;
 };
+
+function normalizeCloudBaseUrl(rawBaseUrl: string): string {
+  const normalized = rawBaseUrl.trim().replace(/\/+$/, "");
+  if (/^https:\/\/(www\.)?arenacue\.com$/i.test(normalized)) {
+    return "https://arenacue.be";
+  }
+  return normalized;
+}
+
+function withTimerTelemetry(snapshot: unknown) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return snapshot;
+  const state = snapshot as {
+    timerRunning?: boolean;
+    timerStartedAt?: string | null;
+    timerBaseSec?: number;
+  };
+  return {
+    ...state,
+    timerElapsedSec: computeElapsedSeconds({
+      timerRunning: !!state.timerRunning,
+      timerStartedAt: state.timerStartedAt ?? null,
+      timerBaseSec: Number(state.timerBaseSec ?? 0),
+    }),
+    timerElapsedAtMs: Date.now(),
+  };
+}
 
 export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHandle | null {
   const stored = readStoredLicense(app.getPath("userData"));
@@ -26,36 +56,42 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
     process.env.CONTROL_CLOUD_BASE_URL?.trim() ||
     stored?.controlCloudBaseUrl ||
     ""
-  ).replace(/\/$/, "");
+  );
   const desktopKey = process.env.CONTROL_DESKTOP_KEY?.trim() || stored?.controlDesktopKey;
   const venueId = process.env.CONTROL_VENUE_ID?.trim() || stored?.controlVenueId;
+  const operatorPairToken = stored?.controlOperatorPairToken ?? "";
   if (!baseUrl || !desktopKey || !venueId) {
     options.log("[cloud-control] uitgeschakeld (CONTROL_CLOUD_BASE_URL/CONTROL_DESKTOP_KEY/CONTROL_VENUE_ID ontbreekt).");
     return null;
   }
+  const cloudBaseUrl = normalizeCloudBaseUrl(baseUrl);
+  const cloudDesktopKey = desktopKey;
+  const cloudVenueId = venueId;
 
-  const customerPairCode = `ACPAIR:${encodeURIComponent(baseUrl)}|${encodeURIComponent(venueId)}`;
+  const customerPairCode = operatorPairToken
+    ? `ACPAIR:cloud|${encodeURIComponent(cloudBaseUrl)}|${encodeURIComponent(cloudVenueId)}|${encodeURIComponent(operatorPairToken)}`
+    : `ACPAIR:${encodeURIComponent(cloudBaseUrl)}|${encodeURIComponent(cloudVenueId)}`;
 
   let disposed = false;
   let busy = false;
 
   async function postState() {
-    const state = await options.runtime.getDisplaySnapshot();
-    await fetch(`${baseUrl}/api/control/desktop/state`, {
+    const state = withTimerTelemetry(await options.runtime.getDisplaySnapshot());
+    await fetch(`${cloudBaseUrl}/api/control/desktop/state`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-desktop-key": desktopKey,
+        "x-desktop-key": cloudDesktopKey,
       },
-      body: JSON.stringify({ venueId, state }),
+      body: JSON.stringify({ venueId: cloudVenueId, state }),
     });
   }
 
   async function pullCommands(): Promise<PendingCommand[]> {
     const res = await fetch(
-      `${baseUrl}/api/control/desktop/commands?venueId=${encodeURIComponent(venueId)}`,
+      `${cloudBaseUrl}/api/control/desktop/commands?venueId=${encodeURIComponent(cloudVenueId)}`,
       {
-        headers: { "x-desktop-key": desktopKey },
+        headers: { "x-desktop-key": cloudDesktopKey },
       },
     );
     if (!res.ok) return [];
@@ -64,11 +100,11 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
   }
 
   async function ackCommand(commandId: string, result: { ok: boolean; error?: string; result?: unknown }) {
-    await fetch(`${baseUrl}/api/control/desktop/commands`, {
+    await fetch(`${cloudBaseUrl}/api/control/desktop/commands`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-desktop-key": desktopKey,
+        "x-desktop-key": cloudDesktopKey,
       },
       body: JSON.stringify({
         commandId,
@@ -115,10 +151,13 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
     void tick();
   }, 1500);
   void tick();
-  options.log(`[cloud-control] actief voor venue=${venueId}`);
+  options.log(`[cloud-control] actief voor venue=${cloudVenueId}`);
   options.log(`[cloud-control] klant-koppelcode: ${customerPairCode}`);
 
   return {
+    baseUrl: cloudBaseUrl,
+    venueId: cloudVenueId,
+    customerPairCode,
     stop: () => {
       disposed = true;
       clearInterval(interval);

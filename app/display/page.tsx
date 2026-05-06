@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
@@ -19,6 +19,7 @@ import type {
   Player,
   Playlist,
   PlaylistSlot,
+  ScheduledMediaCue,
   Sponsor,
 } from "@/lib/types";
 import {
@@ -47,7 +48,10 @@ import {
   sponsorHalftimeShowsPanel,
   sponsorRotationBesideScoreboard,
 } from "@/lib/sponsor-display-helpers";
-import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
+import {
+  sponsorTelemetryActiveClipElapsedSec,
+  sponsorTelemetrySegmentKey,
+} from "@/lib/sponsor-telemetry";
 import { LeftScoreboardLayout } from "./_modes/left-scoreboard-layout";
 import { MatchScoreboardFull } from "./_modes/match-scoreboard-full";
 import { GoalMode } from "./_modes/goal";
@@ -63,6 +67,14 @@ import { ExternalCaptureVideo } from "@/components/external-capture-video";
 
 /** Modes die naast het scorebord in het content-vlak staan (niet fullscreen over het canvas). */
 const LEFT_PANEL_INTERRUPT_MODES = new Set(["GOAL", "CARD"]);
+
+type SponsorScheduleClock = {
+  key: string;
+  adjustedT: number;
+  lastRawT: number;
+  initialized: boolean;
+  wasFrozen: boolean;
+};
 
 function isPreviewIframe(): boolean {
   if (typeof window === "undefined") return false;
@@ -99,6 +111,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const [allPlayers, setAllPlayers] = useState<Record<string, Player>>({});
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [scheduledCues, setScheduledCues] = useState<ScheduledMediaCue[]>([]);
+  const [activeScheduledCue, setActiveScheduledCue] = useState<ScheduledMediaCue | null>(null);
   const [scoreboardTheme, setScoreboardTheme] = useState<ResolvedScoreboardTheme>(() =>
     mergeScoreboardTheme(null),
   );
@@ -128,6 +142,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       .then((r) => r.json())
       .then((list: Sponsor[]) => setSponsors(list ?? []))
       .catch(() => setSponsors([]));
+  }, [state?.updatedAt, previewIframe]);
+
+  useEffect(() => {
+    if (previewIframe) return;
+    fetch("/api/scheduled-media-cues")
+      .then((r) => r.json())
+      .then((list: ScheduledMediaCue[]) => setScheduledCues(list ?? []))
+      .catch(() => setScheduledCues([]));
   }, [state?.updatedAt, previewIframe]);
 
   useEffect(() => {
@@ -190,6 +212,53 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   const mode = state?.mode ?? "IDLE";
 
+  const firedScheduledCueKeysRef = useRef<Set<string>>(new Set());
+  const lastScheduledCueClockRef = useRef<{ matchId: string | null; status: string | null; elapsed: number }>({
+    matchId: null,
+    status: null,
+    elapsed: 0,
+  });
+
+  useEffect(() => {
+    const prev = lastScheduledCueClockRef.current;
+    const matchId = match?.id ?? null;
+    const status = match?.status ?? null;
+    if (prev.matchId !== matchId || prev.status !== status || elapsed < prev.elapsed - 1) {
+      firedScheduledCueKeysRef.current.clear();
+      setActiveScheduledCue(null);
+    }
+    lastScheduledCueClockRef.current = { matchId, status, elapsed };
+  }, [match?.id, match?.status, elapsed]);
+
+  useEffect(() => {
+    if (!state || !match || mode === "BLACKOUT") return;
+    if (activeScheduledCue || !(state.timerRunning ?? false)) return;
+    const due = scheduledCues
+      .filter(
+        (cue) =>
+          cue.enabled &&
+          cue.media?.active &&
+          cue.matchStatus === match.status &&
+          elapsed >= cue.triggerSec &&
+          elapsed - cue.triggerSec <= 2,
+      )
+      .sort((a, b) => a.triggerSec - b.triggerSec);
+    const cue = due.find((candidate) => {
+      const key = `${match.id}:${match.status}:${candidate.id}`;
+      return !firedScheduledCueKeysRef.current.has(key);
+    });
+    if (!cue) return;
+    firedScheduledCueKeysRef.current.add(`${match.id}:${match.status}:${cue.id}`);
+    setActiveScheduledCue(cue);
+  }, [activeScheduledCue, elapsed, match, mode, scheduledCues, state]);
+
+  useEffect(() => {
+    if (!activeScheduledCue || activeScheduledCue.media.type !== "IMAGE") return;
+    const ms = Math.max(1500, Math.max(1, activeScheduledCue.media.durationSec) * 1000);
+    const id = window.setTimeout(() => setActiveScheduledCue(null), ms);
+    return () => window.clearTimeout(id);
+  }, [activeScheduledCue]);
+
   /** Alleen het echte display-venster meldt afgespeelde sponsorclips (niet de ingebouwde preview). */
   const sponsorPlaybackTelemetry = useMemo(
     () =>
@@ -202,8 +271,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, section);
     if (!segmentKey) return null;
     if (sponsorLedger.matchId !== match.id || sponsorLedger.segmentKey !== segmentKey) return null;
-    return sponsorLedger.activeClip;
-  }, [embedInControl, match, sponsorLedger]);
+    const activeClip = sponsorLedger.activeClip;
+    if (!activeClip) return null;
+    const elapsedSec = sponsorTelemetryActiveClipElapsedSec(activeClip, Date.now());
+    const totalSec = Math.max(0.1, activeClip.expectedPlaySec || 0.1);
+    if (elapsedSec >= totalSec + 0.75) return null;
+    return activeClip;
+  }, [embedInControl, elapsed, match, sponsorLedger]);
 
   const [prematchClock, setPrematchClock] = useState(0);
   useEffect(() => {
@@ -311,15 +385,16 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     return <HalfTimeMode match={match} />;
   }, [match]);
 
-  const liveAutoBeside = useMemo(
+  const sponsorBesideConfigured = useMemo(
     () =>
       !!match &&
       !!state &&
-      mode === "SPONSOR_ROTATION" &&
       sponsorRotationBesideScoreboard(match.status) &&
       sponsorBesideShowsPanel(match, sponsors, playlists),
     [match, state, mode, sponsors, playlists],
   );
+
+  const liveAutoBeside = sponsorBesideConfigured && mode === "SPONSOR_ROTATION";
 
   const liveAutoHalftime = useMemo(
     () =>
@@ -355,10 +430,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   const [phaseTick, setPhaseTick] = useState(0);
   useEffect(() => {
-    if (!liveAutoBeside && !liveAutoHalftime && !prematchSpreadActive) return;
+    if (!sponsorBesideConfigured && !liveAutoHalftime && !prematchSpreadActive) return;
     const id = setInterval(() => setPhaseTick((n) => n + 1), 400);
     return () => clearInterval(id);
-  }, [liveAutoBeside, liveAutoHalftime, prematchSpreadActive]);
+  }, [sponsorBesideConfigured, liveAutoHalftime, prematchSpreadActive]);
 
   const sponsorSlotMapMatch = useMemo(() => {
     if (!match) return [] as (string | null)[];
@@ -392,6 +467,27 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     startedAtSlotIdx?: number;
     lastSeenAtMs?: number;
   } | null>(null);
+  const sponsorScheduleClockRef = useRef<SponsorScheduleClock>({
+    key: "",
+    adjustedT: 0,
+    lastRawT: 0,
+    initialized: false,
+    wasFrozen: false,
+  });
+  const halftimeScheduleClockRef = useRef<SponsorScheduleClock>({
+    key: "",
+    adjustedT: 0,
+    lastRawT: 0,
+    initialized: false,
+    wasFrozen: false,
+  });
+  const prematchScheduleClockRef = useRef<SponsorScheduleClock>({
+    key: "",
+    adjustedT: 0,
+    lastRawT: 0,
+    initialized: false,
+    wasFrozen: false,
+  });
   const prematchPhaseHangRef = useRef<{
     sponsorId: string;
     untilMs: number;
@@ -405,17 +501,23 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsorPhaseHangRef.current = null;
     prematchPhaseHangRef.current = null;
     prematchOriginRef.current = null;
+    sponsorScheduleClockRef.current.initialized = false;
+    halftimeScheduleClockRef.current.initialized = false;
+    prematchScheduleClockRef.current.initialized = false;
   }, [match?.id]);
 
   /** Nieuwe fase (bijv. helft → rust): hang uit vorig segment mag niet doorlopen. */
   useEffect(() => {
     sponsorPhaseHangRef.current = null;
-  }, [match?.status, liveAutoBeside, liveAutoHalftime]);
+    sponsorScheduleClockRef.current.initialized = false;
+    halftimeScheduleClockRef.current.initialized = false;
+  }, [match?.status, sponsorBesideConfigured, liveAutoHalftime]);
 
   useEffect(() => {
     if (!prematchSpreadActive) {
       prematchOriginRef.current = null;
       prematchPhaseHangRef.current = null;
+      prematchScheduleClockRef.current.initialized = false;
     }
   }, [prematchSpreadActive]);
 
@@ -428,6 +530,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   /** Tijdens deze modi loopt een overlay (goal/speler/kaart/wissel/halftime/fulltime).
    * Sponsor-hang vriest dan in zodat de clip later volledig kan afspelen. */
   const sponsorInterrupted =
+    activeScheduledCue != null ||
     mode === "GOAL" ||
     mode === "GOAL_INTRO_VIDEO" ||
     mode === "GOAL_PLAYER_VIDEO" ||
@@ -436,15 +539,56 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     mode === "HALFTIME" ||
     mode === "FULLTIME";
 
+  function sponsorScheduleTime(
+    ref: MutableRefObject<SponsorScheduleClock>,
+    key: string,
+    rawT: number,
+    frozen: boolean,
+    maxT: number,
+  ): number {
+    const clock = ref.current;
+    if (!clock.initialized || clock.key !== key || rawT < clock.lastRawT - 1) {
+      clock.key = key;
+      clock.adjustedT = rawT;
+      clock.lastRawT = rawT;
+      clock.initialized = true;
+      clock.wasFrozen = frozen;
+      return Math.min(Math.max(0, clock.adjustedT), maxT);
+    }
+
+    if (frozen) {
+      clock.lastRawT = rawT;
+      clock.wasFrozen = true;
+      return Math.min(Math.max(0, clock.adjustedT), maxT);
+    }
+
+    if (clock.wasFrozen) {
+      clock.lastRawT = rawT;
+      clock.wasFrozen = false;
+      return Math.min(Math.max(0, clock.adjustedT), maxT);
+    }
+
+    const delta = Math.max(0, rawT - clock.lastRawT);
+    clock.adjustedT = Math.min(maxT, clock.adjustedT + delta);
+    clock.lastRawT = rawT;
+    return Math.min(Math.max(0, clock.adjustedT), maxT);
+  }
+
   const sponsorDistView = useMemo(() => {
     const now = Date.now();
 
-    if (liveAutoBeside && match) {
+    if (sponsorBesideConfigured && match) {
       const tLive = halfWindowElapsed(elapsed, match.status, match.halfDurationSec);
       if (mode === "SPONSOR_ROTATION") {
         tInterruptFrozen.current = tLive;
       }
-      const t = mode === "SPONSOR_ROTATION" ? tLive : tInterruptFrozen.current;
+      const t = sponsorScheduleTime(
+        sponsorScheduleClockRef,
+        `${match.id}:${match.status}:match`,
+        mode === "SPONSOR_ROTATION" ? tLive : tInterruptFrozen.current,
+        mode !== "SPONSOR_ROTATION" || sponsorInterrupted,
+        Math.max(60, match.halfDurationSec),
+      );
       const v = lookupSponsorAtSecond(sponsorSlotMapMatch, t);
       const section = sectionForStatus(match.status);
       return resolveSponsorSpreadPhase(v, sponsors, section, match.status, now, sponsorPhaseHangRef, {
@@ -455,7 +599,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
       const H = Math.max(60, match.halfBreakSec);
-      const t = ((Date.now() - rustEpochRef.current) / 1000) % H;
+      const rawT = ((Date.now() - rustEpochRef.current) / 1000) % H;
+      const t = sponsorScheduleTime(
+        halftimeScheduleClockRef,
+        `${match.id}:${match.status}:halftime`,
+        rawT,
+        sponsorInterrupted,
+        H,
+      );
       const v = lookupSponsorAtSecond(sponsorSlotMapHalftime, t);
       return resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapHalftime,
@@ -466,7 +617,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsorPhaseHangRef.current = null;
     return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
   }, [
-    liveAutoBeside,
+    sponsorBesideConfigured,
     liveAutoHalftime,
     match,
     sponsors,
@@ -484,7 +635,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
     const H = Math.max(1, sponsorSlotMapPrematch.length);
-    const t = ((now - prematchOriginRef.current) / 1000) % H;
+    const rawT = ((now - prematchOriginRef.current) / 1000) % H;
+    const t = sponsorScheduleTime(
+      prematchScheduleClockRef,
+      "prematch",
+      rawT,
+      sponsorInterrupted,
+      H,
+    );
     const v = lookupSponsorAtSecond(sponsorSlotMapPrematch, t);
     return resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
       slotMap: sponsorSlotMapPrematch,
@@ -503,8 +661,66 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       (mode === "SPONSOR_ROTATION" && sponsorBesideShowsPanel(match, sponsors, playlists)) ||
       (mode === "SPONSOR" && sponsorClipBesideLiveBoard));
 
-  const sponsorBudgetSponsorFilter =
-    sponsorDistView.phase === "sponsor" ? sponsorDistView.sponsorFilterId : null;
+  const previewForcesSponsorBeside =
+    embedInControl && previewFollowClip != null && sponsorBesideConfigured;
+  const sponsorBudgetSponsorFilter = previewFollowClip
+    ? previewFollowClip.sponsorId
+    : sponsorDistView.phase === "sponsor"
+      ? sponsorDistView.sponsorFilterId
+      : null;
+
+  const liveSponsorBesideContent = useMemo(() => {
+    if (
+      !state ||
+      !match ||
+      !sponsorBesideConfigured ||
+      (sponsorDistView.phase !== "sponsor" && !previewForcesSponsorBeside)
+    ) {
+      return null;
+    }
+    const section = sectionForStatus(match.status);
+    if (hasSponsorsForSection(sponsors, section, match.status)) {
+      return (
+        <SponsorBudgetRotation
+          key={`sbr-panel-stable-${section}-${sponsorBudgetSponsorFilter ?? "all"}`}
+          sponsors={sponsors}
+          section={section}
+          matchStatus={match.status}
+          sponsorIdFilter={sponsorBudgetSponsorFilter}
+          playbackTelemetry={sponsorPlaybackTelemetry}
+          followPlayback={embedInControl && previewFollowClip != null}
+          followClip={previewFollowClip}
+          showPreviewProgress={embedInControl}
+          fallback={sponsorBudgetFallbackScoreboard}
+          cycleBudgetForever={sponsorRepeatBudgetCycles}
+          paused={sponsorInterrupted || mode !== "SPONSOR_ROTATION"}
+        />
+      );
+    }
+    return (
+      <SponsorRotation
+        key="sr-panel-stable"
+        playlist={pickSponsorPlaylist(playlists, match.status) ?? playlists.IDLE}
+        showPreviewProgress={embedInControl}
+      />
+    );
+  }, [
+    state,
+    match,
+    sponsorBesideConfigured,
+    sponsorDistView.phase,
+    previewForcesSponsorBeside,
+    sponsorBudgetSponsorFilter,
+    sponsors,
+    playlists,
+    embedInControl,
+    previewFollowClip,
+    sponsorPlaybackTelemetry,
+    sponsorBudgetFallbackScoreboard,
+    sponsorRepeatBudgetCycles,
+    sponsorInterrupted,
+    mode,
+  ]);
 
   // Content that goes in the right panel (when the left scoreboard is shown)
   // or fullscreen (when it isn't).
@@ -524,7 +740,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             matchStatus={match.status}
             sponsorIdFilter={sponsorBudgetSponsorFilter}
             playbackTelemetry={sponsorPlaybackTelemetry}
-            followPlayback={embedInControl}
+            followPlayback={embedInControl && previewFollowClip != null}
             followClip={previewFollowClip}
             showPreviewProgress={embedInControl}
             fallback={sponsorBudgetFallbackScoreboard}
@@ -619,7 +835,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   section="prematch"
                   sponsorIdFilter={prematchDistView.sponsorFilterId ?? undefined}
                   playbackTelemetry={sponsorPlaybackTelemetry}
-                  followPlayback={embedInControl}
+                  followPlayback={embedInControl && previewFollowClip != null}
                   followClip={previewFollowClip}
                   showPreviewProgress={embedInControl}
                   fallback={sponsorBudgetFallbackScoreboard}
@@ -668,7 +884,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               sponsors={sponsors}
               showPreviewProgress={embedInControl}
               playbackTelemetry={sponsorPlaybackTelemetry}
-              followPlayback={embedInControl}
+              followPlayback={embedInControl && previewFollowClip != null}
               followClip={previewFollowClip}
               prematchSpread={prematchSpreadActive ? prematchDistView : null}
               sponsorBudgetFallback={sponsorBudgetFallbackScoreboard}
@@ -686,7 +902,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         {state &&
           match &&
           (shouldShowFullScreenMatchBoard(match, mode, sponsors, playlists) ||
-            (liveAutoBeside && sponsorDistView.phase === "scoreboard")) &&
+            (liveAutoBeside && sponsorDistView.phase === "scoreboard" && !previewForcesSponsorBeside)) &&
           !(liveAutoHalftime && sponsorDistView.phase === "scoreboard") && (
             <MatchScoreboardFull
               key="match-board-full"
@@ -714,7 +930,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 section="halftime"
                 sponsorIdFilter={sponsorDistView.sponsorFilterId}
                 playbackTelemetry={sponsorPlaybackTelemetry}
-                followPlayback={embedInControl}
+                followPlayback={embedInControl && previewFollowClip != null}
                 followClip={previewFollowClip}
                 showPreviewProgress={embedInControl}
                 fallback={halftimeSponsorFallback}
@@ -835,6 +1051,36 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         {state && mode === "BLACKOUT" && <BlackoutMode key="bo" />}
       </AnimatePresence>
 
+      {activeScheduledCue && mode !== "BLACKOUT" && match && sponsorRotationBesideScoreboard(match.status) && (
+        <div className="absolute inset-0 z-[88]">
+          <LeftScoreboardLayout
+            match={match}
+            elapsed={elapsed}
+            running={state?.timerRunning ?? false}
+            period={period}
+            theme={scoreboardTheme}
+          >
+            <SingleMediaMode
+              key={`scheduled-cue-panel-${activeScheduledCue.id}`}
+              media={activeScheduledCue.media}
+              showPreviewProgress={embedInControl}
+              onVideoEnded={() => setActiveScheduledCue(null)}
+            />
+          </LeftScoreboardLayout>
+        </div>
+      )}
+
+      {activeScheduledCue && mode !== "BLACKOUT" && !(match && sponsorRotationBesideScoreboard(match.status)) && (
+        <div className="absolute inset-0 z-[88] bg-black">
+          <SingleMediaMode
+            key={`scheduled-cue-fullscreen-${activeScheduledCue.id}`}
+            media={activeScheduledCue.media}
+            showPreviewProgress={embedInControl}
+            onVideoEnded={() => setActiveScheduledCue(null)}
+          />
+        </div>
+      )}
+
       {state &&
         prematchMatchSponsorShow &&
         match?.matchSponsorMedia &&
@@ -862,8 +1108,16 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         )}
 
       {/* Speelhelft + “Scorebord + sponsors”: sponsorfase naast vaste score/timer-kolom (niet fullscreen). */}
-      {state && match && liveAutoBeside && sponsorDistView.phase === "sponsor" && (
-        <div className="absolute inset-0 z-[12]">
+      {state &&
+        match &&
+        sponsorBesideConfigured &&
+        (sponsorDistView.phase === "sponsor" || previewForcesSponsorBeside) &&
+        liveSponsorBesideContent && (
+        <div
+          className={`absolute inset-0 ${
+            mode === "SPONSOR_ROTATION" ? "z-[12]" : "z-0 pointer-events-none opacity-0"
+          }`}
+        >
           <LeftScoreboardLayout
             match={match}
             elapsed={elapsed}
@@ -880,7 +1134,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 transition={{ duration: 0.25 }}
                 className="absolute inset-0"
               >
-                {activeContent}
+                {liveSponsorBesideContent}
               </motion.div>
             </AnimatePresence>
           </LeftScoreboardLayout>

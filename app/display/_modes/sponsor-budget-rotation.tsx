@@ -21,6 +21,7 @@ import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
 } from "../_components/preview-slide-progress";
+import { sponsorTelemetryActiveClipElapsedSec } from "@/lib/sponsor-telemetry";
 
 type Plan = {
   sponsorId: string;
@@ -66,6 +67,7 @@ export function SponsorBudgetRotation({
   showPreviewProgress = false,
   fallback = null,
   cycleBudgetForever = false,
+  paused = false,
 }: {
   sponsors: Sponsor[];
   section: SponsorSection;
@@ -80,6 +82,8 @@ export function SponsorBudgetRotation({
     mediaId: string;
     startedAtMs: number;
     expectedPlaySec: number;
+    playbackPositionMs?: number;
+    paused?: boolean;
   } | null;
   mediaObjectFit?: "cover" | "contain";
   showPreviewProgress?: boolean;
@@ -87,6 +91,8 @@ export function SponsorBudgetRotation({
   fallback?: ReactNode;
   /** Zet spent terug naar nul zodra iedereen zijn quotum haalde — oneindige cyclus binnen de fase. */
   cycleBudgetForever?: boolean;
+  /** Tijdelijk pauzeren zonder current clip te vergeten, bv. tijdens goal/wissel-overlay. */
+  paused?: boolean;
 }) {
   const followMode = followPlayback;
   const activeSponsors = useMemo(() => {
@@ -112,6 +118,7 @@ export function SponsorBudgetRotation({
   const [slideTick, setSlideTick] = useState(0);
   const [current, setCurrent] = useState<Plan | null>(null);
   const [videoProgressDurationMs, setVideoProgressDurationMs] = useState(0);
+  const playbackProgressMsRef = useRef(0);
 
   const stateRef = useRef<{
     mediaCursor: Record<string, number>;
@@ -124,6 +131,7 @@ export function SponsorBudgetRotation({
   const videoFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const playedClipRef = useRef(false);
   const finishedClipKeyRef = useRef<string | null>(null);
+  const clipSessionRef = useRef<{ key: string; id: string } | null>(null);
 
   const sponsorsById = useMemo(() => {
     const m: Record<string, Sponsor> = {};
@@ -149,10 +157,12 @@ export function SponsorBudgetRotation({
     };
     tieBreakCursorRef.current = 0;
     playedClipRef.current = false;
+    clipSessionRef.current = null;
     setCycleId((c) => c + 1);
     setSlideTick(0);
     setCurrent(null);
     setVideoProgressDurationMs(0);
+    playbackProgressMsRef.current = 0;
   }, [section, activeSponsorSignature]);
 
   const budgetFn = useCallback(
@@ -163,10 +173,11 @@ export function SponsorBudgetRotation({
   const pickNext = useCallback((): Plan | null => {
     const st = stateRef.current;
 
-    let eligibleAll = activeSponsors.filter(
-      (s) => (st.spentPerSponsor[s.id] ?? 0) < budgetFn(s),
-    );
-    if (eligibleAll.length === 0 && cycleBudgetForever) {
+    const scheduledSponsorMode = sponsorIdFilter != null;
+    let eligibleAll = scheduledSponsorMode
+      ? activeSponsors
+      : activeSponsors.filter((s) => (st.spentPerSponsor[s.id] ?? 0) < budgetFn(s));
+    if (!scheduledSponsorMode && eligibleAll.length === 0 && cycleBudgetForever) {
       st.spentPerSponsor = {};
       eligibleAll = activeSponsors.filter(
         (s) => (st.spentPerSponsor[s.id] ?? 0) < budgetFn(s),
@@ -215,7 +226,7 @@ export function SponsorBudgetRotation({
       mediaIndex: mi,
       playSec,
     };
-  }, [activeSponsors, budgetFn, section, cycleBudgetForever]);
+  }, [activeSponsors, budgetFn, section, cycleBudgetForever, sponsorIdFilter]);
 
   const advanceAfterSlide = useCallback(
     (sponsorId: string, mediaIndex: number, seconds: number) => {
@@ -231,6 +242,7 @@ export function SponsorBudgetRotation({
 
       const next = pickNext();
       setVideoProgressDurationMs(0);
+      playbackProgressMsRef.current = 0;
       if (next) {
         setCurrent(next);
         setSlideTick((t) => t + 1);
@@ -251,6 +263,17 @@ export function SponsorBudgetRotation({
     [advanceAfterSlide, cycleId, slideTick],
   );
 
+  function stableClipSessionId(segmentKey: string, plan: Plan) {
+    const key = `${playbackTelemetry?.matchId ?? "match"}-${segmentKey}-${cycleId}-${slideTick}-${plan.sponsorId}-${plan.mediaId}`;
+    if (clipSessionRef.current?.key !== key) {
+      clipSessionRef.current = {
+        key,
+        id: `${key}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      };
+    }
+    return clipSessionRef.current.id;
+  }
+
   useEffect(() => {
     finishedClipKeyRef.current = null;
   }, [current?.sponsorId, current?.mediaId, cycleId, slideTick]);
@@ -270,6 +293,7 @@ export function SponsorBudgetRotation({
 
   useEffect(() => {
     if (followMode) return;
+    if (paused) return;
     if (!current || activeSponsors.length === 0) return;
 
     if (current.item.type === "VIDEO") {
@@ -304,6 +328,7 @@ export function SponsorBudgetRotation({
     advanceAfterSlide,
     finishClipOnce,
     followMode,
+    paused,
     videoProgressDurationMs,
   ]);
 
@@ -333,7 +358,7 @@ export function SponsorBudgetRotation({
     if (!segmentKey) return;
 
     const startedAtMs = Date.now();
-    const clipSessionId = `${playbackTelemetry.matchId}-${segmentKey}-${slideTick}-${current.sponsorId}-${current.mediaId}`;
+    const clipSessionId = stableClipSessionId(segmentKey, current);
 
     void reportSponsorClipStart({
       matchId: playbackTelemetry.matchId,
@@ -343,6 +368,8 @@ export function SponsorBudgetRotation({
       expectedPlaySec: current.playSec,
       clipSessionId,
       startedAtMs,
+      playbackPositionMs: 0,
+      paused: false,
     });
 
     const ended = {
@@ -355,10 +382,38 @@ export function SponsorBudgetRotation({
     };
 
     return () => {
-      const actualSec = (Date.now() - startedAtMs) / 1000;
+      const playbackSec = playbackProgressMsRef.current / 1000;
+      const actualSec =
+        current.item.type === "VIDEO" && playbackSec > 0
+          ? playbackSec
+          : (Date.now() - startedAtMs) / 1000;
       void reportSponsorClipEnd({ ...ended, actualSec });
     };
   }, [current, slideTick, section, playbackTelemetry, followMode]);
+
+  useEffect(() => {
+    if (followMode) return;
+    if (!playbackTelemetry || !current) return;
+    const segmentKey = sponsorTelemetrySegmentKey(
+      playbackTelemetry.matchId,
+      playbackTelemetry.matchStatus,
+      section,
+    );
+    if (!segmentKey) return;
+    const clipSessionId = stableClipSessionId(segmentKey, current);
+    const positionMs = Math.max(0, playbackProgressMsRef.current);
+    void reportSponsorClipStart({
+      matchId: playbackTelemetry.matchId,
+      segmentKey,
+      sponsorId: current.sponsorId,
+      mediaId: current.mediaId,
+      expectedPlaySec: current.playSec,
+      clipSessionId,
+      startedAtMs: Date.now() - positionMs,
+      playbackPositionMs: positionMs,
+      paused,
+    });
+  }, [paused, current, slideTick, section, playbackTelemetry, followMode]);
 
   useEffect(() => {
     if (!followMode) return;
@@ -414,12 +469,20 @@ export function SponsorBudgetRotation({
         : Math.max(1500, current.playSec * 1000)
       : 0;
   const followElapsedMs =
-    followMode && followClip ? Math.max(0, nowMs - followClip.startedAtMs) : 0;
+    followMode && followClip
+      ? sponsorTelemetryActiveClipElapsedSec(
+          { ...followClip, clipSessionId: "follow" },
+          nowMs,
+        ) * 1000
+      : 0;
   const followElapsed01 =
     followMode && current && slideMs > 0 ? Math.min(1, followElapsedMs / slideMs) : null;
+  const followClipExpired =
+    followMode && current && slideMs > 0 && followElapsedMs >= slideMs + 750;
   const slideElapsed = useTimedSlideProgress(
     showPreviewProgress && current && !followMode ? slideMs : 0,
     current ? `${current.sponsorId}-${current.mediaId}-${slideTick}` : "none",
+    paused,
   );
 
   if (activeSponsors.length === 0) {
@@ -431,7 +494,7 @@ export function SponsorBudgetRotation({
   }
 
   const showBudgetFallback = followMode
-    ? fallback != null && !current
+    ? fallback != null && (!current || followClipExpired)
     : fallback != null && !cycleBudgetForever && !current && playedClipRef.current;
 
   return (
@@ -440,7 +503,7 @@ export function SponsorBudgetRotation({
         <div className="absolute inset-0 size-full">{fallback}</div>
       ) : (
         <AnimatePresence mode="sync">
-        {current && (
+        {current && !followClipExpired && (
           <motion.div
             key={`${current.sponsorId}-${current.mediaId}-${cycleId}-${slideTick}`}
             initial={{ opacity: 0 }}
@@ -452,8 +515,9 @@ export function SponsorBudgetRotation({
             <MediaRenderer
               item={current.item}
               objectFit={mediaObjectFit}
-              syncPlaybackSec={
-                followMode && followClip ? Math.max(0, Math.floor(followElapsedMs / 1000)) : undefined
+              paused={paused}
+              syncPlaybackMs={
+                followMode && followClip ? Math.max(0, followElapsedMs) : undefined
               }
               onVideoEnded={handleVideoEnded}
               onVideoPlaybackFault={() => {
@@ -468,12 +532,16 @@ export function SponsorBudgetRotation({
               onVideoDurationMs={(ms) => {
                 if (ms > 0) setVideoProgressDurationMs(ms);
               }}
+              onVideoProgressMs={(ms) => {
+                const next = Math.max(0, ms);
+                playbackProgressMsRef.current = next;
+              }}
             />
           </motion.div>
         )}
       </AnimatePresence>
       )}
-      {showPreviewProgress && current && slideMs > 0 && (
+      {showPreviewProgress && current && !followClipExpired && slideMs > 0 && (
         <PreviewSlideProgressBar
           elapsed01={followElapsed01 ?? slideElapsed}
           totalMs={slideMs}
@@ -492,19 +560,23 @@ function budgetFor(s: Sponsor, section: SponsorSection, matchStatus?: string): n
 function MediaRenderer({
   item,
   objectFit,
-  syncPlaybackSec,
+  paused,
+  syncPlaybackMs,
   onVideoEnded,
   onVideoPlaybackFault,
   onVideoDurationMs,
+  onVideoProgressMs,
 }: {
   item: MediaItem;
   objectFit: "cover" | "contain";
+  paused: boolean;
   /** Voor embedded preview: houd de video exact op dezelfde positie als main. */
-  syncPlaybackSec?: number;
+  syncPlaybackMs?: number;
   onVideoEnded: (actualSec: number) => void;
   /** Decode-/netwerkfout: clip kan geen `ended` geven; ga door zonder volledige buffertime-out. */
   onVideoPlaybackFault?: () => void;
   onVideoDurationMs?: (ms: number) => void;
+  onVideoProgressMs?: (ms: number) => void;
 }) {
   const src = mediaUrl(item.path);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -516,15 +588,27 @@ function MediaRenderer({
   }, [item.id, item.path]);
 
   useEffect(() => {
-    if (item.type !== "VIDEO" || syncPlaybackSec == null) return;
+    if (item.type !== "VIDEO" || syncPlaybackMs == null) return;
     const v = videoRef.current;
     if (!v) return;
     const applySync = () => {
       const dur = Number.isFinite(v.duration) && v.duration > 0 ? v.duration : null;
+      const syncPlaybackSec = syncPlaybackMs / 1000;
       const target = dur != null ? Math.min(Math.max(0, syncPlaybackSec), Math.max(0, dur - 0.05)) : syncPlaybackSec;
       const now = Date.now();
       const drift = Math.abs(v.currentTime - target);
-      if (drift > 1.25 && now - lastFollowSeekAtRef.current > 1000) {
+      if (dur != null && syncPlaybackSec >= dur - 0.1) {
+        if (drift > 0.25) {
+          try {
+            v.currentTime = target;
+          } catch {
+            /* ignore media seek race */
+          }
+        }
+        v.pause();
+        return;
+      }
+      if (drift > 2.5 && now - lastFollowSeekAtRef.current > 2500) {
         lastFollowSeekAtRef.current = now;
         try {
           v.currentTime = target;
@@ -537,7 +621,7 @@ function MediaRenderer({
     applySync();
     const id = window.setTimeout(applySync, 50);
     return () => clearTimeout(id);
-  }, [item.id, item.path, item.type, syncPlaybackSec]);
+  }, [item.id, item.path, item.type, syncPlaybackMs]);
 
   useEffect(() => {
     if (item.type !== "VIDEO" || !(item.playAudio ?? false)) return;
@@ -547,6 +631,18 @@ function MediaRenderer({
     return () => clearTimeout(id);
   }, [item.id, item.path, item.playAudio, item.type]);
 
+  useEffect(() => {
+    if (item.type !== "VIDEO") return;
+    const v = videoRef.current;
+    if (!v) return;
+    if (paused) {
+      onVideoProgressMs?.(v.currentTime * 1000);
+      v.pause();
+      return;
+    }
+    void v.play().catch(() => {});
+  }, [item.id, item.path, item.type, onVideoProgressMs, paused]);
+
   const fireEndedOnce = (video: HTMLVideoElement) => {
     if (endedRef.current) return;
     endedRef.current = true;
@@ -554,6 +650,16 @@ function MediaRenderer({
     const useDur =
       Number.isFinite(d) && d > 0 ? d : Math.max(0.1, video.currentTime || 0);
     onVideoEnded(useDur);
+  };
+
+  const maybeFireEarlyEnd = (video: HTMLVideoElement) => {
+    if (endedRef.current) return;
+    if (syncPlaybackMs != null) return;
+    const d = video.duration;
+    if (!Number.isFinite(d) || d <= 0) return;
+    if (video.currentTime >= d - 0.2) {
+      fireEndedOnce(video);
+    }
   };
 
   const videoProps = {
@@ -569,7 +675,8 @@ function MediaRenderer({
       if (Number.isFinite(d) && d > 0) {
         onVideoDurationMs?.(d * 1000);
       }
-      if (syncPlaybackSec != null) {
+      if (syncPlaybackMs != null) {
+        const syncPlaybackSec = syncPlaybackMs / 1000;
         const target = Number.isFinite(d) && d > 0
           ? Math.min(Math.max(0, syncPlaybackSec), Math.max(0, d - 0.05))
           : syncPlaybackSec;
@@ -578,9 +685,19 @@ function MediaRenderer({
         } catch {
           /* ignore media seek race */
         }
+        if (Number.isFinite(d) && d > 0 && syncPlaybackSec >= d - 0.1) {
+          v.pause();
+        }
       }
+      onVideoProgressMs?.(v.currentTime * 1000);
+    },
+    onTimeUpdate: (e: SyntheticEvent<HTMLVideoElement>) => {
+      const v = e.currentTarget;
+      onVideoProgressMs?.(v.currentTime * 1000);
+      maybeFireEarlyEnd(v);
     },
     onEnded: (e: SyntheticEvent<HTMLVideoElement>) => {
+      onVideoProgressMs?.(e.currentTarget.currentTime * 1000);
       fireEndedOnce(e.currentTarget);
     },
     onError: () => {

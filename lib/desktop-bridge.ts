@@ -73,6 +73,22 @@ export type LicenseActivateResult =
   | { ok: true; organizationLabel: string | null; status: "activated" | "already_activated" }
   | { ok: false; message: string; reason?: string };
 
+export type MobileBridgeInfo = {
+  enabled: boolean;
+  port: number | null;
+  pairingCode: string | null;
+  operatorPin: string | null;
+  bridgeUrls: string[];
+  pairCodes: string[];
+  operatorPinConfigured: boolean;
+  cloud: {
+    enabled: boolean;
+    baseUrl: string | null;
+    venueId: string | null;
+    pairCode: string | null;
+  };
+};
+
 export type ElectronBridge = {
   context: DesktopContext;
   selectFile: (opts: {
@@ -107,4 +123,5 @@ export type ElectronBridge = {
   /** ArenaCue-licentie: status (gate vs ok). */
   licenseGetStatus: () => Promise<LicenseGetStatusResult>;
   licenseActivate: (opts: { licenseKey: string }) => Promise<LicenseActivateResult>;
+  getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
 };

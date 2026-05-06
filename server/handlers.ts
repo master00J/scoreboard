@@ -23,6 +23,20 @@ async function updateState(data: Parameters<typeof prisma.displayState.update>[0
   return prisma.displayState.update({ where: { id: 1 }, data });
 }
 
+async function goalVisualEnabledForSide(side: "home" | "away"): Promise<boolean> {
+  const column = side === "home" ? "goalVisualHomeEnabled" : "goalVisualAwayEnabled";
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ enabled: boolean | number | null }>>(
+      `SELECT "${column}" AS enabled FROM "AppSettings" WHERE "id" = 1`,
+    );
+    const value = rows[0]?.enabled;
+    if (value == null) return side === "home";
+    return Boolean(value);
+  } catch {
+    return side === "home";
+  }
+}
+
 /**
  * Zorgt dat een VIDEO MediaItem bestaat voor dit bestandspad (nodig voor goalIntroVideoPath / goalVideoPath),
  * zodat het display via activeMediaId + /api/media kan laden.
@@ -237,6 +251,8 @@ export async function handleCommand(cmd: Command) {
           where: { id: s.matchId },
           data: { status: cmd.status },
         });
+        // Bumpt DisplayState.updatedAt zodat desktop control en mobiele clients matchdata herladen.
+        await updateState({ mode: s.mode });
       }
       return { ok: true };
     }
@@ -268,6 +284,9 @@ export async function handleCommand(cmd: Command) {
       // fullscreen while the operator is picking the scorer.
       const s = await getState();
       if (!s.matchId) throw new Error("No active match");
+      if (!(await goalVisualEnabledForSide(cmd.side))) {
+        return { ok: true };
+      }
       let activeMediaId: string | null = null;
       const settingsRow = await prisma.appSettings.findUnique({ where: { id: 1 } });
       const introPath = settingsRow?.goalIntroVideoPath ?? null;
@@ -323,6 +342,15 @@ export async function handleCommand(cmd: Command) {
         playerInId: cmd.scorerId,
         playerOutId: cmd.assistId,
       });
+
+      if (!(await goalVisualEnabledForSide(cmd.side))) {
+        await updateState({
+          mode: s.mode,
+          activeMediaId: null,
+          activeGoalScorerId: null,
+        });
+        return { ok: true };
+      }
 
       // If the confirmed scorer has a personal goal video, play it
       // fullscreen. Otherwise fall back to the existing text-based GOAL

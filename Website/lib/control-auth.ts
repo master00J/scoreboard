@@ -1,4 +1,5 @@
 import { SignJWT, jwtVerify } from "jose";
+import crypto from "node:crypto";
 
 export type ControlRole = "viewer" | "operator";
 
@@ -11,6 +12,11 @@ function readSecret(): Uint8Array | null {
   const s = process.env.CONTROL_SESSION_SECRET?.trim();
   if (!s || s.length < 24) return null;
   return new TextEncoder().encode(s);
+}
+
+function readSecretText(): string | null {
+  const s = process.env.CONTROL_SESSION_SECRET?.trim();
+  return s && s.length >= 24 ? s : null;
 }
 
 export function isControlAuthConfigured(): boolean {
@@ -51,4 +57,21 @@ export function readBearerToken(request: Request): string | undefined {
   if (!auth.toLowerCase().startsWith("bearer ")) return undefined;
   const token = auth.slice(7).trim();
   return token || undefined;
+}
+
+export function operatorPairTokenForVenue(venueId: string): string | null {
+  const secret = readSecretText();
+  if (!secret || !venueId.trim()) return null;
+  return crypto
+    .createHmac("sha256", secret)
+    .update(`operator-pair:${venueId.trim()}`)
+    .digest("base64url");
+}
+
+export function verifyOperatorPairToken(venueId: string, token: string | undefined): boolean {
+  const expected = operatorPairTokenForVenue(venueId);
+  if (!expected || !token) return false;
+  const a = Buffer.from(expected);
+  const b = Buffer.from(token.trim());
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }

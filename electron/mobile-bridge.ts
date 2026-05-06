@@ -1,6 +1,7 @@
 import http from "http";
 import { randomBytes } from "crypto";
 import type { DesktopApiRequest } from "../lib/desktop-bridge";
+import { computeElapsedSeconds } from "../lib/timer";
 
 type BridgeRuntime = {
   apiRequest: (req: DesktopApiRequest) => Promise<{
@@ -23,6 +24,7 @@ type SessionRole = "viewer" | "operator";
 export type MobileBridgeHandle = {
   port: number;
   pairingCode: string;
+  operatorPin: string;
   stop: () => Promise<void>;
 };
 
@@ -33,6 +35,10 @@ function parseJsonBody(raw: string): unknown {
 
 function randomPairingCode(): string {
   return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+function randomOperatorPin(): string {
+  return String(Math.floor(1000 + Math.random() * 9000));
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -52,9 +58,27 @@ function writeJson(
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Scoreboard-Token");
+  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Scoreboard-Token");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
   res.end(JSON.stringify(payload));
+}
+
+function withTimerTelemetry(snapshot: unknown) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return snapshot;
+  const state = snapshot as {
+    timerRunning?: boolean;
+    timerStartedAt?: string | null;
+    timerBaseSec?: number;
+  };
+  return {
+    ...state,
+    timerElapsedSec: computeElapsedSeconds({
+      timerRunning: !!state.timerRunning,
+      timerStartedAt: state.timerStartedAt ?? null,
+      timerBaseSec: Number(state.timerBaseSec ?? 0),
+    }),
+    timerElapsedAtMs: Date.now(),
+  };
 }
 
 export async function startMobileBridge(
@@ -63,7 +87,7 @@ export async function startMobileBridge(
   const preferredPort = Number(process.env.MOBILE_BRIDGE_PORT ?? "17890");
   const port = Number.isFinite(preferredPort) ? preferredPort : 17890;
   const pairingCode = process.env.MOBILE_BRIDGE_PAIRING_CODE?.trim() || randomPairingCode();
-  const operatorPin = process.env.MOBILE_BRIDGE_OPERATOR_PIN?.trim() || "";
+  const operatorPin = process.env.MOBILE_BRIDGE_OPERATOR_PIN?.trim() || randomOperatorPin();
   const sessionTtlMs = Number(process.env.MOBILE_BRIDGE_SESSION_TTL_MS ?? 1000 * 60 * 60 * 8);
 
   const sessions = new Map<string, { expiresAtMs: number; role: SessionRole }>();
@@ -194,7 +218,7 @@ export async function startMobileBridge(
 
       if (url.pathname === "/mobile/snapshot" && req.method === "GET") {
         const snapshot = await options.runtime.getDisplaySnapshot();
-        writeJson(res, 200, snapshot);
+        writeJson(res, 200, withTimerTelemetry(snapshot));
         return;
       }
 
@@ -247,10 +271,12 @@ export async function startMobileBridge(
   options.log(
     `[mobile-bridge] actief op poort ${port} (pairing-code=${pairingCode})`,
   );
+  options.log(`[mobile-bridge] operator-pin=${operatorPin}`);
 
   return {
     port,
     pairingCode,
+    operatorPin,
     stop: () =>
       new Promise<void>((resolve, reject) => {
         server.close((err) => {

@@ -61,8 +61,6 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
           {model.nextSlotEtaSec != null ? (
             <>
               Volgende sponsor in beeld over <strong>{model.nextSlotEtaSec.toFixed(1)} s</strong>
-              {" "}
-              (zelfde rooster als het scherm).
             </>
           ) : (
             <>Geen volgende sponsor-slot meer in dit blok.</>

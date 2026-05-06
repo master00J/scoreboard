@@ -1,5 +1,6 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, dialog, Menu, screen, session, shell } from "electron";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import type {
   DesktopApiRequest,
@@ -123,6 +124,37 @@ function stadiumDisplay() {
   const primary = screen.getPrimaryDisplay();
   const external = screen.getAllDisplays().find((d) => d.id !== primary.id);
   return external ?? primary;
+}
+
+function isLikelyVirtualAdapter(name: string): boolean {
+  return /bluetooth|docker|hyper-v|loopback|npcap|tap|virtual|vmware|vethernet|wsl/i.test(name);
+}
+
+function localNetworkUrls(port: number): string[] {
+  const primaryUrls: string[] = [];
+  const fallbackUrls: string[] = [];
+  const nets = os.networkInterfaces();
+  for (const [name, entries] of Object.entries(nets)) {
+    for (const net of entries ?? []) {
+      if (net.family !== "IPv4" || net.internal) continue;
+      const url = `http://${net.address}:${port}`;
+      if (isLikelyVirtualAdapter(name)) fallbackUrls.push(url);
+      else primaryUrls.push(url);
+    }
+  }
+  const urls = [...primaryUrls, ...fallbackUrls];
+  return urls.length > 0 ? urls : [`http://localhost:${port}`];
+}
+
+function mobileLocalPairCodes(handle: MobileBridgeHandle): string[] {
+  return localNetworkUrls(handle.port).map((bridgeUrl) =>
+    [
+      "ACPAIR:local",
+      encodeURIComponent(bridgeUrl),
+      encodeURIComponent(handle.pairingCode),
+      encodeURIComponent(handle.operatorPin ?? ""),
+    ].join("|"),
+  );
 }
 
 /**
@@ -269,6 +301,22 @@ function registerIpc() {
   });
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
+
+  ipcMain.handle("mobile:getBridgeInfo", () => ({
+    enabled: mobileBridge != null,
+    port: mobileBridge?.port ?? null,
+    pairingCode: mobileBridge?.pairingCode ?? null,
+    operatorPin: mobileBridge?.operatorPin ?? null,
+    bridgeUrls: mobileBridge ? localNetworkUrls(mobileBridge.port) : [],
+    pairCodes: mobileBridge ? mobileLocalPairCodes(mobileBridge) : [],
+    operatorPinConfigured: !!mobileBridge?.operatorPin,
+    cloud: {
+      enabled: cloudAgent != null,
+      baseUrl: cloudAgent?.baseUrl ?? null,
+      venueId: cloudAgent?.venueId ?? null,
+      pairCode: cloudAgent?.customerPairCode ?? null,
+    },
+  }));
 
   ipcMain.handle("shell:openExternal", async (_, url: unknown) => {
     if (typeof url !== "string" || !/^https:\/\//i.test(url.trim())) {
@@ -483,6 +531,11 @@ function registerIpc() {
         : prevLicense?.controlVenueId !== undefined
           ? { controlVenueId: prevLicense.controlVenueId }
           : {}),
+      ...(r.controlOperatorPairToken !== undefined
+        ? { controlOperatorPairToken: r.controlOperatorPairToken }
+        : prevLicense?.controlOperatorPairToken !== undefined
+          ? { controlOperatorPairToken: prevLicense.controlOperatorPairToken }
+          : {}),
     });
     return {
       gate: false,
@@ -520,6 +573,7 @@ function registerIpc() {
       ...(r.controlCloudBaseUrl !== undefined ? { controlCloudBaseUrl: r.controlCloudBaseUrl } : {}),
       ...(r.controlDesktopKey !== undefined ? { controlDesktopKey: r.controlDesktopKey } : {}),
       ...(r.controlVenueId !== undefined ? { controlVenueId: r.controlVenueId } : {}),
+      ...(r.controlOperatorPairToken !== undefined ? { controlOperatorPairToken: r.controlOperatorPairToken } : {}),
     });
     return {
       ok: true,

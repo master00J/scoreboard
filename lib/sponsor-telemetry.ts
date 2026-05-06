@@ -28,6 +28,9 @@ export type SponsorLedgerPayload = {
     startedAtMs: number;
     expectedPlaySec: number;
     clipSessionId: string;
+    /** Laatst bekende echte playback-positie; bevriest HUD/preview tijdens onderbreking. */
+    playbackPositionMs?: number;
+    paused?: boolean;
   } | null;
   updatedAtMs: number;
 };
@@ -40,6 +43,8 @@ export type SponsorTelemetryClipStart = {
   expectedPlaySec: number;
   clipSessionId: string;
   startedAtMs: number;
+  playbackPositionMs?: number;
+  paused?: boolean;
 };
 
 export type SponsorTelemetryClipEnd = {
@@ -51,6 +56,18 @@ export type SponsorTelemetryClipEnd = {
   clipSessionId: string;
   startedAtMs: number;
 };
+
+export function sponsorTelemetryActiveClipElapsedSec(
+  activeClip: NonNullable<SponsorLedgerPayload["activeClip"]>,
+  nowMs: number,
+): number {
+  if (activeClip.paused) {
+    return Math.max(0, (activeClip.playbackPositionMs ?? 0) / 1000);
+  }
+  const basePlaybackMs = Math.max(0, activeClip.playbackPositionMs ?? 0);
+  const elapsedSinceStartMs = Math.max(0, nowMs - activeClip.startedAtMs);
+  return Math.max(basePlaybackMs / 1000, elapsedSinceStartMs / 1000);
+}
 
 /** Totale geschatte verbruikte seconden inclusief lopende clip (display-sync). */
 export function sponsorTelemetryConsumedSec(
@@ -66,7 +83,7 @@ export function sponsorTelemetryConsumedSec(
      * doortikt terwijl er een goal-/spelervideo over de sponsor heen wordt gelegd
      * (waardoor `bySponsorSec` later met de echte playback-duur lager uitvalt).
      */
-    const elapsedSec = Math.max(0, (nowMs - ac.startedAtMs) / 1000);
+    const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ac, nowMs);
     const cap = Math.max(0, ac.expectedPlaySec || 0);
     total += cap > 0 ? Math.min(elapsedSec, cap) : elapsedSec;
   }

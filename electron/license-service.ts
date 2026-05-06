@@ -31,6 +31,7 @@ export type StoredLicense = {
   controlCloudBaseUrl?: string;
   controlDesktopKey?: string;
   controlVenueId?: string;
+  controlOperatorPairToken?: string;
 };
 
 export function skipLicenseGateFromEnv(): boolean {
@@ -114,16 +115,22 @@ function parseControlBundle(v: unknown): {
   controlCloudBaseUrl?: string;
   controlDesktopKey?: string;
   controlVenueId?: string;
+  controlOperatorPairToken?: string;
 } {
   if (!v || typeof v !== "object" || Array.isArray(v)) return {};
   const rec = v as Record<string, unknown>;
   const cloudBaseUrl = typeof rec.cloudBaseUrl === "string" ? rec.cloudBaseUrl.trim() : "";
+  const normalizedCloudBaseUrl = /^https:\/\/(www\.)?arenacue\.com\/?$/i.test(cloudBaseUrl)
+    ? "https://arenacue.be"
+    : cloudBaseUrl.replace(/\/+$/, "");
   const desktopKey = typeof rec.desktopKey === "string" ? rec.desktopKey.trim() : "";
   const venueId = typeof rec.venueId === "string" ? rec.venueId.trim() : "";
+  const operatorPairToken = typeof rec.operatorPairToken === "string" ? rec.operatorPairToken.trim() : "";
   return {
-    ...(cloudBaseUrl ? { controlCloudBaseUrl: cloudBaseUrl.replace(/\/+$/, "") } : {}),
+    ...(normalizedCloudBaseUrl ? { controlCloudBaseUrl: normalizedCloudBaseUrl } : {}),
     ...(desktopKey ? { controlDesktopKey: desktopKey } : {}),
     ...(venueId ? { controlVenueId: venueId } : {}),
+    ...(operatorPairToken ? { controlOperatorPairToken: operatorPairToken } : {}),
   };
 }
 
@@ -160,6 +167,7 @@ export async function remoteLicenseCheck(
       controlCloudBaseUrl?: string;
       controlDesktopKey?: string;
       controlVenueId?: string;
+      controlOperatorPairToken?: string;
     }
   | { kind: "error"; message: string; reason?: string }
   | { kind: "network" }
@@ -212,6 +220,7 @@ export async function remoteLicenseActivate(
       controlCloudBaseUrl?: string;
       controlDesktopKey?: string;
       controlVenueId?: string;
+      controlOperatorPairToken?: string;
     }
   | { kind: "error"; message: string; reason?: string }
   | { kind: "network" }

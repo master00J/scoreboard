@@ -1,13 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 /**
  * Loopt van 0 → 1 over `totalMs` (wall clock), opnieuw bij `resetKey`.
  * Bij totalMs ≤ 0: geen animatie, waarde blijft 0.
  */
-export function useTimedSlideProgress(totalMs: number, resetKey: string | number) {
+export function useTimedSlideProgress(
+  totalMs: number,
+  resetKey: string | number,
+  paused = false,
+) {
   const [elapsed01, setElapsed01] = useState(0);
+  const pausedRef = useRef(paused);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
   useEffect(() => {
     if (totalMs <= 0) {
       setElapsed01(0);
@@ -15,10 +23,15 @@ export function useTimedSlideProgress(totalMs: number, resetKey: string | number
     }
     let cancelled = false;
     let raf = 0;
-    const start = performance.now();
+    let accumulatedMs = 0;
+    let lastTickMs = performance.now();
     function tick(now: number) {
       if (cancelled) return;
-      const t = (now - start) / totalMs;
+      if (!pausedRef.current) {
+        accumulatedMs += Math.max(0, now - lastTickMs);
+      }
+      lastTickMs = now;
+      const t = accumulatedMs / totalMs;
       const clamped = Math.min(1, Math.max(0, t));
       setElapsed01(clamped);
       if (clamped < 1) raf = requestAnimationFrame(tick);

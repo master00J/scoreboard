@@ -15,7 +15,10 @@ import {
   sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
 import { sponsorRepeatBudgetCyclesFromThemeJson } from "@/lib/scoreboard-theme";
-import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
+import {
+  sponsorTelemetryActiveClipElapsedSec,
+  sponsorTelemetrySegmentKey,
+} from "@/lib/sponsor-telemetry";
 import {
   hasSponsorsForSection,
   secondsUntilNextSponsorSlot,
@@ -321,8 +324,16 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       if (ledgerMatchesSegment) {
         const ac = sponsorLedger!.activeClip;
         if (ac) {
-          effectivePhase = "sponsor";
-          effectiveSponsorId = ac.sponsorId;
+          const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ac, now);
+          const totalSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
+          if (elapsedSec < totalSec + 0.75) {
+            effectivePhase = "sponsor";
+            effectiveSponsorId = ac.sponsorId;
+          } else {
+            effectivePhase = "scoreboard";
+            effectiveSponsorId = null;
+            hangRef.current = null;
+          }
         } else {
           effectivePhase = "scoreboard";
           effectiveSponsorId = null;
@@ -367,7 +378,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       if (ledgerMatchesSegment) {
         const ac = sponsorLedger!.activeClip;
         if (effectivePhase === "sponsor" && ac) {
-          const elapsedSec = Math.max(0, (now - ac.startedAtMs) / 1000);
+          const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ac, now);
           const totalSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
           sponsorClipProgress = Math.min(1, elapsedSec / totalSec);
           clipRemainingSec = Math.max(0, totalSec - elapsedSec);

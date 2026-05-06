@@ -87,6 +87,8 @@ export function sponsorTelemetryClipStart(payload: SponsorTelemetryClipStart): S
     startedAtMs: payload.startedAtMs,
     expectedPlaySec: payload.expectedPlaySec,
     clipSessionId: payload.clipSessionId,
+    playbackPositionMs: payload.playbackPositionMs,
+    paused: payload.paused,
   };
   ledger.updatedAtMs = now;
   sponsorLedgerSnapshot = ledger;
@@ -96,7 +98,20 @@ export function sponsorTelemetryClipStart(payload: SponsorTelemetryClipStart): S
 
 export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): SponsorLedgerPayload {
   if (sponsorClipEndedSessions.has(payload.clipSessionId)) {
-    return sponsorLedgerSnapshot ?? ensureSponsorLedger(payload.matchId, payload.segmentKey);
+    const ledger = sponsorLedgerSnapshot ?? ensureSponsorLedger(payload.matchId, payload.segmentKey);
+    const ac = ledger.activeClip;
+    if (
+      ac &&
+      ac.clipSessionId === payload.clipSessionId &&
+      ac.sponsorId === payload.sponsorId &&
+      ac.mediaId === payload.mediaId
+    ) {
+      ledger.activeClip = null;
+      ledger.updatedAtMs = Date.now();
+      sponsorLedgerSnapshot = ledger;
+      sendAll("display:sponsorLedger", ledger);
+    }
+    return ledger;
   }
   sponsorClipEndedSessions.add(payload.clipSessionId);
   if (sponsorClipEndedSessions.size > 4000) {
@@ -224,6 +239,17 @@ async function ensureSqliteSchema() {
         FOREIGN KEY ("mediaId") REFERENCES "MediaItem" ("id")
         ON DELETE RESTRICT ON UPDATE CASCADE
     )`,
+    `CREATE TABLE IF NOT EXISTS "ScheduledMediaCue" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "mediaId" TEXT NOT NULL,
+      "matchStatus" TEXT NOT NULL,
+      "triggerSec" INTEGER NOT NULL,
+      "enabled" BOOLEAN NOT NULL DEFAULT true,
+      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT "ScheduledMediaCue_mediaId_fkey"
+        FOREIGN KEY ("mediaId") REFERENCES "MediaItem" ("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
+    )`,
     `CREATE TABLE IF NOT EXISTS "DisplayState" (
       "id" INTEGER NOT NULL PRIMARY KEY DEFAULT 1,
       "mode" TEXT NOT NULL DEFAULT 'IDLE',
@@ -252,6 +278,8 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("Player", "subImagePath", "TEXT");
   await addColumnIfMissing("Player", "lineupVideoPath", "TEXT");
   await addColumnIfMissing("AppSettings", "goalIntroVideoPath", "TEXT");
+  await addColumnIfMissing("AppSettings", "goalVisualHomeEnabled", "BOOLEAN NOT NULL DEFAULT 1");
+  await addColumnIfMissing("AppSettings", "goalVisualAwayEnabled", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("AppSettings", "matchLiveScoreboardSec", "INTEGER NOT NULL DEFAULT 45");
   await addColumnIfMissing("AppSettings", "matchLiveSponsorSec", "INTEGER NOT NULL DEFAULT 15");
   await addColumnIfMissing("AppSettings", "firstHalfScoreboardSec", "INTEGER NOT NULL DEFAULT 45");
@@ -403,6 +431,8 @@ type AppSettingsRow = {
   id: number;
   homeTeamId: string | null;
   goalIntroVideoPath: string | null;
+  goalVisualHomeEnabled?: boolean | number | null;
+  goalVisualAwayEnabled?: boolean | number | null;
   firstHalfScoreboardSec?: number | null;
   firstHalfSponsorSec?: number | null;
   halftimeScoreboardSec?: number | null;
@@ -441,11 +471,14 @@ async function getAppSettings(): Promise<{
   id: number;
   homeTeamId: string | null;
   goalIntroVideoPath: string | null;
+  goalVisualHomeEnabled: boolean;
+  goalVisualAwayEnabled: boolean;
   scoreboardThemeJson: string | null;
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
     `SELECT "id", "homeTeamId", "goalIntroVideoPath",
+      "goalVisualHomeEnabled", "goalVisualAwayEnabled",
       "firstHalfScoreboardSec", "firstHalfSponsorSec",
       "halftimeScoreboardSec", "halftimeSponsorSec",
       "secondHalfScoreboardSec", "secondHalfSponsorSec",
@@ -458,6 +491,8 @@ async function getAppSettings(): Promise<{
       id: row.id,
       homeTeamId: row.homeTeamId,
       goalIntroVideoPath: row.goalIntroVideoPath,
+      goalVisualHomeEnabled: row.goalVisualHomeEnabled == null ? true : Boolean(row.goalVisualHomeEnabled),
+      goalVisualAwayEnabled: row.goalVisualAwayEnabled == null ? false : Boolean(row.goalVisualAwayEnabled),
       scoreboardThemeJson: row.scoreboardThemeJson ?? null,
       firstHalfScoreboardSec: row.firstHalfScoreboardSec ?? defaults.firstHalfScoreboardSec,
       firstHalfSponsorSec: row.firstHalfSponsorSec ?? defaults.firstHalfSponsorSec,
@@ -474,6 +509,8 @@ async function getAppSettings(): Promise<{
     id: 1,
     homeTeamId: null,
     goalIntroVideoPath: null,
+    goalVisualHomeEnabled: true,
+    goalVisualAwayEnabled: false,
     scoreboardThemeJson: null,
     ...defaults,
   };
@@ -490,6 +527,14 @@ async function setGoalIntroVideoPath(videoPath: string | null) {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "goalIntroVideoPath" = ? WHERE "id" = 1`,
     videoPath,
+  );
+}
+
+async function setGoalVisualEnabled(side: "home" | "away", enabled: boolean) {
+  const column = side === "home" ? "goalVisualHomeEnabled" : "goalVisualAwayEnabled";
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "${column}" = ? WHERE "id" = 1`,
+    enabled ? 1 : 0,
   );
 }
 
@@ -711,6 +756,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       return json(200, {
         homeTeamId: settings.homeTeamId,
         goalIntroVideoPath: settings.goalIntroVideoPath,
+        goalVisualHomeEnabled: settings.goalVisualHomeEnabled,
+        goalVisualAwayEnabled: settings.goalVisualAwayEnabled,
         firstHalfScoreboardSec: settings.firstHalfScoreboardSec,
         firstHalfSponsorSec: settings.firstHalfSponsorSec,
         halftimeScoreboardSec: settings.halftimeScoreboardSec,
@@ -726,6 +773,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         (parseJsonBody(req) as {
           homeTeamId?: string | null;
           goalIntroVideoPath?: string | null;
+          goalVisualHomeEnabled?: boolean;
+          goalVisualAwayEnabled?: boolean;
           matchLiveScoreboardSec?: number;
           matchLiveSponsorSec?: number;
           firstHalfScoreboardSec?: number;
@@ -748,6 +797,12 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       }
       if ("goalIntroVideoPath" in body) {
         await setGoalIntroVideoPath(body.goalIntroVideoPath ?? null);
+      }
+      if (typeof body.goalVisualHomeEnabled === "boolean") {
+        await setGoalVisualEnabled("home", body.goalVisualHomeEnabled);
+      }
+      if (typeof body.goalVisualAwayEnabled === "boolean") {
+        await setGoalVisualEnabled("away", body.goalVisualAwayEnabled);
       }
       if ("scoreboardThemeJson" in body) {
         const raw = body.scoreboardThemeJson;
@@ -796,6 +851,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       return json(200, {
         homeTeamId: settings.homeTeamId,
         goalIntroVideoPath: settings.goalIntroVideoPath,
+        goalVisualHomeEnabled: settings.goalVisualHomeEnabled,
+        goalVisualAwayEnabled: settings.goalVisualAwayEnabled,
         firstHalfScoreboardSec: settings.firstHalfScoreboardSec,
         firstHalfSponsorSec: settings.firstHalfSponsorSec,
         halftimeScoreboardSec: settings.halftimeScoreboardSec,
@@ -1100,6 +1157,137 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       return json(200, { ok: true });
     }
 
+    if (pathname === "/api/scheduled-media-cues" && method === "GET") {
+      const cues = await prisma.$queryRawUnsafe<
+        Array<{
+          id: string;
+          mediaId: string;
+          matchStatus: string;
+          triggerSec: number;
+          enabled: boolean | number;
+          createdAt: Date | string;
+          mediaType: string;
+          mediaPath: string;
+          mediaTitle: string;
+          mediaDurationSec: number;
+          mediaSponsorName: string | null;
+          mediaSponsorId: string | null;
+          mediaActive: boolean | number;
+          mediaPlayAudio: boolean | number;
+          mediaSponsorPhaseTagsJson: string | null;
+          mediaCreatedAt: Date | string;
+        }>
+      >(
+        `SELECT
+          c."id", c."mediaId", c."matchStatus", c."triggerSec", c."enabled", c."createdAt",
+          m."type" AS "mediaType", m."path" AS "mediaPath", m."title" AS "mediaTitle",
+          m."durationSec" AS "mediaDurationSec", m."sponsorName" AS "mediaSponsorName",
+          m."sponsorId" AS "mediaSponsorId", m."active" AS "mediaActive",
+          m."playAudio" AS "mediaPlayAudio", m."sponsorPhaseTagsJson" AS "mediaSponsorPhaseTagsJson",
+          m."createdAt" AS "mediaCreatedAt"
+        FROM "ScheduledMediaCue" c
+        INNER JOIN "MediaItem" m ON m."id" = c."mediaId"
+        ORDER BY c."matchStatus" ASC, c."triggerSec" ASC, c."createdAt" ASC`,
+      );
+      return json(
+        200,
+        cues.map((c) => ({
+          id: c.id,
+          mediaId: c.mediaId,
+          matchStatus: c.matchStatus,
+          triggerSec: Number(c.triggerSec),
+          enabled: Boolean(c.enabled),
+          createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
+          media: {
+            id: c.mediaId,
+            type: c.mediaType,
+            path: c.mediaPath,
+            title: c.mediaTitle,
+            durationSec: Number(c.mediaDurationSec),
+            sponsorName: c.mediaSponsorName,
+            sponsorId: c.mediaSponsorId,
+            active: Boolean(c.mediaActive),
+            playAudio: Boolean(c.mediaPlayAudio),
+            sponsorPhaseTagsJson: c.mediaSponsorPhaseTagsJson,
+            createdAt: c.mediaCreatedAt instanceof Date ? c.mediaCreatedAt.toISOString() : String(c.mediaCreatedAt),
+          },
+        })),
+      );
+    }
+
+    if (pathname === "/api/scheduled-media-cues" && method === "POST") {
+      const body = (parseJsonBody(req) as {
+        mediaId?: string;
+        matchStatus?: string;
+        triggerSec?: number;
+        enabled?: boolean;
+      }) ?? {};
+      if (!body.mediaId || !body.matchStatus || !Number.isFinite(body.triggerSec)) {
+        return json(400, { error: "Media, fase en tijdstip zijn verplicht." });
+      }
+      const media = await prisma.mediaItem.findUnique({ where: { id: body.mediaId } });
+      if (!media) return json(400, { error: "Media niet gevonden." });
+      const id = `cue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO "ScheduledMediaCue" ("id", "mediaId", "matchStatus", "triggerSec", "enabled")
+         VALUES (?, ?, ?, ?, ?)`,
+        id,
+        body.mediaId,
+        body.matchStatus,
+        Math.max(0, Math.round(body.triggerSec ?? 0)),
+        body.enabled === false ? 0 : 1,
+      );
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { id });
+    }
+
+    const scheduledCueId = pathname.match(/^\/api\/scheduled-media-cues\/([^/]+)$/)?.[1];
+    if (scheduledCueId && method === "PATCH") {
+      const body = (parseJsonBody(req) as {
+        mediaId?: string;
+        matchStatus?: string;
+        triggerSec?: number;
+        enabled?: boolean;
+      }) ?? {};
+      const updates: string[] = [];
+      const values: unknown[] = [];
+      if (typeof body.mediaId === "string") {
+        const media = await prisma.mediaItem.findUnique({ where: { id: body.mediaId } });
+        if (!media) return json(400, { error: "Media niet gevonden." });
+        updates.push(`"mediaId" = ?`);
+        values.push(body.mediaId);
+      }
+      if (typeof body.matchStatus === "string") {
+        updates.push(`"matchStatus" = ?`);
+        values.push(body.matchStatus);
+      }
+      if (Number.isFinite(body.triggerSec)) {
+        updates.push(`"triggerSec" = ?`);
+        values.push(Math.max(0, Math.round(body.triggerSec ?? 0)));
+      }
+      if (typeof body.enabled === "boolean") {
+        updates.push(`"enabled" = ?`);
+        values.push(body.enabled ? 1 : 0);
+      }
+      if (updates.length === 0) return json(400, { error: "Geen wijzigingen." });
+      await prisma.$executeRawUnsafe(
+        `UPDATE "ScheduledMediaCue" SET ${updates.join(", ")} WHERE "id" = ?`,
+        ...values,
+        scheduledCueId,
+      );
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true });
+    }
+
+    if (scheduledCueId && method === "DELETE") {
+      await prisma.$executeRawUnsafe(`DELETE FROM "ScheduledMediaCue" WHERE "id" = ?`, scheduledCueId);
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true });
+    }
+
     if (pathname === "/api/media" && method === "GET") {
       const media = await prisma.mediaItem.findMany({
         orderBy: { createdAt: "desc" },
@@ -1125,6 +1313,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       return json(200, media);
     }
     if (mediaId && method === "DELETE") {
+      await prisma.$executeRawUnsafe(`DELETE FROM "ScheduledMediaCue" WHERE "mediaId" = ?`, mediaId);
       await prisma.playlistItem.deleteMany({ where: { mediaId } });
       await prisma.mediaItem.delete({ where: { id: mediaId } });
       await touchState();

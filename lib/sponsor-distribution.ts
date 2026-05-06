@@ -270,6 +270,58 @@ export function buildSponsorSecondQueue(
   return q;
 }
 
+export type SponsorAppearancePlan = {
+  id: string;
+  clipSec: number;
+  appearances: number;
+};
+
+/**
+ * Slotmap-starts zijn vertoningen, geen losse budgetseconden. Een sponsor met 60s budget
+ * en een clip van 30s krijgt dus ongeveer 2 starts over de fase, niet 60 starts.
+ */
+export function buildSponsorAppearancePlan(
+  active: Sponsor[],
+  section: SponsorSection,
+  matchStatus?: string,
+): SponsorAppearancePlan[] {
+  return active
+    .map((s) => {
+      const budget = sponsorSectionBudgetSeconds(s, section, matchStatus);
+      const clipSec = Math.max(1, Math.ceil(maxClipSecondsForSponsor(s, section, matchStatus)));
+      return {
+        id: s.id,
+        clipSec,
+        appearances: Math.max(0, Math.ceil(budget / clipSec)),
+      };
+    })
+    .filter((p) => p.appearances > 0);
+}
+
+/**
+ * Bouw sponsorblokken/rondes. Sponsors met meer geboekte tijd verschijnen in meer rondes;
+ * binnen één ronde mogen verschillende sponsors gewoon direct na elkaar spelen.
+ */
+export function buildSponsorBlockRounds(plan: SponsorAppearancePlan[]): string[][] {
+  const maxRounds = Math.max(0, ...plan.map((p) => p.appearances));
+  if (maxRounds <= 0) return [];
+  const rounds: string[][] = Array.from({ length: maxRounds }, () => []);
+  for (const p of plan) {
+    const roundIndices = spreadSponsorBinIndices(p.appearances, maxRounds);
+    for (const roundIdx of roundIndices) {
+      rounds[roundIdx]?.push(p.id);
+    }
+  }
+  const order = new Map(plan.map((p, idx) => [p.id, idx]));
+  return rounds
+    .map((round) =>
+      round
+        .slice()
+        .sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0)),
+    )
+    .filter((round) => round.length > 0);
+}
+
 /** Per seconde-index in de helft: welke sponsor-id of null (= scorebord). */
 export function buildSponsorSlotMap(
   active: Sponsor[],
@@ -278,18 +330,37 @@ export function buildSponsorSlotMap(
   matchStatus?: string,
 ): (string | null)[] {
   const Hc = Math.max(1, Math.floor(H));
-  let queue = buildSponsorSecondQueue(active, section, matchStatus);
   const map: (string | null)[] = Array(Hc).fill(null);
-  if (queue.length === 0) return map;
-  if (queue.length > Hc) {
-    queue = thinSponsorQueue(queue, Hc);
+  const plan = buildSponsorAppearancePlan(active, section, matchStatus);
+  if (plan.length === 0) return map;
+
+  const clipSecById = new Map(plan.map((p) => [p.id, p.clipSec]));
+  const rounds = buildSponsorBlockRounds(plan);
+  if (rounds.length === 0) return map;
+
+  const roundDurations = rounds.map((round) =>
+    round.reduce((sum, sponsorId) => sum + (clipSecById.get(sponsorId) ?? 1), 0),
+  );
+  const totalSponsorSec = roundDurations.reduce((sum, dur) => sum + dur, 0);
+  const gapSec = totalSponsorSec < Hc ? (Hc - totalSponsorSec) / (rounds.length + 1) : 0;
+
+  let cursor = gapSec;
+  for (let r = 0; r < rounds.length; r++) {
+    let t = Math.round(cursor);
+    for (const sponsorId of rounds[r]!) {
+      if (t >= Hc) return map;
+      const clipSec = clipSecById.get(sponsorId) ?? 1;
+      if (t >= 0) {
+        const triggerWindowSec = Math.min(3, Math.max(1, clipSec));
+        for (let w = 0; w < triggerWindowSec && t + w < Hc && w < clipSec; w++) {
+          if (map[t + w] == null) map[t + w] = sponsorId;
+        }
+      }
+      t += clipSec;
+    }
+    cursor += roundDurations[r]! + gapSec;
   }
-  const bins = spreadSponsorBinIndices(queue.length, Hc);
-  const safeBins = assignBinsCollisionFree(bins, Hc);
-  for (let i = 0; i < queue.length; i++) {
-    const b = safeBins[i] ?? 0;
-    map[b] = queue[i]!;
-  }
+
   return map;
 }
 
@@ -315,6 +386,8 @@ export type ResolveSponsorSpreadOptions = {
    * Resterende hangtijd schuift mee zodat de sponsor zijn volle clip krijgt na de overlay.
    */
   interrupted?: boolean;
+  /** Optionele scorebordperiode na een sponsorclip; standaard uit, blokplanning bepaalt de pauzes. */
+  minScoreboardMsAfterHang?: number;
 };
 
 /**
@@ -359,6 +432,17 @@ export function resolveSponsorSpreadPhase(
       phase: "sponsor",
       sponsorFilterId: hang.sponsorId,
     };
+  }
+
+  const minScoreboardMsAfterHang = Math.max(0, options?.minScoreboardMsAfterHang ?? 0);
+  if (
+    hang &&
+    raw.phase === "sponsor" &&
+    nowMs >= hang.untilMs &&
+    nowMs - hang.untilMs < minScoreboardMsAfterHang
+  ) {
+    hang.lastSeenAtMs = nowMs;
+    return { phase: "scoreboard", sponsorFilterId: null };
   }
 
   /**

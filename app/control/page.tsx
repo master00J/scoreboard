@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import * as QRCode from "qrcode";
 import { useSocketSync, sendCommand, onDisplayError } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
@@ -20,6 +21,7 @@ import { UpdateNudgeBanner } from "./_components/update-nudge-banner";
 import { LicenseActivationGate } from "./_components/license-activation-gate";
 import type { Match } from "@/lib/types";
 import type { MatchStatusT } from "@/lib/validation/commands";
+import type { MobileBridgeInfo } from "@/lib/desktop-bridge";
 import { isFullMatch } from "@/lib/is-full-match";
 import { exportMatch, focusDisplayWindow } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
@@ -29,6 +31,7 @@ export default function ControlPage() {
   useSocketSync();
   const connected = useDisplayStore((s) => s.connected);
   const state = useDisplayStore((s) => s.state);
+  const [mobileBridge, setMobileBridge] = useState<MobileBridgeInfo | null>(null);
   const { data: match, reload: reloadMatch } = useApi<Match>(
     state?.matchId ? `/api/matches/${state.matchId}` : null,
   );
@@ -36,6 +39,20 @@ export default function ControlPage() {
   useEffect(() => {
     reloadMatch();
   }, [state?.updatedAt, reloadMatch]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadMobileBridge() {
+      const info = await window.electronAPI?.getMobileBridgeInfo();
+      if (!cancelled && info) setMobileBridge(info);
+    }
+    void loadMobileBridge();
+    const id = window.setInterval(() => void loadMobileBridge(), 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   // Surface server error toasts
   useEffect(() => {
@@ -64,6 +81,7 @@ export default function ControlPage() {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          <MobileBridgeBadge info={mobileBridge} />
           <span className="flex items-center gap-2 text-xs">
             <span
               className={`h-3 w-3 rounded-full ${
@@ -123,6 +141,129 @@ export default function ControlPage() {
       </Tabs>
     </main>
     </LicenseActivationGate>
+  );
+}
+
+function MobileBridgeBadge({ info }: { info: MobileBridgeInfo | null }) {
+  const bridgeUrl = info?.bridgeUrls[0] ?? (info?.port ? `http://localhost:${info.port}` : "");
+  const localPairCode =
+    info?.pairCodes[0] ??
+    (bridgeUrl && info?.pairingCode
+      ? [
+          "ACPAIR:local",
+          encodeURIComponent(bridgeUrl),
+          encodeURIComponent(info.pairingCode),
+          encodeURIComponent(info.operatorPin ?? ""),
+        ].join("|")
+      : "");
+
+  if (!info?.enabled && !info?.cloud.enabled) return null;
+
+  return (
+    <div className="flex flex-wrap gap-2">
+      {info.cloud.enabled && info.cloud.pairCode ? (
+        <div className="rounded-lg border border-green-500/40 bg-card p-3 text-xs shadow-sm">
+          <div className="flex items-center gap-3">
+            <PairCodeQr pairCode={info.cloud.pairCode} label="Cloud QR-code" />
+            <div className="flex flex-col gap-1">
+              <span className="font-semibold text-green-500">Mobiele app via cloud</span>
+              <span className="text-muted-foreground">Werkt ook buiten hetzelfde netwerk.</span>
+              <span className="font-mono text-muted-foreground">venue: {info.cloud.venueId}</span>
+              <button
+                type="button"
+                className="w-fit font-mono text-primary underline"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(info.cloud.pairCode ?? "");
+                  toast({ title: "Cloud koppelcode gekopieerd" });
+                }}
+              >
+                Kopieer cloud-code
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {info.enabled && info.pairingCode ? (
+        <div className="rounded-lg border border-border bg-card p-3 text-xs shadow-sm">
+          <div className="flex items-center gap-3">
+            <PairCodeQr pairCode={localPairCode} label="LAN QR-code" />
+        <div className="flex flex-col gap-1">
+          <span className="font-semibold text-foreground">Mobiele app via LAN</span>
+          <span className="text-muted-foreground">Snelste optie op hetzelfde netwerk.</span>
+          <span className="font-mono text-muted-foreground">pairing: {info.pairingCode}</span>
+          {info.operatorPin && (
+            <span className="font-mono text-green-500">operator PIN: {info.operatorPin}</span>
+          )}
+          {bridgeUrl && (
+            <button
+              type="button"
+              className="w-fit font-mono text-primary underline"
+              title="Klik om Bridge URL te kopiëren"
+              onClick={() => {
+                void navigator.clipboard?.writeText(bridgeUrl);
+                toast({ title: "Bridge URL gekopieerd", description: bridgeUrl });
+              }}
+            >
+              {bridgeUrl}
+            </button>
+          )}
+          {localPairCode && (
+            <button
+              type="button"
+              className="w-fit text-primary underline"
+              onClick={() => {
+                void navigator.clipboard?.writeText(localPairCode);
+                toast({ title: "LAN koppelcode gekopieerd" });
+              }}
+            >
+              Kopieer LAN-code
+            </button>
+          )}
+          <span className={info.operatorPinConfigured ? "text-green-500" : "text-amber-500"}>
+            {info.operatorPinConfigured ? "operator actief" : "viewer only"}
+          </span>
+        </div>
+          </div>
+      </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PairCodeQr({ pairCode, label }: { pairCode: string; label: string }) {
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!pairCode) {
+      setQrDataUrl(null);
+      return;
+    }
+    QRCode.toDataURL(pairCode, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: 132,
+      color: { dark: "#0f172a", light: "#ffffff" },
+    })
+      .then((url) => {
+        if (!cancelled) setQrDataUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) setQrDataUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pairCode]);
+
+  if (!qrDataUrl) return null;
+  return (
+    <img
+      src={qrDataUrl}
+      alt={label}
+      className="h-[96px] w-[96px] rounded-md bg-white p-1"
+    />
   );
 }
 

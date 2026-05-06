@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useApi } from "@/lib/use-api";
-import type { Match, MediaItem, Playlist, PlaylistSlot, Sponsor } from "@/lib/types";
+import type { Match, MediaItem, Playlist, PlaylistSlot, ScheduledMediaCue, Sponsor } from "@/lib/types";
 import { useDisplayStore } from "@/lib/store";
 import { effectiveMatchPlayRosterSeconds } from "@/lib/sponsor-roster-effective-timeline";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
@@ -29,6 +29,12 @@ import {
   SPONSOR_MEDIA_PHASES,
   type SponsorMediaPhase,
 } from "@/lib/sponsor-media-phases";
+
+const SCHEDULED_CUE_PHASES = [
+  { value: "FIRST_HALF", label: "1e helft" },
+  { value: "SECOND_HALF", label: "2e helft" },
+  { value: "EXTRA_TIME", label: "Verlenging" },
+] as const;
 
 async function patchMediaJson(
   mediaId: string,
@@ -53,6 +59,8 @@ export function MediaPanel() {
 
   const { data: mediaRaw, reload: reloadMedia } = useApi<MediaItem[]>("/api/media");
   const { data: playlistsRaw, reload: reloadPlaylists } = useApi<Playlist[]>("/api/playlists");
+  const { data: scheduledCuesRaw, reload: reloadScheduledCues } =
+    useApi<ScheduledMediaCue[]>("/api/scheduled-media-cues");
   const [uploading, setUploading] = useState(false);
   const [libraryImageDurationSec, setLibraryImageDurationSec] = useState(10);
   const [mediaSearch, setMediaSearch] = useState("");
@@ -60,6 +68,7 @@ export function MediaPanel() {
 
   const media = mediaRaw ?? [];
   const playlists = playlistsRaw ?? [];
+  const scheduledCues = scheduledCuesRaw ?? [];
   const visibleMedia = media.filter((m) => {
     const q = mediaSearch.trim().toLowerCase();
     if (!q) return true;
@@ -202,6 +211,9 @@ export function MediaPanel() {
           <TabsTrigger value="playlists" className="min-w-36">
             Playlists
           </TabsTrigger>
+          <TabsTrigger value="scheduled" className="min-w-36">
+            Tijdscues
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="sponsors" className="mt-0">
@@ -330,8 +342,159 @@ export function MediaPanel() {
         </Tabs>
       </section>
         </TabsContent>
+        <TabsContent value="scheduled" className="mt-0">
+          <ScheduledCuesSection
+            media={media}
+            cues={scheduledCues}
+            onChange={reloadScheduledCues}
+          />
+        </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+function ScheduledCuesSection({
+  media,
+  cues,
+  onChange,
+}: {
+  media: MediaItem[];
+  cues: ScheduledMediaCue[];
+  onChange: () => void;
+}) {
+  const activeMedia = media.filter((m) => m.active).sort((a, b) => a.title.localeCompare(b.title));
+  const [mediaId, setMediaId] = useState(activeMedia[0]?.id ?? "");
+  const [matchStatus, setMatchStatus] = useState<(typeof SCHEDULED_CUE_PHASES)[number]["value"]>("FIRST_HALF");
+  const [timeText, setTimeText] = useState("12:00");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!mediaId && activeMedia[0]) setMediaId(activeMedia[0].id);
+  }, [activeMedia, mediaId]);
+
+  async function addCue() {
+    const triggerSec = parseClockInput(timeText);
+    if (!mediaId || triggerSec == null) {
+      toast({ title: "Kies media en vul een tijd in zoals 12:30", variant: "error" });
+      return;
+    }
+    setSaving(true);
+    const res = await fetch("/api/scheduled-media-cues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mediaId, matchStatus, triggerSec, enabled: true }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      toast({ title: "Tijdscue opslaan mislukt", variant: "error" });
+      return;
+    }
+    onChange();
+    toast({ title: `Tijdscue toegevoegd op ${formatCueClock(triggerSec)}` });
+  }
+
+  async function patchCue(id: string, body: Record<string, unknown>) {
+    const res = await fetch(`/api/scheduled-media-cues/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      toast({ title: "Tijdscue aanpassen mislukt", variant: "error" });
+      return;
+    }
+    onChange();
+  }
+
+  async function deleteCue(id: string) {
+    if (!confirm("Tijdscue verwijderen?")) return;
+    await fetch(`/api/scheduled-media-cues/${id}`, { method: "DELETE" });
+    onChange();
+  }
+
+  return (
+    <section className="bg-card border border-border rounded-xl p-6 space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">Tijdscues</h2>
+        <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+          Toon een specifieke video of foto automatisch fullscreen op een exact matchtijdstip. De cue ligt bovenop
+          het normale programma; daarna loopt het scorebord/sponsorprogramma verder.
+        </p>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-[1fr_150px_120px_auto] md:items-end">
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">Media</span>
+          <select
+            value={mediaId}
+            onChange={(e) => setMediaId(e.target.value)}
+            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {activeMedia.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.title} ({m.type === "VIDEO" ? "video" : "foto"})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">Fase</span>
+          <select
+            value={matchStatus}
+            onChange={(e) => setMatchStatus(e.target.value as typeof matchStatus)}
+            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+          >
+            {SCHEDULED_CUE_PHASES.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">Tijd</span>
+          <Input
+            value={timeText}
+            onChange={(e) => setTimeText(e.target.value)}
+            placeholder="12:30"
+            className="h-10"
+          />
+        </label>
+        <Button type="button" onClick={() => void addCue()} disabled={saving || activeMedia.length === 0}>
+          Toevoegen
+        </Button>
+      </div>
+
+      <div className="rounded-lg border border-border overflow-hidden">
+        {cues.length === 0 ? (
+          <div className="p-4 text-sm text-muted-foreground">Nog geen tijdscues ingesteld.</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {cues.map((cue) => (
+              <div key={cue.id} className="grid gap-2 p-3 md:grid-cols-[90px_120px_1fr_auto] md:items-center">
+                <label className="flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={cue.enabled}
+                    onChange={(e) => void patchCue(cue.id, { enabled: e.target.checked })}
+                  />
+                  Actief
+                </label>
+                <div className="text-xs font-mono">{formatCueClock(cue.triggerSec)}</div>
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-medium">{cue.media.title}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {phaseLabel(cue.matchStatus)} · {cue.media.type === "VIDEO" ? "video" : "foto"} · {cue.media.durationSec}s
+                  </div>
+                </div>
+                <Button type="button" variant="ghost" size="sm" onClick={() => void deleteCue(cue.id)}>
+                  Verwijder
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1271,6 +1434,32 @@ function formatMin(sec: number): string {
   const m = Math.floor(sec / 60);
   const s = sec % 60;
   return s === 0 ? `${m}m` : `${m}m${s}s`;
+}
+
+function parseClockInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^\d+:\d{1,2}$/.test(trimmed)) {
+    const [mRaw, sRaw] = trimmed.split(":");
+    const m = Number(mRaw);
+    const s = Number(sRaw);
+    if (!Number.isFinite(m) || !Number.isFinite(s) || s < 0 || s > 59) return null;
+    return Math.max(0, Math.round(m * 60 + s));
+  }
+  const min = Number(trimmed.replace(",", "."));
+  if (!Number.isFinite(min) || min < 0) return null;
+  return Math.round(min * 60);
+}
+
+function formatCueClock(sec: number): string {
+  const safe = Math.max(0, Math.round(sec));
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function phaseLabel(status: string): string {
+  return SCHEDULED_CUE_PHASES.find((p) => p.value === status)?.label ?? status;
 }
 
 /** Afbeelding / afgeronde videoseconds voor opslag (1 … 600). */

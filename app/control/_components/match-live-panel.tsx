@@ -5,7 +5,7 @@ import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import type { Match, Player } from "@/lib/types";
+import type { AppSettings, Match, Player } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { isFullMatch } from "@/lib/is-full-match";
 import { defaultField11FromRoster } from "@/lib/match-field-lineup";
@@ -17,6 +17,7 @@ export function MatchLivePanel() {
   const { data: match, reload } = useApi<Match>(
     state?.matchId ? `/api/matches/${state.matchId}` : null,
   );
+  const { data: settings } = useApi<AppSettings>("/api/settings");
   const [scoreModal, setScoreModal] = useState<null | "home" | "away">(null);
   const [subModal, setSubModal] = useState(false);
   const [lineupModal, setLineupModal] = useState(false);
@@ -32,6 +33,18 @@ export function MatchLivePanel() {
         No active match. Create or select a match in <span className="font-semibold text-foreground">Setup</span>.
       </div>
     );
+  }
+
+  const homeGoalVisualEnabled = settings?.goalVisualHomeEnabled ?? true;
+  const awayGoalVisualEnabled = settings?.goalVisualAwayEnabled ?? false;
+
+  async function handleGoalClick(side: "home" | "away") {
+    const visualEnabled = side === "home" ? homeGoalVisualEnabled : awayGoalVisualEnabled;
+    if (visualEnabled) {
+      setScoreModal(side);
+      return;
+    }
+    await sendCommand({ type: "score:adjust", side, delta: 1 });
   }
 
   return (
@@ -50,14 +63,16 @@ export function MatchLivePanel() {
           side="home"
           team={match.homeTeam}
           score={match.homeScore}
-          onGoalClick={() => setScoreModal("home")}
+          goalVisualEnabled={homeGoalVisualEnabled}
+          onGoalClick={() => void handleGoalClick("home")}
           onAdjust={(d) => sendCommand({ type: "score:adjust", side: "home", delta: d })}
         />
         <SideControl
           side="away"
           team={match.awayTeam}
           score={match.awayScore}
-          onGoalClick={() => setScoreModal("away")}
+          goalVisualEnabled={awayGoalVisualEnabled}
+          onGoalClick={() => void handleGoalClick("away")}
           onAdjust={(d) => sendCommand({ type: "score:adjust", side: "away", delta: d })}
         />
       </div>
@@ -133,12 +148,14 @@ function SideControl({
   side,
   team,
   score,
+  goalVisualEnabled,
   onGoalClick,
   onAdjust,
 }: {
   side: "home" | "away";
   team: { name: string; shortName: string; primaryColor: string };
   score: number;
+  goalVisualEnabled: boolean;
   onGoalClick: () => void;
   onAdjust: (delta: number) => void;
 }) {
@@ -166,6 +183,9 @@ function SideControl({
           onClick={onGoalClick}
         >
           GOAL +1
+          <span className="block text-[10px] font-semibold opacity-75">
+            {goalVisualEnabled ? "met visual" : "alleen score"}
+          </span>
         </Button>
         <Button variant="outline" onClick={() => onAdjust(-1)}>
           −1

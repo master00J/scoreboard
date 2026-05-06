@@ -7,6 +7,7 @@ import {
   touchInstallationLastSeen,
 } from "@/lib/license-server";
 import { licenseActivateBodySchema, normalizeLicenseKey } from "@/lib/license-keys";
+import { operatorPairTokenForVenue } from "@/lib/control-auth";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -17,10 +18,13 @@ const cors = {
 function controlConfigFor(machineId: string, licenseId: string) {
   const desktopKey = process.env.CONTROL_DESKTOP_KEY?.trim();
   if (!desktopKey) return null;
-  const baseUrl =
+  const configuredBaseUrl =
     process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/+$/, "") || "https://arenacue.be";
+  const baseUrl = /^https:\/\/(www\.)?arenacue\.com$/i.test(configuredBaseUrl)
+    ? "https://arenacue.be"
+    : configuredBaseUrl;
   const venueId = `v-${licenseId.slice(0, 8)}-${machineId.slice(0, 6)}`.toLowerCase();
-  return { cloudBaseUrl: baseUrl, desktopKey, venueId };
+  return { cloudBaseUrl: baseUrl, desktopKey, venueId, operatorPairToken: operatorPairTokenForVenue(venueId) };
 }
 
 export async function OPTIONS() {

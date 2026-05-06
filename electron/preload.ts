@@ -45,6 +45,7 @@ const bridge: ElectronBridge = {
   openExternalUrl: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   licenseGetStatus: () => ipcRenderer.invoke("license:getStatus"),
   licenseActivate: (opts: { licenseKey: string }) => ipcRenderer.invoke("license:activate", opts),
+  getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
 };
 
 try {

@@ -8,6 +8,14 @@
     "assetBundlePatterns": [
       "**/*"
     ],
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Camera nodig om de ArenaCue desktop QR-code te scannen."
+        }
+      ]
+    ],
     "android": {
       "package": "com.stadium.scoreboard.mobile"
     }
