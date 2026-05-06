@@ -53,8 +53,13 @@ function sendControl(channel: string, payload: unknown) {
 }
 
 let sponsorLedgerSnapshot: SponsorLedgerPayload | null = null;
-/** Voorkomt dubbele telling bij dubbele effect-cleanups (o.a. React Strict Mode). */
-const sponsorClipEndedSessions = new Set<string>();
+/**
+ * Per clipSessionId de hoogste gerapporteerde werkelijke duur (sec, afgerond).
+ * React Strict Mode kan een effect-cleanup direct na mount laten lopen met ~0s;
+ * de echte clipEnd komt daarna met de juiste waarde — dan tellen we enkel het verschil
+ * bij en overschrijven we proof-of-play niet meer met 0.
+ */
+const sponsorClipBestActualSec = new Map<string, number>();
 
 export function getSponsorLedgerSnapshot(): SponsorLedgerPayload | null {
   return sponsorLedgerSnapshot;
@@ -97,50 +102,43 @@ export function sponsorTelemetryClipStart(payload: SponsorTelemetryClipStart): S
 }
 
 export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): SponsorLedgerPayload {
-  if (sponsorClipEndedSessions.has(payload.clipSessionId)) {
-    const ledger = sponsorLedgerSnapshot ?? ensureSponsorLedger(payload.matchId, payload.segmentKey);
-    const ac = ledger.activeClip;
-    if (
-      ac &&
-      ac.clipSessionId === payload.clipSessionId &&
-      ac.sponsorId === payload.sponsorId &&
-      ac.mediaId === payload.mediaId
-    ) {
-      ledger.activeClip = null;
-      ledger.updatedAtMs = Date.now();
-      sponsorLedgerSnapshot = ledger;
-      sendAll("display:sponsorLedger", ledger);
-    }
-    return ledger;
-  }
-  sponsorClipEndedSessions.add(payload.clipSessionId);
-  if (sponsorClipEndedSessions.size > 4000) {
-    sponsorClipEndedSessions.clear();
+  const sessionId = payload.clipSessionId;
+  const rounded = Math.max(0, Math.round(payload.actualSec));
+  const prevBest = sponsorClipBestActualSec.get(sessionId) ?? 0;
+  const bestActual = Math.max(prevBest, rounded);
+  const delta = bestActual - prevBest;
+  sponsorClipBestActualSec.set(sessionId, bestActual);
+  if (sponsorClipBestActualSec.size > 4000) {
+    sponsorClipBestActualSec.clear();
   }
 
   const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
-  const add = Math.max(0, payload.actualSec);
-  const prev = ledger.bySponsorSec[payload.sponsorId] ?? 0;
-  ledger.bySponsorSec[payload.sponsorId] = prev + add;
+  if (delta > 0) {
+    const prevSpent = ledger.bySponsorSec[payload.sponsorId] ?? 0;
+    ledger.bySponsorSec[payload.sponsorId] = prevSpent + delta;
+  }
 
   const ac = ledger.activeClip;
   let expectedSecForLog = 0;
-  if (
+  const clipMatches =
     ac &&
-    ac.clipSessionId === payload.clipSessionId &&
+    ac.clipSessionId === sessionId &&
     ac.sponsorId === payload.sponsorId &&
-    ac.mediaId === payload.mediaId
-  ) {
+    ac.mediaId === payload.mediaId;
+  if (clipMatches) {
     expectedSecForLog = Math.max(0, Math.round(ac.expectedPlaySec || 0));
-    ledger.activeClip = null;
+    // Geen activeClip wissen op een spuriëne 0s-melding (Strict Mode / vroege cleanup).
+    if (delta > 0) {
+      ledger.activeClip = null;
+    }
   }
 
   ledger.updatedAtMs = Date.now();
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
 
-  // Proof-of-play: persistente log voor rapporten naar adverteerders.
-  void persistSponsorPlayLog(payload, expectedSecForLog).catch((err) => {
+  // Proof-of-play: sla de beste bekende werkelijke duur op (monotoon stijgend).
+  void persistSponsorPlayLog(payload, expectedSecForLog, bestActual).catch((err) => {
     console.warn("[runtime] kon proof-of-play niet opslaan", err);
   });
 
@@ -150,6 +148,7 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
 async function persistSponsorPlayLog(
   payload: SponsorTelemetryClipEnd,
   expectedSec: number,
+  bestActualSec: number,
 ): Promise<void> {
   const [sponsor, media, match] = await Promise.all([
     prisma.sponsor.findUnique({
@@ -166,26 +165,39 @@ async function persistSponsorPlayLog(
     }),
   ]);
 
-  await prisma.sponsorPlayLog.upsert({
+  const expected =
+    expectedSec > 0 ? expectedSec : (media?.durationSec ?? 0);
+  const actual = Math.max(0, Math.round(bestActualSec));
+
+  const existing = await prisma.sponsorPlayLog.findUnique({
     where: { clipSessionId: payload.clipSessionId },
-    create: {
-      matchId: payload.matchId,
-      sponsorId: payload.sponsorId,
-      mediaId: payload.mediaId,
-      sponsorName: sponsor?.name ?? "(verwijderd)",
-      mediaTitle: media?.title ?? "(verwijderd)",
-      segmentKey: payload.segmentKey,
-      matchStatus: match?.status ?? null,
-      expectedSec: expectedSec || media?.durationSec || 0,
-      actualSec: Math.max(0, Math.round(payload.actualSec)),
-      startedAt: new Date(payload.startedAtMs),
-      endedAt: new Date(),
-      clipSessionId: payload.clipSessionId,
-    },
-    update: {
-      // Idempotent: bij rare retries niet opnieuw boeken, maar wel actualSec verhogen
-      // als we een correctere meting hebben.
-      actualSec: Math.max(0, Math.round(payload.actualSec)),
+    select: { actualSec: true },
+  });
+
+  if (!existing) {
+    await prisma.sponsorPlayLog.create({
+      data: {
+        matchId: payload.matchId,
+        sponsorId: payload.sponsorId,
+        mediaId: payload.mediaId,
+        sponsorName: sponsor?.name ?? "(verwijderd)",
+        mediaTitle: media?.title ?? "(verwijderd)",
+        segmentKey: payload.segmentKey,
+        matchStatus: match?.status ?? null,
+        expectedSec: expected,
+        actualSec: actual,
+        startedAt: new Date(payload.startedAtMs),
+        endedAt: new Date(),
+        clipSessionId: payload.clipSessionId,
+      },
+    });
+    return;
+  }
+
+  await prisma.sponsorPlayLog.update({
+    where: { clipSessionId: payload.clipSessionId },
+    data: {
+      actualSec: Math.max(existing.actualSec, actual),
       endedAt: new Date(),
     },
   });
@@ -201,7 +213,7 @@ function broadcastSponsorLedger() {
  */
 export function resetSponsorLedger(): void {
   sponsorLedgerSnapshot = null;
-  sponsorClipEndedSessions.clear();
+  sponsorClipBestActualSec.clear();
   sendAll("display:sponsorLedger", null);
 }
 
@@ -822,7 +834,7 @@ export function disposeDesktopRuntime() {
     tickInterval = null;
   }
   sponsorLedgerSnapshot = null;
-  sponsorClipEndedSessions.clear();
+  sponsorClipBestActualSec.clear();
 }
 
 type SponsorPlayFilters = {
