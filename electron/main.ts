@@ -7,6 +7,7 @@ import type {
   ExportFormat,
 } from "../lib/desktop-bridge";
 import * as licenseSvc from "./license-service";
+import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 
 const IS_DEV = !app.isPackaged;
 
@@ -14,6 +15,7 @@ let controlWindow: BrowserWindow | null = null;
 let displayWindow: BrowserWindow | null = null;
 let runtime: typeof import("./runtime") | null = null;
 let desktopContext: ElectronBridge["context"] | null = null;
+let mobileBridge: MobileBridgeHandle | null = null;
 
 function bootLogPath(): string {
   return path.join(app.getPath("userData"), "boot.log");
@@ -88,6 +90,14 @@ async function loadRuntime() {
     getDisplayWindow: () => displayWindow,
     log: bootLog,
   });
+  mobileBridge = await startMobileBridge({
+    runtime: {
+      apiRequest: (req) => runtime!.apiRequest(req),
+      getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
+      runCommand: (command) => runtime!.runCommand(command as any),
+    },
+    log: bootLog,
+  });
 }
 
 function loadView(win: BrowserWindow, view: "control" | "display") {
@@ -145,7 +155,9 @@ function createWindows() {
   controlWindow.webContents.on("did-finish-load", () => {
     void runtime?.broadcastDisplayState();
   });
-  controlWindow.webContents.openDevTools({ mode: "detach" });
+  if (IS_DEV && process.env.OPEN_DEVTOOLS_ON_START === "1") {
+    controlWindow.webContents.openDevTools({ mode: "detach" });
+  }
   controlWindow.on("closed", () => {
     controlWindow = null;
   });
@@ -533,5 +545,9 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  if (mobileBridge) {
+    void mobileBridge.stop();
+    mobileBridge = null;
+  }
   runtime?.disposeDesktopRuntime();
 });
