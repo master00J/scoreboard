@@ -26,6 +26,13 @@ Scan de QR-code in de terminal met Expo Go op je Samsung Galaxy S24.
 - Zet `Pairing code` op de code uit de desktop boot-log
 - Klik `Koppel toestel`
 
+Voor cloudmodus (Optie A):
+
+- Zet `Bridge URL` op je website API-host (bv. `https://arenacue.be`)
+- Kies `Cloud (Optie A)` in de app
+- Vul `Venue ID` in
+- Log in als viewer/operator (operator met PIN)
+
 ## Netwerkvoorwaarden
 
 - Pc en telefoon op hetzelfde wifi-netwerk
@@ -52,6 +59,26 @@ De bridge gebruikt:
 - basis rate-limiting op foute loginpogingen
 
 De mobiele app bewaart verbindingsinstellingen en sessie lokaal op het toestel.
+
+## Cloud backend setup
+
+Run in Supabase:
+
+```sql
+-- Website/supabase/cloud-control.sql
+```
+
+Vereiste Website env vars:
+
+- `CONTROL_SESSION_SECRET` (min. 24 chars)
+- `CONTROL_OPERATOR_PIN`
+- `CONTROL_DESKTOP_KEY`
+
+Vereiste desktop env vars:
+
+- `CONTROL_CLOUD_BASE_URL`
+- `CONTROL_DESKTOP_KEY`
+- `CONTROL_VENUE_ID`
 
 ## APK/AAB build (zonder Expo Go)
 

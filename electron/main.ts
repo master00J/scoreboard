@@ -8,6 +8,7 @@ import type {
 } from "../lib/desktop-bridge";
 import * as licenseSvc from "./license-service";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
+import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
 
 const IS_DEV = !app.isPackaged;
 
@@ -16,6 +17,7 @@ let displayWindow: BrowserWindow | null = null;
 let runtime: typeof import("./runtime") | null = null;
 let desktopContext: ElectronBridge["context"] | null = null;
 let mobileBridge: MobileBridgeHandle | null = null;
+let cloudAgent: CloudAgentHandle | null = null;
 
 function bootLogPath(): string {
   return path.join(app.getPath("userData"), "boot.log");
@@ -93,6 +95,13 @@ async function loadRuntime() {
   mobileBridge = await startMobileBridge({
     runtime: {
       apiRequest: (req) => runtime!.apiRequest(req),
+      getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
+      runCommand: (command) => runtime!.runCommand(command as any),
+    },
+    log: bootLog,
+  });
+  cloudAgent = startCloudControlAgent({
+    runtime: {
       getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
       runCommand: (command) => runtime!.runCommand(command as any),
     },
@@ -548,6 +557,10 @@ app.on("before-quit", () => {
   if (mobileBridge) {
     void mobileBridge.stop();
     mobileBridge = null;
+  }
+  if (cloudAgent) {
+    cloudAgent.stop();
+    cloudAgent = null;
   }
   runtime?.disposeDesktopRuntime();
 });

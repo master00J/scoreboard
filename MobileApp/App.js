@@ -5,6 +5,7 @@ import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View 
 
 const defaultBaseUrl = "http://192.168.1.10:17890";
 const defaultPairingCode = "";
+const defaultVenueId = "default";
 const STORAGE_KEY = "scoreboard_mobile_session_v1";
 const MATCH_STATUSES = ["SETUP", "PREMATCH", "FIRST_HALF", "HALF_TIME", "SECOND_HALF", "EXTRA_TIME", "FULL_TIME", "POST_MATCH"];
 
@@ -30,6 +31,8 @@ async function callBridge(baseUrl, sessionToken, path, method = "GET", body) {
 
 export default function App() {
   const [baseUrl, setBaseUrl] = useState(defaultBaseUrl);
+  const [connectionMode, setConnectionMode] = useState("cloud");
+  const [venueId, setVenueId] = useState(defaultVenueId);
   const [pairingCode, setPairingCode] = useState(defaultPairingCode);
   const [operatorPin, setOperatorPin] = useState("");
   const [role, setRole] = useState("viewer");
@@ -50,13 +53,20 @@ export default function App() {
 
   const canCall = useMemo(() => baseUrl.trim().length > 0 && sessionToken.trim().length > 0, [baseUrl, sessionToken]);
   const canMutate = role === "operator";
+  const isCloud = connectionMode === "cloud";
+
+  function cloudPath(path) {
+    return path.startsWith("/api/") ? path : `/api${path}`;
+  }
 
   async function pingHealth() {
-    setStatus("Bridge pingen...");
+    setStatus("Service pingen...");
     try {
-      const res = await fetch(`${baseUrl}/mobile/health`);
-      const payload = await res.json();
-      setStatus(res.ok ? `Bridge online: ${payload.service}` : `Fout: ${res.status}`);
+      const url = isCloud ? `${baseUrl}${cloudPath("/control/state")}` : `${baseUrl}/mobile/health`;
+      const res = await fetch(url, {
+        headers: isCloud ? { Authorization: `Bearer ${sessionToken}` } : undefined,
+      });
+      setStatus(res.ok ? "Service online" : `Fout: ${res.status}`);
     } catch (error) {
       setStatus(`Niet bereikbaar: ${String(error)}`);
     }
@@ -65,9 +75,11 @@ export default function App() {
   async function loadSnapshot() {
     if (!canCall) return;
     try {
-      const response = await callBridge(baseUrl, sessionToken, "/mobile/snapshot");
+      const response = isCloud
+        ? await callBridge(baseUrl, sessionToken, cloudPath("/control/state"))
+        : await callBridge(baseUrl, sessionToken, "/mobile/snapshot");
       if (!response.ok) return setStatus(`Snapshot fout (${response.status})`);
-      setSnapshot(response.data);
+      setSnapshot(isCloud ? response.data?.state ?? null : response.data);
     } catch (error) {
       setStatus(`Snapshot mislukt: ${String(error)}`);
     }
@@ -77,7 +89,20 @@ export default function App() {
     if (!canCall) return;
     setLoadingMatches(true);
     try {
-      const response = await callBridge(baseUrl, sessionToken, "/mobile/api/matches");
+      const response = isCloud
+        ? await callBridge(baseUrl, sessionToken, cloudPath("/control/state"))
+        : await callBridge(baseUrl, sessionToken, "/mobile/api/matches");
+      if (isCloud) {
+        const cloudState = response.data?.state;
+        if (cloudState?.matchId) {
+          setMatches([{ id: cloudState.matchId, status: cloudState.mode ?? "UNKNOWN", homeScore: 0, awayScore: 0 }]);
+          setStatus("Cloud state geladen");
+        } else {
+          setMatches([]);
+          setStatus("Cloud state geladen (geen matchId)");
+        }
+        return;
+      }
       if (!response.ok || !Array.isArray(response.data)) return setStatus(`Matches ophalen mislukt (${response.status})`);
       setMatches(response.data);
       setStatus(`Matches geladen (${response.data.length})`);
@@ -89,6 +114,7 @@ export default function App() {
   }
 
   async function loadActiveMatchDetails(matchId) {
+    if (isCloud) return;
     if (!canCall || !matchId) return setActiveMatchDetails(null);
     const response = await callBridge(baseUrl, sessionToken, `/mobile/api/matches/${matchId}`);
     if (response.ok && response.data?.id) {
@@ -102,9 +128,11 @@ export default function App() {
     if (!canMutate) return setStatus("Viewer-modus: commando's geblokkeerd.");
     setStatus(`Command ${command.type} verzenden...`);
     try {
-      const response = await callBridge(baseUrl, sessionToken, "/mobile/command", "POST", { command });
+      const response = isCloud
+        ? await callBridge(baseUrl, sessionToken, cloudPath("/control/commands"), "POST", { command })
+        : await callBridge(baseUrl, sessionToken, "/mobile/command", "POST", { command });
       if (!response.ok) return setStatus(`Command fout (${response.status})`);
-      setStatus(`Command verwerkt: ${JSON.stringify(response.data)}`);
+      setStatus(isCloud ? "Command in cloud queue gezet." : `Command verwerkt: ${JSON.stringify(response.data)}`);
       await loadSnapshot();
     } catch (error) {
       setStatus(`Command mislukt: ${String(error)}`);
@@ -114,14 +142,22 @@ export default function App() {
   async function authenticate() {
     setStatus("Authenticatie...");
     try {
-      const res = await fetch(`${baseUrl}/mobile/auth/session`, {
+      const res = await fetch(
+        isCloud ? `${baseUrl}${cloudPath("/control/auth/session")}` : `${baseUrl}/mobile/auth/session`,
+        {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pairingCode, role, operatorPin: role === "operator" ? operatorPin : undefined }),
-      });
+        body: JSON.stringify(
+          isCloud
+            ? { venueId, role, pin: role === "operator" ? operatorPin : undefined }
+            : { pairingCode, role, operatorPin: role === "operator" ? operatorPin : undefined },
+        ),
+      },
+      );
       const payload = await res.json();
-      if (!res.ok || !payload?.sessionToken) return setStatus(payload?.error || `Login mislukt (${res.status})`);
-      setSessionToken(payload.sessionToken);
+      const token = isCloud ? payload?.token : payload?.sessionToken;
+      if (!res.ok || !token) return setStatus(payload?.error || payload?.message || `Login mislukt (${res.status})`);
+      setSessionToken(token);
       setSessionExpiresAt(payload.expiresAt ?? null);
       setRole(payload.role === "operator" ? "operator" : "viewer");
       setStatus(`Verbonden als ${payload.role} (sessie tot ${payload.expiresAt})`);
@@ -138,6 +174,8 @@ export default function App() {
         if (!raw || !mounted) return;
         const parsed = JSON.parse(raw);
         if (parsed.baseUrl) setBaseUrl(parsed.baseUrl);
+        if (parsed.connectionMode) setConnectionMode(parsed.connectionMode);
+        if (parsed.venueId) setVenueId(parsed.venueId);
         if (parsed.pairingCode) setPairingCode(parsed.pairingCode);
         if (parsed.role) setRole(parsed.role);
         if (parsed.sessionToken) setSessionToken(parsed.sessionToken);
@@ -152,8 +190,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, pairingCode, role, sessionToken, sessionExpiresAt }));
-  }, [baseUrl, pairingCode, role, sessionToken, sessionExpiresAt]);
+    void AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ baseUrl, connectionMode, venueId, pairingCode, role, sessionToken, sessionExpiresAt }),
+    );
+  }, [baseUrl, connectionMode, venueId, pairingCode, role, sessionToken, sessionExpiresAt]);
 
   useEffect(() => {
     if (!sessionExpiresAt) return;
@@ -213,6 +254,28 @@ export default function App() {
             placeholder="http://192.168.x.x:17890"
             placeholderTextColor="#666"
           />
+          <Text style={styles.label}>Connectiemodus</Text>
+          <View style={styles.row}>
+            <Pressable style={[styles.buttonSecondary, connectionMode === "cloud" ? styles.activeBorder : null]} onPress={() => setConnectionMode("cloud")}>
+              <Text style={styles.buttonText}>Cloud (Optie A)</Text>
+            </Pressable>
+            <Pressable style={[styles.buttonSecondary, connectionMode === "local" ? styles.activeBorder : null]} onPress={() => setConnectionMode("local")}>
+              <Text style={styles.buttonText}>Lokaal LAN</Text>
+            </Pressable>
+          </View>
+          {isCloud && (
+            <>
+              <Text style={styles.label}>Venue ID</Text>
+              <TextInput
+                style={styles.input}
+                value={venueId}
+                onChangeText={setVenueId}
+                autoCapitalize="none"
+                placeholder="bv. genk-a"
+                placeholderTextColor="#666"
+              />
+            </>
+          )}
           <Text style={styles.label}>Rol</Text>
           <View style={styles.row}>
             <Pressable style={[styles.buttonSecondary, role === "viewer" ? styles.activeBorder : null]} onPress={() => setRole("viewer")}>
@@ -236,15 +299,19 @@ export default function App() {
               />
             </>
           )}
-          <Text style={styles.label}>Pairing code (desktop boot.log)</Text>
-          <TextInput
-            style={styles.input}
-            value={pairingCode}
-            onChangeText={setPairingCode}
-            autoCapitalize="none"
-            placeholder="6-cijferige code"
-            placeholderTextColor="#666"
-          />
+          {!isCloud && (
+            <>
+              <Text style={styles.label}>Pairing code (desktop boot.log)</Text>
+              <TextInput
+                style={styles.input}
+                value={pairingCode}
+                onChangeText={setPairingCode}
+                autoCapitalize="none"
+                placeholder="6-cijferige code"
+                placeholderTextColor="#666"
+              />
+            </>
+          )}
           <View style={styles.row}>
             <Pressable style={styles.button} onPress={pingHealth}>
               <Text style={styles.buttonText}>Ping</Text>

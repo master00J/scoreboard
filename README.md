@@ -66,6 +66,16 @@ public/uploads/  user media (gitignored)
 - IPC handlers guarded — een foutmelding crash’t de app niet volledig
 - Mutaties naar SQLite; timer server-side / authoritative waar van toepassing
 
+## Cloud remote control (Optie A)
+
+Desktop kan optioneel cloud-gestuurd draaien (mobiel hoeft dan niet op hetzelfde netwerk):
+
+- `CONTROL_CLOUD_BASE_URL` (bijv. `https://arenacue.be`)
+- `CONTROL_DESKTOP_KEY` (zelfde secret als op Website)
+- `CONTROL_VENUE_ID` (bijv. `genk-a`)
+
+De desktop-agent pusht state naar de cloud en voert gequeue’de commando’s uit.
+
 ## Dubbele marketingwebsite
 
 Er staat ook een `Website/`-submap (ArenaCue-site). De levende marketingbron staat in de aparte repo **Arenacue**; houd releases synchroon of verwijder een van de twee om drift te voorkomen.

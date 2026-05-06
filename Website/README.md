@@ -35,3 +35,6 @@ voor demo-aanvragen aan te maken.
 
 Run `supabase/reviews.sql` om de reviewmodule (inzendingen + gepubliceerde reviews)
 te activeren.
+
+Run `supabase/cloud-control.sql` om de cloud control relay-tabellen te maken
+(mobile remote control buiten lokaal netwerk).
