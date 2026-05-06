@@ -18,15 +18,21 @@ type MobileBridgeOptions = {
   log: (line: string) => void;
 };
 
+type SessionRole = "viewer" | "operator";
+
 export type MobileBridgeHandle = {
   port: number;
-  token: string;
+  pairingCode: string;
   stop: () => Promise<void>;
 };
 
 function parseJsonBody(raw: string): unknown {
   if (!raw.trim()) return {};
   return JSON.parse(raw);
+}
+
+function randomPairingCode(): string {
+  return String(Math.floor(100000 + Math.random() * 900000));
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -54,9 +60,65 @@ function writeJson(
 export async function startMobileBridge(
   options: MobileBridgeOptions,
 ): Promise<MobileBridgeHandle> {
-  const token = process.env.MOBILE_BRIDGE_TOKEN?.trim() || randomBytes(12).toString("hex");
   const preferredPort = Number(process.env.MOBILE_BRIDGE_PORT ?? "17890");
   const port = Number.isFinite(preferredPort) ? preferredPort : 17890;
+  const pairingCode = process.env.MOBILE_BRIDGE_PAIRING_CODE?.trim() || randomPairingCode();
+  const operatorPin = process.env.MOBILE_BRIDGE_OPERATOR_PIN?.trim() || "";
+  const sessionTtlMs = Number(process.env.MOBILE_BRIDGE_SESSION_TTL_MS ?? 1000 * 60 * 60 * 8);
+
+  const sessions = new Map<string, { expiresAtMs: number; role: SessionRole }>();
+  const failedAttemptsByIp = new Map<string, number[]>();
+
+  function cleanupSessions() {
+    const now = Date.now();
+    for (const [token, session] of sessions.entries()) {
+      if (session.expiresAtMs <= now) {
+        sessions.delete(token);
+      }
+    }
+  }
+
+  function isRateLimited(ip: string): boolean {
+    const now = Date.now();
+    const windowMs = 5 * 60 * 1000;
+    const maxAttempts = 8;
+    const arr = failedAttemptsByIp.get(ip) ?? [];
+    const recent = arr.filter((t) => now - t < windowMs);
+    failedAttemptsByIp.set(ip, recent);
+    return recent.length >= maxAttempts;
+  }
+
+  function registerFailedAttempt(ip: string) {
+    const arr = failedAttemptsByIp.get(ip) ?? [];
+    arr.push(Date.now());
+    failedAttemptsByIp.set(ip, arr);
+  }
+
+  function issueSessionToken(role: SessionRole) {
+    const token = randomBytes(24).toString("hex");
+    const expiresAtMs = Date.now() + sessionTtlMs;
+    sessions.set(token, { expiresAtMs, role });
+    return { token, expiresAtMs };
+  }
+
+  function readAuthBearer(req: http.IncomingMessage): string | null {
+    const auth = (req.headers.authorization as string | undefined) ?? "";
+    if (!auth.toLowerCase().startsWith("bearer ")) return null;
+    return auth.slice(7).trim() || null;
+  }
+
+  function getSession(req: http.IncomingMessage): { expiresAtMs: number; role: SessionRole } | null {
+    cleanupSessions();
+    const bearer = readAuthBearer(req);
+    if (!bearer) return null;
+    const session = sessions.get(bearer);
+    if (!session) return null;
+    if (session.expiresAtMs <= Date.now()) {
+      sessions.delete(bearer);
+      return null;
+    }
+    return session;
+  }
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -71,15 +133,61 @@ export async function startMobileBridge(
       }
 
       const url = new URL(req.url, "http://localhost");
+      const remoteIp = (req.socket.remoteAddress ?? "unknown").trim();
 
       if (url.pathname === "/mobile/health" && req.method === "GET") {
-        writeJson(res, 200, { ok: true, service: "scoreboard-mobile-bridge" });
+        writeJson(res, 200, {
+          ok: true,
+          service: "scoreboard-mobile-bridge",
+          auth: "pairing-code + short-lived session",
+        });
         return;
       }
 
-      const inboundToken =
-        (req.headers["x-scoreboard-token"] as string | undefined)?.trim() ?? "";
-      if (inboundToken !== token) {
+      if (url.pathname === "/mobile/auth/session" && req.method === "POST") {
+        if (isRateLimited(remoteIp)) {
+          writeJson(res, 429, { ok: false, error: "Te veel foute pogingen, probeer later opnieuw." });
+          return;
+        }
+        const bodyText = await readBody(req);
+        const body = parseJsonBody(bodyText) as {
+          pairingCode?: string;
+          role?: SessionRole;
+          operatorPin?: string;
+        };
+        if ((body.pairingCode ?? "").trim() !== pairingCode) {
+          registerFailedAttempt(remoteIp);
+          writeJson(res, 401, { ok: false, error: "Onjuiste pairing code." });
+          return;
+        }
+        const requestedRole: SessionRole = body.role === "operator" ? "operator" : "viewer";
+        if (requestedRole === "operator") {
+          if (!operatorPin) {
+            registerFailedAttempt(remoteIp);
+            writeJson(res, 403, {
+              ok: false,
+              error: "Operator mode is niet geconfigureerd op desktop (MOBILE_BRIDGE_OPERATOR_PIN).",
+            });
+            return;
+          }
+          if ((body.operatorPin ?? "").trim() !== operatorPin) {
+            registerFailedAttempt(remoteIp);
+            writeJson(res, 401, { ok: false, error: "Onjuiste operator PIN." });
+            return;
+          }
+        }
+        const session = issueSessionToken(requestedRole);
+        writeJson(res, 200, {
+          ok: true,
+          sessionToken: session.token,
+          expiresAt: new Date(session.expiresAtMs).toISOString(),
+          role: requestedRole,
+        });
+        return;
+      }
+
+      const session = getSession(req);
+      if (!session) {
         writeJson(res, 401, { error: "Unauthorized" });
         return;
       }
@@ -91,6 +199,10 @@ export async function startMobileBridge(
       }
 
       if (url.pathname === "/mobile/command" && req.method === "POST") {
+        if (session.role !== "operator") {
+          writeJson(res, 403, { error: "Operator rechten vereist." });
+          return;
+        }
         const bodyText = await readBody(req);
         const body = parseJsonBody(bodyText) as { command?: unknown };
         const result = await options.runtime.runCommand(body.command);
@@ -99,6 +211,10 @@ export async function startMobileBridge(
       }
 
       if (url.pathname.startsWith("/mobile/api/")) {
+        if (req.method !== "GET" && session.role !== "operator") {
+          writeJson(res, 403, { error: "Operator rechten vereist voor mutaties." });
+          return;
+        }
         const bodyText = req.method === "GET" ? "" : await readBody(req);
         const desktopPath = url.pathname.replace("/mobile", "");
         const response = await options.runtime.apiRequest({
@@ -129,12 +245,12 @@ export async function startMobileBridge(
   });
 
   options.log(
-    `[mobile-bridge] actief op poort ${port} (token=${token})`,
+    `[mobile-bridge] actief op poort ${port} (pairing-code=${pairingCode})`,
   );
 
   return {
     port,
-    token,
+    pairingCode,
     stop: () =>
       new Promise<void>((resolve, reject) => {
         server.close((err) => {
