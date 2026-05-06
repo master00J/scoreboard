@@ -3,6 +3,7 @@ import { getSiteUrl } from "@/lib/site-url";
 import { SITE_KEYWORDS } from "@/lib/seo";
 import { SiteShell } from "@/components/site-shell";
 import { SeoJsonLd } from "@/components/seo-json-ld";
+import { SupportChatWidget } from "@/components/support-chat-widget";
 import "./globals.css";
 import "./globals-professional-home.css";
 
@@ -57,6 +58,7 @@ export default function RootLayout({
       <body>
         <SeoJsonLd />
         <SiteShell>{children}</SiteShell>
+        <SupportChatWidget />
       </body>
     </html>
   );

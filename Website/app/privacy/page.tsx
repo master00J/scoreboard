@@ -163,6 +163,12 @@ export default function PrivacyPage() {
             <strong>Resend</strong> (of vergelijkbare e-mailprovider) voor transactionele e-mails
             rond demo-aanvragen indien geconfigureerd.
           </li>
+          <li>
+            <strong>Anthropic</strong> als AI-leverancier (Claude) voor de support-chatbot rechtsonder
+            op deze site. Wanneer je iets typt in het chatvenster wordt je vraag eenmalig naar
+            Anthropic verzonden om een antwoord te genereren. We slaan gesprekken niet op aan onze
+            zijde.
+          </li>
         </ul>
         <p>
           Een verwerking buiten de Europese Economische Ruimte kan plaatsvinden als de aanbieder
