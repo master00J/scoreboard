@@ -51,9 +51,10 @@ export default function FunctiesPage() {
         <p className="section-kicker">Software</p>
         <h1>Alle functies</h1>
         <p className="features-deep-lead">
-          ArenaCue bestaat uit <strong>twee Windows-apps</strong>: <strong>ArenaCue Scoreboard</strong> voor live
+          ArenaCue bestaat uit <strong>twee producten</strong>: <strong>ArenaCue Scoreboard</strong> voor live
           wedstrijdregie en het hoofdstadionscherm, en <strong>ArenaCue LED boarding</strong> voor perimeter-, lint- en
-          tribuneschermen met eigen zones en playlists. Hieronder per product wat je concreet kunt verwachten.
+          tribuneschermen met eigen zones en playlists. Hieronder zie je per product welke impact je operationeel mag
+          verwachten.
         </p>
 
         {/* —— Scoreboard —— */}
@@ -63,26 +64,26 @@ export default function FunctiesPage() {
           </h2>
           <p className="features-deep-lead tight">
             Live scorebord, timer, wedstrijdmodi, sponsors naast of fullscreen op het display — één control‑paneel, één
-            hoofduitgang naar je 16:9 stadionscherm.
+            duidelijke regieflow naar je stadionscherm voor een professioneel wedstrijdbeeld.
           </p>
 
           <section className="features-deep-section" id="platform-scoreboard">
-            <h3>Platform &amp; installatie</h3>
+            <h3>Dagelijkse werking</h3>
             <ul className="features-deep-list">
               <li>
-                <strong>Windows-first:</strong> gebouwd voor snelle setup op een regie-laptop of PC, met ondersteuning
-                voor installer en portable variant (afhankelijk van je release).
+                <strong>Snel inzetbaar:</strong> focus op vlotte opstart voor regie op wedstrijddagen, zonder complexe
+                voorbereiding.
               </li>
               <li>
-                <strong>Lokaal en wedstrijdklaar:</strong> kernfunctionaliteit werkt zonder internet; geschikt voor LAN
-                en stabiele wedstrijdavond.
+                <strong>Betrouwbaar tijdens live momenten:</strong> gebouwd voor stabiele bediening wanneer timing
+                cruciaal is.
               </li>
               <li>
-                <strong>Twee vensters:</strong> een controlevenster voor de operator en een uitgangsvenster voor het
-                grote scherm (typisch 16:9, fullscreen).
+                <strong>Duidelijke regieflow:</strong> operatorbediening en schermoutput zijn logisch gescheiden zodat je
+                rustig en snel kunt schakelen.
               </li>
               <li>
-                <strong>Licentie:</strong> activatie en status via het{" "}
+                <strong>Toegang en licentie:</strong> activatie en status via het{" "}
                 <Link href="/portal">online klantportaal</Link> van ArenaCue.
               </li>
             </ul>
@@ -135,7 +136,7 @@ export default function FunctiesPage() {
               </li>
               <li>
                 <strong>Eerlijke verdeling:</strong> rotatie tussen sponsors op basis van verbruik en budget; clips
-                worden normaal volledig afgespeeld zodat je niet midden in een spot wordt afgebroken.
+                lopen netjes uit zodat je niet midden in een spot moet onderbreken.
               </li>
               <li>
                 <strong>Na budget:</strong> sponsoring kan stoppen en het scherm kan automatisch terugkeren naar het
@@ -191,8 +192,8 @@ export default function FunctiesPage() {
                 neutraliseren.
               </li>
               <li>
-                Werken met <strong>externe capture-bronnen</strong> (waar ondersteund) om bv. extern videobeeld op het
-                canvas te tonen.
+                Integratie van <strong>externe beeldbronnen</strong> (waar ondersteund) om extra videobeeld op het
+                scherm te tonen.
               </li>
               <li>
                 <strong>Toetsenbordsneltoetsen</strong> voor veelgebruikte acties (bv. timer start/stop) zodat operators
@@ -223,24 +224,23 @@ export default function FunctiesPage() {
           </h2>
           <p className="features-deep-lead tight">
             Losstaande app voor LED-randen en tribunes: je bouwt een <strong>pixelcanvas per zone</strong>, koppelt
-            sponsors en playlists, en stuurt fullscreen output naar je LED‑processors — los van het hoofdscorebord, met
+            sponsors en playlists, en stuurt fullscreen output naar je LED‑processors — los van het hoofdscorebord, maar met
             hetzelfde licentie‑ en downloadpatroon als Scoreboard.
           </p>
 
           <section className="features-deep-section" id="led-platform">
-            <h3>Platform &amp; installatie</h3>
+            <h3>Dagelijkse werking</h3>
             <ul className="features-deep-list">
               <li>
-                <strong>Windows desktopapp</strong> (Electron): installer en portable build, gelijkwaardig aan ArenaCue
-                Scoreboard qua distributie.
+                <strong>Zelfstandig product:</strong> LED boarding draait naast Scoreboard met een eigen setup voor
+                perimeter en tribunes.
               </li>
               <li>
-                <strong>Lokaal ingesteld:</strong> configuratie en media blijven op je regiemachine; geschikt voor vaste
-                LED‑opstellingen per stadionvak of perimeter.
+                <strong>Per stadion op maat:</strong> configuratie en media stem je af op je eigen LED-opstelling, zones
+                en vakken.
               </li>
               <li>
-                <strong>Licentie:</strong> zelfde <Link href="/portal">klantportaal</Link> voor status en downloads waar
-                van toepassing.
+                <strong>Licentie:</strong> zelfde <Link href="/portal">klantportaal</Link> voor status en downloads.
               </li>
             </ul>
           </section>
@@ -281,8 +281,7 @@ export default function FunctiesPage() {
             <h3>Output &amp; bediening</h3>
             <ul className="features-deep-list">
               <li>
-                <strong>Outputvensters</strong> per zone (hash-routes voor display‑URLs), klaar om fullscreen op je
-                LED‑rij te zetten.
+                <strong>Output per zone</strong>, klaar om fullscreen op je LED-rij of processor te tonen.
               </li>
               <li>
                 <strong>Sneltoetsen 1–9</strong> op het outputscherm om snel tussen vooraf gekozen slots of segmenten te
@@ -299,7 +298,7 @@ export default function FunctiesPage() {
                 baseline voor het seizoen te bewaren.
               </li>
               <li>
-                Instellingen kunnen lokaal in de browser/app worden bewaard (geen verplichte cloud voor de kernworkflow).
+                Instellingen blijven consistent en zijn makkelijk overdraagbaar tussen opstellingen.
               </li>
             </ul>
           </section>

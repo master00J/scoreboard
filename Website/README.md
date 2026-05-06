@@ -32,3 +32,6 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-key>
 
 Run `supabase/schema.sql` in de Supabase SQL Editor om de tabel en RLS-policy
 voor demo-aanvragen aan te maken.
+
+Run `supabase/reviews.sql` om de reviewmodule (inzendingen + gepubliceerde reviews)
+te activeren.

@@ -4,6 +4,7 @@ import { SITE_KEYWORDS } from "@/lib/seo";
 import { SiteShell } from "@/components/site-shell";
 import { SeoJsonLd } from "@/components/seo-json-ld";
 import "./globals.css";
+import "./globals-professional-home.css";
 
 const siteUrl = getSiteUrl();
 
