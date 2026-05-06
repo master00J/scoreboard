@@ -110,7 +110,7 @@ export function PortalDashboard({
               }}
             >
               <h3 style={{ margin: "0 0 10px", fontSize: "0.95rem", color: "var(--muted)" }}>Download</h3>
-              {data.downloadUrl || data.ledboardingDownloadUrl ? (
+              {data.downloadUrl || data.ledboardingDownloadUrl || data.mobileDownloadUrl ? (
                 <>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                     {data.downloadUrl ? (
@@ -146,6 +146,28 @@ export function PortalDashboard({
                         {data.ledboardingDownloadLabel?.trim() || "ArenaCue LED boarding"}
                       </a>
                     ) : null}
+                    {data.mobileDownloadUrl ? (
+                      <a
+                        className="primary-button"
+                        href={data.mobileDownloadUrl}
+                        {...(data.mobileDownloadUrl.startsWith("http://") ||
+                        data.mobileDownloadUrl.startsWith("https://")
+                          ? { target: "_blank", rel: "noopener noreferrer" }
+                          : {})}
+                        style={
+                          data.downloadUrl || data.ledboardingDownloadUrl
+                            ? {
+                                background:
+                                  "linear-gradient(135deg, rgba(120, 119, 198, 0.26), rgba(99, 102, 241, 0.2))",
+                                border: "1px solid rgba(120, 119, 198, 0.45)",
+                                color: "var(--text)",
+                              }
+                            : undefined
+                        }
+                      >
+                        {data.mobileDownloadLabel?.trim() || "ArenaCue mobiele app (Android)"}
+                      </a>
+                    ) : null}
                   </div>
                   <p className="form-hint" style={{ marginTop: 12, marginBottom: 0 }}>
                     Installeer ArenaCue op je Windows-pc met deze download(s). Bij vragen:{" "}
@@ -167,7 +189,8 @@ export function PortalDashboard({
                   Er is nog geen downloadlink geconfigureerd voor dit portaal. Neem contact op met ArenaCue of vraag je
                   beheerder om een link in te stellen (
                   <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_DOWNLOAD_URL</code>, optioneel{" "}
-                  <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_LEDBOARDING_DOWNLOAD_URL</code>, of per
+                  <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_LEDBOARDING_DOWNLOAD_URL</code>,{" "}
+                  <code style={{ color: "var(--cyan)" }}>NEXT_PUBLIC_PORTAL_MOBILE_DOWNLOAD_URL</code>, of per
                   licentie).
                 </p>
               )}

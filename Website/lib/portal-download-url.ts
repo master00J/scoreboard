@@ -53,3 +53,10 @@ export function portalLedboardingDownloadLabel(): string {
   const s = raw && raw.length > 0 ? raw : "ArenaCue LED boarding";
   return s.length > 80 ? s.slice(0, 80) : s;
 }
+
+/** Derde downloadknop op het licentieportaal (Android app), alleen als URL gezet is. */
+export function portalMobileDownloadLabel(): string {
+  const raw = process.env.NEXT_PUBLIC_PORTAL_MOBILE_DOWNLOAD_LABEL?.trim();
+  const s = raw && raw.length > 0 ? raw : "ArenaCue mobiele app (Android)";
+  return s.length > 80 ? s.slice(0, 80) : s;
+}

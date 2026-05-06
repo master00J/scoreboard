@@ -8,6 +8,7 @@ import { licensePortalBodySchema, normalizeLicenseKey } from "@/lib/license-keys
 import {
   portalDownloadLabel,
   portalLedboardingDownloadLabel,
+  portalMobileDownloadLabel,
   resolvePortalDownloadUrl,
   sanitizePortalDownloadUrl,
 } from "@/lib/portal-download-url";
@@ -118,6 +119,10 @@ export async function POST(request: Request) {
     status === "active"
       ? sanitizePortalDownloadUrl(process.env.NEXT_PUBLIC_PORTAL_LEDBOARDING_DOWNLOAD_URL)
       : null;
+  const mobileDownloadUrl =
+    status === "active"
+      ? sanitizePortalDownloadUrl(process.env.NEXT_PUBLIC_PORTAL_MOBILE_DOWNLOAD_URL)
+      : null;
 
   const snapshot = toPublicLicenseSnapshot(row);
 
@@ -133,6 +138,8 @@ export async function POST(request: Request) {
         downloadLabel: downloadUrl ? portalDownloadLabel() : null,
         ledboardingDownloadUrl,
         ledboardingDownloadLabel: ledboardingDownloadUrl ? portalLedboardingDownloadLabel() : null,
+        mobileDownloadUrl,
+        mobileDownloadLabel: mobileDownloadUrl ? portalMobileDownloadLabel() : null,
         installations: installs.map((i) => ({
           deviceLabel: i.device_label || "—",
           machinePreview: machinePreview(i.machine_id),
