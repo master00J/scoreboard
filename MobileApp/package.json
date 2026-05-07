@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "eas:login": "eas login",
     "build:apk": "eas build -p android --profile preview",
-    "build:aab": "eas build -p android --profile production"
+    "build:aab": "eas build -p android --profile production",
+    "legal": "node ../scripts/npm-production-license-inventory.mjs --lock package-lock.json --out LEGAL_THIRD_PARTY_NPM.md --title \"ArenaCue Mobile — third-party npm-packages (productie)\""
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "2.2.0",

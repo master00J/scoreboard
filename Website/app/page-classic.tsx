@@ -258,6 +258,8 @@ export default function Home() {
           <Link href="/portal">Klantportaal</Link>
           <Link href="/changelog">Changelog</Link>
           <a href="/privacy">Privacy</a>
+          <a href="/vereisten">Systeemvereisten</a>
+          <a href="/licenses">Licenties</a>
           <a href="/terms">Voorwaarden</a>
           <CookieSettingsTrigger />
         </span>

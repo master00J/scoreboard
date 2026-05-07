@@ -22,6 +22,7 @@ function run(command, args) {
 }
 
 async function main() {
+  await run("npm", ["run", "legal:desktop"]);
   await run("npm", ["run", "renderer:build"]);
   await run("npm", ["run", "electron:compile"]);
   await run("npx", ["electron", "."]);

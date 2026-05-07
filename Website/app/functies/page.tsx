@@ -56,6 +56,11 @@ export default function FunctiesPage() {
           tribuneschermen met eigen zones en playlists. Hieronder zie je per product welke impact je operationeel mag
           verwachten.
         </p>
+        <p className="features-deep-lead tight">
+          <strong>Wedstrijd-PC:</strong> voor langere sessies (typisch 4–6 uur) met video en sponsorrotatie gelden
+          concrete hardwarerichtlijnen — zie{" "}
+          <Link href="/vereisten">systeemvereisten</Link>.
+        </p>
 
         {/* —— Scoreboard —— */}
         <section className="features-product-block" aria-labelledby="heading-scoreboard">

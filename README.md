@@ -33,6 +33,15 @@ npm run build
 
 Produceert Windows-artifacts onder `dist/` (o.a. portable / NSIS via electron-builder).
 
+## Systeemvereisten (productie / wedstrijddag)
+
+Richtlijn voor clubs en operators: typisch **4–6 uur** continue gebruik met **timer, regie en video** (sponsorrotatie, clips). Zie de publieke pagina **[arenacue.be/vereisten](https://arenacue.be/vereisten)** voor minimale vs. aanbevolen hardware (Windows 64-bit, RAM, SSD, GPU/drivers, tweede scherm). Kort samengevat:
+
+- **Minimum:** Windows 10/11 64-bit, **8 GB RAM**, quad-core CPU, **SSD**, GPU met hardware videodecode, drivers up-to-date; bediening min. 1920×1080 + videouitgang voor het stadionscherm.
+- **Aanbevolen voor zware video:** **16 GB RAM**, 6+ cores of recente mid-range CPU, dedicated GPU of sterke iGPU, NVMe SSD, wedstrijddag zonder energiebesparing/achtergrondstress.
+
+Test altijd op de **werkelijke wedstrijd-PC** vóór de eerste live inzet.
+
 ## Build phases (functioneel)
 
 - [x] **Phase 1** — scaffold + timer sync backbone

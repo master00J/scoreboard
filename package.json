@@ -13,8 +13,9 @@
     "electron:dev": "node scripts/electron-dev.mjs",
     "renderer:build": "node scripts/build-renderer.mjs",
     "electron:compile": "tsc -p electron/tsconfig.json",
-    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-windows-icon.mjs && npm run renderer:build && npm run electron:compile && electron-builder",
-    "electron:pack": "npm run renderer:build && npm run electron:compile && electron-builder --dir"
+    "legal:desktop": "node scripts/assemble-desktop-legal-bundle.mjs",
+    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-windows-icon.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder",
+    "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir"
   },
   "build": {
     "forceCodeSigning": false,
@@ -72,6 +73,13 @@
         ]
       },
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "legal-dist",
+        "to": "legal",
+        "filter": ["**/*"]
+      }
     ]
   },
   "dependencies": {

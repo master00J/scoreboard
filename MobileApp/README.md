@@ -2,6 +2,8 @@
 
 Testbare companion-app voor Android (Expo), bedoeld om de desktop-app op afstand te bedienen.
 
+De **wedstrijd-PC** die de display en video draait heeft hogere eisen dan deze telefoon-app. Zie **https://arenacue.be/vereisten** (minimaal vs. aanbevolen voor lange sessies met video).
+
 ## 1) Desktop starten
 
 Start de desktop-app zoals normaal. In de boot-log verschijnt daarna:

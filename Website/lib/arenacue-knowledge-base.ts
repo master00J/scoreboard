@@ -106,45 +106,8 @@ Voor exact getimede momenten zoals "speel deze film op 25:00 in de eerste helft"
 - **Rust**: het display wisselt automatisch tussen een halftime-graphic en sponsor-/playlist-content op basis van het halftime-budget en de pauzeduur.
 - **Einde wedstrijd**: postmatch playlist en/of FULLTIME-graphic.
 
-### Externe capture (HDMI / SDI / vMix-feed / replay-PC)
-Onder "Externe capture" kies je een **HDMI/SDI capture-kaart** (Magewell, Elgato, Blackmagic verschijnen onder *Camera's & video-invoer*), een **scherm/venster** (bv. vMix, OBS of andere SDI-software die op deze PC draait), of een **webcam**. Voor pro capture-kaarten probeert ArenaCue automatisch 1920×1080@30 op te halen. Optioneel kan je **audio doorzetten** (handig voor een vMix/zendwagen-feed met commentaar).
-
-Workflow voor goal-replays op rust/na-de-match (zoals in profclubs):
-- Zendwagen-feed → vMix-PC neemt op → DaVinci Resolve montage → SDI/HDMI → capture-kaart in ArenaCue-PC.
-- In ArenaCue: kies de kaart als bron, "Fullscreen op scorebord" activeren tijdens rust of post-match.
-- Eén knop "Stop op scorebord" om terug te gaan naar het normale wedstrijdscherm.
-
-### Veilige modus (noodknop voor live wedstrijden)
-Sneltoets **Ctrl+Shift+S** (of de noodknop in het control panel "Scherm & fase") forceert het stadionscherm **direct** terug naar pure scoreboard. Geen sponsors, geen overlays, geen externe capture, geen scheduled cues — alleen score en timer. Bedoeld voor noodgevallen tijdens een live wedstrijd waarbij iets misgaat. Een rode banner "VEILIGE MODUS" verschijnt op het stadiondisplay zodat de operator weet dat de override actief is. Uitschakelen: zelfde sneltoets of de knop "Veilige modus uitschakelen".
-
-### Display herstarten en heartbeat-bewaking
-- Het control panel detecteert wanneer het display al meer dan 8 seconden geen update meer stuurt terwijl de timer loopt. Een gele banner verschijnt met de optie veilige modus aan te zetten of het display-venster te herstarten.
-- Knop **"Display herstarten"** doet een hard reload van enkel het stadiondisplay (zonder de control panel te onderbreken). Geen wedstrijdcontext gaat verloren — de state komt direct terug uit de lokale database.
-
-### Decode-watchdog op sponsorvideos
-Als een sponsorvideo niet binnen 4 seconden metadata levert (corrupt bestand, codec-issue, hardware-hapering), wordt hij automatisch overgeslagen en gaat de rotatie naar de volgende clip. Voorkomt dat het stadionscherm op één video vast blijft hangen tijdens een live wedstrijd.
-
-### Pre-match media-check
-In Setup-tab → "Pre-match check" kun je vóór een wedstrijd alle actieve media testen. ArenaCue laadt elk bestand kort om codec-/leesfouten en trage clips op te sporen. Resultaten per bestand: ✓ OK, ⚠ traag (>1.5s), ✗ fout (corrupt of timeout). Aan te raden 30 minuten voor kickoff te draaien.
-
-### Pixel-perfect LED-output / configureerbaar canvas
-Onder Setup → "LED / Display canvas" stel je de logische resolutie van het stadiondisplay in.
-- **Snelle keuzes**: Full HD 1920×1080, 4K UHD 3840×2160, brede LED-strip 1920×360, vierkante cube 1024×1024, grote stadion-LED 2304×1296, etc.
-- **Custom afmeting**: voor exotische LED-formaten kun je elke breedte/hoogte invullen. Aspect ratio wordt automatisch berekend.
-- **Scaling-modus**:
-  - *Cover* (standaard): vult het venster, kan een minieme rand croppen bij afwijkende aspect.
-  - *Contain*: hele inhoud zichtbaar, eventueel zwarte rand.
-  - *Pixel-perfect (1:1)*: geen browser-scaling. Logische resolutie = fysieke LED-resolutie. Voorkomt blur en video-stretching, ideaal voor pro LED-walls (Daktronics, Yaham, Unilumin).
-- **Safe-zone overlay**: groen kader met instelbare marge — handig tijdens setup als de LED-cabinets randen wegnemen. Schakel uit voor de wedstrijd.
-
-### Proof-of-play (sponsor-rapporten)
-Elke voltooide sponsor-clipweergave wordt automatisch gelogd in een aparte tabel \`SponsorPlayLog\` met sponsor, media, wedstrijd, fase, verwachte vs werkelijke schermtijd, start- en eindtijd, en een unieke sessie-id. In tab **Rapporten** in het control panel:
-- Filteren op wedstrijd, sponsor, match-fase (voor wedstrijd, 1e helft, rust, 2e helft, verlenging) en datumbereik.
-- Samenvatting per sponsor: aantal afspeelbeurten, totale schermtijd, verwachte tijd, realisatiegraad.
-- Detaillijst van laatste afspeelbeurten met tijdstempel.
-- **Export** als professioneel opgemaakte **Excel** (.xlsx, bladen Rapport + Detail) of **PDF** (samenvatting + detail, kant-en-klaar voor sponsors) — gegenereerd in de app; desktop opent een kies-locatie-dialoog. Optioneel blijft \`/api/sponsor-plays/export.csv\` beschikbaar voor integraties.
-- Snapshot-velden (sponsorName, mediaTitle) zorgen dat rapporten leesbaar blijven na verwijdering van een sponsor of media-item.
-- Te gebruiken voor adverteerderfacturatie en transparantie naar sponsoren over werkelijk geleverde schermtijd.
+### Externe capture
+Onder "Externe capture" kies je een camerabron of een scherm/venster (bijv. een replay-PC). Door te schakelen verschijnt die feed fullscreen op het stadionscherm.
 
 ### Mobiele bridge – LAN
 - De desktop start een lokale server (poort 17890 standaard) met **pairing code** (6 cijfers) en **operator-PIN** (4 cijfers), beide automatisch gegenereerd of via env vastgezet.
@@ -220,7 +183,8 @@ Download de Android APK via de licentie/portaal. Toestaan dat onbekende bronnen 
 - **/licentie** – licentiemodellen en koop-uitleg.
 - **/portal** – klantportaal: log in met je licentie-e-mail, ontvang een **magic link** (15 minuten geldig), download installer/APK, beheer cloud-bediening.
 - **/changelog** – release notes.
-- **/privacy** en **/terms** – juridisch (incl. cookie- en gegevensverwerking).
+- **/privacy**, **/licenses** en **/terms** – juridisch (incl. cookie-, licentie- en gegevensverwerking).
+- **/vereisten** – minimale en aanbevolen Windows-hardware voor wedstrijddagen (lange sessies, video).
 - **/admin** – intern beheer (afgeschermd).
 
 ### Demo aanvragen
@@ -244,17 +208,6 @@ Setup → "GOAL +1 gedrag" → vink visual uit voor die ploeg. Bevestigen. Vanaf
 
 **Sponsorvideo blijft hangen / hapert aan het einde**
 Sinds de laatste update wordt de clip 200ms voor het einde als afgelopen gemeld om compositor-hapering te voorkomen. Update naar de nieuwste versie (banner verschijnt automatisch).
-
-**Sponsorvideo blokkeert de rotatie (corrupt bestand)**
-ArenaCue heeft een decode-watchdog van 4 seconden. Als een video niet binnen die tijd metadata levert, wordt hij automatisch overgeslagen en gaat de rotatie verder. Vervang het bestand of zet het op inactief in Media → Sponsors. Run nadien de Pre-match check.
-
-**Display lijkt vastgelopen tijdens wedstrijd**
-1. Druk Ctrl+Shift+S voor veilige modus → scoreboard verschijnt direct, alle media stopt.
-2. Of klik "Display herstarten" in het control panel → enkel het display-venster wordt herladen, je behoudt al je wedstrijdstate.
-3. Crash-recovery banner detecteert sowieso een onverwachte herstart en biedt herstel.
-
-**HDMI/SDI capture-kaart wordt niet gevonden**
-Capture-kaarten verschijnen onder *Camera's & video-invoer* in de bronnenlijst (niet onder Schermen & vensters). Druk op "Bronnen vernieuwen". Bij de eerste keer vraagt Windows om cameratoegang. Zonder die toegang verschijnt geen enkele cameralabel.
 
 **Mobiele app vindt de desktop niet (LAN)**
 - Telefoon en computer op hetzelfde Wi-Fi-netwerk?
@@ -296,13 +249,6 @@ Onderaan het control panel staat de huidige versie. De update-banner toont de ni
 - **Beside scoreboard**: layout met scorebord-strip links en sponsor/cue rechts tijdens speelhelft.
 - **Match sponsor venster**: 5 minuten voor kickoff toont automatisch een fullscreen reclame van de match-sponsor.
 - **Fase-tag op media**: beperking dat een mediabestand alleen in bepaalde fasen telt (bv. alleen Voor wedstrijd).
-- **Veilige modus**: noodoverride die het stadionscherm forceert naar pure scoreboard. Sneltoets Ctrl+Shift+S.
-- **Decode-watchdog**: automatische skip naar volgende sponsorclip als de huidige binnen 4s geen metadata levert.
-- **Heartbeat-bewaking**: het control panel waarschuwt en biedt herstart aan als het display 8+ seconden geen update meer stuurt terwijl de timer loopt.
-- **Logisch canvas**: configureerbare resolutie van het stadiondisplay (default 1920×1080), past zich aan aan elke LED-wall.
-- **Pixel-perfect (1:1)**: scaling-modus die geen browser-scaling toepast — logische pixels = fysieke LED-pixels.
-- **Safe zone**: visuele hulplijn (groen kader) tijdens LED-setup om aan te tonen welk gebied gegarandeerd zichtbaar is buiten de cabinet-randen.
-- **Proof-of-play**: persistente log van elke sponsor-clipweergave (sponsorName, mediaTitle, fase, verwachte/werkelijke seconden, sessie-id) voor adverteerderfacturatie en audit-rapporten.
 
 ---
 

@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "prebuild": "node scripts/ensure-portable-exe.mjs",
+    "prebuild": "node scripts/ensure-portable-exe.mjs && node scripts/generate-website-legal.mjs",
+    "legal": "node scripts/generate-website-legal.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"

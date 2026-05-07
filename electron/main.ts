@@ -278,8 +278,60 @@ function buildMenu() {
         },
       ],
     },
+    {
+      label: "Help",
+      submenu: [
+        {
+          label: "Licenties en open source…",
+          click: () => {
+            void openLegalBundleFolder();
+          },
+        },
+      ],
+    },
   ]);
   Menu.setApplicationMenu(menu);
+}
+
+/** Juridisch: Chromium/npm-attributie (`extraResources` → resources/legal bij packaged build). */
+function legalBundleDir(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, "legal");
+  }
+  return path.join(appRoot(), "legal-dist");
+}
+
+async function openLegalBundleFolder() {
+  const dir = legalBundleDir();
+  try {
+    if (!fs.existsSync(dir)) {
+      await dialog.showMessageBox({
+        type: "info",
+        title: "Licenties",
+        message: "Licentiemap niet gevonden.",
+        detail:
+          "Voer lokaal `npm run legal:desktop` uit (genereert legal-dist/), of bouw de installatie opnieuw met `npm run electron:build`.",
+      });
+      return;
+    }
+    const err = await shell.openPath(dir);
+    if (err) {
+      await dialog.showMessageBox({
+        type: "warning",
+        title: "Licenties",
+        message: "Kon de licentiemap niet openen.",
+        detail: err,
+      });
+    }
+  } catch (e) {
+    bootLog(`openLegalBundleFolder failed ${String(e)}`);
+    await dialog.showMessageBox({
+      type: "error",
+      title: "Licenties",
+      message: "Kon de licentiemap niet openen.",
+      detail: String(e),
+    });
+  }
 }
 
 function registerIpc() {

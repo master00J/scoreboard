@@ -1672,6 +1672,34 @@ h2 {
   word-break: break-word;
 }
 
+.legal-muted {
+  color: var(--muted);
+  font-size: 0.95rem;
+  opacity: 0.92;
+}
+
+.legal-license-pre {
+  margin: 14px 0 22px;
+  padding: clamp(16px, 3vw, 24px);
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(4, 10, 18, 0.88);
+  color: var(--text);
+  font-family:
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre;
+  max-height: min(70vh, 720px);
+}
+
 .legal-table-wrap {
   margin: 14px 0 22px;
   border: 1px solid var(--line);
