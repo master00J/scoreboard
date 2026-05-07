@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { NextResponse } from "next/server";
 import { ARENACUE_KNOWLEDGE_BASE } from "@/lib/arenacue-knowledge-base";
+import { checkRateLimit, readClientIp } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +36,19 @@ Als iemand een bug of crash rapporteert: vraag om versie en Windows-versie en ve
 Niet hallucineren over features die niet in de kennisbank staan.`;
 
 export async function POST(request: Request) {
+  const ip = readClientIp(request);
+  const limit = checkRateLimit({
+    key: `support-chat:${ip}`,
+    limit: 20,
+    windowMs: 10 * 60 * 1000,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { error: "Te veel chatverzoeken. Probeer het over enkele minuten opnieuw." },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } },
+    );
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) {
     return NextResponse.json(

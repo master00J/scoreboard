@@ -1,6 +1,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import * as XLSX from "xlsx";
+import { XlsxWriteOnly } from "./xlsx-write-only";
 
 /** Rij uit GET /api/sponsor-plays — gelijk aan control panel. */
 export type ProofOfPlayRow = {
@@ -88,7 +88,7 @@ export function buildProofOfPlayXlsx(
   summary: ProofOfPlaySummaryRow[],
   meta: ProofOfPlayExportMeta,
 ): Uint8Array {
-  const wb = XLSX.utils.book_new();
+  const wb = XlsxWriteOnly.utils.book_new();
 
   const overview: (string | number)[][] = [
     ["ArenaCue · Proof-of-play"],
@@ -113,7 +113,7 @@ export function buildProofOfPlayXlsx(
       fulfillmentPct(s.actualSec, s.expectedSec),
     ]);
   }
-  const wsRapport = XLSX.utils.aoa_to_sheet(overview);
+  const wsRapport = XlsxWriteOnly.utils.aoa_to_sheet(overview);
   wsRapport["!cols"] = [
     { wch: 32 },
     { wch: 22 },
@@ -121,7 +121,7 @@ export function buildProofOfPlayXlsx(
     { wch: 14 },
     { wch: 12 },
   ];
-  XLSX.utils.book_append_sheet(wb, wsRapport, "Rapport");
+  XlsxWriteOnly.utils.book_append_sheet(wb, wsRapport, "Rapport");
 
   const detailHead = [
     "Einde",
@@ -147,7 +147,7 @@ export function buildProofOfPlayXlsx(
     r.actualSec,
     r.clipSessionId,
   ]);
-  const wsDetail = XLSX.utils.aoa_to_sheet([detailHead, ...detailBody]);
+  const wsDetail = XlsxWriteOnly.utils.aoa_to_sheet([detailHead, ...detailBody]);
   wsDetail["!cols"] = [
     { wch: 18 },
     { wch: 24 },
@@ -160,9 +160,9 @@ export function buildProofOfPlayXlsx(
     { wch: 12 },
     { wch: 38 },
   ];
-  XLSX.utils.book_append_sheet(wb, wsDetail, "Detail");
+  XlsxWriteOnly.utils.book_append_sheet(wb, wsDetail, "Detail");
 
-  const buf = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+  const buf = XlsxWriteOnly.writeArrayBuffer(wb);
   return new Uint8Array(buf);
 }
 

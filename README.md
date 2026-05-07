@@ -42,6 +42,13 @@ Richtlijn voor clubs en operators: typisch **4–6 uur** continue gebruik met **
 
 Test altijd op de **werkelijke wedstrijd-PC** vóór de eerste live inzet.
 
+## Security hardening (snelle notities)
+
+- Cloud control viewer-sessies vereisen een venue-scoped pair token (geen anonieme read-only tokens).
+- Gevoelige secrets (licentie/cloud keys) worden in `userData` versleuteld opgeslagen wanneer Windows encryptie beschikbaar is.
+- Openbare website endpoints hebben basis rate limiting (anti-spam / anti-abuse).
+- Excel export gebruikt SheetJS **write-only** (geen import). Als je ooit XLSX import toevoegt: upgrade SheetJS naar een versie die CVE-2023-30533 expliciet fixt.
+
 ## Build phases (functioneel)
 
 - [x] **Phase 1** — scaffold + timer sync backbone

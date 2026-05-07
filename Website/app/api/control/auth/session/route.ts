@@ -5,8 +5,22 @@ import {
   verifyOperatorPairToken,
   type ControlRole,
 } from "@/lib/control-auth";
+import { checkRateLimit, readClientIp } from "@/lib/rate-limit";
 
 export async function POST(request: Request) {
+  const ip = readClientIp(request);
+  const limit = checkRateLimit({
+    key: `control-auth:${ip}`,
+    limit: 30,
+    windowMs: 5 * 60 * 1000,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Te veel aanvragen. Probeer het straks opnieuw." },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } },
+    );
+  }
+
   if (!isControlAuthConfigured()) {
     return NextResponse.json(
       { ok: false, message: "CONTROL_SESSION_SECRET niet geconfigureerd." },
@@ -34,8 +48,18 @@ export async function POST(request: Request) {
   }
 
   const role: ControlRole = input.role === "operator" ? "operator" : "viewer";
+  const hasValidPairToken = verifyOperatorPairToken(venueId, input.pairToken);
+
+  // Viewer-sessies vereisen ook venue-scoped pair token.
+  if (role === "viewer" && !hasValidPairToken) {
+    return NextResponse.json(
+      { ok: false, message: "Viewer-toegang vereist een geldige pair token." },
+      { status: 401 },
+    );
+  }
+
   if (role === "operator") {
-    if (verifyOperatorPairToken(venueId, input.pairToken)) {
+    if (hasValidPairToken) {
       const token = await signControlToken({ role, venueId });
       return NextResponse.json({ ok: true, token, role, venueId });
     }

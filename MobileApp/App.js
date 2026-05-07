@@ -272,6 +272,10 @@ export default function App() {
   async function authenticate() {
     setStatus("Authenticatie...");
     try {
+      if (isCloud && role === "viewer" && !cloudPairToken.trim()) {
+        setStatus("Viewer-login via cloud vereist een geldige pair token uit de desktop QR.");
+        return;
+      }
       const res = await fetch(
         isCloud ? `${baseUrl}${cloudPath("/control/auth/session")}` : `${baseUrl}/mobile/auth/session`,
         {

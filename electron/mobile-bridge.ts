@@ -57,9 +57,6 @@ function writeJson(
 ) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Scoreboard-Token");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
   res.end(JSON.stringify(payload));
 }
 
@@ -148,11 +145,6 @@ export async function startMobileBridge(
     try {
       if (!req.url || !req.method) {
         writeJson(res, 400, { error: "Bad request" });
-        return;
-      }
-
-      if (req.method === "OPTIONS") {
-        writeJson(res, 200, { ok: true });
         return;
       }
 
@@ -268,10 +260,8 @@ export async function startMobileBridge(
     });
   });
 
-  options.log(
-    `[mobile-bridge] actief op poort ${port} (pairing-code=${pairingCode})`,
-  );
-  options.log(`[mobile-bridge] operator-pin=${operatorPin}`);
+  options.log(`[mobile-bridge] actief op poort ${port}`);
+  options.log("[mobile-bridge] pairing actief (code/pin afgeschermd)");
 
   return {
     port,

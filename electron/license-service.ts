@@ -11,6 +11,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { safeStorage } from "electron";
 
 const MACHINE_FILE = "arenacue-machine-id.txt";
 const LICENSE_FILE = "arenacue-license.json";
@@ -33,6 +34,50 @@ export type StoredLicense = {
   controlVenueId?: string;
   controlOperatorPairToken?: string;
 };
+
+type StoredLicenseFileV2 = {
+  version: 2;
+  encrypted: string;
+};
+
+function isV2File(value: unknown): value is StoredLicenseFileV2 {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const rec = value as Record<string, unknown>;
+  return rec.version === 2 && typeof rec.encrypted === "string" && rec.encrypted.length > 0;
+}
+
+function decryptStoredLicense(raw: string): StoredLicense | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (isV2File(parsed)) {
+      if (!safeStorage.isEncryptionAvailable()) return null;
+      const encBytes = Buffer.from(parsed.encrypted, "base64");
+      const json = safeStorage.decryptString(encBytes);
+      const lic = JSON.parse(json) as StoredLicense;
+      if (typeof lic.licenseKey === "string" && lic.licenseKey.trim().length >= 8) {
+        return { ...lic, licenseKey: lic.licenseKey.trim().toUpperCase() };
+      }
+      return null;
+    }
+
+    const j = parsed as StoredLicense;
+    if (typeof j.licenseKey === "string" && j.licenseKey.trim().length >= 8) {
+      return { ...j, licenseKey: j.licenseKey.trim().toUpperCase() };
+    }
+  } catch {
+    /* invalid */
+  }
+  return null;
+}
+
+function serializeStoredLicense(data: StoredLicense): string {
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(JSON.stringify(data)).toString("base64");
+    const payload: StoredLicenseFileV2 = { version: 2, encrypted };
+    return JSON.stringify(payload, null, 2);
+  }
+  return JSON.stringify(data, null, 2);
+}
 
 export function skipLicenseGateFromEnv(): boolean {
   return process.env.ARENACUE_SKIP_LICENSE_GATE === "1";
@@ -64,10 +109,7 @@ export function readStoredLicense(userDataDir: string): StoredLicense | null {
   const p = path.join(userDataDir, LICENSE_FILE);
   try {
     const raw = fs.readFileSync(p, "utf8");
-    const j = JSON.parse(raw) as StoredLicense;
-    if (typeof j.licenseKey === "string" && j.licenseKey.trim().length >= 8) {
-      return { ...j, licenseKey: j.licenseKey.trim().toUpperCase() };
-    }
+    return decryptStoredLicense(raw);
   } catch {
     /* none */
   }
@@ -77,7 +119,7 @@ export function readStoredLicense(userDataDir: string): StoredLicense | null {
 export function writeStoredLicense(userDataDir: string, data: StoredLicense): void {
   const p = path.join(userDataDir, LICENSE_FILE);
   fs.mkdirSync(userDataDir, { recursive: true });
-  fs.writeFileSync(p, JSON.stringify(data, null, 2), "utf8");
+  fs.writeFileSync(p, serializeStoredLicense(data), "utf8");
 }
 
 export function machinePreview(machineId: string): string {
