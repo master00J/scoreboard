@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { createHash, timingSafeEqual } from "node:crypto";
 import {
   signControlToken,
   isControlAuthConfigured,
@@ -6,6 +7,17 @@ import {
   type ControlRole,
 } from "@/lib/control-auth";
 import { checkRateLimit, readClientIp } from "@/lib/rate-limit";
+
+function sha256utf8(s: string): Buffer {
+  return createHash("sha256").update(s, "utf8").digest();
+}
+
+function constantTimeSecretEq(input: string, expected: string): boolean {
+  const a = sha256utf8(input);
+  const b = sha256utf8(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
 
 export async function POST(request: Request) {
   const ip = readClientIp(request);
@@ -70,7 +82,7 @@ export async function POST(request: Request) {
         { status: 503 },
       );
     }
-    if ((input.pin ?? "").trim() !== expectedPin) {
+    if (!constantTimeSecretEq((input.pin ?? "").trim(), expectedPin)) {
       return NextResponse.json({ ok: false, message: "Onjuiste PIN." }, { status: 401 });
     }
   }

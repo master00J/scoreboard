@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { upsertControlState } from "@/lib/control-store";
+import { checkRateLimit, readClientIp } from "@/lib/rate-limit";
 
 function authorized(request: Request): boolean {
   const expected = process.env.CONTROL_DESKTOP_KEY?.trim();
@@ -9,6 +10,19 @@ function authorized(request: Request): boolean {
 }
 
 export async function POST(request: Request) {
+  const ip = readClientIp(request);
+  const limit = checkRateLimit({
+    key: `desktop-state:${ip}`,
+    limit: 240,
+    windowMs: 60 * 1000,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Te veel state-updates. Probeer later opnieuw." },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } },
+    );
+  }
+
   if (!authorized(request)) {
     return NextResponse.json({ ok: false, message: "Unauthorized." }, { status: 401 });
   }

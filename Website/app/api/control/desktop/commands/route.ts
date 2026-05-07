@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ackControlCommand, listPendingCommands } from "@/lib/control-store";
+import { checkRateLimit, readClientIp } from "@/lib/rate-limit";
 
 function authorized(request: Request): boolean {
   const expected = process.env.CONTROL_DESKTOP_KEY?.trim();
@@ -9,6 +10,19 @@ function authorized(request: Request): boolean {
 }
 
 export async function GET(request: Request) {
+  const ip = readClientIp(request);
+  const limit = checkRateLimit({
+    key: `desktop-commands-get:${ip}`,
+    limit: 360,
+    windowMs: 60 * 1000,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Te veel command-polls. Probeer later opnieuw." },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } },
+    );
+  }
+
   if (!authorized(request)) {
     return NextResponse.json({ ok: false, message: "Unauthorized." }, { status: 401 });
   }
@@ -29,6 +43,19 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  const ip = readClientIp(request);
+  const limit = checkRateLimit({
+    key: `desktop-commands-ack:${ip}`,
+    limit: 360,
+    windowMs: 60 * 1000,
+  });
+  if (!limit.allowed) {
+    return NextResponse.json(
+      { ok: false, message: "Te veel command-acks. Probeer later opnieuw." },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSec) } },
+    );
+  }
+
   if (!authorized(request)) {
     return NextResponse.json({ ok: false, message: "Unauthorized." }, { status: 401 });
   }

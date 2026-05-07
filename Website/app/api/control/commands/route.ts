@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { enqueueControlCommand } from "@/lib/control-store";
 import { readBearerToken, verifyControlToken } from "@/lib/control-auth";
+import { ControlCommandSchema } from "@/lib/control-command-schema";
 
 export async function POST(request: Request) {
   const claims = await verifyControlToken(readBearerToken(request));
@@ -22,9 +23,16 @@ export async function POST(request: Request) {
   if (!input.command) {
     return NextResponse.json({ ok: false, message: "Command ontbreekt." }, { status: 422 });
   }
+  const parsed = ControlCommandSchema.safeParse(input.command);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { ok: false, message: "Ongeldig command formaat." },
+      { status: 422 },
+    );
+  }
 
   try {
-    const commandId = await enqueueControlCommand(claims.venueId, input.command);
+    const commandId = await enqueueControlCommand(claims.venueId, parsed.data);
     return NextResponse.json({ ok: true, commandId });
   } catch (err) {
     return NextResponse.json(
