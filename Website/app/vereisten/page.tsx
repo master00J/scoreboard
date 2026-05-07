@@ -61,29 +61,32 @@ export default function VereistenPage() {
           <li>
             <strong>Windows 10 of Windows 11</strong> (64-bit)
           </li>
+          <li>
+            Voor nieuwe B2B-installaties: <strong>Windows 11 Pro</strong> als standaard (beheer, updates, stabiliteit)
+          </li>
           <li>Alle recente updates en stabiele grafische stuurprogramma&apos;s (Intel / AMD / NVIDIA)</li>
         </ul>
 
-        <h2>Minimum (werkbaar)</h2>
+        <h2>Minimum (kleinere clubs, werkbaar)</h2>
         <p className="legal-muted">
-          Geschikt voor lichte tot middelzware playlists. Bij veel gelijktijdige HD/4K-video of lange speelduur kan de
-          machine eerder tegen de grens aan zitten.
+          Geschikt voor scorebord + lichte tot middelzware sponsorvideo. Bij zware playlists of veel HD/4K-content zit
+          deze klasse sneller tegen de grens.
         </p>
         <ul>
           <li>
-            <strong>Processor:</strong> 4 fysieke cores (of vergelijkbaar), bijv. Intel Core i5 (8e generatie of
-            nieuwer) of AMD Ryzen 5 (2000-serie of nieuwer)
+            <strong>Processor:</strong> bij voorkeur <strong>6 cores / 12 threads</strong>, bv. Intel Core i5 (10e gen
+            of nieuwer) of AMD Ryzen 5 3600+
           </li>
           <li>
-            <strong>Geheugen:</strong> <strong>8 GB RAM</strong>
+            <strong>Geheugen:</strong> <strong>16 GB RAM</strong> (niet 8 GB voor matchday met video)
           </li>
           <li>
-            <strong>Opslag:</strong> <strong>SSD</strong> met minstens <strong>10 GB vrije ruimte</strong> voor programma
-            en database (exclusief je mediabibliotheek — video&apos;s kunnen vele GB extra zijn)
+            <strong>Opslag:</strong> <strong>256 GB SSD</strong> minimum (NVMe aanbevolen), met voldoende ruimte voor
+            mediabibliotheek
           </li>
           <li>
-            <strong>Grafisch:</strong> GPU met hardwarematige videodecode voor gangbare formaten (o.a. H.264); installeer
-            de <strong>nieuwste officiële drivers</strong> van de fabrikant
+            <strong>Grafisch:</strong> recente iGPU kan voor basisgebruik, maar instap <strong>dedicated GPU</strong>{" "}
+            (bv. GTX 1650-klasse of beter) is robuuster voor lange video-sessies
           </li>
           <li>
             <strong>Schermen:</strong> bedieningspaneel minimaal <strong>1920 × 1080</strong>; aparte videouitgang voor
@@ -91,40 +94,57 @@ export default function VereistenPage() {
           </li>
         </ul>
 
-        <h2>Aanbevolen voor wedstrijddag (4–6 uur, stevige video)</h2>
+        <h2>Aanbevolen (profclub / zware matchday 4–6 uur)</h2>
         <p className="legal-muted">
-          Richtlijn voor comfortabele bediening met sponsorrotatie, langere clips en minder risico op haperingen of
-          geheugendruk na uren draaien.
+          Voor hoge betrouwbaarheid met langere sessies, zwaardere video, meerdere outputs en minder risico op haperingen.
         </p>
         <ul>
           <li>
-            <strong>Geheugen:</strong> <strong>16 GB RAM</strong>
+            <strong>Processor:</strong> Intel Core i7 (12e gen+) of AMD Ryzen 7 (5700X / 7700X of beter)
           </li>
           <li>
-            <strong>Processor:</strong> 6+ cores of recente mid-range CPU (bijv. Intel Core i5/i7 of AMD Ryzen 5/7,
-            laatste generaties)
+            <strong>Geheugen:</strong> <strong>32 GB RAM</strong>
           </li>
           <li>
-            <strong>Grafisch:</strong> <strong>dedicated GPU</strong> (entry-level is vaak al voldoende) of sterke
-            geïntegreerde GPU (bijv. Intel Iris Xe, recente AMD RDNA); altijd <strong>actuele drivers</strong>
+            <strong>Grafisch:</strong> NVIDIA RTX 3060 / 4060-klasse of gelijkwaardig; focus op stabiele
+            hardware-decode/encode en multi-display output
           </li>
           <li>
-            <strong>Opslag:</strong> snelle <strong>NVMe SSD</strong> voor OS, app en cache; mediabestanden kunnen op een
-            tweede schijf
+            <strong>Opslag:</strong> <strong>1 TB NVMe SSD</strong> (eventueel tweede SSD voor media om I/O te scheiden)
           </li>
           <li>
-            <strong>Energie &amp; achtergrond:</strong> op wedstrijddag <strong>geen energiebesparing op &quot;maximaal
-            batterij&quot;</strong>; sluit onnodige zware apps (back-ups, game launchers, browser met veel tabs)
+            <strong>Display outputs:</strong> liefst <strong>3+ uitgangen</strong> (operator + hoofdscherm + reserve /
+            capture), afhankelijk van de setup
+          </li>
+          <li>
+            <strong>Energie &amp; updates:</strong> wedstrijddag-profiel zonder energiebesparing; updatevensters plannen
+            buiten wedstrijduren; onnodige zware achtergrondapps sluiten
           </li>
         </ul>
 
-        <h2>Netwerk (optioneel)</h2>
+        <h2>Netwerk (afhankelijk van inzet)</h2>
         <p>
           De kern van Scoreboard kan <strong>volledig offline</strong>. Voor{" "}
           <strong>cloud remote control</strong>, <strong>licentiecontrole</strong> of koppelingen met online diensten is
-          een stabiele internetverbinding nodig. Voor bediening via de <strong>mobiele app</strong> op hetzelfde netwerk:
-          zie de documentatie bij de app (firewall/poorten).
+          een stabiele internetverbinding nodig. Voor bediening via de <strong>mobiele app</strong> op hetzelfde netwerk
+          is bekabeld Ethernet voor de wedstrijd-PC sterk aanbevolen; wifi alleen als fallback.
         </p>
+
+        <h2>Matchday hardening (sterk aanbevolen)</h2>
+        <ul>
+          <li>
+            <strong>UPS (noodstroom):</strong> korte stroomdip mag geen reboot en live-uitval veroorzaken
+          </li>
+          <li>
+            <strong>Driver discipline:</strong> test GPU-drivers vooraf, niet blind vlak voor een wedstrijd updaten
+          </li>
+          <li>
+            <strong>Preflight test:</strong> simuleer volledige wedstrijdflow met echte media op de doel-PC
+          </li>
+          <li>
+            <strong>Failover:</strong> hou een reserve-output of fallback-beeld beschikbaar voor noodgevallen
+          </li>
+        </ul>
 
         <h2>Mobiele app (operator)</h2>
         <p>

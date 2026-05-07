@@ -197,6 +197,12 @@ Cookie-banner met categorieën: noodzakelijk (altijd), voorkeur (\`localStorage\
 
 ## Veel gestelde vragen / how-to
 
+**Welke hardware raden jullie aan voor 4–6 uur matchday met video?**
+- **Minimum (kleinere clubs):** i5 10e gen of Ryzen 5 3600+, liefst 6c/12t; **16 GB RAM**; SSD (min. 256 GB, liefst NVMe); recente iGPU kan, maar dedicated GPU (bv. GTX 1650-klasse) is robuuster; 2 video-uitgangen.
+- **Aanbevolen (prof / zware video):** i7 12e gen+ of Ryzen 7 5700X/7700X+; **32 GB RAM**; RTX 3060/4060-klasse of gelijkwaardig; 1 TB NVMe (eventueel tweede SSD voor media); 3+ video-uitgangen waar nodig.
+- **OS:** Windows 10/11 64-bit, met **Windows 11 Pro** als standaard voor nieuwe B2B-installaties.
+- **Matchday hardening:** UPS/noodstroom sterk aanbevolen, Ethernet voor de wedstrijd-PC, GPU-drivers vooraf testen en updates buiten wedstrijdvensters plannen.
+
 **Hoe start ik een wedstrijd?**
 Setup-tab → maak/activeer match → Match-tab → zet status op Voor wedstrijd → start timer wanneer je wil. Schakel daarna naar Eerste helft.
 
