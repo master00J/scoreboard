@@ -27,6 +27,17 @@ function bootLogPath(): string {
 function bootLog(line: string) {
   const lineWithNl = `[${new Date().toISOString()}] ${line}\n`;
   try {
+    const logFile = bootLogPath();
+    try {
+      const st = fs.statSync(logFile);
+      const maxBytes = 5 * 1024 * 1024;
+      if (st.size > maxBytes) {
+        const keep = fs.readFileSync(logFile, "utf8").slice(-Math.floor(maxBytes / 2));
+        fs.writeFileSync(logFile, keep, "utf8");
+      }
+    } catch {
+      /* ignore */
+    }
     fs.appendFileSync(bootLogPath(), lineWithNl, "utf8");
   } catch {
     /* ignore */
@@ -221,7 +232,12 @@ function createWindows() {
     ...(winIcon ? { icon: winIcon } : {}),
     /** Windows: resize-rand i.p.v. alleen `maximize()` bij frameless. */
     thickFrame: true,
-    webPreferences: { preload, contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      preload,
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+    },
   });
   void loadView(displayWindow, "display");
   /** Bounds op stadionscherm, dan fullscreen — geen taakbalk op die monitor. */
@@ -232,6 +248,18 @@ function createWindows() {
   });
   displayWindow.webContents.on("did-finish-load", () => {
     void runtime?.broadcastDisplayState();
+  });
+  displayWindow.webContents.on("render-process-gone", (_event, details) => {
+    bootLog(`[display] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
+    if (!displayWindow?.isDestroyed()) {
+      displayWindow.webContents.reloadIgnoringCache();
+    }
+  });
+  displayWindow.webContents.on("unresponsive", () => {
+    bootLog("[display] renderer unresponsive -> reload");
+    if (!displayWindow?.isDestroyed()) {
+      displayWindow.webContents.reloadIgnoringCache();
+    }
   });
   displayWindow.on("closed", () => {
     displayWindow = null;

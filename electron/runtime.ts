@@ -1795,6 +1795,15 @@ export async function runCommand(input: Command): Promise<CommandAck> {
 
 type ExportMatch = Awaited<ReturnType<typeof prisma.match.findUnique>>;
 
+function escapeHtml(value: unknown): string {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function renderHtml(
   match: NonNullable<ExportMatch> & {
     homeTeam: {
@@ -1841,7 +1850,7 @@ function renderHtml(
                 : event.type === "TIMER_ADJUST"
                   ? `Timer adjust — ${event.note ?? ""}`
                   : event.type;
-      return `<tr><td>${event.minute}'</td><td>${event.type}</td><td>${description}</td></tr>`;
+      return `<tr><td>${escapeHtml(`${event.minute}'`)}</td><td>${escapeHtml(event.type)}</td><td>${escapeHtml(description)}</td></tr>`;
     })
     .join("");
 
@@ -1858,9 +1867,9 @@ function renderHtml(
   @media print { body { margin: 0; } }
 </style></head>
 <body>
-  <h1>${match.homeTeam.name} vs ${match.awayTeam.name}</h1>
-  <div class="sub">Status: ${match.status} · ${new Date(match.createdAt).toLocaleString()}</div>
-  <div class="score">${match.homeScore} – ${match.awayScore}</div>
+  <h1>${escapeHtml(match.homeTeam.name)} vs ${escapeHtml(match.awayTeam.name)}</h1>
+  <div class="sub">Status: ${escapeHtml(match.status)} · ${escapeHtml(new Date(match.createdAt).toLocaleString())}</div>
+  <div class="score">${escapeHtml(`${match.homeScore} – ${match.awayScore}`)}</div>
   <table>
     <thead><tr><th>Min</th><th>Type</th><th>Description</th></tr></thead>
     <tbody>${rows || '<tr><td colspan="3">No events</td></tr>'}</tbody>

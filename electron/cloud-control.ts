@@ -24,6 +24,18 @@ export type CloudAgentHandle = {
   stop: () => void;
 };
 
+const FETCH_TIMEOUT_MS = 5000;
+
+async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...(init ?? {}), signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 function normalizeCloudBaseUrl(rawBaseUrl: string): string {
   const normalized = rawBaseUrl.trim().replace(/\/+$/, "");
   if (/^https:\/\/(www\.)?arenacue\.com$/i.test(normalized)) {
@@ -77,7 +89,7 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
 
   async function postState() {
     const state = withTimerTelemetry(await options.runtime.getDisplaySnapshot());
-    await fetch(`${cloudBaseUrl}/api/control/desktop/state`, {
+    await fetchWithTimeout(`${cloudBaseUrl}/api/control/desktop/state`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -88,7 +100,7 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
   }
 
   async function pullCommands(): Promise<PendingCommand[]> {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `${cloudBaseUrl}/api/control/desktop/commands?venueId=${encodeURIComponent(cloudVenueId)}`,
       {
         headers: { "x-desktop-key": cloudDesktopKey },
@@ -100,7 +112,7 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
   }
 
   async function ackCommand(commandId: string, result: { ok: boolean; error?: string; result?: unknown }) {
-    await fetch(`${cloudBaseUrl}/api/control/desktop/commands`, {
+    await fetchWithTimeout(`${cloudBaseUrl}/api/control/desktop/commands`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -152,7 +164,8 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
   }, 1500);
   void tick();
   options.log(`[cloud-control] actief voor venue=${cloudVenueId}`);
-  options.log(`[cloud-control] klant-koppelcode: ${customerPairCode}`);
+  const safePairPreview = `${customerPairCode.slice(0, 24)}…`;
+  options.log(`[cloud-control] klant-koppelcode preview: ${safePairPreview}`);
 
   return {
     baseUrl: cloudBaseUrl,
