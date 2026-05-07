@@ -34,6 +34,15 @@ function bootLog(line: string) {
   console.log(line);
 }
 
+process.on("unhandledRejection", (reason) => {
+  const msg = reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
+  bootLog(`[process] unhandledRejection ${msg}`);
+});
+
+process.on("uncaughtException", (error) => {
+  bootLog(`[process] uncaughtException ${error.name}: ${error.message}`);
+});
+
 function appRoot(): string {
   return IS_DEV ? path.join(__dirname, "..", "..") : app.getAppPath();
 }

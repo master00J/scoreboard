@@ -27,24 +27,29 @@ export async function getPublishedReviews(limit = 6): Promise<PublicReview[]> {
     `${url}/rest/v1/reviews?` +
     `select=id,created_at,name,club,role,rating,quote&status=in.(published,approved)&order=created_at.desc&limit=${Math.max(1, Math.min(limit, 20))}`;
 
-  const response = await fetch(endpoint, {
-    headers: {
-      apikey: anon,
-      Authorization: `Bearer ${anon}`,
-    },
-    next: { revalidate: 60 },
-  });
+  try {
+    const response = await fetch(endpoint, {
+      headers: {
+        apikey: anon,
+        Authorization: `Bearer ${anon}`,
+      },
+      next: { revalidate: 60 },
+    });
 
-  if (!response.ok) return [];
+    if (!response.ok) return [];
 
-  const rows = (await response.json()) as SupabaseReviewRow[];
-  return rows.map((row) => ({
-    id: row.id,
-    createdAt: row.created_at,
-    name: row.name,
-    club: row.club,
-    role: row.role ?? null,
-    rating: row.rating,
-    quote: row.quote,
-  }));
+    const rows = (await response.json()) as SupabaseReviewRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      name: row.name,
+      club: row.club,
+      role: row.role ?? null,
+      rating: row.rating,
+      quote: row.quote,
+    }));
+  } catch {
+    // Bij Supabase netwerk-/beschikbaarheidsfout: homepage blijft renderen zonder reviews.
+    return [];
+  }
 }
