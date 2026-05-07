@@ -1700,6 +1700,33 @@ h2 {
   max-height: min(70vh, 720px);
 }
 
+.legal-details-disclosure {
+  margin-top: 40px;
+  padding-top: 28px;
+  border-top: 1px solid var(--line);
+}
+
+.legal-details-disclosure summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  font-size: 1.05rem;
+  list-style: none;
+}
+
+.legal-details-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.legal-details-disclosure[open] summary {
+  margin-bottom: 4px;
+}
+
+.legal-details-disclosure .legal-muted {
+  margin-bottom: 0;
+}
+
 .legal-table-wrap {
   margin: 14px 0 22px;
   border: 1px solid var(--line);

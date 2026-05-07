@@ -117,6 +117,7 @@ async function loadRuntime() {
     runtime: {
       apiRequest: (req) => runtime!.apiRequest(req),
       getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
+      getSponsorLedgerSnapshot: () => runtime!.getSponsorLedgerSnapshot(),
       runCommand: (command) => runtime!.runCommand(command as any),
     },
     log: bootLog,
@@ -251,14 +252,16 @@ function createWindows() {
   });
   displayWindow.webContents.on("render-process-gone", (_event, details) => {
     bootLog(`[display] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
-    if (!displayWindow?.isDestroyed()) {
-      displayWindow.webContents.reloadIgnoringCache();
+    const win = displayWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.reloadIgnoringCache();
     }
   });
   displayWindow.webContents.on("unresponsive", () => {
     bootLog("[display] renderer unresponsive -> reload");
-    if (!displayWindow?.isDestroyed()) {
-      displayWindow.webContents.reloadIgnoringCache();
+    const win = displayWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.reloadIgnoringCache();
     }
   });
   displayWindow.on("closed", () => {

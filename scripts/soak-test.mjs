@@ -11,6 +11,8 @@ const cfg = {
   maxConsecutiveFailures: Number(process.env.SOAK_MAX_CONSECUTIVE_FAILURES ?? "10"),
   maxErrorRate: Number(process.env.SOAK_MAX_ERROR_RATE ?? "0.03"),
   maxP95Ms: Number(process.env.SOAK_MAX_P95_MS ?? "1500"),
+  /** Standaard uit: blackout trekt het scherm zwart en stoort sponsor-/scoreboard-test. Zet op "1" om dat pad wél te belasten. */
+  includeBlackout: process.env.SOAK_INCLUDE_BLACKOUT === "1",
 };
 
 const startedAt = new Date();
@@ -98,7 +100,9 @@ function buildCommand(step) {
     case 5:
       return { type: "display:setSafeMode", enabled: false };
     case 6:
-      return { type: "display:blackout" };
+      if (cfg.includeBlackout) return { type: "display:blackout" };
+      /* Geen blackout: anders wordt het stadionscherm periodiek zwart tijdens soak. */
+      return { type: "display:setMode", mode: "SPONSOR_ROTATION" };
     default:
       return { type: "display:requestSnapshot" };
   }
@@ -115,6 +119,7 @@ function redactConfigForReport() {
     maxP95Ms: cfg.maxP95Ms,
     pairingConfigured: cfg.pairingCode.length > 0,
     operatorPinConfigured: cfg.operatorPin.length > 0,
+    includeBlackout: cfg.includeBlackout,
   };
 }
 

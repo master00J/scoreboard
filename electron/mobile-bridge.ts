@@ -11,6 +11,8 @@ type BridgeRuntime = {
     text?: string;
   }>;
   getDisplaySnapshot: () => Promise<unknown>;
+  /** Optioneel: sponsor-ledger voor timing-tests (mobile snapshot). */
+  getSponsorLedgerSnapshot?: () => unknown;
   runCommand: (command: unknown) => Promise<unknown>;
 };
 
@@ -210,7 +212,16 @@ export async function startMobileBridge(
 
       if (url.pathname === "/mobile/snapshot" && req.method === "GET") {
         const snapshot = await options.runtime.getDisplaySnapshot();
-        writeJson(res, 200, withTimerTelemetry(snapshot));
+        const ledger = options.runtime.getSponsorLedgerSnapshot?.() ?? null;
+        writeJson(
+          res,
+          200,
+          withTimerTelemetry(
+            snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+              ? { ...snapshot, sponsorLedger: ledger }
+              : snapshot,
+          ),
+        );
         return;
       }
 

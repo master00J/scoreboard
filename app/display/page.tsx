@@ -727,7 +727,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           matchStatus={match.status}
           sponsorIdFilter={sponsorBudgetSponsorFilter}
           playbackTelemetry={sponsorPlaybackTelemetry}
-          followPlayback={embedInControl && previewFollowClip != null}
+          followPlayback={embedInControl}
           followClip={previewFollowClip}
           showPreviewProgress={embedInControl}
           fallback={sponsorBudgetFallbackScoreboard}
@@ -779,7 +779,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             matchStatus={match.status}
             sponsorIdFilter={sponsorBudgetSponsorFilter}
             playbackTelemetry={sponsorPlaybackTelemetry}
-            followPlayback={embedInControl && previewFollowClip != null}
+            followPlayback={embedInControl}
             followClip={previewFollowClip}
             showPreviewProgress={embedInControl}
             fallback={sponsorBudgetFallbackScoreboard}
@@ -914,7 +914,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   section="prematch"
                   sponsorIdFilter={prematchDistView.sponsorFilterId ?? undefined}
                   playbackTelemetry={sponsorPlaybackTelemetry}
-                  followPlayback={embedInControl && previewFollowClip != null}
+                  followPlayback={embedInControl}
                   followClip={previewFollowClip}
                   showPreviewProgress={embedInControl}
                   fallback={sponsorBudgetFallbackScoreboard}
@@ -963,7 +963,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               sponsors={sponsors}
               showPreviewProgress={embedInControl}
               playbackTelemetry={sponsorPlaybackTelemetry}
-              followPlayback={embedInControl && previewFollowClip != null}
+              followPlayback={embedInControl}
               followClip={previewFollowClip}
               prematchSpread={prematchSpreadActive ? prematchDistView : null}
               sponsorBudgetFallback={sponsorBudgetFallbackScoreboard}
@@ -1009,7 +1009,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 section="halftime"
                 sponsorIdFilter={sponsorDistView.sponsorFilterId}
                 playbackTelemetry={sponsorPlaybackTelemetry}
-                followPlayback={embedInControl && previewFollowClip != null}
+                followPlayback={embedInControl}
                 followClip={previewFollowClip}
                 showPreviewProgress={embedInControl}
                 fallback={halftimeSponsorFallback}

@@ -17,6 +17,7 @@ import {
 import { sponsorRepeatBudgetCyclesFromThemeJson } from "@/lib/scoreboard-theme";
 import {
   sponsorTelemetryActiveClipElapsedSec,
+  sponsorTelemetryConsumedSec,
   sponsorTelemetrySegmentKey,
 } from "@/lib/sponsor-telemetry";
 import {
@@ -308,9 +309,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       );
 
       /**
-       * Budget-check: als de actuele sponsor zijn budget al volledig benut heeft (op basis
-       * van de slotmap), is er op het hoofdscherm geen rotatie meer (tenzij `cycleBudgetForever`).
-       * In dat geval tonen we hetzelfde als wat de display toont: de scoreboard-fallback.
+       * Budget: als de sponsor zijn quotum (volgens telemetry op scherm, of slot-rooster)
+       * volledig gebruikt heeft, toont het display het scorebord-fallback — HUD moet dan
+       * niet "Bezig" blijven op basis van een achterhaalde activeClip of alleen het slotmodel.
        */
       let effectivePhase: "scoreboard" | "sponsor" = dist.phase;
       let effectiveSponsorId = dist.sponsorFilterId;
@@ -324,31 +325,24 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       if (ledgerMatchesSegment) {
         const ac = sponsorLedger!.activeClip;
         if (ac) {
-          const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ac, now);
-          const totalSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
-          if (elapsedSec < totalSec + 0.75) {
-            effectivePhase = "sponsor";
-            effectiveSponsorId = ac.sponsorId;
-          } else {
-            effectivePhase = "scoreboard";
-            effectiveSponsorId = null;
-            hangRef.current = null;
-          }
+          /**
+           * Actieve clip op het scherm (display → ledger). Overschrijft het slot-rooster
+           * zolang de clip loopt; budget-check hieronder kan alsnog naar scorebord als
+           * het schermquotum op is (zelfde bron als "Sponsors live · gemeten op scherm").
+           */
+          effectivePhase = "sponsor";
+          effectiveSponsorId = ac.sponsorId;
         } else {
           effectivePhase = "scoreboard";
           effectiveSponsorId = null;
           hangRef.current = null;
         }
       }
-      if (
-        !cycleBudgetForever &&
-        dist.phase === "sponsor" &&
-        dist.sponsorFilterId
-      ) {
-        const sponsor = sponsors.find((s) => s.id === dist.sponsorFilterId);
+      if (!cycleBudgetForever && effectivePhase === "sponsor" && effectiveSponsorId) {
+        const sponsor = sponsors.find((s) => s.id === effectiveSponsorId);
         if (sponsor) {
           const budget = sponsorSectionBudgetSeconds(sponsor, section, matchStatus);
-          const consumed = sponsorScreenSecondsConsumed(
+          const consumedSlot = sponsorScreenSecondsConsumed(
             slotMap,
             sponsors,
             section,
@@ -356,6 +350,11 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
             t,
             sponsor.id,
           );
+          const consumedTelem =
+            ledgerMatchesSegment && sponsorLedger
+              ? sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, now)
+              : consumedSlot;
+          const consumed = Math.max(consumedSlot, consumedTelem);
           if (budget > 0 && consumed >= budget) {
             effectivePhase = "scoreboard";
             effectiveSponsorId = null;

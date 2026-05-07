@@ -74,7 +74,7 @@ export function SponsorBudgetRotation({
   matchStatus?: string;
   sponsorIdFilter?: string | null;
   playbackTelemetry?: { matchId: string; matchStatus: string } | null;
-  /** Preview blijft in volgmodus, ook wanneer main geen actieve clip meer heeft. */
+  /** Embedded control-preview: volg alleen de ledger, nooit een eigen rotatie (die mist verbruikte budget-ticks). */
   followPlayback?: boolean;
   /** Preview volgt exact de actieve clip van het hoofdscherm (via sponsor-ledger). */
   followClip?: {
@@ -174,9 +174,11 @@ export function SponsorBudgetRotation({
     const st = stateRef.current;
 
     const scheduledSponsorMode = sponsorIdFilter != null;
-    let eligibleAll = scheduledSponsorMode
-      ? activeSponsors
-      : activeSponsors.filter((s) => (st.spentPerSponsor[s.id] ?? 0) < budgetFn(s));
+    /** Altijd op resterend budget filteren — ook bij `sponsorIdFilter` (prematch-/slot-spread),
+     *  anders blijft dezelfde sponsor oneindig roteren na opgebruikt prematch-/segmentbudget. */
+    let eligibleAll = activeSponsors.filter(
+      (s) => (st.spentPerSponsor[s.id] ?? 0) < budgetFn(s),
+    );
     if (!scheduledSponsorMode && eligibleAll.length === 0 && cycleBudgetForever) {
       st.spentPerSponsor = {};
       eligibleAll = activeSponsors.filter(
@@ -462,12 +464,9 @@ export function SponsorBudgetRotation({
     return () => clearInterval(id);
   }, [followMode, current?.sponsorId, current?.mediaId]);
 
+  /** Geen HTML-video-duration hier: die springt soms (korte metadata → echte lengte) en reset de preview-balk. */
   const slideMs =
-    current != null
-      ? current.item.type === "VIDEO" && videoProgressDurationMs > 0
-        ? videoProgressDurationMs
-        : Math.max(1500, current.playSec * 1000)
-      : 0;
+    current != null ? Math.max(1500, current.playSec * 1000) : 0;
   const followElapsedMs =
     followMode && followClip
       ? sponsorTelemetryActiveClipElapsedSec(
@@ -494,7 +493,8 @@ export function SponsorBudgetRotation({
   }
 
   const showBudgetFallback = followMode
-    ? fallback != null && (!current || followClipExpired)
+    ? fallback != null &&
+        (followClipExpired || (!followClip && !current && playedClipRef.current))
     : fallback != null && !cycleBudgetForever && !current && playedClipRef.current;
 
   return (
@@ -666,18 +666,23 @@ function MediaRenderer({
   const fireEndedOnce = (video: HTMLVideoElement) => {
     if (endedRef.current) return;
     endedRef.current = true;
-    const d = video.duration;
-    const useDur =
-      Number.isFinite(d) && d > 0 ? d : Math.max(0.1, video.currentTime || 0);
+    const browserDur =
+      Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
+    const ct = Math.max(0, video.currentTime || 0);
+    /** Alleen decoder/tijd — catalog niet optellen om overschatting bij foute DB-waarden. */
+    const useDur = Math.max(0.1, ct, browserDur);
     onVideoEnded(useDur);
   };
 
   const maybeFireEarlyEnd = (video: HTMLVideoElement) => {
     if (endedRef.current) return;
     if (syncPlaybackMs != null) return;
-    const d = video.duration;
-    if (!Number.isFinite(d) || d <= 0) return;
-    if (video.currentTime >= d - 0.2) {
+    const browserDur = video.duration;
+    if (!Number.isFinite(browserDur) || browserDur <= 0) return;
+    const catalogDur = item.durationSec > 0 ? item.durationSec : 0;
+    const effectiveDur =
+      catalogDur > 0 ? Math.max(browserDur, catalogDur) : browserDur;
+    if (video.currentTime >= effectiveDur - 0.2) {
       fireEndedOnce(video);
     }
   };

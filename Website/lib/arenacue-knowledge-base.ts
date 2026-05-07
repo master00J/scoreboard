@@ -183,7 +183,7 @@ Download de Android APK via de licentie/portaal. Toestaan dat onbekende bronnen 
 - **/licentie** – licentiemodellen en koop-uitleg.
 - **/portal** – klantportaal: log in met je licentie-e-mail, ontvang een **magic link** (15 minuten geldig), download installer/APK, beheer cloud-bediening.
 - **/changelog** – release notes.
-- **/privacy**, **/licenses** en **/terms** – juridisch (incl. cookie-, licentie- en gegevensverwerking).
+- **/privacy**, **/licenties** (zelfde inhoud als het pad /licenses) en **/terms** – juridisch (incl. cookie-, licentie- en gegevensverwerking).
 - **/vereisten** – minimale en aanbevolen Windows-hardware voor wedstrijddagen (lange sessies, video).
 - **/admin** – intern beheer (afgeschermd).
 

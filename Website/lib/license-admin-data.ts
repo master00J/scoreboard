@@ -31,7 +31,8 @@ export type InstallationFullRow = {
   last_seen_at: string;
 };
 
-function licenseRowActiveNonExpired(row: LicenseFullRow): boolean {
+/** Of een licentieregel nu actief is (niet ingetrokken, niet verlopen). */
+export function isLicenseRowActive(row: LicenseFullRow): boolean {
   if (row.revoked_at) {
     return false;
   }
@@ -56,7 +57,7 @@ export async function adminFindActiveWebsiteDemoLicenseForOwnerEmail(
     return null;
   }
   for (const row of r.data) {
-    if (licenseRowActiveNonExpired(row)) {
+    if (isLicenseRowActive(row)) {
       return row;
     }
   }
@@ -276,4 +277,33 @@ export async function adminMachineHasOtherWebsiteDemoInstallation(
     return null;
   }
   return lic.data.some((row) => isWebsiteDemoLicense(row));
+}
+
+/**
+ * Unieke owner-e-mails met minstens één actieve (niet verlopen, niet ingetrokken) licentie.
+ * Gebruikt voor update-aankondigingen per e-mail.
+ */
+export async function adminCollectActiveOwnerEmails(opts: {
+  /** Standaard uit: website_demo-trials krijgen geen product-updatemail. */
+  includeWebsiteDemo: boolean;
+}): Promise<{ ok: true; emails: string[] } | { ok: false }> {
+  const rows = await adminListLicenses();
+  if (!rows) {
+    return { ok: false };
+  }
+  const set = new Set<string>();
+  for (const row of rows) {
+    if (!isLicenseRowActive(row)) {
+      continue;
+    }
+    const em = row.owner_email?.trim().toLowerCase();
+    if (!em) {
+      continue;
+    }
+    if (!opts.includeWebsiteDemo && isWebsiteDemoLicense(row)) {
+      continue;
+    }
+    set.add(em);
+  }
+  return { ok: true, emails: [...set].sort() };
 }

@@ -127,8 +127,16 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
     ac.mediaId === payload.mediaId;
   if (clipMatches) {
     expectedSecForLog = Math.max(0, Math.round(ac.expectedPlaySec || 0));
-    // Geen activeClip wissen op een spuriëne 0s-melding (Strict Mode / vroege cleanup).
-    if (delta > 0) {
+    // Geen activeClip wissen op een spuriëne 0s-melding direct na mount (Strict Mode).
+    // Wél wissen als er na enige tijd nog steeds 0s binnenkomt: anders blijft de HUD "Bezig"
+    // terwijl het display al op scorebord-fallback staat.
+    const startedMs = ac.startedAtMs;
+    const allowStaleZeroClear =
+      delta === 0 &&
+      rounded === 0 &&
+      prevBest === 0 &&
+      Date.now() - startedMs >= 2000;
+    if (delta > 0 || allowStaleZeroClear) {
       ledger.activeClip = null;
     }
   }
