@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
@@ -40,6 +40,8 @@ import {
   lookupSponsorAtSecond,
   resolveSponsorSpreadPhase,
 } from "@/lib/sponsor-distribution";
+import { sponsorScheduleTime, type SponsorScheduleClock } from "@/lib/sponsor-schedule-clock";
+import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import {
   hasSponsorsForSection,
   pickSponsorPlaylist,
@@ -104,14 +106,6 @@ function ledgerAwareSponsorDistOverride(
   return { phase: "sponsor", sponsorFilterId: ac.sponsorId };
 }
 
-type SponsorScheduleClock = {
-  key: string;
-  adjustedT: number;
-  lastRawT: number;
-  initialized: boolean;
-  wasFrozen: boolean;
-};
-
 const EXTERNAL_CAPTURE_AUDIO_PREF_KEY = "arenacue_external_capture_audio_v1";
 
 function readExternalCaptureAudioPref(): boolean {
@@ -158,8 +152,6 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const [allPlayers, setAllPlayers] = useState<Record<string, Player>>({});
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
-  const [scheduledCues, setScheduledCues] = useState<ScheduledMediaCue[]>([]);
-  const [activeScheduledCue, setActiveScheduledCue] = useState<ScheduledMediaCue | null>(null);
   const [scoreboardTheme, setScoreboardTheme] = useState<ResolvedScoreboardTheme>(() =>
     mergeScoreboardTheme(null),
   );
@@ -242,14 +234,6 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   useEffect(() => {
     if (previewIframe) return;
-    fetch("/api/scheduled-media-cues")
-      .then((r) => r.json())
-      .then((list: ScheduledMediaCue[]) => setScheduledCues(list ?? []))
-      .catch(() => setScheduledCues([]));
-  }, [state?.updatedAt, previewIframe]);
-
-  useEffect(() => {
-    if (previewIframe) return;
     if (!state?.matchId) {
       setMatch(null);
       return;
@@ -308,52 +292,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   const mode = state?.mode ?? "IDLE";
 
-  const firedScheduledCueKeysRef = useRef<Set<string>>(new Set());
-  const lastScheduledCueClockRef = useRef<{ matchId: string | null; status: string | null; elapsed: number }>({
-    matchId: null,
-    status: null,
-    elapsed: 0,
+  const activeScheduledCue = useScheduledMediaCueActive({
+    match,
+    state,
+    mode,
+    elapsed,
+    skip: previewIframe,
   });
-
-  useEffect(() => {
-    const prev = lastScheduledCueClockRef.current;
-    const matchId = match?.id ?? null;
-    const status = match?.status ?? null;
-    if (prev.matchId !== matchId || prev.status !== status || elapsed < prev.elapsed - 1) {
-      firedScheduledCueKeysRef.current.clear();
-      setActiveScheduledCue(null);
-    }
-    lastScheduledCueClockRef.current = { matchId, status, elapsed };
-  }, [match?.id, match?.status, elapsed]);
-
-  useEffect(() => {
-    if (!state || !match || mode === "BLACKOUT") return;
-    if (activeScheduledCue || !(state.timerRunning ?? false)) return;
-    const due = scheduledCues
-      .filter(
-        (cue) =>
-          cue.enabled &&
-          cue.media?.active &&
-          cue.matchStatus === match.status &&
-          elapsed >= cue.triggerSec &&
-          elapsed - cue.triggerSec <= 2,
-      )
-      .sort((a, b) => a.triggerSec - b.triggerSec);
-    const cue = due.find((candidate) => {
-      const key = `${match.id}:${match.status}:${candidate.id}`;
-      return !firedScheduledCueKeysRef.current.has(key);
-    });
-    if (!cue) return;
-    firedScheduledCueKeysRef.current.add(`${match.id}:${match.status}:${cue.id}`);
-    setActiveScheduledCue(cue);
-  }, [activeScheduledCue, elapsed, match, mode, scheduledCues, state]);
-
-  useEffect(() => {
-    if (!activeScheduledCue || activeScheduledCue.media.type !== "IMAGE") return;
-    const ms = Math.max(1500, Math.max(1, activeScheduledCue.media.durationSec) * 1000);
-    const id = window.setTimeout(() => setActiveScheduledCue(null), ms);
-    return () => window.clearTimeout(id);
-  }, [activeScheduledCue]);
 
   /** Alleen het echte display-venster meldt afgespeelde sponsorclips (niet de ingebouwde preview). */
   const sponsorPlaybackTelemetry = useMemo(
@@ -628,41 +573,6 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     mode === "HALFTIME" ||
     mode === "FULLTIME";
 
-  function sponsorScheduleTime(
-    ref: MutableRefObject<SponsorScheduleClock>,
-    key: string,
-    rawT: number,
-    frozen: boolean,
-    maxT: number,
-  ): number {
-    const clock = ref.current;
-    if (!clock.initialized || clock.key !== key || rawT < clock.lastRawT - 1) {
-      clock.key = key;
-      clock.adjustedT = rawT;
-      clock.lastRawT = rawT;
-      clock.initialized = true;
-      clock.wasFrozen = frozen;
-      return Math.min(Math.max(0, clock.adjustedT), maxT);
-    }
-
-    if (frozen) {
-      clock.lastRawT = rawT;
-      clock.wasFrozen = true;
-      return Math.min(Math.max(0, clock.adjustedT), maxT);
-    }
-
-    if (clock.wasFrozen) {
-      clock.lastRawT = rawT;
-      clock.wasFrozen = false;
-      return Math.min(Math.max(0, clock.adjustedT), maxT);
-    }
-
-    const delta = Math.max(0, rawT - clock.lastRawT);
-    clock.adjustedT = Math.min(maxT, clock.adjustedT + delta);
-    clock.lastRawT = rawT;
-    return Math.min(Math.max(0, clock.adjustedT), maxT);
-  }
-
   const sponsorDistView = useMemo(() => {
     const now = Date.now();
 
@@ -739,6 +649,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     let dist = resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
       slotMap: sponsorSlotMapPrematch,
       slotT: t,
+      interrupted: sponsorInterrupted,
     });
     /**
      * Ingebouwde control-preview: geen eigen prematch-klok (andere mount-tijd dan stadionscherm).

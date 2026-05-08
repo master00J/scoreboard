@@ -98,6 +98,7 @@ export function sponsorTelemetryClipStart(payload: SponsorTelemetryClipStart): S
   ledger.updatedAtMs = now;
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
+  void broadcastDisplayState().catch(() => {});
   return ledger;
 }
 
@@ -144,6 +145,7 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
   ledger.updatedAtMs = Date.now();
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
+  void broadcastDisplayState().catch(() => {});
 
   // Proof-of-play: sla de beste bekende werkelijke duur op (monotoon stijgend).
   void persistSponsorPlayLog(payload, expectedSecForLog, bestActual).catch((err) => {
