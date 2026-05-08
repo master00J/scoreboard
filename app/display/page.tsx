@@ -683,11 +683,42 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       H,
     );
     const v = lookupSponsorAtSecond(sponsorSlotMapPrematch, t);
-    return resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
+    let dist = resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
       slotMap: sponsorSlotMapPrematch,
       slotT: t,
     });
-  }, [prematchSpreadActive, sponsorSlotMapPrematch, sponsors, phaseTick]);
+    /**
+     * Ingebouwde control-preview: geen eigen prematch-klok (andere mount-tijd dan stadionscherm).
+     * Zelfde bron als Sponsor HUD — ledger actieve clip overschrijft het slot-rooster.
+     */
+    if (embedInControl && match) {
+      const seg = sponsorTelemetrySegmentKey(match.id, match.status, "prematch");
+      if (
+        seg &&
+        sponsorLedger &&
+        sponsorLedger.matchId === match.id &&
+        sponsorLedger.segmentKey === seg
+      ) {
+        const ac = sponsorLedger.activeClip;
+        if (ac) {
+          dist = { phase: "sponsor", sponsorFilterId: ac.sponsorId };
+        } else {
+          dist = { phase: "scoreboard", sponsorFilterId: null };
+          prematchPhaseHangRef.current = null;
+        }
+      }
+    }
+    return dist;
+  }, [
+    prematchSpreadActive,
+    sponsorSlotMapPrematch,
+    sponsors,
+    phaseTick,
+    embedInControl,
+    match,
+    sponsorLedger,
+    sponsorInterrupted,
+  ]);
 
   const sponsorClipBesideLiveBoard =
     !!match && sponsorRotationBesideScoreboard(match.status);
@@ -966,6 +997,18 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               followPlayback={embedInControl}
               followClip={previewFollowClip}
               prematchSpread={prematchSpreadActive ? prematchDistView : null}
+              prematchScoreboardNode={
+                match && state ? (
+                  <MatchScoreboardFull
+                    key="prematch-spread-gap-board"
+                    match={match}
+                    elapsed={elapsed}
+                    running={state.timerRunning ?? false}
+                    period={period}
+                    theme={scoreboardTheme}
+                  />
+                ) : null
+              }
               sponsorBudgetFallback={sponsorBudgetFallbackScoreboard}
               cycleBudgetForever={sponsorRepeatBudgetCycles}
             />
@@ -1257,6 +1300,7 @@ function SponsorRotationLiveContent({
   followPlayback = false,
   followClip = null,
   prematchSpread = null,
+  prematchScoreboardNode = null,
   sponsorBudgetFallback = null,
   cycleBudgetForever = false,
 }: {
@@ -1277,6 +1321,8 @@ function SponsorRotationLiveContent({
     phase: "scoreboard" | "sponsor";
     sponsorFilterId: string | null;
   } | null;
+  /** Tijdens prematch-rooster in «scoreboard»-gap: echte scorebordweergave i.p.v. PREMATCH-playlist. */
+  prematchScoreboardNode?: ReactNode | null;
   sponsorBudgetFallback?: ReactNode;
   cycleBudgetForever?: boolean;
 }) {
@@ -1308,6 +1354,9 @@ function SponsorRotationLiveContent({
           cycleBudgetForever={cycleBudgetForever}
         />
       );
+    }
+    if (prematchScoreboardNode) {
+      return <>{prematchScoreboardNode}</>;
     }
     return (
       <SponsorRotation
