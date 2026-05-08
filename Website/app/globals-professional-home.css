@@ -183,8 +183,9 @@
   padding-top: 72px;
 }
 
+/* Eerste kolom alleen zo breed als “Reviews”; geen vaste 220px-min — die stal ruimte op mobiel en knipt de h2 af (main heeft overflow:hidden). */
 .pro-section-heading {
-  grid-template-columns: minmax(220px, 0.58fr) minmax(0, 1.1fr);
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
   align-items: start;
 }
 
@@ -478,6 +479,13 @@
 
   .pro-feature-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* Zelfde breekpunt als globals.css .section-heading: kicker + titel onder elkaar op smal scherm. */
+@media (max-width: 980px) {
+  .pro-section-heading {
+    grid-template-columns: 1fr;
   }
 }
 

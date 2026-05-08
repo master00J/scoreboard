@@ -714,6 +714,15 @@ main {
   margin-bottom: 28px;
 }
 
+/* Grid-items mogen krimpen; anders blijft de h2 te breed en wordt tekst afgekapt (main overflow). */
+.section-heading > * {
+  min-width: 0;
+}
+
+.section-heading h2 {
+  overflow-wrap: break-word;
+}
+
 .section-heading p,
 .section-kicker {
   color: var(--cyan);
