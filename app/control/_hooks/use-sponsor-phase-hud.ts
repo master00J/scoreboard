@@ -331,13 +331,25 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       if (ledgerMatchesSegment) {
         const ac = sponsorLedger!.activeClip;
         if (ac) {
+          const expectedSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
+          const liveElapsed = sponsorTelemetryActiveClipElapsedSec(ac, now);
           /**
-           * Actieve clip op het scherm (display → ledger). Overschrijft het slot-rooster
-           * zolang de clip loopt; budget-check hieronder kan alsnog naar scorebord als
-           * het schermquotum op is (zelfde bron als "Sponsors live · gemeten op scherm").
+           * Zelfde marge als `previewFollowClip` op het display: na verwachte eindtijd
+           * geen "Bezig" meer tonen als de ledger-event kort achterloopt op het echte scherm
+           * (anders volle balk + 0.0 s resterend terwijl het scherm al scorebord toont).
            */
-          effectivePhase = "sponsor";
-          effectiveSponsorId = ac.sponsorId;
+          if (liveElapsed >= expectedSec + 0.75) {
+            effectivePhase = "scoreboard";
+            effectiveSponsorId = null;
+          } else {
+            /**
+             * Actieve clip op het scherm (display → ledger). Overschrijft het slot-rooster
+             * zolang de clip loopt; budget-check hieronder kan alsnog naar scorebord als
+             * het schermquotum op is (zelfde bron als "Sponsors live · gemeten op scherm").
+             */
+            effectivePhase = "sponsor";
+            effectiveSponsorId = ac.sponsorId;
+          }
         } else {
           effectivePhase = "scoreboard";
           effectiveSponsorId = null;

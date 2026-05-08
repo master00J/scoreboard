@@ -515,7 +515,7 @@ export function SponsorBudgetRotation({
             <MediaRenderer
               item={current.item}
               objectFit={mediaObjectFit}
-              paused={paused}
+              paused={paused || (followMode && !followClip)}
               syncPlaybackMs={
                 followMode && followClip ? Math.max(0, followElapsedMs) : undefined
               }
