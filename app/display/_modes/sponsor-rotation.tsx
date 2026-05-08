@@ -10,11 +10,148 @@ import {
   useTimedSlideProgress,
 } from "../_components/preview-slide-progress";
 
+/** Minimale mediabeschrijving voor lege-playlist fallback (instellingen / thuislogo). */
+export type IdleEmptyFallback = {
+  logoUrl: string | null;
+  media: {
+    path: string;
+    type: string;
+    title: string;
+    durationSec: number;
+    playAudio?: boolean | null;
+  } | null;
+};
+
+function FallbackMediaSlide({
+  media,
+  objectFit,
+}: {
+  media: NonNullable<IdleEmptyFallback["media"]>;
+  objectFit: "cover" | "contain";
+}) {
+  const src = mediaUrl(media.path);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (media.type !== "VIDEO" || !(media.playAudio ?? false)) return;
+    const v = videoRef.current;
+    if (!v) return;
+    const id = window.setTimeout(() => void v.play().catch(() => {}), 0);
+    return () => clearTimeout(id);
+  }, [media.path, media.playAudio, media.type]);
+
+  if (objectFit === "contain") {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center bg-black">
+        {media.type === "VIDEO" ? (
+          <video
+            ref={videoRef}
+            key={src}
+            src={src}
+            autoPlay
+            loop
+            muted={!(media.playAudio ?? false)}
+            playsInline
+            className="max-h-full max-w-full"
+            style={{ objectFit: "contain", objectPosition: "center" }}
+          />
+        ) : (
+          <img
+            src={src}
+            alt={media.title}
+            className="max-h-full max-w-full"
+            style={{ objectFit: "contain", objectPosition: "center" }}
+          />
+        )}
+      </div>
+    );
+  }
+  if (media.type === "VIDEO") {
+    return (
+      <div className="absolute inset-0 overflow-hidden bg-black">
+        <video
+          ref={videoRef}
+          key={src}
+          src={src}
+          autoPlay
+          loop
+          muted={!(media.playAudio ?? false)}
+          playsInline
+          style={DISPLAY_COVER_MEDIA_STYLE}
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="absolute inset-0 overflow-hidden bg-black">
+      <img src={src} alt={media.title} style={DISPLAY_COVER_MEDIA_STYLE} />
+    </div>
+  );
+}
+
+function IdleEmptyVisual({
+  fallback,
+  mediaObjectFit,
+}: {
+  fallback: IdleEmptyFallback;
+  mediaObjectFit: "cover" | "contain";
+}) {
+  const { media, logoUrl } = fallback;
+  const [imgTick, setImgTick] = useState(0);
+  useEffect(() => {
+    if (!media || media.type === "VIDEO") return;
+    const durMs = Math.max(1500, Math.max(1, media.durationSec) * 1000);
+    const id = window.setInterval(() => setImgTick((n) => n + 1), durMs);
+    return () => clearInterval(id);
+  }, [media]);
+
+  if (media) {
+    return (
+      <div className="absolute inset-0 overflow-hidden bg-black">
+        {media.type === "VIDEO" ? (
+          <FallbackMediaSlide media={media} objectFit={mediaObjectFit} />
+        ) : (
+          <AnimatePresence mode="sync">
+            <motion.div
+              key={`${media.path}-${imgTick}`}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+              className="absolute inset-0 size-full min-h-0 min-w-0"
+            >
+              <FallbackMediaSlide media={media} objectFit={mediaObjectFit} />
+            </motion.div>
+          </AnimatePresence>
+        )}
+      </div>
+    );
+  }
+  if (logoUrl) {
+    return (
+      <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+        <img
+          src={logoUrl}
+          alt=""
+          className="max-h-[55%] max-w-[55%] object-contain opacity-95"
+        />
+      </div>
+    );
+  }
+  return (
+    <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
+      <div className="text-white/40 text-[56px] tracking-wide text-center px-8">
+        Geen media geconfigureerd
+      </div>
+    </div>
+  );
+}
+
 export function SponsorRotation({
   playlist,
   preferredItemId,
   mediaObjectFit = "cover",
   showPreviewProgress = false,
+  idleEmptyFallback = null,
 }: {
   playlist: Playlist | null;
   /** Kept for backwards-compat callers but no longer used: the component
@@ -25,6 +162,8 @@ export function SponsorRotation({
   mediaObjectFit?: "cover" | "contain";
   /** Alleen in control-ingebouwde preview: voortgang resterende slidetijd. */
   showPreviewProgress?: boolean;
+  /** Bij lege playlist: voorkeur gekozen clubmedia, anders thuislogo, anders tekst. */
+  idleEmptyFallback?: IdleEmptyFallback | null;
 }) {
   const items = useMemo(
     () => playlist?.items.filter((i) => i.media.active) ?? [],
@@ -78,9 +217,18 @@ export function SponsorRotation({
   );
 
   if (items.length === 0) {
+    if (idleEmptyFallback && (idleEmptyFallback.media || idleEmptyFallback.logoUrl)) {
+      return (
+        <div className="absolute inset-0 overflow-hidden bg-black">
+          <IdleEmptyVisual fallback={idleEmptyFallback} mediaObjectFit={mediaObjectFit} />
+        </div>
+      );
+    }
     return (
       <div className="absolute inset-0 flex items-center justify-center bg-slate-950">
-        <div className="text-white/40 text-[56px]">No media configured</div>
+        <div className="text-white/40 text-[56px] tracking-wide text-center px-8">
+          Geen media geconfigureerd
+        </div>
       </div>
     );
   }

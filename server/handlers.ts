@@ -44,11 +44,20 @@ async function goalVisualEnabledForSide(side: "home" | "away"): Promise<boolean>
 async function ensureMediaItemForVideoPath(
   filePath: string,
   titleHint: string,
+  options?: { hideFromLibrary?: boolean },
 ): Promise<string | null> {
   const trimmed = filePath.trim();
   if (!trimmed) return null;
   const existing = await prisma.mediaItem.findFirst({ where: { path: trimmed } });
-  if (existing) return existing.id;
+  if (existing) {
+    if (options?.hideFromLibrary && !existing.hideFromLibrary) {
+      await prisma.mediaItem.update({
+        where: { id: existing.id },
+        data: { hideFromLibrary: true },
+      });
+    }
+    return existing.id;
+  }
   const base = path.basename(trimmed.replace(/[/\\]+$/, "")) || titleHint;
   const created = await prisma.mediaItem.create({
     data: {
@@ -57,6 +66,7 @@ async function ensureMediaItemForVideoPath(
       title: `${titleHint}: ${base}`,
       durationSec: 15,
       active: true,
+      hideFromLibrary: options?.hideFromLibrary ?? false,
     },
   });
   return created.id;
@@ -241,6 +251,17 @@ export async function handleCommand(cmd: Command) {
       return { ok: true };
     }
     case "match:setActive": {
+      if (cmd.matchId != null) {
+        const m = await prisma.match.findUnique({
+          where: { id: cmd.matchId },
+          select: { closedAt: true },
+        });
+        if (m?.closedAt) {
+          throw new Error(
+            "Deze wedstrijd is afgesloten (rapportage bewaard). Heropen in Setup → Matches of kies een andere wedstrijd.",
+          );
+        }
+      }
       await updateState({ matchId: cmd.matchId });
       return { ok: true };
     }
@@ -363,10 +384,9 @@ export async function handleCommand(cmd: Command) {
         });
         scorerMediaId = scorer?.goalMediaId ?? null;
         if (!scorerMediaId && scorer?.goalVideoPath) {
-          scorerMediaId = await ensureMediaItemForVideoPath(
-            scorer.goalVideoPath,
-            "Doelpuntviering",
-          );
+          scorerMediaId = await ensureMediaItemForVideoPath(scorer.goalVideoPath, "Doelpuntviering", {
+            hideFromLibrary: true,
+          });
         }
       }
       await updateState({

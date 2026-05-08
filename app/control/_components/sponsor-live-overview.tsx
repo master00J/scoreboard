@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef } from "react";
 import type { MutableRefObject } from "react";
 import { useApi } from "@/lib/use-api";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
+import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 import { useDisplayStore } from "@/lib/store";
 import type { Match, Sponsor } from "@/lib/types";
 import {
@@ -66,12 +67,13 @@ function sponsorHasActiveMedia(s: Sponsor): boolean {
 }
 
 export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null }) {
-  const { data: sponsorsRaw } = useApi<Sponsor[]>("/api/sponsors");
+  const displayStateUpdatedAt = useDisplayStore((s) => s.state?.updatedAt);
+  const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
   const sponsors = sponsorsRaw ?? [];
   const elapsedSec = useLiveTimerSeconds();
+  const wallTelemetryMs = useWallClockMs(250);
   const displayMode = useDisplayStore((s) => s.state?.mode);
   const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
-  const displayTick = useDisplayStore((s) => s.tick);
   const matchRosterFreezeRef = useRef(0);
   const halftimeT = useHalftimeSponsorTimelineT(
     activeMatch?.status,
@@ -99,6 +101,16 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
   useEffect(() => {
     matchRosterFreezeRef.current = 0;
   }, [activeMatch?.id, activeMatch?.status]);
+
+  /** Zelfde bron als Sponsor-HUD: na sponsorwijziging (API) bump’t Electron `displayState.updatedAt`. */
+  const lastSponsorReloadAtRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const at = displayStateUpdatedAt;
+    if (at == null) return;
+    if (lastSponsorReloadAtRef.current === at) return;
+    lastSponsorReloadAtRef.current = at;
+    reloadSponsors();
+  }, [displayStateUpdatedAt, reloadSponsors]);
 
   function carryRefFor(id: string): MutableRefObject<RosterCarry | null> {
     const m = carryMapRef.current;
@@ -139,7 +151,7 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
     telemetrySegmentKey != null &&
     sponsorLedger.matchId === activeMatch.id &&
     sponsorLedger.segmentKey === telemetrySegmentKey;
-  const telemetryNowMs = displayTick?.serverNow ?? Date.now();
+  const telemetryNowMs = wallTelemetryMs;
 
   function computeRow(sponsor: Sponsor) {
     const prematchB = sponsorSectionBudgetSeconds(sponsor, "prematch");

@@ -17,6 +17,7 @@ import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
 import { reportSponsorClipEnd, reportSponsorClipStart } from "@/lib/use-socket";
 import { mediaUrl } from "@/lib/media-url";
 import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
+import { mediaAllowedForSponsorPhase } from "@/lib/sponsor-media-phases";
 import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
@@ -108,11 +109,25 @@ export function SponsorBudgetRotation({
         sectionMedia.length > 0
       );
     });
+    /**
+     * Alleen control-ingestie: ledger = bron van waarheid. `filterMediaForSponsorSpreadSection`
+     * kan langere wedstrijd-video's wegfilteren zodra er korte clips zijn — dan vindt de preview
+     * de `mediaId` uit de ledger niet meer terwijl het stadionscherm wél die clip draait.
+     */
+    if (followMode && followClip) {
+      const s = sponsors.find((x) => x.id === followClip.sponsorId);
+      if (s?.active && !list.some((x) => x.id === s.id)) {
+        const hasPhaseMedia = (s.media ?? []).some(
+          (m) => m.active && mediaAllowedForSponsorPhase(m, section, matchStatus),
+        );
+        if (hasPhaseMedia) list = [...list, s];
+      }
+    }
     if (sponsorIdFilter) {
       list = list.filter((s) => s.id === sponsorIdFilter);
     }
     return list;
-  }, [sponsors, section, matchStatus, sponsorIdFilter]);
+  }, [sponsors, section, matchStatus, sponsorIdFilter, followMode, followClip?.sponsorId]);
 
   const [cycleId, setCycleId] = useState(0);
   const [slideTick, setSlideTick] = useState(0);
@@ -429,13 +444,19 @@ export function SponsorBudgetRotation({
       setCurrent(null);
       return;
     }
-    const mediaList = filterMediaForSponsorSpreadSection(
-      (sponsor.media ?? []).filter((m) => m.active),
-      section,
-      matchStatus,
-    );
-    const mediaIndex = mediaList.findIndex((m) => m.id === followClip.mediaId);
-    const item = mediaIndex >= 0 ? mediaList[mediaIndex] : null;
+    const active = (sponsor.media ?? []).filter((m) => m.active);
+    const spreadList = filterMediaForSponsorSpreadSection(active, section, matchStatus);
+    let mediaIndex = spreadList.findIndex((m) => m.id === followClip.mediaId);
+    let item: MediaItem | null = mediaIndex >= 0 ? spreadList[mediaIndex]! : null;
+    if (!item) {
+      const phaseOk = active.filter((m) => mediaAllowedForSponsorPhase(m, section, matchStatus));
+      const fallback = phaseOk.find((m) => m.id === followClip.mediaId) ?? null;
+      if (fallback) {
+        item = fallback;
+        const j = spreadList.findIndex((m) => m.id === fallback.id);
+        mediaIndex = j >= 0 ? j : 0;
+      }
+    }
     if (!item) {
       setCurrent(null);
       return;
@@ -516,6 +537,7 @@ export function SponsorBudgetRotation({
               item={current.item}
               objectFit={mediaObjectFit}
               paused={paused || (followMode && !followClip)}
+              committedPlaySec={current.item.type === "VIDEO" ? current.playSec : undefined}
               syncPlaybackMs={
                 followMode && followClip ? Math.max(0, followElapsedMs) : undefined
               }
@@ -562,6 +584,7 @@ function MediaRenderer({
   objectFit,
   paused,
   syncPlaybackMs,
+  committedPlaySec,
   onVideoEnded,
   onVideoPlaybackFault,
   onVideoDurationMs,
@@ -572,6 +595,8 @@ function MediaRenderer({
   paused: boolean;
   /** Voor embedded preview: houd de video exact op dezelfde positie als main. */
   syncPlaybackMs?: number;
+  /** Geplande spotduur (s) — bij afwijkende browser-metadata toch volledige clip afwachten. */
+  committedPlaySec?: number;
   onVideoEnded: (actualSec: number) => void;
   /** Decode-/netwerkfout: clip kan geen `ended` geven; ga door zonder volledige buffertime-out. */
   onVideoPlaybackFault?: () => void;
@@ -581,10 +606,12 @@ function MediaRenderer({
   const src = mediaUrl(item.path);
   const videoRef = useRef<HTMLVideoElement>(null);
   const endedRef = useRef(false);
+  const falseEndedRetriesRef = useRef(0);
   const lastFollowSeekAtRef = useRef(0);
 
   useEffect(() => {
     endedRef.current = false;
+    falseEndedRetriesRef.current = 0;
   }, [item.id, item.path]);
 
   // Decode-watchdog: als een video niet binnen 4s metadata aanlevert,
@@ -663,15 +690,27 @@ function MediaRenderer({
     void v.play().catch(() => {});
   }, [item.id, item.path, item.type, onVideoProgressMs, paused]);
 
-  const fireEndedOnce = (video: HTMLVideoElement) => {
-    if (endedRef.current) return;
-    endedRef.current = true;
+  /**
+   * Facturatie voor rotatie-budget moet gelijk lopen met telemetry (`currentTime`).
+   * `video.duration` kan een langere container zijn dan de werkelijk afgespeelde spot;
+   * `Math.max(ct, browserDur)` joeg `spentPerSponsor` dan omhoog terwijl de ledger
+   * nog resterend budget toonde.
+   */
+  const resolveBilledVideoSec = (video: HTMLVideoElement): number => {
     const browserDur =
       Number.isFinite(video.duration) && video.duration > 0 ? video.duration : 0;
     const ct = Math.max(0, video.currentTime || 0);
-    /** Alleen decoder/tijd — catalog niet optellen om overschatting bij foute DB-waarden. */
-    const useDur = Math.max(0.1, ct, browserDur);
-    onVideoEnded(useDur);
+    let sec = Math.max(0.1, ct);
+    if (browserDur > 0 && ct >= browserDur - 2.5) {
+      sec = Math.max(sec, browserDur);
+    }
+    return sec;
+  };
+
+  const fireEndedOnce = (video: HTMLVideoElement) => {
+    if (endedRef.current) return;
+    endedRef.current = true;
+    onVideoEnded(resolveBilledVideoSec(video));
   };
 
   const maybeFireEarlyEnd = (video: HTMLVideoElement) => {
@@ -679,9 +718,20 @@ function MediaRenderer({
     if (syncPlaybackMs != null) return;
     const browserDur = video.duration;
     if (!Number.isFinite(browserDur) || browserDur <= 0) return;
-    const catalogDur = item.durationSec > 0 ? item.durationSec : 0;
-    const effectiveDur =
-      catalogDur > 0 ? Math.max(browserDur, catalogDur) : browserDur;
+    const catalogDur = Math.max(
+      item.durationSec > 0 ? item.durationSec : 0,
+      committedPlaySec != null && committedPlaySec > 0 ? committedPlaySec : 0,
+    );
+    /**
+     * Korte browser-duration i.c.m. lange spot: niet afkappen op currentTime >= browserDur.
+     * Wacht tot currentTime dicht bij de (max van catalog, geplande) duur zit.
+     */
+    if (catalogDur >= 10 && browserDur + 5 < catalogDur) {
+      if (video.currentTime < catalogDur - 0.35) return;
+      fireEndedOnce(video);
+      return;
+    }
+    const effectiveDur = catalogDur > 0 ? Math.max(browserDur, catalogDur) : browserDur;
     if (video.currentTime >= effectiveDur - 0.2) {
       fireEndedOnce(video);
     }
@@ -722,8 +772,45 @@ function MediaRenderer({
       maybeFireEarlyEnd(v);
     },
     onEnded: (e: SyntheticEvent<HTMLVideoElement>) => {
-      onVideoProgressMs?.(e.currentTarget.currentTime * 1000);
-      fireEndedOnce(e.currentTarget);
+      const v = e.currentTarget;
+      onVideoProgressMs?.(v.currentTime * 1000);
+      const catalogDur = Math.max(
+        item.durationSec > 0 ? item.durationSec : 0,
+        committedPlaySec != null && committedPlaySec > 0 ? committedPlaySec : 0,
+      );
+      const browserDur =
+        Number.isFinite(v.duration) && v.duration > 0 ? v.duration : 0;
+      const useDur = resolveBilledVideoSec(v);
+      const looksLikeFalseEnd =
+        item.type === "VIDEO" &&
+        syncPlaybackMs == null &&
+        catalogDur >= 12 &&
+        browserDur > 0 &&
+        browserDur <= 6 &&
+        catalogDur >= browserDur + 6 &&
+        useDur + 3 < catalogDur;
+      if (looksLikeFalseEnd) {
+        if (falseEndedRetriesRef.current >= 2) {
+          endedRef.current = true;
+          onVideoProgressMs?.(catalogDur * 1000);
+          onVideoEnded(catalogDur);
+          falseEndedRetriesRef.current = 0;
+          return;
+        }
+        falseEndedRetriesRef.current += 1;
+        endedRef.current = false;
+        try {
+          v.currentTime = 0;
+          void v.play().catch(() => {
+            fireEndedOnce(v);
+          });
+        } catch {
+          fireEndedOnce(v);
+        }
+        return;
+      }
+      falseEndedRetriesRef.current = 0;
+      fireEndedOnce(v);
     },
     onError: () => {
       if (!onVideoPlaybackFault) return;

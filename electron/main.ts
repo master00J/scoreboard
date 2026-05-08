@@ -10,6 +10,7 @@ import type {
 import * as licenseSvc from "./license-service";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
+import { getAppResourceMetrics } from "./resource-metrics";
 
 const IS_DEV = !app.isPackaged;
 
@@ -393,6 +394,8 @@ function registerIpc() {
   });
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
+
+  ipcMain.handle("app:getResourceMetrics", () => getAppResourceMetrics());
 
   ipcMain.handle("mobile:getBridgeInfo", () => ({
     enabled: mobileBridge != null,

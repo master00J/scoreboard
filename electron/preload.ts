@@ -48,6 +48,7 @@ const bridge: ElectronBridge = {
   licenseGetStatus: () => ipcRenderer.invoke("license:getStatus"),
   licenseActivate: (opts: { licenseKey: string }) => ipcRenderer.invoke("license:activate", opts),
   getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
+  getAppResourceMetrics: () => ipcRenderer.invoke("app:getResourceMetrics"),
 };
 
 try {

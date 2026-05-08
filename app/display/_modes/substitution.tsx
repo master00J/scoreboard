@@ -29,7 +29,7 @@ export function SubstitutionMode({
       >
         Substitution · {team?.name ?? ""} · {minute}'
       </div>
-      <div className="flex gap-8">
+      <div className="flex max-w-full flex-wrap justify-center gap-6 px-6 sm:gap-8">
         <PlayerCard player={playerOut} label="OUT" color="#ef4444" arrow="↓" />
         <PlayerCard player={playerIn} label="IN" color="#22c55e" arrow="↑" />
       </div>
@@ -49,13 +49,15 @@ function PlayerCard({
   arrow: string;
 }) {
   if (!player) return null;
+  const displayName = `${player.firstName} ${player.lastName}`.trim();
+  const nameLen = displayName.length;
+  const nameFontSize = nameLen > 34 ? 28 : nameLen > 26 ? 34 : nameLen > 20 ? 38 : 44;
   return (
     <motion.div
       initial={{ y: 60, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.4 }}
-      className="flex flex-col items-center"
-      style={{ width: 420 }}
+      className="flex min-w-0 max-w-[min(520px,calc(50vw-40px))] flex-col items-center"
     >
       <div className="flex items-center gap-3 mb-3">
         <span className="font-black leading-none" style={{ fontSize: 48, color }}>
@@ -69,15 +71,13 @@ function PlayerCard({
         <img
           src={mediaUrl(player.subImagePath ?? player.photoPath)}
           alt=""
-          className="rounded-xl object-cover"
-          style={{ width: 380, height: 440, border: `5px solid ${color}` }}
+          className="w-full max-w-[380px] rounded-xl object-cover"
+          style={{ aspectRatio: "380 / 440", border: `5px solid ${color}` }}
         />
       ) : (
         <div
-          className="rounded-xl flex items-center justify-center text-white font-black bg-slate-800"
+          className="flex aspect-[380/440] w-full max-w-[380px] items-center justify-center rounded-xl bg-slate-800 font-black text-white"
           style={{
-            width: 380,
-            height: 440,
             border: `5px solid ${color}`,
             fontSize: 240,
           }}
@@ -92,10 +92,10 @@ function PlayerCard({
         #{player.number}
       </div>
       <div
-        className="font-black text-white uppercase text-center leading-tight truncate w-full px-2"
-        style={{ fontSize: 44 }}
+        className="w-full max-w-full px-1 text-center text-balance break-words font-black uppercase leading-snug text-white"
+        style={{ fontSize: nameFontSize }}
       >
-        {player.firstName} {player.lastName}
+        {displayName}
       </div>
     </motion.div>
   );

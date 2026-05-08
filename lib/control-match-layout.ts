@@ -67,6 +67,52 @@ function normalizeOrder(defaultOrder: MatchTabPanelId[], saved: unknown): MatchT
   return out;
 }
 
+/**
+ * Eén paneel-id mag maar in één kolom voorkomen (anders dubbele HUD / capture / etc.).
+ * Links → midden → rechts: eerste voorkomen wint.
+ */
+function dedupePanelsAcrossColumns(layout: MatchTabLayoutState): MatchTabLayoutState {
+  const seen = new Set<MatchTabPanelId>();
+  const uniq = (order: MatchTabPanelId[]) => {
+    const out: MatchTabPanelId[] = [];
+    for (const id of order) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(id);
+    }
+    return out;
+  };
+  return {
+    ...layout,
+    orderLeft: uniq(layout.orderLeft),
+    orderCenter: uniq(layout.orderCenter),
+    orderRight: uniq(layout.orderRight),
+  };
+}
+
+/** Ontbrekende panelen weer toevoegen op hun standaardkolom (na dedupe). */
+function appendMissingPanels(layout: MatchTabLayoutState): MatchTabLayoutState {
+  const seen = new Set<MatchTabPanelId>([
+    ...layout.orderLeft,
+    ...layout.orderCenter,
+    ...layout.orderRight,
+  ]);
+  const out: MatchTabLayoutState = {
+    orderLeft: [...layout.orderLeft],
+    orderCenter: [...layout.orderCenter],
+    orderRight: [...layout.orderRight],
+    collapsed: layout.collapsed,
+  };
+  for (const id of ALL_PANEL_IDS) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (DEFAULT_MATCH_TAB_LAYOUT.orderLeft.includes(id)) out.orderLeft.push(id);
+    else if (DEFAULT_MATCH_TAB_LAYOUT.orderCenter.includes(id)) out.orderCenter.push(id);
+    else out.orderRight.push(id);
+  }
+  return out;
+}
+
 export function loadMatchTabLayout(): MatchTabLayoutState {
   if (typeof window === "undefined") return DEFAULT_MATCH_TAB_LAYOUT;
   try {
@@ -79,12 +125,14 @@ export function loadMatchTabLayout(): MatchTabLayoutState {
             Object.entries(p.collapsed).filter(([k, v]) => isPanelId(k) && typeof v === "boolean"),
           ) as Partial<Record<MatchTabPanelId, boolean>>)
         : {};
-    return {
-      orderLeft: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderLeft, p.orderLeft),
-      orderCenter: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderCenter, p.orderCenter),
-      orderRight: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderRight, p.orderRight),
-      collapsed,
-    };
+    return appendMissingPanels(
+      dedupePanelsAcrossColumns({
+        orderLeft: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderLeft, p.orderLeft),
+        orderCenter: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderCenter, p.orderCenter),
+        orderRight: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderRight, p.orderRight),
+        collapsed,
+      }),
+    );
   } catch {
     return DEFAULT_MATCH_TAB_LAYOUT;
   }

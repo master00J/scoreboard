@@ -21,6 +21,7 @@ import type {
   PlaylistSlot,
   ScheduledMediaCue,
   Sponsor,
+  SponsorSection,
 } from "@/lib/types";
 import {
   mergeScoreboardTheme,
@@ -51,6 +52,7 @@ import {
 import {
   sponsorTelemetryActiveClipElapsedSec,
   sponsorTelemetrySegmentKey,
+  type SponsorLedgerPayload,
 } from "@/lib/sponsor-telemetry";
 import { LeftScoreboardLayout } from "./_modes/left-scoreboard-layout";
 import { MatchScoreboardFull } from "./_modes/match-scoreboard-full";
@@ -59,7 +61,7 @@ import { SubstitutionMode } from "./_modes/substitution";
 import { CardMode } from "./_modes/card";
 import { TeamIntroMode } from "./_modes/team-intro";
 import { PlayerIntroMode } from "./_modes/player-intro";
-import { SponsorRotation } from "./_modes/sponsor-rotation";
+import { SponsorRotation, type IdleEmptyFallback } from "./_modes/sponsor-rotation";
 import { SponsorBudgetRotation } from "./_modes/sponsor-budget-rotation";
 import { HalfTimeMode, FullTimeMode } from "./_modes/halftime-fulltime";
 import { DisplayWatchdog } from "./_components/watchdog";
@@ -67,6 +69,40 @@ import { ExternalCaptureVideo } from "@/components/external-capture-video";
 
 /** Modes die naast het scorebord in het content-vlak staan (niet fullscreen over het canvas). */
 const LEFT_PANEL_INTERRUPT_MODES = new Set(["GOAL", "CARD"]);
+
+/**
+ * Actieve sponsorclip uit de ledger (zelfde segment-/eindmarge als Sponsor-HUD).
+ * Stadionscherm én control-preview: slot-rooster kan "scorebord" zeggen terwijl de clip nog loopt.
+ */
+function ledgerActiveClipInProgressForSection(
+  match: Match,
+  section: SponsorSection,
+  sponsorLedger: SponsorLedgerPayload | null,
+): NonNullable<SponsorLedgerPayload["activeClip"]> | null {
+  if (!sponsorLedger?.activeClip) return null;
+  const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, section);
+  if (!segmentKey || sponsorLedger.matchId !== match.id || sponsorLedger.segmentKey !== segmentKey) {
+    return null;
+  }
+  const ac = sponsorLedger.activeClip;
+  const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ac, Date.now());
+  const totalSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
+  if (elapsedSec >= totalSec + 0.75) return null;
+  return ac;
+}
+
+/** Ledger wint van slot-rooster zolang er een lopende clip in dit segment is (cf. prematch-inline). */
+function ledgerAwareSponsorDistOverride(
+  match: Match,
+  section: SponsorSection,
+  sponsorLedger: SponsorLedgerPayload | null,
+  base: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null },
+): { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } {
+  if (!sponsorLedger) return base;
+  const ac = ledgerActiveClipInProgressForSection(match, section, sponsorLedger);
+  if (!ac) return base;
+  return { phase: "sponsor", sponsorFilterId: ac.sponsorId };
+}
 
 type SponsorScheduleClock = {
   key: string;
@@ -141,6 +177,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     safeZoneVisible: false,
     safeZoneMarginPx: 40,
   });
+  const [idleEmptyFallback, setIdleEmptyFallback] = useState<IdleEmptyFallback>({
+    logoUrl: null,
+    media: null,
+  });
 
   useEffect(() => {
     if (previewIframe) return;
@@ -167,6 +207,23 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           mode,
           safeZoneVisible: !!s.displaySafeZoneVisible,
           safeZoneMarginPx: Math.max(0, Number(s.displaySafeZoneMarginPx ?? 40)),
+        });
+        const logoUrl = s.homeTeamBranding?.logoPath
+          ? mediaUrl(s.homeTeamBranding.logoPath)
+          : null;
+        const im = s.idleFallbackMedia;
+        setIdleEmptyFallback({
+          logoUrl,
+          media:
+            im && im.active
+              ? {
+                  path: im.path,
+                  type: im.type,
+                  title: im.title,
+                  durationSec: im.durationSec,
+                  playAudio: im.playAudio,
+                }
+              : null,
         });
       })
       .catch(() => {});
@@ -307,15 +364,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const previewFollowClip = useMemo(() => {
     if (!embedInControl || !match || !sponsorLedger) return null;
     const section = sectionForStatus(match.status);
-    const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, section);
-    if (!segmentKey) return null;
-    if (sponsorLedger.matchId !== match.id || sponsorLedger.segmentKey !== segmentKey) return null;
-    const activeClip = sponsorLedger.activeClip;
-    if (!activeClip) return null;
-    const elapsedSec = sponsorTelemetryActiveClipElapsedSec(activeClip, Date.now());
-    const totalSec = Math.max(0.1, activeClip.expectedPlaySec || 0.1);
-    if (elapsedSec >= totalSec + 0.75) return null;
-    return activeClip;
+    return ledgerActiveClipInProgressForSection(match, section, sponsorLedger);
   }, [embedInControl, elapsed, match, sponsorLedger]);
 
   const [prematchClock, setPrematchClock] = useState(0);
@@ -415,9 +464,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       <SponsorRotation
         playlist={playlists.PREMATCH ?? playlists.IDLE}
         showPreviewProgress={embedInControl}
+        idleEmptyFallback={idleEmptyFallback}
       />
     );
-  }, [state, match, elapsed, period, scoreboardTheme, playlists, embedInControl]);
+  }, [state, match, elapsed, period, scoreboardTheme, playlists, embedInControl, idleEmptyFallback]);
 
   const halftimeSponsorFallback = useMemo(() => {
     if (!match) return null;
@@ -630,11 +680,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       );
       const v = lookupSponsorAtSecond(sponsorSlotMapMatch, t);
       const section = sectionForStatus(match.status);
-      return resolveSponsorSpreadPhase(v, sponsors, section, match.status, now, sponsorPhaseHangRef, {
+      const base = resolveSponsorSpreadPhase(v, sponsors, section, match.status, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapMatch,
         slotT: t,
         interrupted: sponsorInterrupted,
       });
+      return ledgerAwareSponsorDistOverride(match, section, sponsorLedger, base);
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
       const H = Math.max(60, match.halfBreakSec);
@@ -647,11 +698,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         H,
       );
       const v = lookupSponsorAtSecond(sponsorSlotMapHalftime, t);
-      return resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
+      const base = resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapHalftime,
         slotT: t,
         interrupted: sponsorInterrupted,
       });
+      return ledgerAwareSponsorDistOverride(match, "halftime", sponsorLedger, base);
     }
     sponsorPhaseHangRef.current = null;
     return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
@@ -666,6 +718,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsorSlotMapMatch,
     sponsorSlotMapHalftime,
     phaseTick,
+    sponsorLedger,
   ]);
 
   const prematchDistView = useMemo(() => {
@@ -772,6 +825,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         key="sr-panel-stable"
         playlist={pickSponsorPlaylist(playlists, match.status) ?? playlists.IDLE}
         showPreviewProgress={embedInControl}
+        idleEmptyFallback={idleEmptyFallback}
       />
     );
   }, [
@@ -790,6 +844,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsorRepeatBudgetCycles,
     sponsorInterrupted,
     mode,
+    idleEmptyFallback,
   ]);
 
   // Content that goes in the right panel (when the left scoreboard is shown)
@@ -823,6 +878,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           key="sr-panel"
           playlist={pickSponsorPlaylist(playlists, match.status) ?? playlists.IDLE}
           showPreviewProgress={embedInControl}
+          idleEmptyFallback={idleEmptyFallback}
         />
       );
     }
@@ -885,6 +941,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     scoreboardTheme,
     sponsorBudgetFallbackScoreboard,
     sponsorRepeatBudgetCycles,
+    idleEmptyFallback,
   ]);
 
   if (state?.safeMode) {
@@ -970,6 +1027,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 key="idle-pl-spread"
                 playlist={playlists.PREMATCH ?? playlists.IDLE}
                 showPreviewProgress={embedInControl}
+                idleEmptyFallback={idleEmptyFallback}
               />
             );
           }
@@ -978,6 +1036,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               key="idle"
               playlist={playlists.IDLE}
               showPreviewProgress={embedInControl}
+              idleEmptyFallback={idleEmptyFallback}
             />
           );
         })()}
@@ -1011,6 +1070,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               }
               sponsorBudgetFallback={sponsorBudgetFallbackScoreboard}
               cycleBudgetForever={sponsorRepeatBudgetCycles}
+              idleEmptyFallback={idleEmptyFallback}
             />
           )}
 
@@ -1064,6 +1124,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 playlists={playlists}
                 sponsors={sponsors}
                 showPreviewProgress={embedInControl}
+                idleEmptyFallback={idleEmptyFallback}
               />
             )}
           </motion.div>
@@ -1303,6 +1364,7 @@ function SponsorRotationLiveContent({
   prematchScoreboardNode = null,
   sponsorBudgetFallback = null,
   cycleBudgetForever = false,
+  idleEmptyFallback = null,
 }: {
   match: Match | null;
   playlists: Record<PlaylistSlot, Playlist | null>;
@@ -1325,12 +1387,14 @@ function SponsorRotationLiveContent({
   prematchScoreboardNode?: ReactNode | null;
   sponsorBudgetFallback?: ReactNode;
   cycleBudgetForever?: boolean;
+  idleEmptyFallback?: IdleEmptyFallback | null;
 }) {
   if (!match) {
     return (
       <SponsorRotation
         playlist={playlists.IDLE}
         showPreviewProgress={showPreviewProgress}
+        idleEmptyFallback={idleEmptyFallback}
       />
     );
   }
@@ -1362,6 +1426,7 @@ function SponsorRotationLiveContent({
       <SponsorRotation
         playlist={playlists.PREMATCH ?? playlists.IDLE}
         showPreviewProgress={showPreviewProgress}
+        idleEmptyFallback={idleEmptyFallback}
       />
     );
   }
@@ -1384,6 +1449,7 @@ function SponsorRotationLiveContent({
     <SponsorRotation
       playlist={playlists.PREMATCH ?? playlists.IDLE}
       showPreviewProgress={showPreviewProgress}
+      idleEmptyFallback={idleEmptyFallback}
     />
   );
 }

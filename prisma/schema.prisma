@@ -60,6 +60,8 @@ model Match {
   events          MatchEvent[]
   sponsorPlays    SponsorPlayLog[]
   createdAt       DateTime     @default(now())
+  /// Afsluiten: rapportage blijft per matchId in SponsorPlayLog; geen live-operatie meer op deze wedstrijd.
+  closedAt        DateTime?
 }
 
 model MatchEvent {
@@ -90,9 +92,13 @@ model MediaItem {
   playAudio   Boolean        @default(false)
   /// JSON array met sponsor-fases waarvoor dit media-item mag draaien. Null/leeg = alle fases.
   sponsorPhaseTagsJson String?
+  /// True = technisch item (bv. auto-aangemaakt voor speler goalVideoPath); niet tonen in Media-bibliotheek.
+  hideFromLibrary Boolean @default(false)
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
+  /// Optioneel standaardbeeld op het display wanneer IDLE/PREMATCH-playlist leeg is.
+  appSettingsIdleFallback AppSettings? @relation("IdleFallbackMedia")
   scheduledCues ScheduledMediaCue[]
   playLogs    SponsorPlayLog[]
 }
@@ -197,6 +203,9 @@ model AppSettings {
   displaySafeZoneVisible   Boolean @default(false)
   /// Safe-zone marges in pixels van het logische canvas.
   displaySafeZoneMarginPx  Int     @default(40)
+  /// Standaard fullscreen-media (afbeelding of video) wanneer er nog geen playlist-items zijn (IDLE / lege prematch).
+  idleFallbackMediaId String? @unique
+  idleFallbackMedia   MediaItem? @relation("IdleFallbackMedia", fields: [idleFallbackMediaId], references: [id], onDelete: SetNull)
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.

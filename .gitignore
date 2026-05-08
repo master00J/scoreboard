@@ -9,6 +9,10 @@ electron-dist/
 renderer-dist/
 data/*.db
 data/*.db-journal
+prisma-push-temp.db
+prisma/prisma-push-temp.db
+soak-results/
+prisma/prisma/
 public/uploads/*
 !public/uploads/.gitkeep
 logs/*.log

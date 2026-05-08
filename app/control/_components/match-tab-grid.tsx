@@ -1,6 +1,14 @@
 "use client";
 
-import { useEffect, useState, type ReactNode, type DragEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type DragEvent,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 import { ChevronDown, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DisplayPage from "@/app/display/page";
@@ -26,11 +34,82 @@ function reorderBefore(
   return rest;
 }
 
+/** Zet `dragged` op index 0 (ook bij slepen naar andere kolom). */
+function insertFirst(order: MatchTabPanelId[], dragged: MatchTabPanelId): MatchTabPanelId[] {
+  const rest = order.filter((x) => x !== dragged);
+  return [dragged, ...rest];
+}
+
 function colToKey(column: "left" | "center" | "right"): keyof Pick<
   MatchTabLayoutState,
   "orderLeft" | "orderCenter" | "orderRight"
 > {
   return column === "left" ? "orderLeft" : column === "center" ? "orderCenter" : "orderRight";
+}
+
+function ColumnTopDropZone({
+  column,
+  setLayout,
+}: {
+  column: "left" | "center" | "right";
+  setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;
+}) {
+  const [active, setActive] = useState(false);
+
+  const onDragOver = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "move";
+    setActive(true);
+  };
+
+  const onDragLeave = (e: DragEvent) => {
+    const rel = e.relatedTarget as Node | null;
+    if (rel && e.currentTarget.contains(rel)) return;
+    setActive(false);
+  };
+
+  const onDrop = (e: DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setActive(false);
+    const dragged = e.dataTransfer.getData("application/x-stadium-panel") as MatchTabPanelId;
+    const fromCol = e.dataTransfer.getData("application/x-stadium-column") as
+      | "left"
+      | "center"
+      | "right";
+    if (!dragged) return;
+    if (fromCol !== "left" && fromCol !== "center" && fromCol !== "right") return;
+
+    const toKey = colToKey(column);
+    const fromKey = colToKey(fromCol);
+
+    setLayout((prev) => {
+      if (fromCol === column) {
+        return { ...prev, [toKey]: insertFirst(prev[toKey], dragged) };
+      }
+      const fromOrder = prev[fromKey].filter((x) => x !== dragged);
+      const toOrder = insertFirst(
+        prev[toKey].filter((x) => x !== dragged),
+        dragged,
+      );
+      return { ...prev, [fromKey]: fromOrder, [toKey]: toOrder };
+    });
+  };
+
+  return (
+    <div
+      className={cn(
+        "shrink-0 min-h-[18px] rounded-md border border-dashed transition-colors",
+        active ? "border-primary/50 bg-primary/15" : "border-transparent bg-muted/20",
+      )}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      title="Sleep hier om bovenaan in deze kolom te zetten"
+      aria-label="Dropzone bovenaan kolom"
+    />
+  );
 }
 
 function LayoutPanelWrapper({
@@ -43,7 +122,7 @@ function LayoutPanelWrapper({
   id: MatchTabPanelId;
   column: "left" | "center" | "right";
   layout: MatchTabLayoutState;
-  setLayout: React.Dispatch<React.SetStateAction<MatchTabLayoutState>>;
+  setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;
   children: ReactNode;
 }) {
   const collapsed = !!layout.collapsed[id];
@@ -53,6 +132,14 @@ function LayoutPanelWrapper({
     e.dataTransfer.setData("application/x-stadium-panel", id);
     e.dataTransfer.setData("application/x-stadium-column", column);
     e.dataTransfer.effectAllowed = "move";
+    const img = new Image();
+    img.src =
+      "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    try {
+      e.dataTransfer.setDragImage(img, 0, 0);
+    } catch {
+      /* ignore */
+    }
   };
 
   const onDragOver = (e: DragEvent) => {
@@ -101,7 +188,7 @@ function LayoutPanelWrapper({
         <span
           draggable
           onDragStart={onDragStart}
-          className="cursor-grab active:cursor-grabbing touch-none p-0.5 rounded hover:bg-muted text-foreground/70"
+          className="cursor-grab active:cursor-grabbing touch-none py-1.5 px-1 rounded-md hover:bg-muted text-foreground/70 will-change-transform"
           aria-label="Versleep om volgorde te wijzigen"
         >
           <GripVertical className="size-4" />
@@ -148,17 +235,20 @@ function Column({
   column: "left" | "center" | "right";
   order: MatchTabPanelId[];
   layout: MatchTabLayoutState;
-  setLayout: React.Dispatch<React.SetStateAction<MatchTabLayoutState>>;
+  setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;
   panels: Partial<Record<MatchTabPanelId, ReactNode>>;
 }) {
   const ids = order.filter((id) => panels[id] != null);
   return (
-    <div className="flex flex-col gap-4 min-w-0">
-      {ids.map((id) => (
-        <LayoutPanelWrapper key={id} id={id} column={column} layout={layout} setLayout={setLayout}>
-          {panels[id]}
-        </LayoutPanelWrapper>
-      ))}
+    <div className="flex flex-col gap-2 min-w-0">
+      <ColumnTopDropZone column={column} setLayout={setLayout} />
+      <div className="flex flex-col gap-3 min-w-0">
+        {ids.map((id) => (
+          <LayoutPanelWrapper key={id} id={id} column={column} layout={layout} setLayout={setLayout}>
+            {panels[id]}
+          </LayoutPanelWrapper>
+        ))}
+      </div>
     </div>
   );
 }
@@ -171,6 +261,11 @@ export function MatchTabGrid({
 }) {
   const [layout, setLayout] = useState<MatchTabLayoutState>(DEFAULT_MATCH_TAB_LAYOUT);
   const [hydrated, setHydrated] = useState(false);
+  const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const layoutRef = useRef(layout);
+  const hydratedRef = useRef(false);
+  layoutRef.current = layout;
+  hydratedRef.current = hydrated;
 
   useEffect(() => {
     setLayout(loadMatchTabLayout());
@@ -178,8 +273,23 @@ export function MatchTabGrid({
   }, []);
 
   useEffect(() => {
+    return () => {
+      if (hydratedRef.current) {
+        saveMatchTabLayout(layoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!hydrated) return;
-    saveMatchTabLayout(layout);
+    if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    saveDebounceRef.current = setTimeout(() => {
+      saveDebounceRef.current = null;
+      saveMatchTabLayout(layoutRef.current);
+    }, 350);
+    return () => {
+      if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+    };
   }, [layout, hydrated]);
 
   const resetLayout = () => setLayout(DEFAULT_MATCH_TAB_LAYOUT);
@@ -188,8 +298,9 @@ export function MatchTabGrid({
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] text-muted-foreground max-w-xl">
-          Versleep een blok aan het grip-icoon om de volgorde te wijzigen (ook naar een andere kolom).
-          Het pijltje klapt een sectie in of uit.
+          Versleep een blok aan het grip-icoon. Boven in elke kolom is een smalle strook om een blok
+          helemaal bovenaan te zetten (ook vanuit een andere kolom). Het pijltje klapt een sectie in
+          of uit.
         </p>
         <button
           type="button"
@@ -199,7 +310,7 @@ export function MatchTabGrid({
           Standaard lay-out
         </button>
       </div>
-      <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(320px,26vw)_minmax(0,1fr)_minmax(320px,26vw)]">
+      <div className="grid gap-3 grid-cols-1 lg:grid-cols-[minmax(320px,26vw)_minmax(0,1fr)_minmax(320px,26vw)]">
         <Column
           column="left"
           order={layout.orderLeft}

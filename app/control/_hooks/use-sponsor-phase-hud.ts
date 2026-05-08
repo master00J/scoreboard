@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { useDisplayStore } from "@/lib/store";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
+import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 import type { Match, Playlist, PlaylistSlot, Sponsor, SponsorSection } from "@/lib/types";
 import {
   activeSponsorsForSection,
@@ -55,6 +56,20 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
   const mode = state?.mode ?? "IDLE";
   const elapsed = useLiveTimerSeconds();
+  const wallNowMs = useWallClockMs(200);
+
+  /** Zelfde set als `display/page.tsx` `sponsorInterrupted` (minus geplande cue — niet in deze hook). */
+  const sponsorInterrupted = useMemo(
+    () =>
+      mode === "GOAL" ||
+      mode === "GOAL_INTRO_VIDEO" ||
+      mode === "GOAL_PLAYER_VIDEO" ||
+      mode === "SUBSTITUTION" ||
+      mode === "CARD" ||
+      mode === "HALFTIME" ||
+      mode === "FULLTIME",
+    [mode],
+  );
 
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [playlists, setPlaylists] =
@@ -97,14 +112,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       .catch(() => setPlaylists(EMPTY_PLAYLISTS));
   }, [state?.updatedAt]);
 
-  const liveAutoBeside = useMemo(
+  const sponsorBesideConfigured = useMemo(
     () =>
       !!match &&
       !!state &&
-      mode === "SPONSOR_ROTATION" &&
       sponsorRotationBesideScoreboard(match.status) &&
       sponsorBesideShowsPanel(match, sponsors, playlists),
-    [match, state, mode, sponsors, playlists],
+    [match, state, sponsors, playlists],
   );
 
   const liveAutoHalftime = useMemo(
@@ -140,10 +154,10 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
   const [phaseTick, setPhaseTick] = useState(0);
   useEffect(() => {
-    if (!liveAutoBeside && !liveAutoHalftime && !prematchSpreadActive) return;
+    if (!sponsorBesideConfigured && !liveAutoHalftime && !prematchSpreadActive) return;
     const id = setInterval(() => setPhaseTick((n) => n + 1), 400);
     return () => clearInterval(id);
-  }, [liveAutoBeside, liveAutoHalftime, prematchSpreadActive]);
+  }, [sponsorBesideConfigured, liveAutoHalftime, prematchSpreadActive]);
 
   const sponsorSlotMapMatch = useMemo(() => {
     if (!match) return [] as (string | null)[];
@@ -189,7 +203,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
   useEffect(() => {
     sponsorPhaseHangRef.current = null;
-  }, [match?.status, liveAutoBeside, liveAutoHalftime]);
+  }, [match?.status, sponsorBesideConfigured, liveAutoHalftime]);
 
   useEffect(() => {
     if (!prematchSpreadActive) {
@@ -205,9 +219,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   }, [prematchSpreadActive]);
 
   const sponsorDistView = useMemo(() => {
-    const now = Date.now();
+    const now = wallNowMs;
 
-    if (liveAutoBeside && match) {
+    if (sponsorBesideConfigured && match) {
       const tLive = halfWindowElapsed(elapsed, match.status, match.halfDurationSec);
       if (mode === "SPONSOR_ROTATION") {
         tInterruptFrozen.current = tLive;
@@ -218,21 +232,23 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       return resolveSponsorSpreadPhase(v, sponsors, section, match.status, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapMatch,
         slotT: t,
+        interrupted: sponsorInterrupted,
       });
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
       const H = Math.max(60, match.halfBreakSec);
-      const t = ((Date.now() - rustEpochRef.current) / 1000) % H;
+      const t = ((now - rustEpochRef.current) / 1000) % H;
       const v = lookupSponsorAtSecond(sponsorSlotMapHalftime, t);
       return resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapHalftime,
         slotT: t,
+        interrupted: sponsorInterrupted,
       });
     }
     sponsorPhaseHangRef.current = null;
     return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
   }, [
-    liveAutoBeside,
+    sponsorBesideConfigured,
     liveAutoHalftime,
     match,
     sponsors,
@@ -241,10 +257,12 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     sponsorSlotMapMatch,
     sponsorSlotMapHalftime,
     phaseTick,
+    sponsorInterrupted,
+    wallNowMs,
   ]);
 
   const prematchDistView = useMemo(() => {
-    const now = Date.now();
+    const now = wallNowMs;
     if (!prematchSpreadActive || prematchOriginRef.current == null) {
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
@@ -255,13 +273,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       slotMap: sponsorSlotMapPrematch,
       slotT: t,
     });
-  }, [prematchSpreadActive, sponsorSlotMapPrematch, sponsors, phaseTick]);
+  }, [prematchSpreadActive, sponsorSlotMapPrematch, sponsors, phaseTick, wallNowMs]);
 
   return useMemo(() => {
-    const now = Date.now();
+    const now = wallNowMs;
 
     if (
-      liveAutoBeside &&
+      sponsorBesideConfigured &&
       match &&
       sponsorBesideShowsPanel(match, sponsors, playlists) &&
       !hasSponsorsForSection(sponsors, sectionForStatus(match.status), match.status)
@@ -411,7 +429,23 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       }
       if (effectivePhase === "scoreboard") {
         const tEta = tForNextSlotEta ?? t;
-        nextSlotEtaSec = secondsUntilNextSponsorSlot(slotMap, tEta);
+        const slotEta = secondsUntilNextSponsorSlot(slotMap, tEta);
+        /**
+         * Slotmap = strategische spreiding over de helft; echte wissels volgen de ledger (clip-einde).
+         * Zonder deze blend toont de HUD bv. "199 s" terwijl het scherm al bijna bij de volgende sponsor is,
+         * of springt de teller vreemd wanneer clips sneller doorlopen dan de kaart-seconden.
+         */
+        let nextEta: number | null = slotEta;
+        if (ledgerMatchesSegment && sponsorLedger?.activeClip) {
+          const ac2 = sponsorLedger.activeClip;
+          const expectedSec2 = Math.max(0.1, ac2.expectedPlaySec || 0.1);
+          const liveElapsed2 = sponsorTelemetryActiveClipElapsedSec(ac2, now);
+          const rem2 = expectedSec2 - liveElapsed2;
+          if (rem2 > 0.2) {
+            nextEta = Math.max(0, rem2);
+          }
+        }
+        nextSlotEtaSec = nextEta;
       }
 
       return {
@@ -425,7 +459,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       };
     }
 
-    if (liveAutoBeside && match && hasSponsorsForSection(sponsors, sectionForStatus(match.status), match.status)) {
+    if (sponsorBesideConfigured && match && hasSponsorsForSection(sponsors, sectionForStatus(match.status), match.status)) {
       const tLive = halfWindowElapsed(elapsed, match.status, match.halfDurationSec);
       const t = mode === "SPONSOR_ROTATION" ? tLive : tInterruptFrozen.current;
       const section = sectionForStatus(match.status);
@@ -454,7 +488,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       hasSponsorsForSection(sponsors, "halftime")
     ) {
       const H = Math.max(60, match.halfBreakSec);
-      const tUnbounded = (Date.now() - rustEpochRef.current) / 1000;
+      const tUnbounded = (now - rustEpochRef.current) / 1000;
       const t = tUnbounded % H;
       const tNextEta = Math.min(tUnbounded, Math.max(0, H - 1e-6));
       return rosterFrom(
@@ -494,7 +528,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
     return { kind: "inactive" as const };
   }, [
-    liveAutoBeside,
+    sponsorBesideConfigured,
     liveAutoHalftime,
     prematchSpreadActive,
     match,
@@ -510,5 +544,6 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     sponsorLedger,
     cycleBudgetForever,
     phaseTick,
+    wallNowMs,
   ]);
 }

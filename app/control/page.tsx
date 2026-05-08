@@ -27,6 +27,7 @@ import { isFullMatch } from "@/lib/is-full-match";
 import { exportMatch, focusDisplayWindow } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
 import { MatchTabGrid, LivePreviewPanel } from "./_components/match-tab-grid";
+import { AppResourceMeter } from "./_components/app-resource-meter";
 
 export default function ControlPage() {
   useSocketSync();
@@ -82,6 +83,7 @@ export default function ControlPage() {
           </p>
         </div>
         <div className="flex items-center gap-4">
+          <AppResourceMeter />
           <MobileBridgeBadge info={mobileBridge} />
           <span className="flex items-center gap-2 text-xs">
             <span

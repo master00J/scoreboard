@@ -220,6 +220,7 @@ export function ProofOfPlayPanel() {
               {(matches ?? []).map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.homeTeam?.name ?? "?"} vs {m.awayTeam?.name ?? "?"}
+                  {m.closedAt ? " (afgesloten)" : ""}
                   {m.kickoffAt
                     ? ` — ${new Date(m.kickoffAt).toLocaleDateString("nl-BE")}`
                     : ""}

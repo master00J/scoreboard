@@ -73,6 +73,20 @@ export type LicenseActivateResult =
   | { ok: true; organizationLabel: string | null; status: "activated" | "already_activated" }
   | { ok: false; message: string; reason?: string };
 
+/** Live app-metrics uit Electron `app.getAppMetrics()` (main + renderers + GPU-proces). */
+export type AppResourceMetrics = {
+  /** Som `percentCPUUsage` voor alle proces-types behalve `GPU`. */
+  cpuNonGpuPercent: number;
+  /** `percentCPUUsage` van het Chromium GPU-hulpproces (CPU-tijd, geen VRAM-meter). */
+  gpuCpuPercent: number;
+  /** Som geheugen (KB→MB): op Windows vooral `privateBytes` per proces (vergelijkbaar met Taakbeheer). */
+  ramTotalMb: number;
+  /** Zelfde definitie als RAM-totaal, alleen GPU-type processen (MB). */
+  gpuRamMb: number;
+  /** cpuNonGpuPercent + gpuCpuPercent (kan op multi-core > 100). */
+  cpuTotalPercent: number;
+};
+
 export type MobileBridgeInfo = {
   enabled: boolean;
   port: number | null;
@@ -131,4 +145,6 @@ export type ElectronBridge = {
   licenseGetStatus: () => Promise<LicenseGetStatusResult>;
   licenseActivate: (opts: { licenseKey: string }) => Promise<LicenseActivateResult>;
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
+  /** CPU/RAM van deze app (Electron); GPU = GPU-hulpproces. */
+  getAppResourceMetrics: () => Promise<AppResourceMetrics>;
 };

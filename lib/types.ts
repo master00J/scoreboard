@@ -10,6 +10,12 @@ export type Team = {
 
 export type AppSettings = {
   homeTeamId: string | null;
+  /** Standaardmedia op het display als IDLE/PREMATCH-playlist leeg is; ontbreekt = alleen thuislogo/tekst. */
+  idleFallbackMediaId?: string | null;
+  /** Alleen op GET /api/settings: resolved item voor display/setup (actief). */
+  idleFallbackMedia?: MediaItem | null;
+  /** Alleen op GET /api/settings: naam + logo van vast thuis team. */
+  homeTeamBranding?: { name: string; logoPath: string | null } | null;
   goalIntroVideoPath: string | null;
   /** GOAL +1 gedrag: true = score + visual, false = alleen score. */
   goalVisualHomeEnabled?: boolean;
@@ -68,6 +74,8 @@ export type Match = {
   awayFieldPlayerIds?: string[];
   events?: MatchEvent[];
   createdAt: string;
+  /** ISO-tijdstip wanneer de wedstrijd is afgesloten; null = nog open voor live. */
+  closedAt?: string | null;
 };
 
 export type MatchEvent = {
@@ -96,6 +104,8 @@ export type MediaItem = {
   playAudio?: boolean;
   /** JSON array met sponsor-fases waarvoor dit media-item mag draaien. Null/leeg = alle fases. */
   sponsorPhaseTagsJson?: string | null;
+  /** Technisch item (bv. auto voor speler goalVideoPath); verborgen in Media-bibliotheek. */
+  hideFromLibrary?: boolean;
   createdAt: string;
 };
 

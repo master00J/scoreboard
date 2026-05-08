@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
@@ -11,7 +11,12 @@ import { useDisplayStore } from "@/lib/store";
 import { effectiveMatchPlayRosterSeconds } from "@/lib/sponsor-roster-effective-timeline";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
+import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 import { sponsorSectionBudgetSeconds } from "@/lib/sponsor-distribution";
+import {
+  sponsorTelemetryConsumedSec,
+  sponsorTelemetrySegmentKey,
+} from "@/lib/sponsor-telemetry";
 import {
   applyRosterBudgetCarry,
   sponsorLiveProgressFromRosterRaw,
@@ -69,7 +74,11 @@ export function MediaPanel() {
   const media = mediaRaw ?? [];
   const playlists = playlistsRaw ?? [];
   const scheduledCues = scheduledCuesRaw ?? [];
-  const visibleMedia = media.filter((m) => {
+  const libraryMedia = useMemo(
+    () => media.filter((m) => !m.hideFromLibrary),
+    [media],
+  );
+  const visibleMedia = libraryMedia.filter((m) => {
     const q = mediaSearch.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -78,6 +87,27 @@ export function MediaPanel() {
       (m.sponsorName ?? "").toLowerCase().includes(q)
     );
   });
+
+  const libraryBySponsor = useMemo(() => {
+    const loose = visibleMedia.filter((m) => !m.sponsorId);
+    const map = new Map<string, { name: string; items: MediaItem[] }>();
+    for (const m of visibleMedia) {
+      if (!m.sponsorId) continue;
+      const sid = m.sponsorId;
+      if (!map.has(sid)) {
+        map.set(sid, { name: m.sponsorName ?? "Sponsor", items: [] });
+      }
+      map.get(sid)!.items.push(m);
+    }
+    const groups = [...map.entries()]
+      .map(([sponsorId, g]) => ({
+        sponsorId,
+        name: g.name,
+        items: [...g.items].sort((a, b) => a.title.localeCompare(b.title, "nl")),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, "nl"));
+    return { loose, groups };
+  }, [visibleMedia]);
 
   /** Register a local file (Electron) — no copying, just store the path. */
   async function registerLocalFile(filePath: string) {
@@ -231,7 +261,8 @@ export function MediaPanel() {
             <h2 className="text-lg font-semibold">Bibliotheek</h2>
             <p className="text-xs text-muted-foreground mt-1 max-w-xl">
               Video&apos;s: duur wordt automatisch uit het bestand gelezen. Afbeeldingen: kies hier hoe lang
-              ze per keer tonen (je kunt dit later per item aanpassen).
+              ze per keer tonen (je kunt dit later per item aanpassen). Automatisch aangemaakte spelers-doelvideo&apos;s
+              (los bestand op speler) verschijnen niet hier — die blijven technisch bewaard voor het display.
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -274,29 +305,66 @@ export function MediaPanel() {
             </label>
           )}
         </div>
-        <div className="mb-3 text-xs text-muted-foreground">
-          {visibleMedia.length} van {media.length} media-items zichtbaar.
+        <div className="mb-3 text-xs text-muted-foreground space-y-1">
+          <p>
+            {visibleMedia.length} van {libraryMedia.length} item(s) in deze weergave
+            {media.length > libraryMedia.length ? (
+              <>
+                {" "}
+                · {media.length - libraryMedia.length} technisch verborgen (o.a. auto spelers-doelvideo)
+              </>
+            ) : null}
+            .
+          </p>
+          <p>
+            Gegroepeerd: <strong>Los (geen sponsor)</strong> en daarna <strong>per sponsor</strong>. Koppel media
+            vooral via de tab <strong>Sponsors</strong>.
+          </p>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {visibleMedia.map((m) => (
-            <MediaCard
-              key={m.id}
-              item={m}
-              onChange={reloadMedia}
-              lockManualSponsorInterrupt={sponsorBudgetsDriveLive}
-            />
-          ))}
-          {media.length === 0 && (
-            <div className="col-span-full text-sm text-muted-foreground">
-              No media yet. Upload 1920×1080 videos or images for sponsor rotations.
-            </div>
-          )}
-          {media.length > 0 && visibleMedia.length === 0 && (
-            <div className="col-span-full text-sm text-muted-foreground">
-              Geen media gevonden voor deze zoekterm.
-            </div>
-          )}
-        </div>
+        {libraryMedia.length === 0 ? (
+          <div className="text-sm text-muted-foreground">
+            Nog geen mediabestanden. Upload hier of via Sponsors → bestanden toevoegen.
+          </div>
+        ) : visibleMedia.length === 0 ? (
+          <div className="text-sm text-muted-foreground">Geen media gevonden voor deze zoekterm.</div>
+        ) : (
+          <div className="space-y-8">
+            {libraryBySponsor.loose.length > 0 ? (
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-3 pb-1 border-b border-border">
+                  Los (geen sponsor) · {libraryBySponsor.loose.length}
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {libraryBySponsor.loose.map((m) => (
+                    <MediaCard
+                      key={m.id}
+                      item={m}
+                      onChange={reloadMedia}
+                      lockManualSponsorInterrupt={sponsorBudgetsDriveLive}
+                    />
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {libraryBySponsor.groups.map((g) => (
+              <div key={g.sponsorId}>
+                <h3 className="text-sm font-semibold text-foreground mb-3 pb-1 border-b border-border">
+                  {g.name} · {g.items.length}
+                </h3>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {g.items.map((m) => (
+                    <MediaCard
+                      key={m.id}
+                      item={m}
+                      onChange={reloadMedia}
+                      lockManualSponsorInterrupt={sponsorBudgetsDriveLive}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
         </TabsContent>
 
@@ -334,7 +402,7 @@ export function MediaPanel() {
               <PlaylistEditor
                 slot={slot}
                 playlist={playlists.find((p) => p.slot === slot) ?? null}
-                media={media}
+                media={libraryMedia}
                 onChange={reloadPlaylists}
               />
             </TabsContent>
@@ -344,7 +412,7 @@ export function MediaPanel() {
         </TabsContent>
         <TabsContent value="scheduled" className="mt-0">
           <ScheduledCuesSection
-            media={media}
+            media={libraryMedia}
             cues={scheduledCues}
             onChange={reloadScheduledCues}
           />
@@ -773,6 +841,7 @@ function SponsorsSection({
   const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
   const sponsors = sponsorsRaw ?? [];
   const elapsedSec = useLiveTimerSeconds();
+  const wallMs = useWallClockMs(250);
   const displayMode = useDisplayStore((s) => s.state?.mode);
   const matchRosterFreezeRef = useRef(0);
   const halftimeT = useHalftimeSponsorTimelineT(
@@ -891,6 +960,7 @@ function SponsorsSection({
             matchPlayRosterSeconds={matchPlayRosterSeconds}
             prematchTimelineSec={elapsedSec}
             halftimeTSec={halftimeT}
+            wallMs={wallMs}
             onChange={() => {
               reloadSponsors();
               reloadMedia();
@@ -930,6 +1000,7 @@ function SponsorCard({
   matchPlayRosterSeconds,
   prematchTimelineSec,
   halftimeTSec,
+  wallMs,
   onChange,
   onRemove,
 }: {
@@ -940,6 +1011,8 @@ function SponsorCard({
   matchPlayRosterSeconds: number;
   prematchTimelineSec: number;
   halftimeTSec: number;
+  /** Muurklok voor telemetry (los van gepauzeerde wedstrijdtimer). */
+  wallMs: number;
   onChange: () => void;
   onRemove: () => void;
 }) {
@@ -1089,7 +1162,7 @@ function SponsorCard({
     onChange();
   }
 
-  const unassignedMedia = allMedia.filter((m) => !m.sponsorId);
+  const unassignedMedia = allMedia.filter((m) => !m.sponsorId && !m.hideFromLibrary);
 
   const rawRoster =
     activeMatch != null
@@ -1122,11 +1195,31 @@ function SponsorCard({
       const Hh = Math.max(60, activeMatch.halfBreakSec);
       tClock = halftimeTSec % Hh;
     }
-    const { consumed, budget } = applyRosterBudgetCarry(
+    const { consumed: consumedFromCarry, budget } = applyRosterBudgetCarry(
       rosterCarryRef,
       { ...rawRoster, matchId: activeMatch.id },
       tClock,
     );
+    let consumed = consumedFromCarry;
+    let telemetryKey: string | null = null;
+    if (st === "FIRST_HALF" || st === "SECOND_HALF" || st === "EXTRA_TIME") {
+      telemetryKey = sponsorTelemetrySegmentKey(activeMatch.id, st, "match");
+    } else if (st === "HALF_TIME") {
+      telemetryKey = sponsorTelemetrySegmentKey(activeMatch.id, st, "halftime");
+    } else if (st === "PREMATCH" || st === "SETUP") {
+      telemetryKey = sponsorTelemetrySegmentKey(activeMatch.id, st, "prematch");
+    }
+    const ledgerMatches =
+      telemetryKey != null &&
+      sponsorLedger != null &&
+      sponsorLedger.matchId === activeMatch.id &&
+      sponsorLedger.segmentKey === telemetryKey;
+    if (ledgerMatches) {
+      consumed = Math.max(
+        consumedFromCarry,
+        sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, wallMs),
+      );
+    }
     liveRoster = {
       label: rawRoster.label,
       consumed,
@@ -1430,10 +1523,11 @@ function minutesStrToSeconds(value: string): number {
 }
 
 function formatMin(sec: number): string {
-  if (!sec) return "0m";
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return s === 0 ? `${m}m` : `${m}m${s}s`;
+  if (!Number.isFinite(sec) || sec <= 0) return "0m";
+  const safe = Math.max(0, Math.floor(sec));
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return s === 0 ? `${m}m` : `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
 function parseClockInput(value: string): number | null {

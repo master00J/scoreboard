@@ -71,7 +71,10 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
   }, [safeMode]);
   const { data: mediaRaw } = useApi<MediaItem[]>("/api/media");
   const mediaList = useMemo(
-    () => (mediaRaw ?? []).filter((m) => m.active).sort((a, b) => a.title.localeCompare(b.title)),
+    () =>
+      (mediaRaw ?? [])
+        .filter((m) => m.active && !m.hideFromLibrary)
+        .sort((a, b) => a.title.localeCompare(b.title)),
     [mediaRaw],
   );
   const [mediaPickId, setMediaPickId] = useState("");

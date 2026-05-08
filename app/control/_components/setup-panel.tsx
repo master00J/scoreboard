@@ -38,6 +38,7 @@ export function SetupPanel() {
   const { data: teams, reload: reloadTeams } = useApi<Team[]>("/api/teams");
   const { data: matches, reload: reloadMatches } = useApi<Match[]>("/api/matches");
   const { data: settings, reload: reloadSettings } = useApi<AppSettings>("/api/settings");
+  const { data: idleFallbackPickMedia } = useApi<MediaItem[]>("/api/media");
   const state = useDisplayStore((s) => s.state);
   const homeTeam = (teams ?? []).find((team) => team.id === settings?.homeTeamId) ?? null;
 
@@ -107,6 +108,19 @@ export function SetupPanel() {
     });
     if (!res.ok) {
       toast({ title: "Goalvisual-instelling opslaan mislukt", variant: "error" });
+      return;
+    }
+    reloadSettings();
+  }
+
+  async function setIdleFallbackMedia(mediaId: string | null) {
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idleFallbackMediaId: mediaId }),
+    });
+    if (!res.ok) {
+      toast({ title: "Standaardmedia niet opgeslagen", variant: "error" });
       return;
     }
     reloadSettings();
@@ -237,6 +251,33 @@ export function SetupPanel() {
         )}
       </section>
 
+      <section className="bg-card border border-border rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-1">Leeg scherm (IDLE / prematch)</h2>
+        <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
+          Zonder items in de playlist toont het stadionscherm optioneel een vaste clip of afbeelding;
+          anders het logo van je vaste thuisploeg. Zonder thuisploeg zie je een korte melding.
+        </p>
+        <div className="max-w-xl space-y-2">
+          <Label htmlFor="idle-fallback-media">Standaardmedia (optioneel)</Label>
+          <Select
+            id="idle-fallback-media"
+            value={settings?.idleFallbackMediaId ?? ""}
+            onChange={(e) =>
+              void setIdleFallbackMedia(e.target.value === "" ? null : e.target.value)
+            }
+          >
+            <option value="">— Alleen thuislogo (indien ingesteld) —</option>
+            {(idleFallbackPickMedia ?? [])
+              .filter((m) => !m.hideFromLibrary && m.active)
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.title} ({m.type === "VIDEO" ? "video" : "afbeelding"})
+                </option>
+              ))}
+          </Select>
+        </div>
+      </section>
+
       <SetupScoreboardThemeSection settings={settings} reloadSettings={reloadSettings} />
 
       <SetupDisplayCanvasSection settings={settings ?? null} reloadSettings={reloadSettings} />
@@ -252,6 +293,11 @@ export function SetupPanel() {
           <Button onClick={() => setMatchDialog(true)}>New match</Button>
         </div>
         <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground max-w-3xl">
+            Sluit een wedstrijd af na afloop: het display wordt losgekoppeld en je kunt geen live
+            commando&apos;s meer op die wedstrijd sturen. Alle sponsor-play logs blijven aan deze
+            match hangen — filter in Rapporten op wedstrijd voor proof-of-play per wedstrijd.
+          </p>
           {(matches ?? []).map((m) => (
             <div
               key={m.id}
@@ -259,10 +305,15 @@ export function SetupPanel() {
                 state?.matchId === m.id ? "border-primary bg-primary/10" : "border-border"
               }`}
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <div className="font-semibold">{m.homeTeam.name}</div>
                 <div className="text-muted-foreground text-sm">vs</div>
                 <div className="font-semibold">{m.awayTeam.name}</div>
+                {m.closedAt ? (
+                  <span className="text-[10px] uppercase tracking-wide rounded px-2 py-0.5 bg-muted text-muted-foreground border border-border">
+                    Afgesloten
+                  </span>
+                ) : null}
                 <div className="text-xs text-muted-foreground ml-2">
                   {m.homeScore} – {m.awayScore} · {m.status}
                   {m.kickoffAt ? (
@@ -278,15 +329,32 @@ export function SetupPanel() {
                     </>
                   ) : null}
                   {m.matchSponsorMediaId ? " · matchsponsor" : ""}
+                  {m.closedAt ? (
+                    <>
+                      {" "}
+                      · gesloten{" "}
+                      {new Date(m.closedAt).toLocaleString("nl-NL", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </>
+                  ) : null}
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 flex-wrap justify-end">
                 <Button size="sm" variant="outline" onClick={() => setScheduleMatch(m)}>
                   Aftrap
                 </Button>
                 {state?.matchId === m.id ? (
                   <Button variant="secondary" disabled size="sm">
-                    Active
+                    Actief
+                  </Button>
+                ) : m.closedAt ? (
+                  <Button variant="secondary" disabled size="sm" title="Afgesloten wedstrijd kan niet actief worden">
+                    Activeren
                   </Button>
                 ) : (
                   <Button
@@ -295,7 +363,72 @@ export function SetupPanel() {
                       sendCommand({ type: "match:setActive", matchId: m.id })
                     }
                   >
-                    Activate
+                    Activeren
+                  </Button>
+                )}
+                {!m.closedAt ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      if (
+                        !confirm(
+                          `Wedstrijd "${m.homeTeam.name} vs ${m.awayTeam.name}" afsluiten?\n\n` +
+                            "Het display wordt losgekoppeld van deze wedstrijd (indien actief). " +
+                            "Sponsor-play logs blijven bewaard voor rapportage per wedstrijd.",
+                        )
+                      ) {
+                        return;
+                      }
+                      const res = await fetch(`/api/matches/${m.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ closedAt: new Date().toISOString() }),
+                      });
+                      if (!res.ok) {
+                        toast({
+                          title: "Afsluiten mislukt",
+                          description: await res.text(),
+                          variant: "error",
+                        });
+                        return;
+                      }
+                      toast({ title: "Wedstrijd afgesloten", variant: "success" });
+                      reloadMatches();
+                    }}
+                  >
+                    Afsluiten
+                  </Button>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={async () => {
+                      if (
+                        !confirm(
+                          `Wedstrijd "${m.homeTeam.name} vs ${m.awayTeam.name}" opnieuw openen voor live bediening?`,
+                        )
+                      ) {
+                        return;
+                      }
+                      const res = await fetch(`/api/matches/${m.id}`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ closedAt: null }),
+                      });
+                      if (!res.ok) {
+                        toast({
+                          title: "Heropenen mislukt",
+                          description: await res.text(),
+                          variant: "error",
+                        });
+                        return;
+                      }
+                      toast({ title: "Wedstrijd heropend", variant: "success" });
+                      reloadMatches();
+                    }}
+                  >
+                    Heropenen
                   </Button>
                 )}
                 <Button
@@ -767,7 +900,7 @@ function PlayerDialog({
   );
   const [uploading, setUploading] = useState(false);
   const { data: allMedia } = useApi<MediaItem[]>("/api/media");
-  const videoMedia = (allMedia ?? []).filter((m) => m.type === "VIDEO");
+  const videoMedia = (allMedia ?? []).filter((m) => m.type === "VIDEO" && !m.hideFromLibrary);
 
   async function save() {
     const body = {
@@ -1901,7 +2034,7 @@ function MatchDialog({
                 >
                   <option value="">— geen —</option>
                   {(mediaForMatch ?? [])
-                    .filter((it) => it.active)
+                    .filter((it) => it.active && !it.hideFromLibrary)
                     .map((it) => (
                       <option key={it.id} value={it.id}>
                         {it.title} ({it.type})
@@ -1995,7 +2128,7 @@ function MatchScheduleDialog({
             <Select value={sponsorId} onChange={(e) => setSponsorId(e.target.value)} className="mt-1">
               <option value="">— geen —</option>
               {(mediaList ?? [])
-                .filter((it) => it.active)
+                .filter((it) => it.active && !it.hideFromLibrary)
                 .map((it) => (
                   <option key={it.id} value={it.id}>
                     {it.title} ({it.type})
