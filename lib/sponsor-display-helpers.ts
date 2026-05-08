@@ -1,5 +1,11 @@
 import type { Match, Playlist, PlaylistSlot, Sponsor, SponsorSection } from "./types";
-import { activeSponsorsForSection } from "./sponsor-distribution";
+import {
+  activeSponsorsForSection,
+  sponsorScreenSecondsConsumed,
+  sponsorSectionBudgetSeconds,
+} from "./sponsor-distribution";
+import type { SponsorLedgerPayload } from "./sponsor-telemetry";
+import { sponsorTelemetryConsumedSec } from "./sponsor-telemetry";
 
 /** Eerste/tweede helft / verlenging: sponsor-slides naast scorebord; rust en voor/na: fullscreen. */
 export function sponsorRotationBesideScoreboard(status: string | undefined): boolean {
@@ -93,4 +99,43 @@ export function secondsUntilNextSponsorSlot(map: (string | null)[], t: number): 
     j++;
   }
   return null;
+}
+
+/**
+ * True wanneer elke actieve sponsor in deze sectie zijn volledige schermbudget heeft
+ * verbruikt (max van slot-rooster en telemetry, gelijk aan Sponsors live). De virtuele
+ * slotmap kan dan nog slots tonen, maar er is geen echte volgende sponsor meer op basis
+ * van budget — dan moet de HUD geen misleidende “volgende sponsor over X s” aftellen.
+ */
+export function allActiveSponsorSectionBudgetsExhausted(
+  sponsors: Sponsor[],
+  section: SponsorSection,
+  matchStatus: string | undefined,
+  slotMap: (string | null)[],
+  slotT: number,
+  sponsorLedger: SponsorLedgerPayload | null | undefined,
+  ledgerMatchesSegment: boolean,
+  nowMs: number,
+): boolean {
+  const active = activeSponsorsForSection(sponsors, section, matchStatus);
+  if (active.length === 0) return true;
+
+  for (const sponsor of active) {
+    const budget = sponsorSectionBudgetSeconds(sponsor, section, matchStatus);
+    const consumedSlot = sponsorScreenSecondsConsumed(
+      slotMap,
+      sponsors,
+      section,
+      matchStatus,
+      slotT,
+      sponsor.id,
+    );
+    const consumedTelem =
+      ledgerMatchesSegment && sponsorLedger
+        ? sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, nowMs)
+        : consumedSlot;
+    const consumed = Math.max(consumedSlot, consumedTelem);
+    if (consumed < budget) return false;
+  }
+  return true;
 }

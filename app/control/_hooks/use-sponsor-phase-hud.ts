@@ -22,6 +22,7 @@ import {
   sponsorTelemetrySegmentKey,
 } from "@/lib/sponsor-telemetry";
 import {
+  allActiveSponsorSectionBudgetsExhausted,
   hasSponsorsForSection,
   secondsUntilNextSponsorSlot,
   sectionForStatus,
@@ -487,24 +488,40 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         }
       }
       if (effectivePhase === "scoreboard") {
-        const tEta = tForNextSlotEta ?? t;
-        const slotEta = secondsUntilNextSponsorSlot(slotMap, tEta);
-        /**
-         * Slotmap = strategische spreiding over de helft; echte wissels volgen de ledger (clip-einde).
-         * Zonder deze blend toont de HUD bv. "199 s" terwijl het scherm al bijna bij de volgende sponsor is,
-         * of springt de teller vreemd wanneer clips sneller doorlopen dan de kaart-seconden.
-         */
-        let nextEta: number | null = slotEta;
-        if (ledgerMatchesSegment && sponsorLedger?.activeClip) {
-          const ac2 = sponsorLedger.activeClip;
-          const expectedSec2 = Math.max(0.1, ac2.expectedPlaySec || 0.1);
-          const liveElapsed2 = sponsorTelemetryActiveClipElapsedSec(ac2, now);
-          const rem2 = expectedSec2 - liveElapsed2;
-          if (rem2 > 0.2) {
-            nextEta = Math.max(0, rem2);
+        if (
+          !cycleBudgetForever &&
+          allActiveSponsorSectionBudgetsExhausted(
+            sponsors,
+            section,
+            matchStatus,
+            slotMap,
+            t,
+            sponsorLedger,
+            ledgerMatchesSegment,
+            now,
+          )
+        ) {
+          nextSlotEtaSec = null;
+        } else {
+          const tEta = tForNextSlotEta ?? t;
+          const slotEta = secondsUntilNextSponsorSlot(slotMap, tEta);
+          /**
+           * Slotmap = strategische spreiding over de helft; echte wissels volgen de ledger (clip-einde).
+           * Zonder deze blend toont de HUD bv. "199 s" terwijl het scherm al bijna bij de volgende sponsor is,
+           * of springt de teller vreemd wanneer clips sneller doorlopen dan de kaart-seconden.
+           */
+          let nextEta: number | null = slotEta;
+          if (ledgerMatchesSegment && sponsorLedger?.activeClip) {
+            const ac2 = sponsorLedger.activeClip;
+            const expectedSec2 = Math.max(0.1, ac2.expectedPlaySec || 0.1);
+            const liveElapsed2 = sponsorTelemetryActiveClipElapsedSec(ac2, now);
+            const rem2 = expectedSec2 - liveElapsed2;
+            if (rem2 > 0.2) {
+              nextEta = Math.max(0, rem2);
+            }
           }
+          nextSlotEtaSec = nextEta;
         }
-        nextSlotEtaSec = nextEta;
       }
 
       return {
