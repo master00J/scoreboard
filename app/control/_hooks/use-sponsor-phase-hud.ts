@@ -298,6 +298,12 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         startedAtMs: number;
         startedAtSlotIdx?: number;
       } | null>,
+      /**
+       * Voor prematch/rust: `t` is vaak `elapsed % H` (herhalend rooster). Voor “volgende sponsor”
+       * moet de ETA op de echte tijdlijn van **één** blok gebaseerd zijn — anders wrapt `t` en
+       * vindt `secondsUntilNextSponsorSlot` opnieuw slots aan het begin van de virtuele cyclus.
+       */
+      tForNextSlotEta?: number,
     ): SponsorPhaseHudModel {
       void holdSecondsCappedBySlotRun(
         sponsors,
@@ -392,7 +398,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         }
       }
       if (effectivePhase === "scoreboard") {
-        nextSlotEtaSec = secondsUntilNextSponsorSlot(slotMap, t);
+        const tEta = tForNextSlotEta ?? t;
+        nextSlotEtaSec = secondsUntilNextSponsorSlot(slotMap, tEta);
       }
 
       return {
@@ -435,7 +442,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       hasSponsorsForSection(sponsors, "halftime")
     ) {
       const H = Math.max(60, match.halfBreakSec);
-      const t = ((Date.now() - rustEpochRef.current) / 1000) % H;
+      const tUnbounded = (Date.now() - rustEpochRef.current) / 1000;
+      const t = tUnbounded % H;
+      const tNextEta = Math.min(tUnbounded, Math.max(0, H - 1e-6));
       return rosterFrom(
         "Rust",
         "halftime",
@@ -445,6 +454,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         sponsorSlotMapHalftime,
         t,
         sponsorPhaseHangRef,
+        tNextEta,
       );
     }
 
@@ -454,7 +464,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       hasSponsorsForSection(sponsors, "prematch")
     ) {
       const H = Math.max(1, sponsorSlotMapPrematch.length);
-      const t = ((now - prematchOriginRef.current) / 1000) % H;
+      const tUnbounded = (now - prematchOriginRef.current) / 1000;
+      const t = tUnbounded % H;
+      const tNextEta = Math.min(tUnbounded, Math.max(0, H - 1e-6));
       return rosterFrom(
         "Voor wedstrijd",
         "prematch",
@@ -464,6 +476,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         sponsorSlotMapPrematch,
         t,
         prematchPhaseHangRef,
+        tNextEta,
       );
     }
 
