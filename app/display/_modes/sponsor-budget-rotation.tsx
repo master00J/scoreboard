@@ -18,6 +18,7 @@ import { reportSponsorClipEnd, reportSponsorClipStart } from "@/lib/use-socket";
 import { mediaUrl } from "@/lib/media-url";
 import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
 import { mediaAllowedForSponsorPhase } from "@/lib/sponsor-media-phases";
+import { applySponsorPlaybackOrder } from "@/lib/sponsor-playback-order";
 import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
@@ -98,10 +99,13 @@ export function SponsorBudgetRotation({
   const followMode = followPlayback;
   const activeSponsors = useMemo(() => {
     let list = sponsors.filter((s) => {
-      const sectionMedia = filterMediaForSponsorSpreadSection(
-        (s.media ?? []).filter((m) => m.active),
-        section,
-        matchStatus,
+      const sectionMedia = applySponsorPlaybackOrder(
+        filterMediaForSponsorSpreadSection(
+          (s.media ?? []).filter((m) => m.active),
+          section,
+          matchStatus,
+        ),
+        s.sponsorPlaybackOrderJson,
       );
       return (
         s.active &&
@@ -110,9 +114,8 @@ export function SponsorBudgetRotation({
       );
     });
     /**
-     * Alleen control-ingestie: ledger = bron van waarheid. `filterMediaForSponsorSpreadSection`
-     * kan langere wedstrijd-video's wegfilteren zodra er korte clips zijn — dan vindt de preview
-     * de `mediaId` uit de ledger niet meer terwijl het stadionscherm wél die clip draait.
+     * Alleen control-ingestie: ledger = bron van waarheid. Bij preview moet dezelfde
+     * volgorde/fase-filter gebruikt worden als op het stadionscherm.
      */
     if (followMode && followClip) {
       const s = sponsors.find((x) => x.id === followClip.sponsorId);
@@ -225,10 +228,13 @@ export function SponsorBudgetRotation({
     const idx = tieBreakCursorRef.current % tied.length;
     const sponsor = tied[idx]!;
 
-    const media = filterMediaForSponsorSpreadSection(
-      (sponsor.media ?? []).filter((m) => m.active),
-      section,
-      matchStatus,
+    const media = applySponsorPlaybackOrder(
+      filterMediaForSponsorSpreadSection(
+        (sponsor.media ?? []).filter((m) => m.active),
+        section,
+        matchStatus,
+      ),
+      sponsor.sponsorPlaybackOrderJson,
     );
     if (media.length === 0) return null;
 
@@ -445,7 +451,10 @@ export function SponsorBudgetRotation({
       return;
     }
     const active = (sponsor.media ?? []).filter((m) => m.active);
-    const spreadList = filterMediaForSponsorSpreadSection(active, section, matchStatus);
+    const spreadList = applySponsorPlaybackOrder(
+      filterMediaForSponsorSpreadSection(active, section, matchStatus),
+      sponsor.sponsorPlaybackOrderJson,
+    );
     let mediaIndex = spreadList.findIndex((m) => m.id === followClip.mediaId);
     let item: MediaItem | null = mediaIndex >= 0 ? spreadList[mediaIndex]! : null;
     if (!item) {

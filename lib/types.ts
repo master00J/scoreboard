@@ -132,6 +132,8 @@ export type Sponsor = {
   matchSecondHalfSeconds: number;
   halftimeSeconds: number;
   imageDefaultSec: number;
+  /** JSON-array van media-id's: volgorde tijdens sponsorrotatie op display; null = uploadvolgorde. */
+  sponsorPlaybackOrderJson?: string | null;
   createdAt: string;
   media?: MediaItem[];
 };

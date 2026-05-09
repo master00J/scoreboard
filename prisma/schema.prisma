@@ -130,6 +130,8 @@ model Sponsor {
   halftimeSponsorSec       Int?
   secondHalfScoreboardSec  Int?
   secondHalfSponsorSec     Int?
+  /// JSON-array van MediaItem-id's: afspeelvolgorde tijdens sponsorrotatie (operator).
+  sponsorPlaybackOrderJson String?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
   playLogs          SponsorPlayLog[]

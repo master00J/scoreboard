@@ -404,6 +404,7 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("Sponsor", "secondHalfSponsorSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "matchFirstHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Sponsor", "matchSecondHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Sponsor", "sponsorPlaybackOrderJson", "TEXT");
   await migrateSponsorMatchHalfFromLegacy();
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPlayLog" (
@@ -1399,6 +1400,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         halftimeSeconds: true,
         imageDefaultSec: true,
         active: true,
+        sponsorPlaybackOrderJson: true,
       };
       const data: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(body)) {

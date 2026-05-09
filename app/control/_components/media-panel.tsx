@@ -34,6 +34,7 @@ import {
   SPONSOR_MEDIA_PHASES,
   type SponsorMediaPhase,
 } from "@/lib/sponsor-media-phases";
+import { applySponsorPlaybackOrder } from "@/lib/sponsor-playback-order";
 
 const SCHEDULED_CUE_PHASES = [
   { value: "FIRST_HALF", label: "1e helft" },
@@ -1065,6 +1066,49 @@ function SponsorCard({
   ]);
 
   const sponsorMedia = allMedia.filter((m) => m.sponsorId === sponsor.id);
+  const orderedSponsorMedia = useMemo(
+    () => applySponsorPlaybackOrder(sponsorMedia, sponsor.sponsorPlaybackOrderJson),
+    [sponsorMedia, sponsor.sponsorPlaybackOrderJson],
+  );
+
+  async function persistPlaybackOrderIds(ids: string[]) {
+    const res = await fetch(`/api/sponsors/${sponsor.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sponsorPlaybackOrderJson: JSON.stringify(ids) }),
+    });
+    if (!res.ok) {
+      toast({ title: "Volgorde opslaan mislukt", variant: "error" });
+      return;
+    }
+    onChange();
+  }
+
+  async function moveSponsorMediaOrder(mediaId: string, dir: -1 | 1) {
+    const ids = orderedSponsorMedia.map((m) => m.id);
+    const i = ids.indexOf(mediaId);
+    if (i < 0) return;
+    const j = i + dir;
+    if (j < 0 || j >= ids.length) return;
+    const next = [...ids];
+    const t = next[i]!;
+    next[i] = next[j]!;
+    next[j] = t;
+    await persistPlaybackOrderIds(next);
+  }
+
+  async function clearSponsorPlaybackOrder() {
+    const res = await fetch(`/api/sponsors/${sponsor.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sponsorPlaybackOrderJson: null }),
+    });
+    if (!res.ok) {
+      toast({ title: "Standaardvolgorde niet gezet", variant: "error" });
+      return;
+    }
+    onChange();
+  }
 
   async function save() {
     setSaving(true);
@@ -1362,9 +1406,27 @@ function SponsorCard({
         </div>
       </div>
 
-      {sponsorMedia.length > 0 && (
+      {orderedSponsorMedia.length > 1 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
+          <span>
+            <span className="font-medium text-foreground">Afspeelvolgorde</span> op het stadionscherm (rotatie per
+            sponsor). Gebruik ↑/↓ per clip; lege instelling = volgorde van upload.
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-7 shrink-0 text-[11px]"
+            onClick={() => void clearSponsorPlaybackOrder()}
+          >
+            Standaardvolgorde
+          </Button>
+        </div>
+      )}
+
+      {orderedSponsorMedia.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {sponsorMedia.map((m) => (
+          {orderedSponsorMedia.map((m) => (
             <div key={m.id} className="rounded-lg border border-border overflow-hidden bg-card">
               <div className="aspect-video bg-black flex items-center justify-center">
                 {m.type === "VIDEO" ? (
@@ -1378,6 +1440,32 @@ function SponsorCard({
                 <div className="text-muted-foreground">
                   {m.type} · {m.durationSec}s
                 </div>
+                {orderedSponsorMedia.length > 1 && (
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-6 flex-1 px-1 text-[10px]"
+                      disabled={orderedSponsorMedia[0]?.id === m.id}
+                      onClick={() => void moveSponsorMediaOrder(m.id, -1)}
+                      title="Eerder in rotatie"
+                    >
+                      ↑
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-6 flex-1 px-1 text-[10px]"
+                      disabled={orderedSponsorMedia[orderedSponsorMedia.length - 1]?.id === m.id}
+                      onClick={() => void moveSponsorMediaOrder(m.id, 1)}
+                      title="Later in rotatie"
+                    >
+                      ↓
+                    </Button>
+                  </div>
+                )}
                 {m.type === "VIDEO" && (
                   <label className="flex items-center gap-1.5 text-[10px] cursor-pointer select-none">
                     <input
