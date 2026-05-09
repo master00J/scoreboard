@@ -50,6 +50,11 @@ const bridge: ElectronBridge = {
   getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
   getAppResourceMetrics: () => ipcRenderer.invoke("app:getResourceMetrics"),
   exportVenueBackup: () => ipcRenderer.invoke("backup:exportVenue"),
+  getMatchTabLayoutSnapshot: () =>
+    ipcRenderer.sendSync("control:getMatchTabLayoutSnapshot") as string | null,
+  persistMatchTabLayout: (json: string) => {
+    ipcRenderer.sendSync("control:persistMatchTabLayout", json);
+  },
 };
 
 try {

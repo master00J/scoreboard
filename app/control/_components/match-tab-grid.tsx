@@ -14,7 +14,8 @@ import { cn } from "@/lib/utils";
 import DisplayPage from "@/app/display/page";
 import {
   DEFAULT_MATCH_TAB_LAYOUT,
-  loadMatchTabLayout,
+  resolveHydratedMatchTabLayout,
+  sanitizeMatchTabLayout,
   saveMatchTabLayout,
   MATCH_TAB_PANEL_LABELS,
   type MatchTabLayoutState,
@@ -268,9 +269,22 @@ export function MatchTabGrid({
   hydratedRef.current = hydrated;
 
   useEffect(() => {
-    setLayout(loadMatchTabLayout());
+    let initial = DEFAULT_MATCH_TAB_LAYOUT;
+    if (typeof window !== "undefined") {
+      const fileJson = window.electronAPI?.getMatchTabLayoutSnapshot?.() ?? null;
+      initial = sanitizeMatchTabLayout(resolveHydratedMatchTabLayout(fileJson));
+    }
+    setLayout(initial);
     setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const sanitized = sanitizeMatchTabLayout(layout);
+    if (JSON.stringify(sanitized) !== JSON.stringify(layout)) {
+      setLayout(sanitized);
+    }
+  }, [layout, hydrated]);
 
   useEffect(() => {
     return () => {
@@ -281,6 +295,14 @@ export function MatchTabGrid({
   }, []);
 
   useEffect(() => {
+    const flush = () => {
+      if (hydratedRef.current) saveMatchTabLayout(layoutRef.current);
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, []);
+
+  useEffect(() => {
     if (!hydrated) return;
     if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
     saveDebounceRef.current = setTimeout(() => {
@@ -288,7 +310,11 @@ export function MatchTabGrid({
       saveMatchTabLayout(layoutRef.current);
     }, 350);
     return () => {
-      if (saveDebounceRef.current) clearTimeout(saveDebounceRef.current);
+      if (saveDebounceRef.current) {
+        clearTimeout(saveDebounceRef.current);
+        saveDebounceRef.current = null;
+        saveMatchTabLayout(layoutRef.current);
+      }
     };
   }, [layout, hydrated]);
 

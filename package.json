@@ -1,7 +1,12 @@
 {
   "name": "stadium-scoreboard",
   "version": "0.1.0",
+  "description": "Desktop scorebord- en sponsorweergave voor stadions (Electron + Next).",
+  "author": "Stadium Scoreboard",
   "private": true,
+  "overrides": {
+    "caniuse-lite": "1.0.30001792"
+  },
   "main": "electron-dist/electron/main.js",
   "scripts": {
     "dev": "npm run electron:dev",

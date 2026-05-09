@@ -18,6 +18,7 @@ import { reportSponsorClipEnd, reportSponsorClipStart } from "@/lib/use-socket";
 import { mediaUrl } from "@/lib/media-url";
 import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
 import { mediaAllowedForSponsorPhase } from "@/lib/sponsor-media-phases";
+import { buildSponsorRotationMediaList } from "@/lib/sponsor-playback-order";
 import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
@@ -98,10 +99,14 @@ export function SponsorBudgetRotation({
   const followMode = followPlayback;
   const activeSponsors = useMemo(() => {
     let list = sponsors.filter((s) => {
-      const sectionMedia = filterMediaForSponsorSpreadSection(
-        (s.media ?? []).filter((m) => m.active),
-        section,
-        matchStatus,
+      const sectionMedia = buildSponsorRotationMediaList(
+        filterMediaForSponsorSpreadSection(
+          (s.media ?? []).filter((m) => m.active),
+          section,
+          matchStatus,
+        ),
+        s.sponsorPlaybackOrderJson,
+        s.sponsorPlaybackRepeatsJson,
       );
       return (
         s.active &&
@@ -110,9 +115,8 @@ export function SponsorBudgetRotation({
       );
     });
     /**
-     * Alleen control-ingestie: ledger = bron van waarheid. `filterMediaForSponsorSpreadSection`
-     * kan langere wedstrijd-video's wegfilteren zodra er korte clips zijn — dan vindt de preview
-     * de `mediaId` uit de ledger niet meer terwijl het stadionscherm wél die clip draait.
+     * Alleen control-ingestie: ledger = bron van waarheid. Bij preview moet dezelfde
+     * volgorde/fase-filter gebruikt worden als op het stadionscherm.
      */
     if (followMode && followClip) {
       const s = sponsors.find((x) => x.id === followClip.sponsorId);
@@ -225,10 +229,14 @@ export function SponsorBudgetRotation({
     const idx = tieBreakCursorRef.current % tied.length;
     const sponsor = tied[idx]!;
 
-    const media = filterMediaForSponsorSpreadSection(
-      (sponsor.media ?? []).filter((m) => m.active),
-      section,
-      matchStatus,
+    const media = buildSponsorRotationMediaList(
+      filterMediaForSponsorSpreadSection(
+        (sponsor.media ?? []).filter((m) => m.active),
+        section,
+        matchStatus,
+      ),
+      sponsor.sponsorPlaybackOrderJson,
+      sponsor.sponsorPlaybackRepeatsJson,
     );
     if (media.length === 0) return null;
 
@@ -314,16 +322,31 @@ export function SponsorBudgetRotation({
     if (!current || activeSponsors.length === 0) return;
 
     if (current.item.type === "VIDEO") {
-      const actualVideoSec =
-        videoProgressDurationMs > 0 ? videoProgressDurationMs / 1000 : current.playSec;
-      const expectedMs = Math.max(5_000, actualVideoSec * 1000);
+      const catalogSec = Math.max(0.5, current.playSec);
+      const browserSec =
+        videoProgressDurationMs > 0 ? videoProgressDurationMs / 1000 : 0;
+      /**
+       * Sommige MP4's melden een container-duur die veel langer is dan de echte spot
+       * (of dan de catalogus). Dan bleef `maybeFireEarlyEnd` wachten op currentTime
+       * richting uren, en werd de fallback-timer tot 15 min gezet — voelt als vastlopen.
+       */
+      const durationBasisSec =
+        browserSec > 0 && browserSec <= Math.max(600, catalogSec * 5 + 120)
+          ? browserSec
+          : catalogSec;
+      const expectedMs = Math.max(5_000, durationBasisSec * 1000);
       const fallbackMs = Math.min(
         900_000,
         Math.max(8_000, expectedMs + 20_000),
       );
       videoFallbackTimerRef.current = setTimeout(() => {
         videoFallbackTimerRef.current = null;
-        finishClipOnce(current, actualVideoSec);
+        const progressed = playbackProgressMsRef.current / 1000;
+        const sec = Math.max(
+          catalogSec,
+          progressed > 0.25 ? progressed : durationBasisSec,
+        );
+        finishClipOnce(current, sec);
       }, fallbackMs);
       return () => {
         if (videoFallbackTimerRef.current != null) {
@@ -445,7 +468,11 @@ export function SponsorBudgetRotation({
       return;
     }
     const active = (sponsor.media ?? []).filter((m) => m.active);
-    const spreadList = filterMediaForSponsorSpreadSection(active, section, matchStatus);
+    const spreadList = buildSponsorRotationMediaList(
+      filterMediaForSponsorSpreadSection(active, section, matchStatus),
+      sponsor.sponsorPlaybackOrderJson,
+      sponsor.sponsorPlaybackRepeatsJson,
+    );
     let mediaIndex = spreadList.findIndex((m) => m.id === followClip.mediaId);
     let item: MediaItem | null = mediaIndex >= 0 ? spreadList[mediaIndex]! : null;
     if (!item) {
@@ -472,7 +499,7 @@ export function SponsorBudgetRotation({
         playSec: Math.max(0.5, followClip.expectedPlaySec || estimatePlaySec(item, sponsor)),
       };
     });
-  }, [followMode, followClip, sponsorsById, section]);
+  }, [followMode, followClip, sponsorsById, section, matchStatus]);
 
   useEffect(() => {
     if (current) playedClipRef.current = true;
@@ -523,14 +550,19 @@ export function SponsorBudgetRotation({
       {showBudgetFallback ? (
         <div className="absolute inset-0 size-full">{fallback}</div>
       ) : (
-        <AnimatePresence mode="sync">
+        <>
+          {/*
+            wait: eerst exit van vorige clip, dan mount van de volgende — voorkomt twee
+            video-elementen tegelijk te decoderen (GPU-piek, zwart bij sponsoromschakeling).
+          */}
+          <AnimatePresence mode="wait">
         {current && !followClipExpired && (
           <motion.div
             key={`${current.sponsorId}-${current.mediaId}-${cycleId}-${slideTick}`}
-            initial={{ opacity: 0 }}
+            initial={false}
             animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
+            exit={{ opacity: 1 }}
+            transition={{ duration: 0 }}
             className="absolute inset-0 size-full min-h-0 min-w-0"
           >
             <MediaRenderer
@@ -542,15 +574,18 @@ export function SponsorBudgetRotation({
                 followMode && followClip ? Math.max(0, followElapsedMs) : undefined
               }
               onVideoEnded={handleVideoEnded}
-              onVideoPlaybackFault={() => {
-                if (!current || current.item.type !== "VIDEO") return;
-                if (followMode) return;
-                if (videoFallbackTimerRef.current != null) {
-                  clearTimeout(videoFallbackTimerRef.current);
-                  videoFallbackTimerRef.current = null;
-                }
-                finishClipOnce(current, current.playSec);
-              }}
+              onVideoPlaybackFault={
+                followMode
+                  ? undefined
+                  : () => {
+                      if (!current || current.item.type !== "VIDEO") return;
+                      if (videoFallbackTimerRef.current != null) {
+                        clearTimeout(videoFallbackTimerRef.current);
+                        videoFallbackTimerRef.current = null;
+                      }
+                      finishClipOnce(current, current.playSec);
+                    }
+              }
               onVideoDurationMs={(ms) => {
                 if (ms > 0) setVideoProgressDurationMs(ms);
               }}
@@ -562,6 +597,7 @@ export function SponsorBudgetRotation({
           </motion.div>
         )}
       </AnimatePresence>
+        </>
       )}
       {showPreviewProgress && current && !followClipExpired && slideMs > 0 && (
         <PreviewSlideProgressBar
@@ -608,10 +644,13 @@ function MediaRenderer({
   const endedRef = useRef(false);
   const falseEndedRetriesRef = useRef(0);
   const lastFollowSeekAtRef = useRef(0);
+  /** Eerste `playing`-event na mount van dit item (alleen hoofd-display). */
+  const firstPlayingAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     endedRef.current = false;
     falseEndedRetriesRef.current = 0;
+    firstPlayingAtRef.current = null;
   }, [item.id, item.path]);
 
   // Decode-watchdog: als een video niet binnen 4s metadata aanlevert,
@@ -633,6 +672,45 @@ function MediaRenderer({
     }, 4000);
     return () => window.clearTimeout(watchdog);
   }, [item.id, item.path, item.type, syncPlaybackMs, onVideoPlaybackFault, item.title]);
+
+  /**
+   * Sommige clips/drivers geven een zwarte videolaag (score/UI wel zichtbaar) terwijl
+   * decode zwaar blijft proberen. Vang vroeg af: vast op t≈0, of extreem veel drops.
+   */
+  useEffect(() => {
+    if (item.type !== "VIDEO") return;
+    if (syncPlaybackMs != null) return;
+    if (!onVideoPlaybackFault) return;
+    const id = window.setInterval(() => {
+      if (endedRef.current || paused) return;
+      const v = videoRef.current;
+      if (!v || v.paused) return;
+      const t0 = firstPlayingAtRef.current;
+      if (t0 == null) return;
+      const sincePlay = Date.now() - t0;
+      if (sincePlay > 8500 && v.currentTime < 0.04) {
+        endedRef.current = true;
+        console.warn("[sponsor] video blijft hangen op t≈0 — clip overgeslagen:", item.title);
+        onVideoPlaybackFault();
+        return;
+      }
+      if (sincePlay < 5500 || v.currentTime < 1.75) return;
+      const q = typeof v.getVideoPlaybackQuality === "function" ? v.getVideoPlaybackQuality() : null;
+      if (!q) return;
+      const rendered = q.totalVideoFrames;
+      const dropped = q.droppedVideoFrames;
+      const denom = rendered + dropped;
+      if (denom < 140 || dropped / denom < 0.9) return;
+      endedRef.current = true;
+      console.warn(
+        "[sponsor] video extreem veel gedropte frames — clip overgeslagen:",
+        item.title,
+        { rendered, dropped, currentTime: v.currentTime },
+      );
+      onVideoPlaybackFault();
+    }, 900);
+    return () => window.clearInterval(id);
+  }, [item.id, item.path, item.type, item.title, paused, syncPlaybackMs, onVideoPlaybackFault]);
 
   useEffect(() => {
     if (item.type !== "VIDEO" || syncPlaybackMs == null) return;
@@ -731,8 +809,14 @@ function MediaRenderer({
       fireEndedOnce(video);
       return;
     }
-    const effectiveDur = catalogDur > 0 ? Math.max(browserDur, catalogDur) : browserDur;
-    if (video.currentTime >= effectiveDur - 0.2) {
+    let endDur: number;
+    if (catalogDur > 0 && browserDur > catalogDur * 2 + 10) {
+      /** Browser/container veel langer dan spot → niet wachten op fictieve eind-t. */
+      endDur = catalogDur;
+    } else {
+      endDur = catalogDur > 0 ? Math.max(browserDur, catalogDur) : browserDur;
+    }
+    if (video.currentTime >= endDur - 0.2) {
       fireEndedOnce(video);
     }
   };
@@ -744,11 +828,22 @@ function MediaRenderer({
     loop: false,
     muted: !(item.playAudio ?? false),
     playsInline: true,
+    onPlaying: () => {
+      if (syncPlaybackMs != null) return;
+      if (firstPlayingAtRef.current == null) firstPlayingAtRef.current = Date.now();
+    },
     onLoadedMetadata: (e: SyntheticEvent<HTMLVideoElement>) => {
       const v = e.currentTarget;
       const d = v.duration;
       if (Number.isFinite(d) && d > 0) {
-        onVideoDurationMs?.(d * 1000);
+        const catalogSec = Math.max(
+          0.5,
+          item.durationSec > 0 ? item.durationSec : 0,
+          committedPlaySec != null && committedPlaySec > 0 ? committedPlaySec : 0,
+        );
+        const capped =
+          d > catalogSec * 3 + 90 ? catalogSec : d;
+        onVideoDurationMs?.(capped * 1000);
       }
       if (syncPlaybackMs != null) {
         const syncPlaybackSec = syncPlaybackMs / 1000;

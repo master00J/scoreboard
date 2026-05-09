@@ -34,6 +34,12 @@ import {
   SPONSOR_MEDIA_PHASES,
   type SponsorMediaPhase,
 } from "@/lib/sponsor-media-phases";
+import {
+  applySponsorPlaybackOrder,
+  clampRepeat,
+  parseSponsorPlaybackOrderJson,
+  parseSponsorPlaybackRepeatsJson,
+} from "@/lib/sponsor-playback-order";
 
 const SCHEDULED_CUE_PHASES = [
   { value: "FIRST_HALF", label: "1e helft" },
@@ -51,6 +57,24 @@ async function patchMediaJson(
     body: JSON.stringify(body),
   });
   return res.ok;
+}
+
+/** Nieuwe sponsor-media achteraan in de rotatievolgorde (JSON-array); leeg = alle actieve clips. */
+async function appendSponsorPlaybackOrderRow(sponsorId: string, mediaId: string): Promise<void> {
+  try {
+    const g = await fetch(`/api/sponsors/${sponsorId}`);
+    if (!g.ok) return;
+    const sp = (await g.json()) as { sponsorPlaybackOrderJson?: string | null };
+    const ids = parseSponsorPlaybackOrderJson(sp.sponsorPlaybackOrderJson);
+    if (ids.includes(mediaId)) return;
+    await fetch(`/api/sponsors/${sponsorId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sponsorPlaybackOrderJson: JSON.stringify([...ids, mediaId]) }),
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 export function MediaPanel() {
@@ -1065,6 +1089,98 @@ function SponsorCard({
   ]);
 
   const sponsorMedia = allMedia.filter((m) => m.sponsorId === sponsor.id);
+  const orderedSponsorMedia = useMemo(
+    () => applySponsorPlaybackOrder(sponsorMedia, sponsor.sponsorPlaybackOrderJson),
+    [sponsorMedia, sponsor.sponsorPlaybackOrderJson],
+  );
+  const repeatMap = useMemo(
+    () => parseSponsorPlaybackRepeatsJson(sponsor.sponsorPlaybackRepeatsJson),
+    [sponsor.sponsorPlaybackRepeatsJson],
+  );
+  const [dragMediaId, setDragMediaId] = useState<string | null>(null);
+  const [dropTargetMediaId, setDropTargetMediaId] = useState<string | null>(null);
+
+  async function persistPlaybackOrderIds(ids: string[]) {
+    const res = await fetch(`/api/sponsors/${sponsor.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sponsorPlaybackOrderJson: JSON.stringify(ids) }),
+    });
+    if (!res.ok) {
+      toast({ title: "Volgorde opslaan mislukt", variant: "error" });
+      return;
+    }
+    onChange();
+  }
+
+  async function persistPlaybackRepeatsForMedia(mediaId: string, rawRepeat: number) {
+    const merged = {
+      ...parseSponsorPlaybackRepeatsJson(sponsor.sponsorPlaybackRepeatsJson),
+    };
+    merged[mediaId] = clampRepeat(rawRepeat);
+    const out: Record<string, number> = {};
+    for (const om of orderedSponsorMedia) {
+      const v = clampRepeat(merged[om.id] ?? 1);
+      if (v > 1) out[om.id] = v;
+    }
+    const res = await fetch(`/api/sponsors/${sponsor.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sponsorPlaybackRepeatsJson:
+          Object.keys(out).length > 0 ? JSON.stringify(out) : null,
+      }),
+    });
+    if (!res.ok) {
+      toast({ title: "Herhalingen opslaan mislukt", variant: "error" });
+      return;
+    }
+    onChange();
+  }
+
+  function reorderIds(ids: string[], fromId: string, toId: string): string[] {
+    const from = ids.indexOf(fromId);
+    const to = ids.indexOf(toId);
+    if (from < 0 || to < 0 || from === to) return [...ids];
+    const next = [...ids];
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item!);
+    return next;
+  }
+
+  async function reorderDropped(fromId: string, toId: string) {
+    const ids = orderedSponsorMedia.map((m) => m.id);
+    await persistPlaybackOrderIds(reorderIds(ids, fromId, toId));
+  }
+
+  async function moveSponsorMediaOrder(mediaId: string, dir: -1 | 1) {
+    const ids = orderedSponsorMedia.map((m) => m.id);
+    const i = ids.indexOf(mediaId);
+    if (i < 0) return;
+    const j = i + dir;
+    if (j < 0 || j >= ids.length) return;
+    const next = [...ids];
+    const t = next[i]!;
+    next[i] = next[j]!;
+    next[j] = t;
+    await persistPlaybackOrderIds(next);
+  }
+
+  async function clearSponsorPlaybackOrder() {
+    const res = await fetch(`/api/sponsors/${sponsor.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sponsorPlaybackOrderJson: null,
+        sponsorPlaybackRepeatsJson: null,
+      }),
+    });
+    if (!res.ok) {
+      toast({ title: "Standaardvolgorde niet gezet", variant: "error" });
+      return;
+    }
+    onChange();
+  }
 
   async function save() {
     setSaving(true);
@@ -1109,7 +1225,7 @@ function SponsorCard({
         return;
       }
     }
-    await fetch("/api/media", {
+    const res = await fetch("/api/media", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1121,6 +1237,9 @@ function SponsorCard({
         sponsorName: sponsor.name,
       }),
     });
+    if (!res.ok) return;
+    const created = (await res.json()) as { id?: string };
+    if (created.id) await appendSponsorPlaybackOrderRow(sponsor.id, created.id);
   }
 
   async function onUploadSponsorFiles() {
@@ -1139,11 +1258,13 @@ function SponsorCard({
   }
 
   async function attachExisting(mediaId: string) {
-    await fetch(`/api/media/${mediaId}`, {
+    const res = await fetch(`/api/media/${mediaId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sponsorId: sponsor.id, sponsorName: sponsor.name }),
     });
+    if (!res.ok) return;
+    await appendSponsorPlaybackOrderRow(sponsor.id, mediaId);
     onChange();
   }
 
@@ -1195,12 +1316,6 @@ function SponsorCard({
       const Hh = Math.max(60, activeMatch.halfBreakSec);
       tClock = halftimeTSec % Hh;
     }
-    const { consumed: consumedFromCarry, budget } = applyRosterBudgetCarry(
-      rosterCarryRef,
-      { ...rawRoster, matchId: activeMatch.id },
-      tClock,
-    );
-    let consumed = consumedFromCarry;
     let telemetryKey: string | null = null;
     if (st === "FIRST_HALF" || st === "SECOND_HALF" || st === "EXTRA_TIME") {
       telemetryKey = sponsorTelemetrySegmentKey(activeMatch.id, st, "match");
@@ -1214,12 +1329,15 @@ function SponsorCard({
       sponsorLedger != null &&
       sponsorLedger.matchId === activeMatch.id &&
       sponsorLedger.segmentKey === telemetryKey;
+    let rawForCarry: typeof rawRoster & { matchId: string } = { ...rawRoster, matchId: activeMatch.id };
     if (ledgerMatches) {
-      consumed = Math.max(
-        consumedFromCarry,
-        sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, wallMs),
-      );
+      rawForCarry = {
+        ...rawForCarry,
+        slotsUsed: Math.round(sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, wallMs)),
+        carryKey: `${rawRoster.carryKey}|ledger`,
+      };
     }
+    const { consumed, budget } = applyRosterBudgetCarry(rosterCarryRef, rawForCarry, tClock);
     liveRoster = {
       label: rawRoster.label,
       consumed,
@@ -1362,15 +1480,83 @@ function SponsorCard({
         </div>
       </div>
 
-      {sponsorMedia.length > 0 && (
+      {orderedSponsorMedia.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
+          <span>
+            <span className="font-medium text-foreground">Rotatie</span> op het stadionscherm: per clip{" "}
+            <span className="font-medium text-foreground">herhaling</span> (1–20 = zo vaak achter elkaar in de
+            ronde).{" "}
+            {orderedSponsorMedia.length > 1 ? (
+              <>
+                <span className="font-medium text-foreground">Volgorde</span> met ↑/↓ of sleep vanaf de
+                videovoorbeeld-strook. Lege instelling = uploadvolgorde, herhaling 1×.
+              </>
+            ) : (
+              <>Lege volgorde-instelling = uploadvolgorde.</>
+            )}
+          </span>
+          {(sponsor.sponsorPlaybackOrderJson || sponsor.sponsorPlaybackRepeatsJson) && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 shrink-0 text-[11px]"
+              onClick={() => void clearSponsorPlaybackOrder()}
+            >
+              Standaard (volgorde + herhaling)
+            </Button>
+          )}
+        </div>
+      )}
+
+      {orderedSponsorMedia.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          {sponsorMedia.map((m) => (
-            <div key={m.id} className="rounded-lg border border-border overflow-hidden bg-card">
-              <div className="aspect-video bg-black flex items-center justify-center">
+          {orderedSponsorMedia.map((m) => (
+            <div
+              key={m.id}
+              className={`rounded-lg border overflow-hidden bg-card ${
+                dropTargetMediaId === m.id && dragMediaId && dragMediaId !== m.id
+                  ? "border-primary ring-2 ring-primary/40"
+                  : "border-border"
+              }`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dragMediaId && dragMediaId !== m.id) setDropTargetMediaId(m.id);
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node))
+                  setDropTargetMediaId((t) => (t === m.id ? null : t));
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const from = e.dataTransfer.getData("application/x-sponsor-media-id");
+                setDropTargetMediaId(null);
+                if (from && from !== m.id) void reorderDropped(from, m.id);
+              }}
+            >
+              <div
+                className={`aspect-video bg-black flex items-center justify-center select-none ${
+                  orderedSponsorMedia.length > 1
+                    ? "cursor-grab active:cursor-grabbing"
+                    : ""
+                }${dragMediaId === m.id ? " opacity-50" : ""}`}
+                draggable={orderedSponsorMedia.length > 1}
+                onDragStart={(e) => {
+                  if (orderedSponsorMedia.length <= 1) return;
+                  e.dataTransfer.setData("application/x-sponsor-media-id", m.id);
+                  e.dataTransfer.effectAllowed = "move";
+                  setDragMediaId(m.id);
+                }}
+                onDragEnd={() => {
+                  setDragMediaId(null);
+                  setDropTargetMediaId(null);
+                }}
+              >
                 {m.type === "VIDEO" ? (
-                  <video src={mediaUrl(m.path)} muted className="w-full h-full object-cover" />
+                  <video src={mediaUrl(m.path)} muted className="w-full h-full object-cover pointer-events-none" />
                 ) : (
-                  <img src={mediaUrl(m.path)} alt="" className="w-full h-full object-cover" />
+                  <img src={mediaUrl(m.path)} alt="" className="w-full h-full object-cover pointer-events-none" />
                 )}
               </div>
               <div className="p-2 text-xs flex flex-col gap-1">
@@ -1378,6 +1564,40 @@ function SponsorCard({
                 <div className="text-muted-foreground">
                   {m.type} · {m.durationSec}s
                 </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground shrink-0">×</span>
+                  <SponsorClipRepeatField
+                    mediaId={m.id}
+                    serverRepeat={repeatMap[m.id] ?? 1}
+                    onCommit={persistPlaybackRepeatsForMedia}
+                  />
+                </div>
+                {orderedSponsorMedia.length > 1 && (
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-6 flex-1 px-1 text-[10px]"
+                      disabled={orderedSponsorMedia[0]?.id === m.id}
+                      onClick={() => void moveSponsorMediaOrder(m.id, -1)}
+                      title="Eerder in rotatie"
+                    >
+                      ↑
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-6 flex-1 px-1 text-[10px]"
+                      disabled={orderedSponsorMedia[orderedSponsorMedia.length - 1]?.id === m.id}
+                      onClick={() => void moveSponsorMediaOrder(m.id, 1)}
+                      title="Later in rotatie"
+                    >
+                      ↓
+                    </Button>
+                  </div>
+                )}
                 {m.type === "VIDEO" && (
                   <label className="flex items-center gap-1.5 text-[10px] cursor-pointer select-none">
                     <input
@@ -1407,6 +1627,43 @@ function SponsorCard({
         </div>
       )}
     </div>
+  );
+}
+
+function SponsorClipRepeatField({
+  mediaId,
+  serverRepeat,
+  onCommit,
+}: {
+  mediaId: string;
+  serverRepeat: number;
+  onCommit: (mediaId: string, raw: number) => void | Promise<void>;
+}) {
+  const [local, setLocal] = useState(() => String(serverRepeat));
+  useEffect(() => {
+    setLocal(String(serverRepeat));
+  }, [serverRepeat, mediaId]);
+  return (
+    <Input
+      type="number"
+      min={1}
+      max={20}
+      className="h-6 w-14 px-1 text-[10px]"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        const n = Number(local);
+        if (!Number.isFinite(n)) {
+          setLocal(String(serverRepeat));
+          return;
+        }
+        void Promise.resolve(onCommit(mediaId, n));
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+      }}
+      title="Aantal keer achter elkaar in één rotatieronde (1–20)"
+    />
   );
 }
 

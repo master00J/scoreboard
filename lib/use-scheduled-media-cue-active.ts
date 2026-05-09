@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import type { DisplayStatePayload } from "@/lib/desktop-bridge";
 import type { Match, ScheduledMediaCue } from "@/lib/types";
 
@@ -13,6 +13,12 @@ type Options = {
   skip?: boolean;
 };
 
+type UseScheduledMediaCueActiveResult = {
+  activeScheduledCue: ScheduledMediaCue | null;
+  /** Sluit de cue-overlay (na video `ended` of handmatig). */
+  dismissActiveScheduledCue: () => void;
+};
+
 /**
  * Zelfde geplande-media-cue actieve clip als `app/display/page.tsx` (fired-keys + reset bij match).
  * Gebruikt door het stadionscherm en door de Sponsor-HUD zodat `sponsorInterrupted` gelijk blijft.
@@ -23,7 +29,7 @@ export function useScheduledMediaCueActive({
   mode,
   elapsed,
   skip = false,
-}: Options): ScheduledMediaCue | null {
+}: Options): UseScheduledMediaCueActiveResult {
   const [scheduledCues, setScheduledCues] = useState<ScheduledMediaCue[]>([]);
   const [activeScheduledCue, setActiveScheduledCue] = useState<ScheduledMediaCue | null>(null);
   const firedScheduledCueKeysRef = useRef<Set<string>>(new Set());
@@ -32,6 +38,10 @@ export function useScheduledMediaCueActive({
     status: string | null;
     elapsed: number;
   }>({ matchId: null, status: null, elapsed: 0 });
+
+  const dismissActiveScheduledCue = useCallback(() => {
+    setActiveScheduledCue(null);
+  }, []);
 
   useEffect(() => {
     if (skip) return;
@@ -95,5 +105,7 @@ export function useScheduledMediaCueActive({
     return () => window.clearTimeout(id);
   }, [skip, activeScheduledCue]);
 
-  return skip ? null : activeScheduledCue;
+  return skip
+    ? { activeScheduledCue: null, dismissActiveScheduledCue: () => {} }
+    : { activeScheduledCue, dismissActiveScheduledCue };
 }

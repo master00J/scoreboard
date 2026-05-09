@@ -3,6 +3,7 @@ import type { Match, Sponsor } from "@/lib/types";
 import {
   activeSponsorsForSection,
   buildSponsorSlotMap,
+  prematchSpreadTimelineSeconds,
   sponsorScreenSecondsConsumed,
   sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
@@ -72,11 +73,7 @@ export function sponsorLiveProgressFromRosterRaw(
     const section = "prematch" as const;
     const active = activeSponsorsForSection(allSponsors, section);
     if (!active.some((s) => s.id === sponsor.id)) return null;
-    const budgetTotal = active.reduce(
-      (a, s) => a + sponsorSectionBudgetSeconds(s, section),
-      0,
-    );
-    const H = Math.max(60, budgetTotal);
+    const H = prematchSpreadTimelineSeconds(match, allSponsors);
     const map = buildSponsorSlotMap(active, section, H);
     const budget = sponsorSectionBudgetSeconds(sponsor, section);
     const slotsUsed =

@@ -175,28 +175,31 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
         halftimeT,
         elapsedSec,
       );
-      if (raw) {
-        const st = activeMatch.status;
-        let tClock = elapsedSec;
-        if (st === "FIRST_HALF" || st === "SECOND_HALF" || st === "EXTRA_TIME") {
-          tClock = matchPlayRosterSeconds;
-        } else if (st === "HALF_TIME") {
-          const Hh = Math.max(60, activeMatch.halfBreakSec);
-          tClock = halftimeT % Hh;
-        }
-        let slotsUsedForCarry = raw.slotsUsed;
-        let labelOut = raw.label;
-        if (ledgerMatchesSegment && sponsorLedger) {
-          slotsUsedForCarry = Math.round(
-            sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, telemetryNowMs),
+        if (raw) {
+          const st = activeMatch.status;
+          let tClock = elapsedSec;
+          if (st === "FIRST_HALF" || st === "SECOND_HALF" || st === "EXTRA_TIME") {
+            tClock = matchPlayRosterSeconds;
+          } else if (st === "HALF_TIME") {
+            const Hh = Math.max(60, activeMatch.halfBreakSec);
+            tClock = halftimeT % Hh;
+          }
+          let slotsUsedForCarry = raw.slotsUsed;
+          let labelOut = raw.label;
+          let carryKey = raw.carryKey;
+          if (ledgerMatchesSegment && sponsorLedger) {
+            slotsUsedForCarry = Math.round(
+              sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, telemetryNowMs),
+            );
+            labelOut = `${raw.label} · gemeten op scherm`;
+            /** Los van rooster-carry: anders blijft `consumedFloor` van het slotrooster boven telemetry hangen. */
+            carryKey = `${raw.carryKey}|ledger`;
+          }
+          const { consumed, budget } = applyRosterBudgetCarry(
+            carryRefFor(sponsor.id),
+            { ...raw, slotsUsed: slotsUsedForCarry, carryKey, matchId: activeMatch.id },
+            tClock,
           );
-          labelOut = `${raw.label} · gemeten op scherm`;
-        }
-        const { consumed, budget } = applyRosterBudgetCarry(
-          carryRefFor(sponsor.id),
-          { ...raw, slotsUsed: slotsUsedForCarry, matchId: activeMatch.id },
-          tClock,
-        );
         live = {
           label: labelOut,
           consumed,

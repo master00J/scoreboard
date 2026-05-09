@@ -396,6 +396,7 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("Match", "awayFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "matchSponsorMediaId", "TEXT");
   await addColumnIfMissing("Match", "closedAt", "DATETIME");
+  await addColumnIfMissing("Match", "prematchSpreadWindowSec", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Sponsor", "firstHalfScoreboardSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "firstHalfSponsorSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "halftimeScoreboardSec", "INTEGER");
@@ -404,6 +405,8 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("Sponsor", "secondHalfSponsorSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "matchFirstHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Sponsor", "matchSecondHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Sponsor", "sponsorPlaybackOrderJson", "TEXT");
+  await addColumnIfMissing("Sponsor", "sponsorPlaybackRepeatsJson", "TEXT");
   await migrateSponsorMatchHalfFromLegacy();
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPlayLog" (
@@ -1399,6 +1402,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         halftimeSeconds: true,
         imageDefaultSec: true,
         active: true,
+        sponsorPlaybackOrderJson: true,
+        sponsorPlaybackRepeatsJson: true,
       };
       const data: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(body)) {
@@ -1522,6 +1527,16 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         if (typeof body.awayScore === "number") data.awayScore = body.awayScore;
         if (body.kickoffAt === null) data.kickoffAt = null;
         else if (typeof body.kickoffAt === "string") data.kickoffAt = new Date(body.kickoffAt);
+
+        if ("prematchSpreadWindowSec" in body) {
+          const v = body.prematchSpreadWindowSec;
+          if (v === null) {
+            data.prematchSpreadWindowSec = 0;
+          } else if (typeof v === "number" && Number.isFinite(v)) {
+            const n = Math.floor(v);
+            data.prematchSpreadWindowSec = n <= 0 ? 0 : Math.min(86400, Math.max(60, n));
+          }
+        }
 
         if ("matchSponsorMediaId" in body) {
           if (body.matchSponsorMediaId === null || body.matchSponsorMediaId === "") {

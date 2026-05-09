@@ -57,6 +57,32 @@ export type SponsorTelemetryClipEnd = {
   startedAtMs: number;
 };
 
+/**
+ * Actieve clip telt alleen mee zolang het scherm hem nog als “lopend” ziet (zelfde marge als
+ * `display/page.tsx` / Sponsor-HUD). Daarna: scorebord-fase / clipEnd wacht — geen live doorschieting.
+ */
+export function ledgerActiveClipStillLiveForMatchSegment(
+  match: { id: string; status?: string },
+  section: SponsorSection,
+  sponsorLedger: SponsorLedgerPayload | null,
+  nowMs: number = Date.now(),
+): NonNullable<SponsorLedgerPayload["activeClip"]> | null {
+  if (!sponsorLedger?.activeClip) return null;
+  const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, section);
+  if (
+    !segmentKey ||
+    sponsorLedger.matchId !== match.id ||
+    sponsorLedger.segmentKey !== segmentKey
+  ) {
+    return null;
+  }
+  const ac = sponsorLedger.activeClip;
+  const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ac, nowMs);
+  const totalSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
+  if (elapsedSec >= totalSec + 0.75) return null;
+  return ac;
+}
+
 export function sponsorTelemetryActiveClipElapsedSec(
   activeClip: NonNullable<SponsorLedgerPayload["activeClip"]>,
   nowMs: number,

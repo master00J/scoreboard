@@ -152,4 +152,11 @@ export type ElectronBridge = {
   getAppResourceMetrics: () => Promise<AppResourceMetrics>;
   /** Zip met `data/stadium.db` + kopie van `uploads/` (wedstrijddag-backup). */
   exportVenueBackup: () => Promise<{ ok: boolean; canceled?: boolean; error?: string; filePath?: string }>;
+  /**
+   * Match-tab rooster: JSON-string uit userData (bestand), anders null.
+   * Betrouwbaarder dan file://-localStorage in de packaged control-UI.
+   */
+  getMatchTabLayoutSnapshot: () => string | null;
+  /** Schrijft dezelfde JSON naar userData (sync IPC). */
+  persistMatchTabLayout: (json: string) => void;
 };

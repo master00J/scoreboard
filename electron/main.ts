@@ -15,6 +15,34 @@ import { getAppResourceMetrics } from "./resource-metrics";
 
 const IS_DEV = !app.isPackaged;
 
+/**
+ * Workaround bij sommige Windows GPU-drivers: hardware-videodecode rendert een zwarte
+ * laag terwijl de rest van de UI (score) wel zichtbaar blijft. Zet vóór app-start:
+ * `STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE=1` — dan valt decode terug op software
+ * (meer CPU; HEVC kan in de browser ontbreken — liever clips als H.264).
+ */
+if (process.env.STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE === "1") {
+  app.commandLine.appendSwitch("disable-accelerated-video-decode");
+  // bootLog not yet on disk path until configure — console is enough for early startup.
+  console.log("[electron] STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE=1 → disable-accelerated-video-decode");
+}
+
+/**
+ * Volledige software-rendering (minder GPU-stress; meer CPU). Bij wit/corrupt beeld na
+ * zware sponsorvideo of driver-bugs: zet vóór start `STADIUM_DISABLE_HARDWARE_ACCELERATION=1`.
+ * Moet vóór `app.ready` — daarom direct bij module-load.
+ */
+if (process.env.STADIUM_DISABLE_HARDWARE_ACCELERATION === "1") {
+  app.disableHardwareAcceleration();
+  console.log("[electron] STADIUM_DISABLE_HARDWARE_ACCELERATION=1 → disableHardwareAcceleration()");
+}
+
+/** Minder GPU-compositing; soms helpt tegen artefacten na driver/GPU-overbelasting. */
+if (process.env.STADIUM_DISABLE_GPU_COMPOSITING === "1") {
+  app.commandLine.appendSwitch("disable-gpu-compositing");
+  console.log("[electron] STADIUM_DISABLE_GPU_COMPOSITING=1 → disable-gpu-compositing");
+}
+
 let controlWindow: BrowserWindow | null = null;
 let displayWindow: BrowserWindow | null = null;
 let runtime: typeof import("./runtime") | null = null;
@@ -336,11 +364,31 @@ function createWindows() {
     backgroundColor: "#09090b",
     show: false,
     ...(winIcon ? { icon: winIcon } : {}),
-    webPreferences: { preload, contextIsolation: true, nodeIntegration: false },
+    webPreferences: {
+      preload,
+      contextIsolation: true,
+      nodeIntegration: false,
+      /** Zelfde als display: voorkomt throttling tijdens zware output op het andere venster. */
+      backgroundThrottling: false,
+    },
   });
   void loadView(controlWindow, "control");
   controlWindow.webContents.on("did-finish-load", () => {
     void runtime?.broadcastDisplayState();
+  });
+  controlWindow.webContents.on("render-process-gone", (_event, details) => {
+    bootLog(`[control] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
+    const win = controlWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.reloadIgnoringCache();
+    }
+  });
+  controlWindow.webContents.on("unresponsive", () => {
+    bootLog("[control] renderer unresponsive -> reload");
+    const win = controlWindow;
+    if (win && !win.isDestroyed()) {
+      win.webContents.reloadIgnoringCache();
+    }
   });
   if (IS_DEV && process.env.OPEN_DEVTOOLS_ON_START === "1") {
     controlWindow.webContents.openDevTools({ mode: "detach" });
@@ -531,7 +579,21 @@ function buildMenu() {
     {
       label: "Weergave",
       submenu: [
-        { role: "reload", label: "Herladen" },
+        { role: "reload", label: "Herladen (actief venster)" },
+        {
+          label: "Herlaad bedieningspaneel",
+          click: () => {
+            const w = controlWindow;
+            if (w && !w.isDestroyed()) w.webContents.reloadIgnoringCache();
+          },
+        },
+        {
+          label: "Herlaad stadionbeeld",
+          click: () => {
+            const w = displayWindow;
+            if (w && !w.isDestroyed()) w.webContents.reloadIgnoringCache();
+          },
+        },
         { type: "separator" },
         { role: "toggleDevTools", label: "DevTools (control)" },
         {
@@ -612,6 +674,39 @@ function registerIpc() {
 
   ipcMain.on("app:getContext", (event) => {
     event.returnValue = desktopContext;
+  });
+
+  const matchTabLayoutPath = () => path.join(app.getPath("userData"), "control-match-tab-layout.json");
+
+  ipcMain.on("control:getMatchTabLayoutSnapshot", (event) => {
+    try {
+      const p = matchTabLayoutPath();
+      if (fs.existsSync(p)) {
+        const text = fs.readFileSync(p, "utf8");
+        if (text.trim()) {
+          event.returnValue = text;
+          return;
+        }
+      }
+    } catch (e) {
+      bootLog(`control:getMatchTabLayoutSnapshot ${String(e)}`);
+    }
+    event.returnValue = null;
+  });
+
+  ipcMain.on("control:persistMatchTabLayout", (event, json: unknown) => {
+    try {
+      if (typeof json !== "string" || json.length > 600_000) {
+        event.returnValue = { ok: false };
+        return;
+      }
+      fs.mkdirSync(app.getPath("userData"), { recursive: true });
+      fs.writeFileSync(matchTabLayoutPath(), json, "utf8");
+      event.returnValue = { ok: true };
+    } catch (e) {
+      bootLog(`control:persistMatchTabLayout ${String(e)}`);
+      event.returnValue = { ok: false };
+    }
   });
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
@@ -985,6 +1080,30 @@ if (!gotLock) {
       registerIpc();
       createWindows();
       wireSplashUntilControlReady();
+
+      app.on("child-process-gone", (_event, details) => {
+        if (details.type !== "GPU") return;
+        const recoverReasons = new Set([
+          "crashed",
+          "killed",
+          "abnormal-exit",
+          "oom",
+          "launch-failed",
+        ]);
+        if (!recoverReasons.has(details.reason)) return;
+        bootLog(
+          `[app] child-process-gone GPU reason=${details.reason} exitCode=${details.exitCode} — herladen beide vensters`,
+        );
+        try {
+          const c = controlWindow;
+          if (c && !c.isDestroyed()) c.webContents.reloadIgnoringCache();
+          const d = displayWindow;
+          if (d && !d.isDestroyed()) d.webContents.reloadIgnoringCache();
+        } catch (e) {
+          bootLog(`[app] child-process-gone GPU reload failed ${String(e)}`);
+        }
+      });
+
       bootLog("Desktop runtime OK — open vensters.");
     } catch (err) {
       closeSplashWindow();

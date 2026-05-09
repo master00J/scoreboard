@@ -4,8 +4,11 @@ import { useEffect, useState } from "react";
 import { isElectron } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
 
-const FEED_URL = "https://arenacue.be/api/app/release";
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const FEED_URL =
+  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_APP_RELEASE_URL?.trim()) ||
+  "https://arenacue.be/api/app/release";
+/** Min. tijd tussen twee checks (focus/visibility); eerste check bij openen altijd. */
+const REFOCUS_CHECK_MIN_MS = 90_000;
 const LS_LAST_CHECK = "arenacue-release-last-check";
 const LS_DISMISS_FOR = "arenacue-update-dismissed-for";
 
@@ -50,13 +53,12 @@ export function UpdateNudgeBanner() {
 
     let cancelled = false;
 
-    (async () => {
+    async function checkRelease(force: boolean) {
       try {
         const now = Date.now();
-        const last = Number(localStorage.getItem(LS_LAST_CHECK) || 0);
-        if (now - last < CHECK_INTERVAL_MS) {
-          setState({ kind: "hidden" });
-          return;
+        if (!force) {
+          const last = Number(localStorage.getItem(LS_LAST_CHECK) || 0);
+          if (now - last < REFOCUS_CHECK_MIN_MS) return;
         }
 
         const api = window.electronAPI;
@@ -96,10 +98,21 @@ export function UpdateNudgeBanner() {
       } catch {
         if (!cancelled) setState({ kind: "hidden" });
       }
-    })();
+    }
+
+    void checkRelease(true);
+
+    const onRefocus = () => {
+      if (document.visibilityState !== "visible") return;
+      void checkRelease(false);
+    };
+    window.addEventListener("focus", onRefocus);
+    document.addEventListener("visibilitychange", onRefocus);
 
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", onRefocus);
+      document.removeEventListener("visibilitychange", onRefocus);
     };
   }, []);
 
