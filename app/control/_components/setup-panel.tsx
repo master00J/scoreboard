@@ -10,7 +10,7 @@ import { Label, Select } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AppSettings, Match, MediaItem, Player, Team } from "@/lib/types";
 import { toast } from "@/components/ui/toast";
-import { isElectron, selectFilesViaDialog, selectFolderViaDialog } from "@/lib/electron";
+import { isElectron, selectFilesViaDialog, selectFolderViaDialog, exportVenueBackup } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
 import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
@@ -128,6 +128,37 @@ export function SetupPanel() {
 
   return (
     <div className="flex flex-col gap-6">
+      {isElectron ? (
+        <section className="bg-card border border-border rounded-xl p-6">
+          <h2 className="text-lg font-semibold mb-1">Venue-backup</h2>
+          <p className="text-sm text-muted-foreground mb-3">
+            Maakt een ZIP met de lokale database (<code className="text-xs">data/stadium.db</code>) en een kopie
+            van <code className="text-xs">uploads/</code>. Ook via het menu: Bestand → Exporteer venue-backup.
+            Herstel: zie <code className="text-xs">docs/MATCHDAY.md</code>.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void (async () => {
+                const r = await exportVenueBackup();
+                if (r.canceled) return;
+                if (!r.ok) {
+                  toast({ title: "Backup mislukt", description: r.error ?? "", variant: "error" });
+                  return;
+                }
+                toast({
+                  title: "Backup opgeslagen",
+                  description: r.filePath ?? "",
+                  variant: "success",
+                });
+              })();
+            }}
+          >
+            Exporteer backup (ZIP)…
+          </Button>
+        </section>
+      ) : null}
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-center justify-between mb-4 gap-4">
           <div>

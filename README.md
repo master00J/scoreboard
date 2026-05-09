@@ -4,6 +4,8 @@ Production-grade football stadium display control system. **Desktop-app (Electro
 
 ## Architecture
 
+Zie ook `docs/ARCHITECTURE_LOCAL.md` (lokaal scorebord vs. optionele Website/cloud-randen).
+
 - **Electron main process** — SQLite-database in de gebruikersmap (`userData/data/stadium.db`), IPC-bridge voor veilige `/api`-achtige calls, twee vensters (control + display).
 - **`/control`** — operatorpanel (laptop / tablet).
 - **`/display`** — fullscreen-output voor het grote scherm (canvas 1920×1080, schaalt naar 16:9).
@@ -17,7 +19,8 @@ Electron · React · TypeScript · Tailwind · shadcn/ui · Framer Motion · Pri
 ## Setup
 
 ```bash
-npm install
+npm install --legacy-peer-deps
+npm test                 # Vitest (timer, commands, sponsor-klok)
 npm run db:push         # databasepad wordt bij eerste start door Electron gezet (zie logs)
 npm run db:seed         # optioneel: default playlists + demo match
 npm run dev             # Electron development build
@@ -31,7 +34,7 @@ Daarna opent de app het control- en displayvenster lokaal.
 npm run build
 ```
 
-Produceert Windows-artifacts onder `dist/` (o.a. portable / NSIS via electron-builder).
+Produceert Windows-artifacts onder `dist/` (o.a. portable / NSIS via electron-builder). Daarna optioneel: `npm run release:checksums` voor `dist/SHA256SUMS.txt`.
 
 ## Systeemvereisten (productie / wedstrijddag)
 
@@ -47,7 +50,8 @@ Test altijd op de **werkelijke wedstrijd-PC** vóór de eerste live inzet.
 - Cloud control viewer-sessies vereisen een venue-scoped pair token (geen anonieme read-only tokens).
 - Gevoelige secrets (licentie/cloud keys) worden in `userData` versleuteld opgeslagen wanneer Windows encryptie beschikbaar is.
 - Openbare website endpoints hebben basis rate limiting (anti-spam / anti-abuse).
-- Excel export gebruikt SheetJS **write-only** (geen import). Als je ooit XLSX import toevoegt: upgrade SheetJS naar een versie die CVE-2023-30533 expliciet fixt.
+- Excel export (proof-of-play) gebruikt **ExcelJS** (write-only `.xlsx`), geen import van spreadsheets in de app.
+- **Mobiele LAN-bridge** (optioneel): omgevingsvariabelen `MOBILE_BRIDGE_PORT`, `MOBILE_BRIDGE_BIND` (`0.0.0.0` of `127.0.0.1`), `MOBILE_BRIDGE_PAIRING_CODE`, `MOBILE_BRIDGE_OPERATOR_PIN` (6–12 cijfers), `MOBILE_BRIDGE_SESSION_TTL_MS`. Operator-PIN is minstens 6 cijfers.
 
 ## Build phases (functioneel)
 
@@ -81,6 +85,7 @@ public/uploads/  user media (gitignored)
 - Commands validated with Zod before mutating state
 - IPC handlers guarded — een foutmelding crash’t de app niet volledig
 - Mutaties naar SQLite; timer server-side / authoritative waar van toepassing
+- **Wedstrijddag:** backup/restore-checklist in `docs/MATCHDAY.md`
 
 ## Cloud remote control (Optie A)
 

@@ -39,8 +39,28 @@ function randomPairingCode(): string {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
 
+/** Minimaal 6 cijfers (operator); pairing blijft 6 cijfers. */
 function randomOperatorPin(): string {
-  return String(Math.floor(1000 + Math.random() * 9000));
+  return String(100000 + Math.floor(Math.random() * 900000));
+}
+
+function normalizeOperatorPinFromEnv(raw: string | undefined, log: (line: string) => void): string {
+  const t = raw?.trim() ?? "";
+  if (/^\d{6,12}$/.test(t)) return t;
+  if (t.length > 0) {
+    log(`[mobile-bridge] MOBILE_BRIDGE_OPERATOR_PIN genegeerd (verwacht 6–12 cijfers); willekeurige PIN gegenereerd.`);
+  }
+  return randomOperatorPin();
+}
+
+function parseBindHost(raw: string | undefined, log: (line: string) => void): string {
+  const t = (raw ?? "0.0.0.0").trim();
+  if (t === "0.0.0.0" || t === "127.0.0.1" || t === "localhost") {
+    return t === "localhost" ? "127.0.0.1" : t;
+  }
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(t)) return t;
+  log(`[mobile-bridge] MOBILE_BRIDGE_BIND ongeldig (${t}), val terug op 0.0.0.0`);
+  return "0.0.0.0";
 }
 
 function readBody(req: http.IncomingMessage): Promise<string> {
@@ -86,11 +106,13 @@ export async function startMobileBridge(
   const preferredPort = Number(process.env.MOBILE_BRIDGE_PORT ?? "17890");
   const port = Number.isFinite(preferredPort) ? preferredPort : 17890;
   const pairingCode = process.env.MOBILE_BRIDGE_PAIRING_CODE?.trim() || randomPairingCode();
-  const operatorPin = process.env.MOBILE_BRIDGE_OPERATOR_PIN?.trim() || randomOperatorPin();
+  const operatorPin = normalizeOperatorPinFromEnv(process.env.MOBILE_BRIDGE_OPERATOR_PIN, options.log);
+  const bindHost = parseBindHost(process.env.MOBILE_BRIDGE_BIND, options.log);
   const sessionTtlMs = Number(process.env.MOBILE_BRIDGE_SESSION_TTL_MS ?? 1000 * 60 * 60 * 8);
 
   const sessions = new Map<string, { expiresAtMs: number; role: SessionRole }>();
   const failedAttemptsByIp = new Map<string, number[]>();
+  const failedOperatorPinByIp = new Map<string, number[]>();
 
   function cleanupSessions() {
     const now = Date.now();
@@ -115,6 +137,23 @@ export async function startMobileBridge(
     const arr = failedAttemptsByIp.get(ip) ?? [];
     arr.push(Date.now());
     failedAttemptsByIp.set(ip, arr);
+  }
+
+  function registerOperatorPinFailedAttempt(ip: string) {
+    const arr = failedOperatorPinByIp.get(ip) ?? [];
+    arr.push(Date.now());
+    failedOperatorPinByIp.set(ip, arr);
+  }
+
+  /** Strengere lockout na herhaald foute operator-PIN (pairing was wél correct). */
+  function isOperatorPinLocked(ip: string): boolean {
+    const now = Date.now();
+    const windowMs = 15 * 60 * 1000;
+    const maxAttempts = 5;
+    const arr = failedOperatorPinByIp.get(ip) ?? [];
+    const recent = arr.filter((t) => now - t < windowMs);
+    failedOperatorPinByIp.set(ip, recent);
+    return recent.length >= maxAttempts;
   }
 
   function issueSessionToken(role: SessionRole) {
@@ -180,16 +219,15 @@ export async function startMobileBridge(
         }
         const requestedRole: SessionRole = body.role === "operator" ? "operator" : "viewer";
         if (requestedRole === "operator") {
-          if (!operatorPin) {
-            registerFailedAttempt(remoteIp);
-            writeJson(res, 403, {
+          if (isOperatorPinLocked(remoteIp)) {
+            writeJson(res, 429, {
               ok: false,
-              error: "Operator mode is niet geconfigureerd op desktop (MOBILE_BRIDGE_OPERATOR_PIN).",
+              error: "Te veel foute operator-PIN-pogingen. Probeer over ca. 15 minuten opnieuw of herstart de desktop-app.",
             });
             return;
           }
           if ((body.operatorPin ?? "").trim() !== operatorPin) {
-            registerFailedAttempt(remoteIp);
+            registerOperatorPinFailedAttempt(remoteIp);
             writeJson(res, 401, { ok: false, error: "Onjuiste operator PIN." });
             return;
           }
@@ -265,13 +303,13 @@ export async function startMobileBridge(
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, "0.0.0.0", () => {
+    server.listen(port, bindHost, () => {
       server.off("error", reject);
       resolve();
     });
   });
 
-  options.log(`[mobile-bridge] actief op poort ${port}`);
+  options.log(`[mobile-bridge] actief op ${bindHost}:${port}`);
   options.log("[mobile-bridge] pairing actief (code/pin afgeschermd)");
 
   return {

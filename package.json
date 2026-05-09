@@ -14,6 +14,9 @@
     "renderer:build": "node scripts/build-renderer.mjs",
     "electron:compile": "tsc -p electron/tsconfig.json",
     "legal:desktop": "node scripts/assemble-desktop-legal-bundle.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "release:checksums": "node scripts/write-release-checksums.mjs",
     "soak:test": "node scripts/soak-test.mjs",
     "soak:sponsor": "node scripts/sponsor-rotation-soak.mjs",
     "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-windows-icon.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder",
@@ -60,7 +63,8 @@
       ],
       "language": "1043"
     },
-    "asar": false,
+    "asar": true,
+    "asarUnpack": ["node_modules/.prisma/**/*"],
     "files": [
       "electron-dist/**/*",
       "renderer-dist/**/*",
@@ -106,7 +110,7 @@
     "react-hook-form": "^7.53.2",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
-    "xlsx": "^0.18.5",
+    "exceljs": "^4.4.0",
     "zod": "^3.23.8",
     "zustand": "^5.0.1"
   },
@@ -126,6 +130,7 @@
     "tailwindcss": "^3.4.14",
     "to-ico": "^1.1.5",
     "tsx": "^4.19.2",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "vitest": "^3.1.4"
   }
 }

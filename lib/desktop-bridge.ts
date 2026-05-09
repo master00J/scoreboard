@@ -93,7 +93,10 @@ export type MobileBridgeInfo = {
   pairingCode: string | null;
   operatorPin: string | null;
   bridgeUrls: string[];
+  /** LAN ACPAIR-codes zonder operator-PIN (alleen viewer in de QR). */
   pairCodes: string[];
+  /** Zelfde URLs als `pairCodes`, mét operator-PIN — alleen tonen in vertrouwde omgeving. */
+  pairCodesOperator: string[];
   operatorPinConfigured: boolean;
   cloud: {
     enabled: boolean;
@@ -147,4 +150,6 @@ export type ElectronBridge = {
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
   /** CPU/RAM van deze app (Electron); GPU = GPU-hulpproces. */
   getAppResourceMetrics: () => Promise<AppResourceMetrics>;
+  /** Zip met `data/stadium.db` + kopie van `uploads/` (wedstrijddag-backup). */
+  exportVenueBackup: () => Promise<{ ok: boolean; canceled?: boolean; error?: string; filePath?: string }>;
 };

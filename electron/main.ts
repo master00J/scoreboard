@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import { app, BrowserWindow, desktopCapturer, ipcMain, dialog, Menu, screen, session, shell } from "electron";
 import fs from "fs";
 import os from "os";
@@ -20,6 +21,7 @@ let runtime: typeof import("./runtime") | null = null;
 let desktopContext: ElectronBridge["context"] | null = null;
 let mobileBridge: MobileBridgeHandle | null = null;
 let cloudAgent: CloudAgentHandle | null = null;
+let splashWindow: BrowserWindow | null = null;
 
 function bootLogPath(): string {
   return path.join(app.getPath("userData"), "boot.log");
@@ -168,15 +170,23 @@ function localNetworkUrls(port: number): string[] {
   return urls.length > 0 ? urls : [`http://localhost:${port}`];
 }
 
-function mobileLocalPairCodes(handle: MobileBridgeHandle): string[] {
+function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, operatorPinForQr: string): string[] {
   return localNetworkUrls(handle.port).map((bridgeUrl) =>
     [
       "ACPAIR:local",
       encodeURIComponent(bridgeUrl),
       encodeURIComponent(handle.pairingCode),
-      encodeURIComponent(handle.operatorPin ?? ""),
+      encodeURIComponent(operatorPinForQr),
     ].join("|"),
   );
+}
+
+function mobileLocalPairCodesViewer(handle: MobileBridgeHandle): string[] {
+  return mobileLocalPairCodesWithPin(handle, "");
+}
+
+function mobileLocalPairCodesOperator(handle: MobileBridgeHandle): string[] {
+  return mobileLocalPairCodesWithPin(handle, handle.operatorPin ?? "");
 }
 
 /**
@@ -198,6 +208,120 @@ function applyDisplayFullscreen(win: BrowserWindow | null) {
   }
 }
 
+function closeSplashWindow() {
+  if (splashWindow && !splashWindow.isDestroyed()) {
+    try {
+      splashWindow.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  splashWindow = null;
+}
+
+function splashPageHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:" />
+  <title>Stadium Scoreboard</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+      background: #09090b;
+      color: #fafafa;
+      -webkit-font-smoothing: antialiased;
+    }
+    .spinner {
+      width: 42px;
+      height: 42px;
+      border: 3px solid #27272a;
+      border-top-color: #22c55e;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    h1 { font-size: 15px; font-weight: 600; margin: 0 0 8px; letter-spacing: 0.02em; }
+    p { font-size: 12px; color: #a1a1aa; margin: 0; text-align: center; max-width: 300px; line-height: 1.45; }
+  </style>
+</head>
+<body>
+  <div class="spinner" aria-hidden="true"></div>
+  <h1>Stadium Scoreboard</h1>
+  <p>Bezig met opstarten…<br />Database en bedieningsvenster worden geladen. Dit kan enkele seconden duren.</p>
+</body>
+</html>`;
+}
+
+function createSplashWindow() {
+  closeSplashWindow();
+  const winIcon = windowIconPath();
+  const w = new BrowserWindow({
+    width: 440,
+    height: 300,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    center: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: true,
+    backgroundColor: "#09090b",
+    ...(winIcon ? { icon: winIcon } : {}),
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  splashWindow = w;
+  const url = `data:text/html;charset=utf-8,${encodeURIComponent(splashPageHtml())}`;
+  void w.loadURL(url);
+}
+
+/** Verberg splash zodra control klaar is om getoond te worden (of bij fout/timeout). */
+function wireSplashUntilControlReady() {
+  const ctrl = controlWindow;
+  if (!ctrl) {
+    closeSplashWindow();
+    return;
+  }
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    closeSplashWindow();
+    if (!ctrl.isDestroyed() && !ctrl.isVisible()) {
+      ctrl.show();
+    }
+  };
+
+  ctrl.once("ready-to-show", finish);
+  ctrl.webContents.once("did-fail-load", (_event, errorCode, errorDescription) => {
+    bootLog(`[control] did-fail-load ${errorCode} ${errorDescription}`);
+    finish();
+  });
+
+  setTimeout(() => {
+    if (splashWindow && !splashWindow.isDestroyed()) {
+      bootLog("[splash] timeout — controlvenster wordt alsnog getoond");
+      finish();
+    }
+  }, 60_000);
+}
+
 function createWindows() {
   const preload = path.join(__dirname, "preload.js");
 
@@ -210,7 +334,7 @@ function createWindows() {
     minHeight: 600,
     title: "Stadium Scoreboard — Control",
     backgroundColor: "#09090b",
-    show: true,
+    show: false,
     ...(winIcon ? { icon: winIcon } : {}),
     webPreferences: { preload, contextIsolation: true, nodeIntegration: false },
   });
@@ -272,12 +396,109 @@ function createWindows() {
   buildMenu();
 }
 
+function psSingleQuoteEscape(p: string): string {
+  return p.replace(/'/g, "''");
+}
+
+async function runVenueBackupExport(parent: BrowserWindow | null): Promise<{
+  ok: boolean;
+  canceled?: boolean;
+  error?: string;
+  filePath?: string;
+}> {
+  const ctx = desktopContext;
+  if (!ctx) return { ok: false, error: "Desktop context ontbreekt." };
+  const dbSrc = path.join(ctx.userDataDir, "data", "stadium.db");
+  if (!fs.existsSync(dbSrc)) {
+    return { ok: false, error: `Database niet gevonden: ${dbSrc}` };
+  }
+
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const win = parent ?? controlWindow;
+  const dialogOpts = {
+    title: "Venue-backup opslaan",
+    defaultPath: path.join(app.getPath("documents"), `Stadium-venue-backup-${stamp}.zip`),
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+  };
+  const save = win
+    ? await dialog.showSaveDialog(win, dialogOpts)
+    : await dialog.showSaveDialog(dialogOpts);
+  if (save.canceled || !save.filePath) return { ok: false, canceled: true };
+
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stadium-bk-"));
+  const staging = path.join(tmpRoot, "stadium-backup");
+  try {
+    fs.mkdirSync(path.join(staging, "data"), { recursive: true });
+    fs.mkdirSync(path.join(staging, "uploads"), { recursive: true });
+    fs.copyFileSync(dbSrc, path.join(staging, "data", "stadium.db"));
+    if (fs.existsSync(ctx.uploadsDir)) {
+      fs.cpSync(ctx.uploadsDir, path.join(staging, "uploads"), { recursive: true });
+    }
+    const zipTarget = save.filePath.toLowerCase().endsWith(".zip") ? save.filePath : `${save.filePath}.zip`;
+
+    if (process.platform === "win32") {
+      const cmd = `Compress-Archive -LiteralPath '${psSingleQuoteEscape(staging)}' -DestinationPath '${psSingleQuoteEscape(zipTarget)}' -Force`;
+      const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd], {
+        encoding: "utf8",
+      });
+      if (r.status !== 0) {
+        bootLog(`[backup] powershell failed: ${r.stderr ?? r.stdout ?? "unknown"}`);
+        return { ok: false, error: r.stderr || r.stdout || "ZIP-export mislukt (PowerShell)." };
+      }
+    } else {
+      const r = spawnSync("zip", ["-r", "-q", zipTarget, "stadium-backup"], {
+        cwd: tmpRoot,
+        encoding: "utf8",
+      });
+      if (r.status !== 0) {
+        bootLog(`[backup] zip failed: ${r.stderr ?? ""}`);
+        return {
+          ok: false,
+          error: "ZIP-export mislukt (installeer het `zip`-commando, of voer backup uit op Windows).",
+        };
+      }
+    }
+
+    bootLog(`[backup] venue export OK: ${zipTarget}`);
+    return { ok: true, filePath: zipTarget };
+  } finally {
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 function buildMenu() {
   const uploadsDir = desktopContext?.uploadsDir ?? path.join(app.getPath("userData"), "uploads");
   const menu = Menu.buildFromTemplate([
     {
       label: "Bestand",
       submenu: [
+        {
+          label: "Exporteer venue-backup (ZIP)…",
+          click: async () => {
+            const r = await runVenueBackupExport(controlWindow);
+            if (r.canceled) return;
+            if (!r.ok) {
+              await dialog.showMessageBox({
+                type: "error",
+                title: "Venue-backup",
+                message: "Exporteren mislukt.",
+                detail: r.error ?? "Onbekende fout",
+              });
+              return;
+            }
+            await dialog.showMessageBox({
+              type: "info",
+              title: "Venue-backup",
+              message: "Backup opgeslagen.",
+              detail: r.filePath ?? "",
+            });
+          },
+        },
+        { type: "separator" },
         {
           label: "Verberg display-venster",
           click: () => displayWindow?.hide(),
@@ -403,7 +624,8 @@ function registerIpc() {
     pairingCode: mobileBridge?.pairingCode ?? null,
     operatorPin: mobileBridge?.operatorPin ?? null,
     bridgeUrls: mobileBridge ? localNetworkUrls(mobileBridge.port) : [],
-    pairCodes: mobileBridge ? mobileLocalPairCodes(mobileBridge) : [],
+    pairCodes: mobileBridge ? mobileLocalPairCodesViewer(mobileBridge) : [],
+    pairCodesOperator: mobileBridge ? mobileLocalPairCodesOperator(mobileBridge) : [],
     operatorPinConfigured: !!mobileBridge?.operatorPin,
     cloud: {
       enabled: cloudAgent != null,
@@ -412,6 +634,10 @@ function registerIpc() {
       pairCode: cloudAgent?.customerPairCode ?? null,
     },
   }));
+
+  ipcMain.handle("backup:exportVenue", async () => {
+    return runVenueBackupExport(BrowserWindow.getFocusedWindow() ?? controlWindow);
+  });
 
   ipcMain.handle("shell:openExternal", async (_, url: unknown) => {
     if (typeof url !== "string" || !/^https:\/\//i.test(url.trim())) {
@@ -752,12 +978,16 @@ if (!gotLock) {
       }
     });
 
+    createSplashWindow();
+
     try {
       await loadRuntime();
       registerIpc();
       createWindows();
+      wireSplashUntilControlReady();
       bootLog("Desktop runtime OK — open vensters.");
     } catch (err) {
+      closeSplashWindow();
       const message = err instanceof Error ? err.message : String(err);
       bootLog(`FATAL: ${message}`);
       dialog.showErrorBox(
@@ -774,6 +1004,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", () => {
+  closeSplashWindow();
   if (mobileBridge) {
     void mobileBridge.stop();
     mobileBridge = null;

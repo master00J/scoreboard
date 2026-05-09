@@ -146,7 +146,7 @@ export function ProofOfPlayPanel() {
         };
         const bytes =
           format === "xlsx"
-            ? buildProofOfPlayXlsx(exportRows, exportSummary, meta)
+            ? await buildProofOfPlayXlsx(exportRows, exportSummary, meta)
             : buildProofOfPlayPdf(exportRows, exportSummary, meta);
         const stamp = new Date().toISOString().slice(0, 10);
         const ext = format === "xlsx" ? "xlsx" : "pdf";

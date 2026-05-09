@@ -85,3 +85,16 @@ export async function exportMatch(
     a.click();
   }
 }
+
+/** ZIP met `data/stadium.db` + `uploads/` (desktop). */
+export async function exportVenueBackup(): Promise<{
+  ok: boolean;
+  canceled?: boolean;
+  error?: string;
+  filePath?: string;
+}> {
+  if (!isElectron || !window.electronAPI?.exportVenueBackup) {
+    return { ok: false, error: "Alleen beschikbaar in de desktop-app." };
+  }
+  return window.electronAPI.exportVenueBackup();
+}

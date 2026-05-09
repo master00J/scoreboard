@@ -152,18 +152,27 @@ export default function ControlPage() {
   );
 }
 
+function buildLocalPairCode(bridgeUrl: string, pairingCode: string, operatorPinForQr: string) {
+  return [
+    "ACPAIR:local",
+    encodeURIComponent(bridgeUrl),
+    encodeURIComponent(pairingCode),
+    encodeURIComponent(operatorPinForQr),
+  ].join("|");
+}
+
 function MobileBridgeBadge({ info }: { info: MobileBridgeInfo | null }) {
+  const [showOperatorSecrets, setShowOperatorSecrets] = useState(false);
   const bridgeUrl = info?.bridgeUrls[0] ?? (info?.port ? `http://localhost:${info.port}` : "");
-  const localPairCode =
+  const localPairCodeViewer =
     info?.pairCodes[0] ??
+    (bridgeUrl && info?.pairingCode ? buildLocalPairCode(bridgeUrl, info.pairingCode, "") : "");
+  const localPairCodeOperator =
+    info?.pairCodesOperator?.[0] ??
     (bridgeUrl && info?.pairingCode
-      ? [
-          "ACPAIR:local",
-          encodeURIComponent(bridgeUrl),
-          encodeURIComponent(info.pairingCode),
-          encodeURIComponent(info.operatorPin ?? ""),
-        ].join("|")
+      ? buildLocalPairCode(bridgeUrl, info.pairingCode, info.operatorPin ?? "")
       : "");
+  const activeLanPairCode = showOperatorSecrets ? localPairCodeOperator : localPairCodeViewer;
 
   if (!info?.enabled && !info?.cloud.enabled) return null;
 
@@ -195,14 +204,31 @@ function MobileBridgeBadge({ info }: { info: MobileBridgeInfo | null }) {
       {info.enabled && info.pairingCode ? (
         <div className="rounded-lg border border-border bg-card p-3 text-xs shadow-sm">
           <div className="flex items-center gap-3">
-            <PairCodeQr pairCode={localPairCode} label="LAN QR-code" />
+            <PairCodeQr pairCode={activeLanPairCode} label="LAN QR-code" />
         <div className="flex flex-col gap-1">
           <span className="font-semibold text-foreground">Mobiele app via LAN</span>
           <span className="text-muted-foreground">Snelste optie op hetzelfde netwerk.</span>
+          {!showOperatorSecrets ? (
+            <span className="text-muted-foreground">
+              Standaardtoon: alleen <strong>viewer</strong>-QR (geen operator-PIN in de code). Vink hieronder aan om
+              operator-koppelcode en PIN te tonen.
+            </span>
+          ) : null}
           <span className="font-mono text-muted-foreground">pairing: {info.pairingCode}</span>
-          {info.operatorPin && (
+          {info.operatorPin && showOperatorSecrets ? (
             <span className="font-mono text-green-500">operator PIN: {info.operatorPin}</span>
-          )}
+          ) : info.operatorPin ? (
+            <span className="font-mono text-muted-foreground">operator PIN: ••••••</span>
+          ) : null}
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              className="rounded border-border"
+              checked={showOperatorSecrets}
+              onChange={(e) => setShowOperatorSecrets(e.target.checked)}
+            />
+            <span>Toon operator-PIN en volledige LAN-koppelcode (QR)</span>
+          </label>
           {bridgeUrl && (
             <button
               type="button"
@@ -216,13 +242,16 @@ function MobileBridgeBadge({ info }: { info: MobileBridgeInfo | null }) {
               {bridgeUrl}
             </button>
           )}
-          {localPairCode && (
+          {activeLanPairCode && (
             <button
               type="button"
               className="w-fit text-primary underline"
               onClick={() => {
-                void navigator.clipboard?.writeText(localPairCode);
-                toast({ title: "LAN koppelcode gekopieerd" });
+                void navigator.clipboard?.writeText(activeLanPairCode);
+                toast({
+                  title: "LAN koppelcode gekopieerd",
+                  description: showOperatorSecrets ? "Inclusief operator-PIN" : "Alleen viewer",
+                });
               }}
             >
               Kopieer LAN-code

@@ -6,9 +6,10 @@ De **wedstrijd-PC** die de display en video draait heeft hogere eisen dan deze t
 
 ## 1) Desktop starten
 
-Start de desktop-app zoals normaal. In de boot-log verschijnt daarna:
+Start de desktop-app zoals normaal. In de boot-log verschijnt daarna o.a.:
 
-- `[mobile-bridge] actief op poort ... (pairing-code=123456)`
+- `[mobile-bridge] actief op 0.0.0.0:17890` (of `127.0.0.1` als je `MOBILE_BRIDGE_BIND` zo zet)
+- pairing-code (6 cijfers) en operator-PIN (**minstens 6 cijfers**), of vast via env — zie root-`README.md`
 
 Die pairing-code heb je nodig in de mobiele app.
 

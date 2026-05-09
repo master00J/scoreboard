@@ -1,6 +1,6 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { XlsxWriteOnly } from "./xlsx-write-only";
+import ExcelJS from "exceljs";
 
 /** Rij uit GET /api/sponsor-plays — gelijk aan control panel. */
 export type ProofOfPlayRow = {
@@ -83,12 +83,13 @@ function fulfillmentPct(actual: number, expected: number): string {
   return `${Math.round((actual / expected) * 100)}%`;
 }
 
-export function buildProofOfPlayXlsx(
+export async function buildProofOfPlayXlsx(
   rows: ProofOfPlayRow[],
   summary: ProofOfPlaySummaryRow[],
   meta: ProofOfPlayExportMeta,
-): Uint8Array {
-  const wb = XlsxWriteOnly.utils.book_new();
+): Promise<Uint8Array> {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "ArenaCue";
 
   const overview: (string | number)[][] = [
     ["ArenaCue · Proof-of-play"],
@@ -113,15 +114,14 @@ export function buildProofOfPlayXlsx(
       fulfillmentPct(s.actualSec, s.expectedSec),
     ]);
   }
-  const wsRapport = XlsxWriteOnly.utils.aoa_to_sheet(overview);
-  wsRapport["!cols"] = [
-    { wch: 32 },
-    { wch: 22 },
-    { wch: 18 },
-    { wch: 14 },
-    { wch: 12 },
-  ];
-  XlsxWriteOnly.utils.book_append_sheet(wb, wsRapport, "Rapport");
+
+  const wsRapport = wb.addWorksheet("Rapport");
+  overview.forEach((row) => wsRapport.addRow(row));
+  wsRapport.getColumn(1).width = 32;
+  wsRapport.getColumn(2).width = 22;
+  wsRapport.getColumn(3).width = 18;
+  wsRapport.getColumn(4).width = 14;
+  wsRapport.getColumn(5).width = 12;
 
   const detailHead = [
     "Einde",
@@ -147,23 +147,23 @@ export function buildProofOfPlayXlsx(
     r.actualSec,
     r.clipSessionId,
   ]);
-  const wsDetail = XlsxWriteOnly.utils.aoa_to_sheet([detailHead, ...detailBody]);
-  wsDetail["!cols"] = [
-    { wch: 18 },
-    { wch: 24 },
-    { wch: 36 },
-    { wch: 22 },
-    { wch: 18 },
-    { wch: 14 },
-    { wch: 14 },
-    { wch: 12 },
-    { wch: 12 },
-    { wch: 38 },
-  ];
-  XlsxWriteOnly.utils.book_append_sheet(wb, wsDetail, "Detail");
 
-  const buf = XlsxWriteOnly.writeArrayBuffer(wb);
-  return new Uint8Array(buf);
+  const wsDetail = wb.addWorksheet("Detail");
+  wsDetail.addRow(detailHead);
+  detailBody.forEach((r) => wsDetail.addRow(r));
+  wsDetail.getColumn(1).width = 18;
+  wsDetail.getColumn(2).width = 24;
+  wsDetail.getColumn(3).width = 36;
+  wsDetail.getColumn(4).width = 22;
+  wsDetail.getColumn(5).width = 18;
+  wsDetail.getColumn(6).width = 14;
+  wsDetail.getColumn(7).width = 14;
+  wsDetail.getColumn(8).width = 12;
+  wsDetail.getColumn(9).width = 12;
+  wsDetail.getColumn(10).width = 38;
+
+  const buf = await wb.xlsx.writeBuffer();
+  return new Uint8Array(buf as ArrayBuffer);
 }
 
 type DocWithAutoTable = jsPDF & {
