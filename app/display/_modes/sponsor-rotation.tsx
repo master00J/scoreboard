@@ -3,6 +3,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
+import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import type { Playlist, PlaylistItemFull } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
 import {
@@ -32,6 +33,12 @@ function FallbackMediaSlide({
   const src = mediaUrl(media.path);
   const videoRef = useRef<HTMLVideoElement>(null);
   useEffect(() => {
+    if (media.type !== "VIDEO") return;
+    return () => {
+      releaseHtmlVideoElement(videoRef.current);
+    };
+  }, [media.path, media.type]);
+  useEffect(() => {
     if (media.type !== "VIDEO" || !(media.playAudio ?? false)) return;
     const v = videoRef.current;
     if (!v) return;
@@ -51,6 +58,7 @@ function FallbackMediaSlide({
             loop
             muted={!(media.playAudio ?? false)}
             playsInline
+            preload="auto"
             className="max-h-full max-w-full"
             style={{ objectFit: "contain", objectPosition: "center" }}
           />
@@ -58,6 +66,7 @@ function FallbackMediaSlide({
           <img
             src={src}
             alt={media.title}
+            decoding="async"
             className="max-h-full max-w-full"
             style={{ objectFit: "contain", objectPosition: "center" }}
           />
@@ -76,6 +85,7 @@ function FallbackMediaSlide({
           loop
           muted={!(media.playAudio ?? false)}
           playsInline
+          preload="auto"
           style={DISPLAY_COVER_MEDIA_STYLE}
         />
       </div>
@@ -83,7 +93,7 @@ function FallbackMediaSlide({
   }
   return (
     <div className="absolute inset-0 overflow-hidden bg-black">
-      <img src={src} alt={media.title} style={DISPLAY_COVER_MEDIA_STYLE} />
+      <img src={src} alt={media.title} decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
     </div>
   );
 }
@@ -234,7 +244,7 @@ export function SponsorRotation({
   }
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black">
+    <div className="absolute inset-0 overflow-hidden bg-black contain-layout contain-paint">
       <AnimatePresence mode="wait">
         <motion.div
           key={current.id + "-" + index}
@@ -263,6 +273,14 @@ function MediaRenderer({
 }) {
   const src = mediaUrl(item.media.path);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (item.media.type !== "VIDEO") return;
+    return () => {
+      releaseHtmlVideoElement(videoRef.current);
+    };
+  }, [item.media.id, item.media.path, item.media.type]);
+
   useEffect(() => {
     if (item.media.type !== "VIDEO" || !(item.media.playAudio ?? false)) return;
     const v = videoRef.current;
@@ -282,6 +300,7 @@ function MediaRenderer({
             autoPlay
             muted={!(item.media.playAudio ?? false)}
             playsInline
+            preload="auto"
             className="max-h-full max-w-full"
             style={{ objectFit: "contain", objectPosition: "center" }}
           />
@@ -289,6 +308,7 @@ function MediaRenderer({
           <img
             src={src}
             alt={item.media.title}
+            decoding="async"
             className="max-h-full max-w-full"
             style={{ objectFit: "contain", objectPosition: "center" }}
           />
@@ -306,6 +326,7 @@ function MediaRenderer({
           autoPlay
           muted={!(item.media.playAudio ?? false)}
           playsInline
+          preload="auto"
           style={DISPLAY_COVER_MEDIA_STYLE}
         />
       </div>
@@ -313,7 +334,7 @@ function MediaRenderer({
   }
   return (
     <div className="absolute inset-0 overflow-hidden bg-black">
-      <img src={src} alt={item.media.title} style={DISPLAY_COVER_MEDIA_STYLE} />
+      <img src={src} alt={item.media.title} decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
     </div>
   );
 }

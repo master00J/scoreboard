@@ -15,6 +15,7 @@ import type { MediaItem, Sponsor, SponsorSection } from "@/lib/types";
 import { matchPlayBudgetSeconds } from "@/lib/sponsor-distribution";
 import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
 import { reportSponsorClipEnd, reportSponsorClipStart } from "@/lib/use-socket";
+import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import { mediaUrl } from "@/lib/media-url";
 import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
 import { mediaAllowedForSponsorPhase } from "@/lib/sponsor-media-phases";
@@ -148,6 +149,9 @@ export function SponsorBudgetRotation({
   });
   const tieBreakCursorRef = useRef(0);
   const videoFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const videoFaultBurstRef = useRef<number[]>([]);
+  const videoFaultCooldownUntilRef = useRef(0);
+  const lastVideoFaultAdvanceAtRef = useRef(0);
   const playedClipRef = useRef(false);
   const finishedClipKeyRef = useRef<string | null>(null);
   const clipSessionRef = useRef<{ key: string; id: string } | null>(null);
@@ -387,6 +391,32 @@ export function SponsorBudgetRotation({
     [current, finishClipOnce, followMode],
   );
 
+  /** Beperkt fault → remount-cascades (decode-watchdogs + GPU-druk). */
+  const onBudgetVideoPlaybackFault = useCallback(() => {
+    if (followMode) return;
+    if (!current || current.item.type !== "VIDEO") return;
+    const now = Date.now();
+    if (now < videoFaultCooldownUntilRef.current) return;
+    if (now - lastVideoFaultAdvanceAtRef.current < 1100) return;
+    const burst = videoFaultBurstRef.current;
+    burst.push(now);
+    const cutoff = now - 60_000;
+    while (burst.length > 0 && burst[0]! < cutoff) burst.shift();
+    if (burst.length > 4) {
+      videoFaultCooldownUntilRef.current = now + 10_000;
+      burst.length = 0;
+      console.warn(
+        "[sponsor] veel decode-fouten in korte tijd — 10s cooldown (fallback-timer kan nog door)",
+      );
+    }
+    lastVideoFaultAdvanceAtRef.current = now;
+    if (videoFallbackTimerRef.current != null) {
+      clearTimeout(videoFallbackTimerRef.current);
+      videoFallbackTimerRef.current = null;
+    }
+    finishClipOnce(current, current.playSec);
+  }, [current, finishClipOnce, followMode]);
+
   useEffect(() => {
     if (followMode) return;
     if (!playbackTelemetry || !current) return;
@@ -546,7 +576,7 @@ export function SponsorBudgetRotation({
     : fallback != null && !cycleBudgetForever && !current && playedClipRef.current;
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black">
+    <div className="absolute inset-0 overflow-hidden bg-black contain-layout contain-paint">
       {showBudgetFallback ? (
         <div className="absolute inset-0 size-full">{fallback}</div>
       ) : (
@@ -574,18 +604,7 @@ export function SponsorBudgetRotation({
                 followMode && followClip ? Math.max(0, followElapsedMs) : undefined
               }
               onVideoEnded={handleVideoEnded}
-              onVideoPlaybackFault={
-                followMode
-                  ? undefined
-                  : () => {
-                      if (!current || current.item.type !== "VIDEO") return;
-                      if (videoFallbackTimerRef.current != null) {
-                        clearTimeout(videoFallbackTimerRef.current);
-                        videoFallbackTimerRef.current = null;
-                      }
-                      finishClipOnce(current, current.playSec);
-                    }
-              }
+              onVideoPlaybackFault={followMode ? undefined : onBudgetVideoPlaybackFault}
               onVideoDurationMs={(ms) => {
                 if (ms > 0) setVideoProgressDurationMs(ms);
               }}
@@ -646,6 +665,13 @@ function MediaRenderer({
   const lastFollowSeekAtRef = useRef(0);
   /** Eerste `playing`-event na mount van dit item (alleen hoofd-display). */
   const firstPlayingAtRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (item.type !== "VIDEO") return;
+    return () => {
+      releaseHtmlVideoElement(videoRef.current);
+    };
+  }, [item.id, item.path, item.type]);
 
   useEffect(() => {
     endedRef.current = false;
@@ -919,16 +945,18 @@ function MediaRenderer({
     return (
       <div className="absolute inset-0 flex items-center justify-center bg-black">
         {item.type === "VIDEO" ? (
-          <video
-            key={`${item.id}-${src}`}
-            {...videoProps}
-            className="max-h-full max-w-full"
+        <video
+          key={`${item.id}-${src}`}
+          {...videoProps}
+          preload="auto"
+          className="max-h-full max-w-full"
             style={{ objectFit: "contain", objectPosition: "center" }}
           />
         ) : (
           <img
             src={src}
             alt={item.title}
+            decoding="async"
             className="max-h-full max-w-full"
             style={{ objectFit: "contain", objectPosition: "center" }}
           />
@@ -942,6 +970,7 @@ function MediaRenderer({
         <video
           key={`${item.id}-${src}`}
           {...videoProps}
+          preload="auto"
           style={DISPLAY_COVER_MEDIA_STYLE}
         />
       </div>
@@ -949,7 +978,7 @@ function MediaRenderer({
   }
   return (
     <div className="absolute inset-0 overflow-hidden bg-black">
-      <img src={src} alt={item.title} style={DISPLAY_COVER_MEDIA_STYLE} />
+      <img src={src} alt={item.title} decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
     </div>
   );
 }

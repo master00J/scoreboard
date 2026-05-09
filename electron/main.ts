@@ -1089,10 +1089,16 @@ if (!gotLock) {
           "abnormal-exit",
           "oom",
           "launch-failed",
+          "integrity-failure",
         ]);
-        if (!recoverReasons.has(details.reason)) return;
+        const byReason = recoverReasons.has(details.reason);
+        const byExit =
+          details.reason !== "clean-exit" &&
+          typeof details.exitCode === "number" &&
+          details.exitCode !== 0;
+        if (!byReason && !byExit) return;
         bootLog(
-          `[app] child-process-gone GPU reason=${details.reason} exitCode=${details.exitCode} — herladen beide vensters`,
+          `[app] child-process-gone GPU reason=${details.reason} exitCode=${details.exitCode} (byReason=${byReason} byExit=${byExit}) — herladen beide vensters`,
         );
         try {
           const c = controlWindow;

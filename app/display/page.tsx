@@ -6,6 +6,7 @@ import {
   useTimedSlideProgress,
 } from "./_components/preview-slide-progress";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
+import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import { AnimatePresence, motion } from "framer-motion";
 import { ScaleContainer } from "@/components/scale-container";
 import { useSocketSync, sendCommand } from "@/lib/use-socket";
@@ -1413,6 +1414,13 @@ function SingleMediaMode({
     return () => clearTimeout(id);
   }, [media?.id, media?.path, media?.playAudio, media?.type]);
 
+  useEffect(() => {
+    if (media?.type !== "VIDEO") return;
+    return () => {
+      releaseHtmlVideoElement(videoRef.current);
+    };
+  }, [media?.id, media?.path, media?.type]);
+
   if (!media) {
     return <>{fallback ?? <div className="absolute inset-0 bg-black" />}</>;
   }
@@ -1437,7 +1445,7 @@ function SingleMediaMode({
   }
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black">
+    <div className="absolute inset-0 overflow-hidden bg-black contain-layout contain-paint">
       {media.type === "VIDEO" ? (
         <video
           ref={videoRef}
@@ -1446,6 +1454,7 @@ function SingleMediaMode({
           muted={!(media.playAudio ?? false)}
           playsInline
           loop={loop}
+          preload="auto"
           style={DISPLAY_COVER_MEDIA_STYLE}
           onLoadedMetadata={(e) => {
             const d = e.currentTarget.duration;
@@ -1464,7 +1473,7 @@ function SingleMediaMode({
           }}
         />
       ) : (
-        <img src={mediaUrl(media.path)} alt="" style={DISPLAY_COVER_MEDIA_STYLE} />
+        <img src={mediaUrl(media.path)} alt="" decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
       )}
       {wallClockBar}
       {showPreviewProgress &&
