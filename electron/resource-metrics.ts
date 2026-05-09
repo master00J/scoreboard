@@ -45,3 +45,19 @@ export function getAppResourceMetrics(): AppResourceMetrics {
     cpuTotalPercent: round1(cpuNonGpu + gpuCpu),
   };
 }
+
+/** RAM per Chromium-procestype (MB) voor periodieke boot.log-regels. */
+export function getMemoryBreakdownForBootLog(): string {
+  const metrics = app.getAppMetrics();
+  const byType: Record<string, { mb: number; n: number }> = {};
+  for (const m of metrics) {
+    const t = String(m.type);
+    if (!byType[t]) byType[t] = { mb: 0, n: 0 };
+    byType[t].mb += memoryFootprintKb(m.memory) / 1024;
+    byType[t].n += 1;
+  }
+  return Object.entries(byType)
+    .sort((a, b) => b[1].mb - a[1].mb)
+    .map(([k, v]) => `${k}:${Math.round(v.mb * 10) / 10}MB×${v.n}`)
+    .join(" | ");
+}

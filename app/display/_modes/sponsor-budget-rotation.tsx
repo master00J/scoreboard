@@ -17,6 +17,7 @@ import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
 import { reportSponsorClipEnd, reportSponsorClipStart } from "@/lib/use-socket";
 import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import { mediaUrl } from "@/lib/media-url";
+import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
 import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
 import { mediaAllowedForSponsorPhase } from "@/lib/sponsor-media-phases";
 import { buildSponsorRotationMediaList } from "@/lib/sponsor-playback-order";
@@ -416,6 +417,39 @@ export function SponsorBudgetRotation({
     }
     finishClipOnce(current, current.playSec);
   }, [current, finishClipOnce, followMode]);
+
+  useEffect(() => {
+    if (followMode) return;
+    if (!window.electronAPI?.reportDisplayPlaybackContext) return;
+    if (!current) {
+      reportDisplayPlaybackToMain({
+        source: "sponsor-budget",
+        section,
+        atMs: Date.now(),
+      });
+      return;
+    }
+    reportDisplayPlaybackToMain({
+      source: "sponsor-budget",
+      matchId: playbackTelemetry?.matchId ?? null,
+      sponsorId: current.sponsorId,
+      mediaId: current.mediaId,
+      mediaTitle: current.item.title,
+      mediaPath: current.item.path,
+      mediaType: current.item.type,
+      section,
+      followMode: false,
+      paused,
+      atMs: Date.now(),
+    });
+  }, [
+    current,
+    section,
+    followMode,
+    paused,
+    playbackTelemetry?.matchId,
+    playbackTelemetry?.matchStatus,
+  ]);
 
   useEffect(() => {
     if (followMode) return;

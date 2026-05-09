@@ -8,6 +8,31 @@ import type {
 
 export type DisplayStatePayload = SerializedDisplayState;
 
+/** Laatst bekende clip op het stadionscherm — voor boot.log bij crash (main process). */
+export type DisplayPlaybackLogPayload = {
+  source:
+    | "sponsor-budget"
+    | "sponsor-rotation"
+    | "single-media"
+    | "idle-fallback"
+    | "other";
+  /** Displaymodus (bv. SPONSOR_ROTATION, MATCH). */
+  mode?: string;
+  matchId?: string | null;
+  sponsorId?: string;
+  mediaId?: string;
+  mediaTitle?: string;
+  /** Relatief pad / uploads-referentie (in main wordt alleen bestandsnaam gelogd). */
+  mediaPath?: string;
+  mediaType?: string;
+  section?: string;
+  followMode?: boolean;
+  paused?: boolean;
+  playlistId?: string | null;
+  /** ms sinds epoch (renderer). */
+  atMs: number;
+};
+
 export type TickPayload = {
   elapsed: number;
   running: boolean;
@@ -159,4 +184,9 @@ export type ElectronBridge = {
   getMatchTabLayoutSnapshot: () => string | null;
   /** Schrijft dezelfde JSON naar userData (sync IPC). */
   persistMatchTabLayout: (json: string) => void;
+  /**
+   * Alleen stadionscherm: meldt welke clip/modus speelt zodat boot.log bij OOM/GPU-crash context heeft.
+   * Geen-op bij control-ingebouwde preview (`followPlayback` / `showPreviewProgress`).
+   */
+  reportDisplayPlaybackContext: (payload: DisplayPlaybackLogPayload) => void;
 };

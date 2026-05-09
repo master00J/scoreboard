@@ -30,6 +30,7 @@ import {
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
 import { mediaUrl } from "@/lib/media-url";
+import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
 import {
   isPrematchMatchSponsorWindow,
   PREMATCH_MATCH_SPONSOR_LEAD_MS,
@@ -1420,6 +1421,19 @@ function SingleMediaMode({
       releaseHtmlVideoElement(videoRef.current);
     };
   }, [media?.id, media?.path, media?.type]);
+
+  useEffect(() => {
+    if (showPreviewProgress) return;
+    if (!media) return;
+    reportDisplayPlaybackToMain({
+      source: "single-media",
+      mediaId: media.id,
+      mediaTitle: media.title,
+      mediaPath: media.path,
+      mediaType: media.type,
+      atMs: Date.now(),
+    });
+  }, [media?.id, media?.path, media?.title, media?.type, showPreviewProgress]);
 
   if (!media) {
     return <>{fallback ?? <div className="absolute inset-0 bg-black" />}</>;

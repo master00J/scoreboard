@@ -6,6 +6,7 @@ import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import type { Playlist, PlaylistItemFull } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
+import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
 import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
@@ -225,6 +226,21 @@ export function SponsorRotation({
     showPreviewProgress ? slideMs : 0,
     current ? `${current.id}-${index}` : "none",
   );
+
+  useEffect(() => {
+    if (showPreviewProgress) return;
+    if (!current) return;
+    reportDisplayPlaybackToMain({
+      source: "sponsor-rotation",
+      mode: "playlist",
+      mediaId: current.media.id,
+      mediaTitle: current.media.title,
+      mediaPath: current.media.path,
+      mediaType: current.media.type,
+      playlistId: playlist?.id ?? null,
+      atMs: Date.now(),
+    });
+  }, [current, playlist?.id, showPreviewProgress]);
 
   if (items.length === 0) {
     if (idleEmptyFallback && (idleEmptyFallback.media || idleEmptyFallback.logoUrl)) {

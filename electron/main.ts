@@ -3,15 +3,11 @@ import { app, BrowserWindow, desktopCapturer, ipcMain, dialog, Menu, screen, ses
 import fs from "fs";
 import os from "os";
 import path from "path";
-import type {
-  DesktopApiRequest,
-  ElectronBridge,
-  ExportFormat,
-} from "../lib/desktop-bridge";
+import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
 import * as licenseSvc from "./license-service";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
-import { getAppResourceMetrics } from "./resource-metrics";
+import { getAppResourceMetrics, getMemoryBreakdownForBootLog } from "./resource-metrics";
 
 const IS_DEV = !app.isPackaged;
 
@@ -45,6 +41,66 @@ if (process.env.STADIUM_DISABLE_GPU_COMPOSITING === "1") {
 
 let controlWindow: BrowserWindow | null = null;
 let displayWindow: BrowserWindow | null = null;
+
+/** Laatste gemelde stadion-afspeelcontext (IPC van display-renderer). */
+let lastDisplayPlaybackSummary = "—";
+
+function fileBaseOnly(p: unknown): string | undefined {
+  if (typeof p !== "string" || !p.trim()) return undefined;
+  const s = p.replace(/\\/g, "/");
+  const i = s.lastIndexOf("/");
+  return (i >= 0 ? s.slice(i + 1) : s).slice(0, 200);
+}
+
+function sanitizePlaybackPayload(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "—";
+  const o = raw as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof o.source === "string") parts.push(`src=${o.source}`);
+  if (typeof o.mode === "string") parts.push(`mode=${o.mode}`);
+  if (typeof o.section === "string") parts.push(`sec=${o.section}`);
+  if (typeof o.matchId === "string" && o.matchId) parts.push(`match=${o.matchId.slice(0, 14)}`);
+  if (typeof o.sponsorId === "string" && o.sponsorId) parts.push(`spon=${o.sponsorId.slice(0, 14)}`);
+  if (typeof o.mediaId === "string" && o.mediaId) parts.push(`mediaId=${o.mediaId.slice(0, 18)}`);
+  if (typeof o.mediaType === "string") parts.push(`type=${o.mediaType}`);
+  if (typeof o.mediaTitle === "string" && o.mediaTitle)
+    parts.push(`title=${String(o.mediaTitle).slice(0, 72)}`);
+  const bn = fileBaseOnly(o.mediaPath);
+  if (bn) parts.push(`file=${bn}`);
+  if (o.followMode === true) parts.push("follow=1");
+  if (o.paused === true) parts.push("paused=1");
+  if (typeof o.playlistId === "string" && o.playlistId) parts.push(`pl=${o.playlistId.slice(0, 12)}`);
+  if (typeof o.atMs === "number") parts.push(`at=${o.atMs}`);
+  const line = parts.join(" ");
+  return line.length > 950 ? `${line.slice(0, 950)}…` : line;
+}
+
+function setLastDisplayPlaybackFromIpc(raw: unknown) {
+  lastDisplayPlaybackSummary = sanitizePlaybackPayload(raw);
+}
+
+function bootPlaybackContextSuffix(): string {
+  return ` | lastPlayback=${lastDisplayPlaybackSummary}`;
+}
+
+function startBootMetricsLogging() {
+  const raw = process.env.STADIUM_BOOT_METRICS_MS;
+  const intervalMs = raw === "" || raw === "0" ? 0 : Number(raw ?? "300000");
+  if (!Number.isFinite(intervalMs) || intervalMs < 60_000) return;
+  const tick = () => {
+    try {
+      const m = getAppResourceMetrics();
+      const br = getMemoryBreakdownForBootLog();
+      bootLog(
+        `[metrics] ramTotal=${m.ramTotalMb}MB gpuRam=${m.gpuRamMb}MB cpu≈${m.cpuTotalPercent}% | ${br}${bootPlaybackContextSuffix()}`,
+      );
+    } catch (e) {
+      bootLog(`[metrics] error ${String(e)}`);
+    }
+  };
+  tick();
+  setInterval(tick, intervalMs);
+}
 let runtime: typeof import("./runtime") | null = null;
 let desktopContext: ElectronBridge["context"] | null = null;
 let mobileBridge: MobileBridgeHandle | null = null;
@@ -377,14 +433,16 @@ function createWindows() {
     void runtime?.broadcastDisplayState();
   });
   controlWindow.webContents.on("render-process-gone", (_event, details) => {
-    bootLog(`[control] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
+    bootLog(
+      `[control] render-process-gone reason=${details.reason} exitCode=${details.exitCode}${bootPlaybackContextSuffix()}`,
+    );
     const win = controlWindow;
     if (win && !win.isDestroyed()) {
       win.webContents.reloadIgnoringCache();
     }
   });
   controlWindow.webContents.on("unresponsive", () => {
-    bootLog("[control] renderer unresponsive -> reload");
+    bootLog(`[control] renderer unresponsive -> reload${bootPlaybackContextSuffix()}`);
     const win = controlWindow;
     if (win && !win.isDestroyed()) {
       win.webContents.reloadIgnoringCache();
@@ -424,14 +482,16 @@ function createWindows() {
     void runtime?.broadcastDisplayState();
   });
   displayWindow.webContents.on("render-process-gone", (_event, details) => {
-    bootLog(`[display] render-process-gone reason=${details.reason} exitCode=${details.exitCode}`);
+    bootLog(
+      `[display] render-process-gone reason=${details.reason} exitCode=${details.exitCode}${bootPlaybackContextSuffix()}`,
+    );
     const win = displayWindow;
     if (win && !win.isDestroyed()) {
       win.webContents.reloadIgnoringCache();
     }
   });
   displayWindow.webContents.on("unresponsive", () => {
-    bootLog("[display] renderer unresponsive -> reload");
+    bootLog(`[display] renderer unresponsive -> reload${bootPlaybackContextSuffix()}`);
     const win = displayWindow;
     if (win && !win.isDestroyed()) {
       win.webContents.reloadIgnoringCache();
@@ -707,6 +767,10 @@ function registerIpc() {
       bootLog(`control:persistMatchTabLayout ${String(e)}`);
       event.returnValue = { ok: false };
     }
+  });
+
+  ipcMain.on("display:playbackContext", (_event, raw: unknown) => {
+    setLastDisplayPlaybackFromIpc(raw);
   });
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
@@ -1098,7 +1162,7 @@ if (!gotLock) {
           details.exitCode !== 0;
         if (!byReason && !byExit) return;
         bootLog(
-          `[app] child-process-gone GPU reason=${details.reason} exitCode=${details.exitCode} (byReason=${byReason} byExit=${byExit}) — herladen beide vensters`,
+          `[app] child-process-gone GPU reason=${details.reason} exitCode=${details.exitCode} (byReason=${byReason} byExit=${byExit}) — herladen beide vensters${bootPlaybackContextSuffix()}`,
         );
         try {
           const c = controlWindow;
@@ -1111,6 +1175,7 @@ if (!gotLock) {
       });
 
       bootLog("Desktop runtime OK — open vensters.");
+      startBootMetricsLogging();
     } catch (err) {
       closeSplashWindow();
       const message = err instanceof Error ? err.message : String(err);

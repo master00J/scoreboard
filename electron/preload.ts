@@ -55,6 +55,9 @@ const bridge: ElectronBridge = {
   persistMatchTabLayout: (json: string) => {
     ipcRenderer.sendSync("control:persistMatchTabLayout", json);
   },
+  reportDisplayPlaybackContext: (payload) => {
+    ipcRenderer.send("display:playbackContext", payload);
+  },
 };
 
 try {
