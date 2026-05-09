@@ -15,6 +15,7 @@ import DisplayPage from "@/app/display/page";
 import {
   DEFAULT_MATCH_TAB_LAYOUT,
   resolveHydratedMatchTabLayout,
+  sanitizeMatchTabLayout,
   saveMatchTabLayout,
   MATCH_TAB_PANEL_LABELS,
   type MatchTabLayoutState,
@@ -271,11 +272,19 @@ export function MatchTabGrid({
     let initial = DEFAULT_MATCH_TAB_LAYOUT;
     if (typeof window !== "undefined") {
       const fileJson = window.electronAPI?.getMatchTabLayoutSnapshot?.() ?? null;
-      initial = resolveHydratedMatchTabLayout(fileJson);
+      initial = sanitizeMatchTabLayout(resolveHydratedMatchTabLayout(fileJson));
     }
     setLayout(initial);
     setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const sanitized = sanitizeMatchTabLayout(layout);
+    if (JSON.stringify(sanitized) !== JSON.stringify(layout)) {
+      setLayout(sanitized);
+    }
+  }, [layout, hydrated]);
 
   useEffect(() => {
     return () => {

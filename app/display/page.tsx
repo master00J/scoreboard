@@ -675,7 +675,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       (mode === "SPONSOR" && sponsorClipBesideLiveBoard));
 
   const previewForcesSponsorBeside =
-    embedInControl && previewFollowClip != null && sponsorBesideConfigured;
+    embedInControl &&
+    mode === "SPONSOR_ROTATION" &&
+    previewFollowClip != null &&
+    sponsorBesideConfigured;
   const sponsorBudgetSponsorFilter = previewFollowClip
     ? previewFollowClip.sponsorId
     : sponsorDistView.phase === "sponsor"
@@ -1183,14 +1186,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       {/* Speelhelft + “Scorebord + sponsors”: sponsorfase naast vaste score/timer-kolom (niet fullscreen). */}
       {state &&
         match &&
+        mode === "SPONSOR_ROTATION" &&
         sponsorBesideConfigured &&
         (sponsorDistView.phase === "sponsor" || previewForcesSponsorBeside) &&
         liveSponsorBesideContent && (
-        <div
-          className={`absolute inset-0 ${
-            mode === "SPONSOR_ROTATION" ? "z-[12]" : "z-0 pointer-events-none opacity-0"
-          }`}
-        >
+        <div className="absolute inset-0 z-[12]">
           <LeftScoreboardLayout
             match={match}
             elapsed={elapsed}
@@ -1198,13 +1198,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             period={period}
             theme={scoreboardTheme}
           >
-            <AnimatePresence mode="wait">
+            <AnimatePresence mode="sync">
               <motion.div
                 key="live-sponsor-beside"
-                initial={false}
+                initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                exit={{ opacity: 1 }}
-                transition={{ duration: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25 }}
                 className="absolute inset-0"
               >
                 {liveSponsorBesideContent}

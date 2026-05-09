@@ -113,6 +113,11 @@ function appendMissingPanels(layout: MatchTabLayoutState): MatchTabLayoutState {
   return out;
 }
 
+/** Dedupe panelen over kolommen + ontbrekende ids terugzetten (laden, opslaan, runtime). */
+export function sanitizeMatchTabLayout(layout: MatchTabLayoutState): MatchTabLayoutState {
+  return appendMissingPanels(dedupePanelsAcrossColumns(layout));
+}
+
 function layoutsEqual(a: MatchTabLayoutState, b: MatchTabLayoutState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -152,14 +157,12 @@ export function parseMatchTabLayoutJson(raw: string | null): MatchTabLayoutState
             Object.entries(p.collapsed).filter(([k, v]) => isPanelId(k) && typeof v === "boolean"),
           ) as Partial<Record<MatchTabPanelId, boolean>>)
         : {};
-    return appendMissingPanels(
-      dedupePanelsAcrossColumns({
-        orderLeft: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderLeft, p.orderLeft),
-        orderCenter: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderCenter, p.orderCenter),
-        orderRight: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderRight, p.orderRight),
-        collapsed,
-      }),
-    );
+    return sanitizeMatchTabLayout({
+      orderLeft: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderLeft, p.orderLeft),
+      orderCenter: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderCenter, p.orderCenter),
+      orderRight: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderRight, p.orderRight),
+      collapsed,
+    });
   } catch {
     return DEFAULT_MATCH_TAB_LAYOUT;
   }
@@ -172,7 +175,7 @@ export function loadMatchTabLayout(): MatchTabLayoutState {
 
 export function saveMatchTabLayout(layout: MatchTabLayoutState): void {
   if (typeof window === "undefined") return;
-  const json = JSON.stringify(layout);
+  const json = JSON.stringify(sanitizeMatchTabLayout(layout));
   try {
     localStorage.setItem(STORAGE_KEY, json);
   } catch {
