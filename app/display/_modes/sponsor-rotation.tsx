@@ -110,13 +110,13 @@ function IdleEmptyVisual({
         {media.type === "VIDEO" ? (
           <FallbackMediaSlide media={media} objectFit={mediaObjectFit} />
         ) : (
-          <AnimatePresence mode="sync">
+          <AnimatePresence mode="wait">
             <motion.div
               key={`${media.path}-${imgTick}`}
-              initial={{ opacity: 0 }}
+              initial={false}
               animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
+              exit={{ opacity: 1 }}
+              transition={{ duration: 0 }}
               className="absolute inset-0 size-full min-h-0 min-w-0"
             >
               <FallbackMediaSlide media={media} objectFit={mediaObjectFit} />
@@ -235,13 +235,13 @@ export function SponsorRotation({
 
   return (
     <div className="absolute inset-0 overflow-hidden bg-black">
-      <AnimatePresence mode="sync">
+      <AnimatePresence mode="wait">
         <motion.div
           key={current.id + "-" + index}
-          initial={{ opacity: 0 }}
+          initial={false}
           animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.25 }}
+          exit={{ opacity: 1 }}
+          transition={{ duration: 0 }}
           className="absolute inset-0 size-full min-h-0 min-w-0"
         >
           <MediaRenderer item={current} objectFit={mediaObjectFit} />

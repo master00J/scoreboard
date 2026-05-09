@@ -2058,6 +2058,23 @@ function MatchDialog({
   );
 }
 
+function formatPrematchSpreadWindowMinutes(sec?: number | null): string {
+  const s = sec ?? 0;
+  if (s <= 0) return "";
+  return String(Math.max(1, Math.round(s / 60)));
+}
+
+/** Leeg = automatisch; anders seconden (60 … 24u), afgerond vanuit minuten. */
+function parsePrematchWindowMinToSec(raw: string): number | "invalid" {
+  const t = raw.trim();
+  if (t === "") return 0;
+  const n = Number(t);
+  if (!Number.isFinite(n) || n < 0) return "invalid";
+  if (n === 0) return 0;
+  const minutes = Math.min(24 * 60, Math.floor(n));
+  return Math.max(60, minutes * 60);
+}
+
 function MatchScheduleDialog({
   match,
   onClose,
@@ -2070,22 +2087,36 @@ function MatchScheduleDialog({
   const { data: mediaList } = useApi<MediaItem[]>("/api/media");
   const [kickoffLocal, setKickoffLocal] = useState(() => isoToDatetimeLocalValue(match.kickoffAt));
   const [sponsorId, setSponsorId] = useState(match.matchSponsorMediaId ?? "");
+  const [prematchWindowMin, setPrematchWindowMin] = useState(() =>
+    formatPrematchSpreadWindowMinutes(match.prematchSpreadWindowSec),
+  );
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setKickoffLocal(isoToDatetimeLocalValue(match.kickoffAt));
     setSponsorId(match.matchSponsorMediaId ?? "");
-  }, [match.id, match.kickoffAt, match.matchSponsorMediaId]);
+    setPrematchWindowMin(formatPrematchSpreadWindowMinutes(match.prematchSpreadWindowSec));
+  }, [match.id, match.kickoffAt, match.matchSponsorMediaId, match.prematchSpreadWindowSec]);
 
   async function save() {
     setSaving(true);
     try {
+      const prematchSec = parsePrematchWindowMinToSec(prematchWindowMin);
+      if (prematchSec === "invalid") {
+        toast({
+          title: "Ongeldige prematch-duur",
+          description: "Vul een niet-negatief geheel getal minuten in, of laat leeg voor automatisch.",
+          variant: "error",
+        });
+        return;
+      }
       const res = await fetch(`/api/matches/${match.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kickoffAt: kickoffLocal.trim() ? localDatetimeToIso(kickoffLocal) : null,
           matchSponsorMediaId: sponsorId.trim() ? sponsorId : null,
+          prematchSpreadWindowSec: prematchSec,
         }),
       });
       if (!res.ok) {
@@ -2103,7 +2134,7 @@ function MatchScheduleDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Aftrap & matchsponsor</DialogTitle>
+          <DialogTitle>Aftrap, prematch-rooster & matchsponsor</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           {match.homeTeam.name} <span className="text-muted-foreground/80">vs</span>{" "}
@@ -2121,6 +2152,26 @@ function MatchScheduleDialog({
             <p className="text-xs text-muted-foreground mt-1">
               Leeg = geen geplande tijd. Met sponsor: vanaf {PREMATCH_MATCH_SPONSOR_LEAD_MS / 60_000}{" "}
               min ervoor tot deze tijd automatisch op het display (SETUP/PREMATCH).
+            </p>
+          </div>
+          <div>
+            <Label>Prematch: tijdsvenster sponsor-rooster (minuten, optioneel)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={1440}
+              step={1}
+              placeholder="Leeg = automatisch (som «voor»-seconden)"
+              value={prematchWindowMin}
+              onChange={(e) => setPrematchWindowMin(e.target.value)}
+              className="mt-1 max-w-xs"
+            />
+            <p className="text-xs text-muted-foreground mt-1">
+              Bepaalt over hoeveel minuten de geplande sponsorclips voor «voor wedstrijd» gelijkmatig worden
+              gespreid op het scherm (herhalend rooster). Laat leeg om automatisch de som van die
+              sponsorseconden te gebruiken. Vul bv. <strong>90</strong> als je vanaf openen stadion tot aftrap
+              ruimte wilt; vaak blijft het laatste kwartier voor de opstelling vrij — plan je clips dan wat
+              vroeger in dit venster.
             </p>
           </div>
           <div>

@@ -113,11 +113,38 @@ function appendMissingPanels(layout: MatchTabLayoutState): MatchTabLayoutState {
   return out;
 }
 
-export function loadMatchTabLayout(): MatchTabLayoutState {
-  if (typeof window === "undefined") return DEFAULT_MATCH_TAB_LAYOUT;
+function layoutsEqual(a: MatchTabLayoutState, b: MatchTabLayoutState): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/**
+ * Kiest de beste startlay-out voor de control-app: Electron-userData-bestand én localStorage
+ * worden meegenomen. Zo blijft een gepersonaliseerde lay-out behouden als het bestand ontbreekt,
+ * leeg is, of ongeldige JSON bevat terwijl localStorage wél nog een geldige kopie heeft.
+ */
+export function resolveHydratedMatchTabLayout(electronFileJson: string | null): MatchTabLayoutState {
+  const def = DEFAULT_MATCH_TAB_LAYOUT;
+  const localRaw =
+    typeof window !== "undefined" ? window.localStorage.getItem(STORAGE_KEY) : null;
+  const fromLocal = parseMatchTabLayoutJson(localRaw);
+  const fileRaw = typeof electronFileJson === "string" && electronFileJson.trim() ? electronFileJson : null;
+  const localCustom = !layoutsEqual(fromLocal, def);
+
+  if (fileRaw) {
+    const fromFile = parseMatchTabLayoutJson(fileRaw);
+    const fileCustom = !layoutsEqual(fromFile, def);
+    if (fileCustom) return fromFile;
+    if (localCustom) return fromLocal;
+    return fromFile;
+  }
+  if (localCustom) return fromLocal;
+  return def;
+}
+
+/** Parseert opgeslagen JSON (localStorage of userData-bestand in Electron). */
+export function parseMatchTabLayoutJson(raw: string | null): MatchTabLayoutState {
+  if (typeof raw !== "string" || !raw.trim()) return DEFAULT_MATCH_TAB_LAYOUT;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_MATCH_TAB_LAYOUT;
     const p = JSON.parse(raw) as Partial<MatchTabLayoutState>;
     const collapsed =
       p.collapsed && typeof p.collapsed === "object"
@@ -138,12 +165,23 @@ export function loadMatchTabLayout(): MatchTabLayoutState {
   }
 }
 
+export function loadMatchTabLayout(): MatchTabLayoutState {
+  if (typeof window === "undefined") return DEFAULT_MATCH_TAB_LAYOUT;
+  return parseMatchTabLayoutJson(localStorage.getItem(STORAGE_KEY));
+}
+
 export function saveMatchTabLayout(layout: MatchTabLayoutState): void {
   if (typeof window === "undefined") return;
+  const json = JSON.stringify(layout);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
+    localStorage.setItem(STORAGE_KEY, json);
   } catch {
     /* ignore quota */
+  }
+  try {
+    window.electronAPI?.persistMatchTabLayout?.(json);
+  } catch {
+    /* ignore */
   }
 }
 

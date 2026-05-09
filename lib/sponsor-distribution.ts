@@ -47,6 +47,23 @@ export function activeSponsorsForSection(
 }
 
 /**
+ * Lengte van het prematch-sponsorrooster (seconden): herhalende tijdlijn voor spread/«naast scorebord».
+ * Bij `prematchSpreadWindowSec` > 0 op de wedstrijd: die waarde (60s … 24u), anders automatisch ≈ som prematch-budgetten.
+ */
+export function prematchSpreadTimelineSeconds(
+  match: { prematchSpreadWindowSec?: number | null } | null | undefined,
+  sponsors: Sponsor[],
+): number {
+  const active = activeSponsorsForSection(sponsors, "prematch");
+  const budgetTotal = active.reduce((a, s) => a + Math.max(0, s.prematchSeconds), 0);
+  const configured = match?.prematchSpreadWindowSec ?? 0;
+  if (typeof configured === "number" && configured > 0) {
+    return Math.min(86400, Math.max(60, Math.floor(configured)));
+  }
+  return Math.max(60, budgetTotal);
+}
+
+/**
  * Langste actieve clip voor één sponsor (video = duur uit bestand; afbeelding = item of sponsor-default).
  */
 export function maxClipSecondsForSponsor(

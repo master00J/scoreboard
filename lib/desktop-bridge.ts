@@ -147,4 +147,11 @@ export type ElectronBridge = {
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
   /** CPU/RAM van deze app (Electron); GPU = GPU-hulpproces. */
   getAppResourceMetrics: () => Promise<AppResourceMetrics>;
+  /**
+   * Match-tab rooster: JSON-string uit userData (bestand), anders null.
+   * Betrouwbaarder dan file://-localStorage in de packaged control-UI.
+   */
+  getMatchTabLayoutSnapshot: () => string | null;
+  /** Schrijft dezelfde JSON naar userData (sync IPC). */
+  persistMatchTabLayout: (json: string) => void;
 };

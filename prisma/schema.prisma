@@ -50,6 +50,8 @@ model Match {
   matchSponsorMedia   MediaItem? @relation("MatchSponsorMedia", fields: [matchSponsorMediaId], references: [id], onDelete: SetNull)
   halfDurationSec Int          @default(2700)
   halfBreakSec    Int          @default(900)
+  /// Lengte (s) van het herhalende prematch-sponsorrooster op het scherm. 0 = automatisch (≈ som van sponsor-«voor»-budgetten, min. 60s).
+  prematchSpreadWindowSec Int @default(0)
   status          String       @default("SETUP")
   homeScore       Int          @default(0)
   awayScore       Int          @default(0)
@@ -132,6 +134,8 @@ model Sponsor {
   secondHalfSponsorSec     Int?
   /// JSON-array van MediaItem-id's: afspeelvolgorde tijdens sponsorrotatie (operator).
   sponsorPlaybackOrderJson String?
+  /// JSON-object mediaId → aantal keer achter elkaar per doorloop unieke clips (1–20, default 1).
+  sponsorPlaybackRepeatsJson String?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
   playLogs          SponsorPlayLog[]

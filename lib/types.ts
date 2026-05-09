@@ -66,6 +66,11 @@ export type Match = {
   matchSponsorMedia?: MediaItem | null;
   halfDurationSec: number;
   halfBreakSec: number;
+  /**
+   * Prematch: lengte van het herhalende sponsor-slotrooster (seconden).
+   * 0 = automatisch: ongeveer de som van geplande «voor wedstrijd»-seconden per sponsor (min. 60).
+   */
+  prematchSpreadWindowSec?: number;
   status: string;
   homeScore: number;
   awayScore: number;
@@ -134,6 +139,8 @@ export type Sponsor = {
   imageDefaultSec: number;
   /** JSON-array van media-id's: volgorde tijdens sponsorrotatie op display; null = uploadvolgorde. */
   sponsorPlaybackOrderJson?: string | null;
+  /** JSON-object mediaId → aantal keer achter elkaar per doorloop van de clip-lijst (1–20). */
+  sponsorPlaybackRepeatsJson?: string | null;
   createdAt: string;
   media?: MediaItem[];
 };

@@ -49,6 +49,11 @@ const bridge: ElectronBridge = {
   licenseActivate: (opts: { licenseKey: string }) => ipcRenderer.invoke("license:activate", opts),
   getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
   getAppResourceMetrics: () => ipcRenderer.invoke("app:getResourceMetrics"),
+  getMatchTabLayoutSnapshot: () =>
+    ipcRenderer.sendSync("control:getMatchTabLayoutSnapshot") as string | null,
+  persistMatchTabLayout: (json: string) => {
+    ipcRenderer.sendSync("control:persistMatchTabLayout", json);
+  },
 };
 
 try {

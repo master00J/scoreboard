@@ -11,12 +11,14 @@ import {
   halfWindowElapsed,
   holdSecondsCappedBySlotRun,
   lookupSponsorAtSecond,
+  prematchSpreadTimelineSeconds,
   resolveSponsorSpreadPhase,
   sponsorScreenSecondsConsumed,
   sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
 import { sponsorRepeatBudgetCyclesFromThemeJson } from "@/lib/scoreboard-theme";
 import {
+  ledgerActiveClipStillLiveForMatchSegment,
   sponsorTelemetryActiveClipElapsedSec,
   sponsorTelemetryConsumedSec,
   sponsorTelemetrySegmentKey,
@@ -61,7 +63,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   const elapsed = useLiveTimerSeconds();
   const wallNowMs = useWallClockMs(200);
 
-  const activeScheduledCue = useScheduledMediaCueActive({
+  const { activeScheduledCue } = useScheduledMediaCueActive({
     match,
     state,
     mode,
@@ -187,10 +189,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
   const sponsorSlotMapPrematch = useMemo(() => {
     const active = activeSponsorsForSection(sponsors, "prematch");
-    const budgetTotal = active.reduce((a, s) => a + Math.max(0, s.prematchSeconds), 0);
-    const H = Math.max(60, budgetTotal);
+    const H = prematchSpreadTimelineSeconds(match ?? undefined, sponsors);
     return buildSponsorSlotMap(active, "prematch", H);
-  }, [sponsors]);
+  }, [sponsors, match?.id, match?.prematchSpreadWindowSec]);
 
   const tInterruptFrozen = useRef(0);
   const sponsorPhaseHangRef = useRef<{
@@ -406,17 +407,11 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         sponsorLedger.matchId === match.id &&
         sponsorLedger.segmentKey === telemetrySegmentKey;
 
-      if (ledgerMatchesSegment) {
+      if (ledgerMatchesSegment && match) {
+        const acLive = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger!, now);
         const ac = sponsorLedger!.activeClip;
         if (ac) {
-          const expectedSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
-          const liveElapsed = sponsorTelemetryActiveClipElapsedSec(ac, now);
-          /**
-           * Zelfde marge als `previewFollowClip` op het display: na verwachte eindtijd
-           * geen "Bezig" meer tonen als de ledger-event kort achterloopt op het echte scherm
-           * (anders volle balk + 0.0 s resterend terwijl het scherm al scorebord toont).
-           */
-          if (liveElapsed >= expectedSec + 0.75) {
+          if (!acLive) {
             effectivePhase = "scoreboard";
             effectiveSponsorId = null;
           } else {
@@ -470,11 +465,11 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       let clipRemainingSec: number | null = null;
       let nextSlotEtaSec: number | null = null;
 
-      if (ledgerMatchesSegment) {
-        const ac = sponsorLedger!.activeClip;
-        if (effectivePhase === "sponsor" && ac) {
-          const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ac, now);
-          const totalSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
+      if (ledgerMatchesSegment && match) {
+        const acLive = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger!, now);
+        if (effectivePhase === "sponsor" && acLive) {
+          const elapsedSec = sponsorTelemetryActiveClipElapsedSec(acLive, now);
+          const totalSec = Math.max(0.1, acLive.expectedPlaySec || 0.1);
           sponsorClipProgress = Math.min(1, elapsedSec / totalSec);
           clipRemainingSec = Math.max(0, totalSec - elapsedSec);
         }
@@ -511,13 +506,15 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
            * of springt de teller vreemd wanneer clips sneller doorlopen dan de kaart-seconden.
            */
           let nextEta: number | null = slotEta;
-          if (ledgerMatchesSegment && sponsorLedger?.activeClip) {
-            const ac2 = sponsorLedger.activeClip;
-            const expectedSec2 = Math.max(0.1, ac2.expectedPlaySec || 0.1);
-            const liveElapsed2 = sponsorTelemetryActiveClipElapsedSec(ac2, now);
-            const rem2 = expectedSec2 - liveElapsed2;
-            if (rem2 > 0.2) {
-              nextEta = Math.max(0, rem2);
+          if (ledgerMatchesSegment && match) {
+            const ac2 = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, now);
+            if (ac2) {
+              const expectedSec2 = Math.max(0.1, ac2.expectedPlaySec || 0.1);
+              const liveElapsed2 = sponsorTelemetryActiveClipElapsedSec(ac2, now);
+              const rem2 = expectedSec2 - liveElapsed2;
+              if (rem2 > 0.2) {
+                nextEta = Math.max(0, rem2);
+              }
             }
           }
           nextSlotEtaSec = nextEta;
