@@ -71,14 +71,11 @@ export function DemoRequestForm() {
   return (
     <form className="contact-form" onSubmit={submit}>
       <div className="demo-policy-note" role="note">
-        <strong>Demo&apos;s zijn beperkt</strong>
+        <strong>Demo starten zonder gedoe</strong>
         <ul>
-          <li>Je kunt maar één keer een demo aanvragen met hetzelfde e-mailadres.</li>
-          <li>Op elk apparaat geldt maximaal één ArenaCue-demo; een tweede demo-sleutel werkt op dat toestel niet.</li>
-          <li>
-            Na een demo kun je wél verder met een <strong>volledige licentie</strong> op hetzelfde apparaat — daarvoor
-            neem je best contact op.
-          </li>
+          <li>We voorzien één demo per e-mailadres en per apparaat, zodat elke testinstallatie overzichtelijk blijft.</li>
+          <li>Na je demo helpen we je gewoon verder naar een volledige licentie op hetzelfde toestel.</li>
+          <li>Twijfel je over de juiste pc of schermopstelling? Zet het in je bericht, dan kijken we mee.</li>
         </ul>
       </div>
       <div className="form-grid">

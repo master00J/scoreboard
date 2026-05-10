@@ -200,6 +200,8 @@ export function LicensePortalForm({
                   <p className="form-hint" style={{ marginTop: 12, marginBottom: 0 }}>
                     Installeer ArenaCue op je Windows-pc met deze download(s). Bij vragen:{" "}
                     <a href="mailto:info@arenacue.be">info@arenacue.be</a>.
+                    {" "}
+                    Bekijk ook de <a href="/vereisten">systeemvereisten</a> voor de wedstrijd-pc.
                     {portalReleaseVersion ? (
                       <>
                         {" "}

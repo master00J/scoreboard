@@ -86,6 +86,8 @@ export default async function PortalPage(props: { searchParams?: SearchParams })
           <strong>ArenaCue</strong>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
             <Link href="/functies">Functies</Link>
+            <Link href="/vereisten">Systeemvereisten</Link>
+            <Link href="/changelog">Changelog</Link>
             <Link href="/">Home</Link>
             <Link href="/#contact">Demo</Link>
           </div>
@@ -97,6 +99,11 @@ export default async function PortalPage(props: { searchParams?: SearchParams })
             <strong>Inloggen voor klanten:</strong> vul hieronder het e-mailadres in dat bij je licentie hoort — je
             ontvangt een eenmalige loginlink (geen wachtwoord). Of gebruik direct het formulier met sleutel + e-mail als
             je snel iets wilt nakijken.
+          </p>
+          <p className="form-hint" style={{ marginTop: 10 }}>
+            Download je ArenaCue voor een nieuwe pc? Bekijk eerst de{" "}
+            <Link href="/vereisten">systeemvereisten</Link>, zodat de wedstrijd-pc klaar is voor video,
+            sponsorrotatie en tweede scherm.
           </p>
         </div>
 

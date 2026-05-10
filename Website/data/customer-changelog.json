@@ -1,33 +1,14 @@
 {
   "entries": [
     {
-      "date": "2026-05-09",
+      "date": "2026-05-10",
+      "version": "0.1.2",
       "title": "Sponsor-timing en wedstrijdonderbrekingen",
       "bullets": [
         "Sponsorvideo's pauzeren nu correct tijdens wedstrijdmomenten zoals goals, kaarten en wissels, en hervatten daarna op dezelfde positie.",
         "Onderbroken sponsorclips tellen alleen de effectief afgespeelde seconden mee, zodat sponsorbudgetten eerlijker en nauwkeuriger worden opgevolgd.",
         "Een actieve sponsorclip blijft behouden tijdens overlays, waardoor clips niet meer vroegtijdig stoppen wanneer het scorebord tijdelijk een animatie of melding toont.",
         "Extra controles en soak-tests toegevoegd voor sponsorrotatie in beide helften, inclusief goals, kaarten en wissels."
-      ]
-    },
-    {
-      "date": "2026-05-05",
-      "version": "0.1.0",
-      "title": "Website: privacy, cookies en transparantie",
-      "bullets": [
-        "Cookiebanner met keuze voor noodzakelijk, statistiek en marketing (statistiek/marketing worden pas gebruikt wanneer we die inschakelen).",
-        "Uitgebreidere privacyverklaring met overzicht cookies en je rechten.",
-        "Deze changelogpagina voor klantrelevante hoogtepunten."
-      ]
-    },
-    {
-      "date": "2026-05-05",
-      "title": "ArenaCue Scoreboard — doorlopende verbeteringen",
-      "bullets": [
-        "Sponsor-budget: na het halen van de geplande zendtijd stopt sponsoring; het scorebord komt automatisch terug in beeld.",
-        "Optioneel opnieuw starten van sponsorrondes via instellingen, of playlists gebruiken voor doorlopende videoloops (matchday + sponsor).",
-        "Betrouwbaardere videoweergave en preview bij sponsorrotatie.",
-        "README en documentatie afgestemd op de Electron-desktopbuild."
       ]
     }
   ]

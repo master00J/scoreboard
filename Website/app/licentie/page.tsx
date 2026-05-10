@@ -16,6 +16,8 @@ export default function LicentiePage() {
           <strong>ArenaCue</strong>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
             <Link href="/">Home</Link>
+            <Link href="/portal">Klantportaal</Link>
+            <Link href="/vereisten">Systeemvereisten</Link>
             <Link href="/#contact">Demo</Link>
           </div>
         </nav>
