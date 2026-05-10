@@ -7,6 +7,7 @@ import { useDisplayStore } from "@/lib/store";
 import { sendCommand } from "@/lib/use-socket";
 import { useApi } from "@/lib/use-api";
 import { isElectron } from "@/lib/electron";
+import { useLicenseFeatures } from "@/lib/use-license-features";
 import type { Match, MatchEvent, Player, MediaItem } from "@/lib/types";
 import type { MatchStatusT } from "@/lib/validation/commands";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
@@ -37,6 +38,8 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
   const mode = state?.mode ?? "IDLE";
   const safeMode = state?.safeMode ?? false;
   const livePlay = isLivePlayingMatchStatus(activeMatch?.status);
+  const { isFeatureAllowed, planLabel } = useLicenseFeatures();
+  const automaticSponsorsAllowed = isFeatureAllowed("automatic_sponsor_rotation");
 
   // Heartbeat: detecteer of het display al lang geen tick meer stuurt terwijl
   // de timer wél zou moeten lopen. In dat geval is het waarschijnlijk vastgelopen.
@@ -106,6 +109,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
   }
 
   async function backToLiveProgram() {
+    if (!automaticSponsorsAllowed) return;
     await sendCommand({ type: "display:setMode", mode: "SPONSOR_ROTATION" });
   }
 
@@ -239,7 +243,13 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             size="lg"
             variant={primaryLive ? "default" : "outline"}
             className="h-auto min-h-[3rem] py-3 whitespace-normal text-center leading-snug"
-            onClick={() => void sendCommand({ type: "display:setMode", mode: "SPONSOR_ROTATION" })}
+            disabled={!automaticSponsorsAllowed}
+            title={
+              automaticSponsorsAllowed
+                ? undefined
+                : "Automatische sponsorrotatie is niet beschikbaar in dit licentieplan."
+            }
+            onClick={() => void backToLiveProgram()}
           >
             Scorebord + sponsors
             {livePlay && (
@@ -260,6 +270,12 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             </span>
           </Button>
         </div>
+        {!automaticSponsorsAllowed && (
+          <p className="text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-snug rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+            Automatische sponsorrotatie is uitgeschakeld voor dit licentieplan
+            {planLabel ? ` (${planLabel})` : ""}. Een operator kan wel losse media handmatig starten.
+          </p>
+        )}
       </section>
 
       <section className="space-y-2 border-t border-border pt-4">

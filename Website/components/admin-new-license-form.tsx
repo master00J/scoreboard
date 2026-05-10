@@ -4,14 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { getAdminPathPrefix } from "@/lib/admin-url";
+import type { LicensePlanRow } from "@/lib/license-plan-admin-data";
 
-export function AdminNewLicenseForm() {
+export function AdminNewLicenseForm({ plans }: { plans: LicensePlanRow[] }) {
   const router = useRouter();
   const [organizationLabel, setOrganizationLabel] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
-  const [maxActivations, setMaxActivations] = useState(2);
+  const [maxActivations, setMaxActivations] = useState(plans[0]?.max_activations_default ?? 1);
   const [validUntil, setValidUntil] = useState("");
-  const [plan, setPlan] = useState<"trial" | "standard" | "club" | "enterprise">("standard");
+  const [plan, setPlan] = useState(plans[0]?.code ?? "standard");
   const [notes, setNotes] = useState("");
   const [downloadUrl, setDownloadUrl] = useState("");
   const [licenseKey, setLicenseKey] = useState("");
@@ -93,11 +94,20 @@ export function AdminNewLicenseForm() {
         </label>
         <label>
           Plan
-          <select value={plan} onChange={(e) => setPlan(e.target.value as typeof plan)}>
-            <option value="trial">Trial</option>
-            <option value="standard">Standard</option>
-            <option value="club">Club</option>
-            <option value="enterprise">Enterprise</option>
+          <select
+            value={plan}
+            onChange={(e) => {
+              const next = e.target.value;
+              setPlan(next);
+              const selected = plans.find((item) => item.code === next);
+              if (selected) setMaxActivations(selected.max_activations_default);
+            }}
+          >
+            {plans.map((item) => (
+              <option key={item.code} value={item.code}>
+                {item.name}
+              </option>
+            ))}
           </select>
         </label>
         <label>

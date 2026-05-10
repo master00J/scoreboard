@@ -6,6 +6,7 @@ import { Label, Select } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { useApi } from "@/lib/use-api";
 import { isElectron } from "@/lib/electron";
+import { useLicenseFeatures } from "@/lib/use-license-features";
 import type { Match, Sponsor } from "@/lib/types";
 import {
   buildProofOfPlayPdf,
@@ -32,6 +33,8 @@ const SEGMENT_OPTIONS = [
 export function ProofOfPlayPanel() {
   const { data: matches } = useApi<Match[]>("/api/matches");
   const { data: sponsors } = useApi<Sponsor[]>("/api/sponsors");
+  const { isFeatureAllowed, planLabel } = useLicenseFeatures();
+  const exportAllowed = isFeatureAllowed("proof_of_play_export");
 
   const [matchId, setMatchId] = useState("");
   const [sponsorId, setSponsorId] = useState("");
@@ -115,6 +118,10 @@ export function ProofOfPlayPanel() {
   const runExport = useCallback(
     async (format: "pdf" | "xlsx") => {
       if (exportBusyRef.current) return;
+      if (!exportAllowed) {
+        setError("Proof-of-play export is niet beschikbaar in dit licentieplan.");
+        return;
+      }
       exportBusyRef.current = true;
       setExporting(true);
       setError(null);
@@ -156,11 +163,12 @@ export function ProofOfPlayPanel() {
             ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             : "application/pdf";
         if (isElectron && window.electronAPI?.saveProofOfPlayExport) {
-          await window.electronAPI.saveProofOfPlayExport({
+          const saved = await window.electronAPI.saveProofOfPlayExport({
             base64: uint8ArrayToBase64(bytes),
             defaultFileName: fileName,
             format,
           });
+          if (saved.error) throw new Error(saved.error);
         } else {
           downloadProofOfPlayFile(bytes, mime, fileName);
         }
@@ -171,7 +179,7 @@ export function ProofOfPlayPanel() {
         setExporting(false);
       }
     },
-    [queryString, filterLabel],
+    [queryString, filterLabel, exportAllowed],
   );
 
   const totalPlays = rows.length;
@@ -193,6 +201,12 @@ export function ProofOfPlayPanel() {
               Filter en exporteer naar Excel of PDF voor adverteerders of
               facturatie.
             </p>
+            {!exportAllowed && (
+              <p className="mt-2 text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-snug rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+                Export naar PDF/Excel is uitgeschakeld voor dit licentieplan
+                {planLabel ? ` (${planLabel})` : ""}. Je kunt de tellingen nog bekijken op dit scherm.
+              </p>
+            )}
             {totalPlays === 0 && !loading && (
               <p className="mt-2 text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-snug rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
                 <strong>Waarom staat alles op 0?</strong> De totalen hieronder zijn de som van{" "}
@@ -275,14 +289,14 @@ export function ProofOfPlayPanel() {
 
         <div className="mt-4 flex flex-wrap gap-2 items-center">
           <Button
-            disabled={exporting}
+            disabled={exporting || !exportAllowed}
             onClick={() => void runExport("xlsx")}
           >
             {exporting ? "Exporteren…" : "Exporteer Excel"}
           </Button>
           <Button
             variant="secondary"
-            disabled={exporting}
+            disabled={exporting || !exportAllowed}
             onClick={() => void runExport("pdf")}
           >
             Exporteer PDF

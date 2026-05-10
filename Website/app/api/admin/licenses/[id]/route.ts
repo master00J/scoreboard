@@ -11,7 +11,7 @@ const patchBody = z.object({
   ownerEmail: z.union([z.string().trim().email(), z.literal("")]).optional(),
   maxActivations: z.coerce.number().int().min(1).max(500).optional(),
   validUntil: z.union([z.string(), z.literal(""), z.null()]).optional(),
-  plan: z.enum(["trial", "standard", "club", "enterprise"]).optional(),
+  plan: z.string().trim().regex(/^[a-z0-9_-]{2,40}$/).optional(),
   notes: z.union([z.string().trim().max(2000), z.literal(""), z.null()]).optional(),
   revoked: z.boolean().optional(),
   downloadUrl: z.union([z.string(), z.literal(""), z.null()]).optional(),

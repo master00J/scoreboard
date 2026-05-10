@@ -8,6 +8,8 @@ import {
 } from "@/lib/license-server";
 import { licenseActivateBodySchema, normalizeLicenseKey } from "@/lib/license-keys";
 import { operatorPairTokenForVenue } from "@/lib/control-auth";
+import { adminGetLicensePlan } from "@/lib/license-plan-admin-data";
+import { getFeaturesForPlan, toPublicLicenseSnapshot } from "@/lib/license-plans";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -25,6 +27,15 @@ function controlConfigFor(machineId: string, licenseId: string) {
     : configuredBaseUrl;
   const venueId = `v-${licenseId.slice(0, 8)}-${machineId.slice(0, 6)}`.toLowerCase();
   return { cloudBaseUrl: baseUrl, desktopKey, venueId, operatorPairToken: operatorPairTokenForVenue(venueId) };
+}
+
+async function licenseBundleFor(row: { organization_label: string; plan: string; valid_until: string | null }) {
+  const plan = await adminGetLicensePlan(row.plan);
+  return toPublicLicenseSnapshot({
+    ...row,
+    plan_name: plan?.name ?? null,
+    plan_features: plan?.features ?? getFeaturesForPlan(row.plan),
+  });
 }
 
 export async function OPTIONS() {
@@ -90,15 +101,12 @@ export async function POST(request: Request) {
 
   if (inst.row) {
     void touchInstallationLastSeen(inst.row.id);
+    const license = await licenseBundleFor(lic.row);
     return NextResponse.json(
       {
         ok: true,
         status: "already_activated",
-        license: {
-          organizationLabel: lic.row.organization_label,
-          plan: lic.row.plan,
-          validUntil: lic.row.valid_until,
-        },
+        license,
         control: controlConfigFor(machineId, lic.row.id),
       },
       { headers: cors },
@@ -130,15 +138,12 @@ export async function POST(request: Request) {
       const again = await findInstallation(lic.row.id, machineId);
       if (again.ok && again.row) {
         void touchInstallationLastSeen(again.row.id);
+        const license = await licenseBundleFor(lic.row);
         return NextResponse.json(
           {
             ok: true,
             status: "already_activated",
-            license: {
-              organizationLabel: lic.row.organization_label,
-              plan: lic.row.plan,
-              validUntil: lic.row.valid_until,
-            },
+            license,
             control: controlConfigFor(machineId, lic.row.id),
           },
           { headers: cors },
@@ -152,15 +157,12 @@ export async function POST(request: Request) {
     );
   }
 
+  const license = await licenseBundleFor(lic.row);
   return NextResponse.json(
     {
       ok: true,
       status: "activated",
-      license: {
-        organizationLabel: lic.row.organization_label,
-        plan: lic.row.plan,
-        validUntil: lic.row.valid_until,
-      },
+      license,
       control: controlConfigFor(machineId, lic.row.id),
     },
     { headers: cors },

@@ -15,8 +15,7 @@ create table if not exists public.licenses (
   owner_email text,
   download_url text,
   constraint licenses_license_key_key unique (license_key),
-  constraint licenses_max_activations_check check (max_activations >= 1 and max_activations <= 500),
-  constraint licenses_plan_check check (plan in ('trial', 'standard', 'club', 'enterprise'))
+  constraint licenses_max_activations_check check (max_activations >= 1 and max_activations <= 500)
 );
 
 create table if not exists public.license_installations (
@@ -47,6 +46,9 @@ on public.licenses (lower(owner_email))
 where owner_email is not null;
 
 alter table public.licenses add column if not exists download_url text;
+
+-- Dynamische plannen staan in license_plans.sql; oude enum/check verwijderen voor bestaande projecten.
+alter table public.licenses drop constraint if exists licenses_plan_check;
 
 -- Voorbeeld: nieuwe licentie (pas sleutel en label aan)
 -- insert into public.licenses (license_key, organization_label, owner_email, max_activations, valid_until, plan)

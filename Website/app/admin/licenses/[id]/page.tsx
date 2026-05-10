@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { ADMIN_COOKIE_NAME, verifyAdminToken } from "@/lib/admin-auth";
 import { getAdminPathPrefix } from "@/lib/admin-url";
 import { adminGetLicense, adminListInstallations } from "@/lib/license-admin-data";
+import { adminListActiveLicensePlans } from "@/lib/license-plan-admin-data";
 import { AdminLicenseDetailClient } from "@/components/admin-license-detail";
 import { AdminLogoutButton } from "@/components/admin-logout-button";
 
@@ -23,6 +24,7 @@ export default async function AdminLicenseDetailPage({
     notFound();
   }
   const installations = (await adminListInstallations(id)) ?? [];
+  const plans = await adminListActiveLicensePlans();
 
   return (
     <div className="app-shell">
@@ -34,7 +36,7 @@ export default async function AdminLicenseDetailPage({
             <AdminLogoutButton />
           </div>
         </nav>
-        <AdminLicenseDetailClient license={lic} installations={installations} />
+        <AdminLicenseDetailClient license={lic} installations={installations} plans={plans} />
       </div>
     </div>
   );

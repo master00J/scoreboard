@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { InstallationFullRow, LicenseFullRow } from "@/lib/license-admin-data";
+import type { LicensePlanRow } from "@/lib/license-plan-admin-data";
 import { getAdminPathPrefix } from "@/lib/admin-url";
 
 function fmtDate(iso: string | null | undefined): string {
@@ -20,9 +21,11 @@ function fmtDate(iso: string | null | undefined): string {
 export function AdminLicenseDetailClient(props: {
   license: LicenseFullRow;
   installations: InstallationFullRow[];
+  plans: LicensePlanRow[];
 }) {
   const router = useRouter();
   const { license: initial } = props;
+  const plans = props.plans;
   const [license, setLicense] = useState(initial);
   const [installations, setInstallations] = useState(props.installations);
   const [organizationLabel, setOrganizationLabel] = useState(license.organization_label);
@@ -241,10 +244,12 @@ export function AdminLicenseDetailClient(props: {
           <label>
             Plan
             <select value={plan} onChange={(e) => setPlan(e.target.value)}>
-              <option value="trial">Trial</option>
-              <option value="standard">Standard</option>
-              <option value="club">Club</option>
-              <option value="enterprise">Enterprise</option>
+              {!plans.some((item) => item.code === plan) && <option value={plan}>{plan}</option>}
+              {plans.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.name}
+                </option>
+              ))}
             </select>
           </label>
           <label>

@@ -6,6 +6,7 @@ import {
 } from "@/lib/license-admin-data";
 import { getSupabaseAdminHeaders } from "@/lib/supabase-admin";
 import { toPublicLicenseSnapshot } from "@/lib/license-plans";
+import { adminGetLicensePlan } from "@/lib/license-plan-admin-data";
 import {
   portalDownloadLabel,
   portalLedboardingDownloadLabel,
@@ -88,7 +89,12 @@ export async function loadPortalLicenseCardsForOwnerEmail(
   for (const row of rows) {
     const installs = (await adminListInstallations(row.id)) ?? [];
     const status = computeStatus(row);
-    const snap = toPublicLicenseSnapshot(row);
+    const plan = await adminGetLicensePlan(row.plan);
+    const snap = toPublicLicenseSnapshot({
+      ...row,
+      plan_name: plan?.name ?? null,
+      plan_features: plan?.features ?? null,
+    });
     const downloadUrl =
       status === "active"
         ? resolvePortalDownloadUrl(

@@ -106,7 +106,14 @@ export type FolderPickResult = {
 };
 
 export type LicenseGetStatusResult =
-  | { gate: false; organizationLabel: string | null; offlineGrace?: boolean }
+  | {
+      gate: false;
+      organizationLabel: string | null;
+      offlineGrace?: boolean;
+      plan?: string;
+      planLabel?: string;
+      features?: Record<string, boolean>;
+    }
   | {
       gate: true;
       machinePreview: string;
@@ -115,7 +122,14 @@ export type LicenseGetStatusResult =
     };
 
 export type LicenseActivateResult =
-  | { ok: true; organizationLabel: string | null; status: "activated" | "already_activated" }
+  | {
+      ok: true;
+      organizationLabel: string | null;
+      status: "activated" | "already_activated";
+      plan?: string;
+      planLabel?: string;
+      features?: Record<string, boolean>;
+    }
   | { ok: false; message: string; reason?: string };
 
 /** Live app-metrics uit Electron `app.getAppMetrics()` (main + renderers + GPU-proces). */
@@ -176,7 +190,7 @@ export type ElectronBridge = {
     base64: string;
     defaultFileName: string;
     format: "pdf" | "xlsx";
-  }) => Promise<{ canceled: boolean; filePath?: string }>;
+  }) => Promise<{ canceled: boolean; filePath?: string; error?: string }>;
   exportMatch: (opts: {
     matchId: string;
     format: ExportFormat;

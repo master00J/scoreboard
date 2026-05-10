@@ -10,7 +10,7 @@ const createBody = z.object({
   ownerEmail: z.union([z.string().trim().email(), z.literal("")]).optional(),
   maxActivations: z.coerce.number().int().min(1).max(500),
   validUntil: z.union([z.string(), z.literal(""), z.null()]).optional(),
-  plan: z.enum(["trial", "standard", "club", "enterprise"]),
+  plan: z.string().trim().regex(/^[a-z0-9_-]{2,40}$/),
   notes: z.string().trim().max(2000).optional().nullable(),
   licenseKey: z.string().trim().min(8).max(64).optional(),
   downloadUrl: z.union([z.string(), z.literal(""), z.null()]).optional(),

@@ -43,6 +43,10 @@ te activeren.
 Run `supabase/cloud-control.sql` om de cloud control relay-tabellen te maken
 (mobile remote control buiten lokaal netwerk).
 
+Run `supabase/license-plans.sql` om beheerbare licentieplannen en feature flags
+te activeren. Dit verwijdert ook de oude vaste check op `licenses.plan`, zodat
+je in het admin-dashboard eigen plan-codes kunt gebruiken.
+
 Run `supabase/app-release-notifications.sql` om automatische update-mails
 idempotent te maken. Deze tabel onthoudt welke `APP_RELEASE_VERSION` al naar
 actieve licentiehouders is gemaild.

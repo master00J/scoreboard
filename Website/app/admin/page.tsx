@@ -5,6 +5,7 @@ import { ADMIN_COOKIE_NAME, verifyAdminToken } from "@/lib/admin-auth";
 import { getAdminPathPrefix } from "@/lib/admin-url";
 import { AdminLogoutButton } from "@/components/admin-logout-button";
 import { adminListLicenses, type LicenseFullRow } from "@/lib/license-admin-data";
+import { adminListActiveLicensePlans } from "@/lib/license-plan-admin-data";
 
 function fmtDate(iso: string | null): string {
   if (!iso) {
@@ -37,6 +38,7 @@ export default async function AdminDashboardPage() {
   }
 
   const rows = await adminListLicenses();
+  const plans = await adminListActiveLicensePlans();
   if (!rows) {
     return (
       <div className="app-shell">
@@ -55,6 +57,7 @@ export default async function AdminDashboardPage() {
           <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
             <Link href="/">Website</Link>
             <Link href="/portal">Klantportaal</Link>
+            <Link href={`${getAdminPathPrefix()}/plans`}>Plannen</Link>
             <Link href={`${getAdminPathPrefix()}/licenses/new`}>+ Nieuwe licentie</Link>
             <AdminLogoutButton />
           </div>
@@ -82,7 +85,7 @@ export default async function AdminDashboardPage() {
                   <tr key={r.id}>
                     <td>{r.organization_label}</td>
                     <td style={{ fontFamily: "ui-monospace, monospace", fontSize: "0.8rem" }}>{r.license_key}</td>
-                    <td>{r.plan}</td>
+                    <td>{plans.find((plan) => plan.code === r.plan)?.name ?? r.plan}</td>
                     <td>{statusBadge(r)}</td>
                     <td>{fmtDate(r.valid_until)}</td>
                     <td>

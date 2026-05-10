@@ -1043,6 +1043,14 @@ function registerIpc() {
 
   ipcMain.handle("display:command", async (_, cmd) => {
     if (!runtime) throw new Error("Runtime not initialized");
+    if (
+      desktopContext &&
+      cmd?.type === "display:setMode" &&
+      cmd?.mode === "SPONSOR_ROTATION" &&
+      licenseSvc.readStoredLicense(desktopContext.userDataDir)?.features?.automatic_sponsor_rotation === false
+    ) {
+      return { ok: false, error: "Automatische sponsorrotatie is niet beschikbaar in dit licentieplan." };
+    }
     return runtime.runCommand(cmd);
   });
 
@@ -1096,6 +1104,12 @@ function registerIpc() {
       _,
       payload: { base64: string; defaultFileName: string; format: "pdf" | "xlsx" },
     ) => {
+      const storedLicense = desktopContext
+        ? licenseSvc.readStoredLicense(desktopContext.userDataDir)
+        : null;
+      if (storedLicense?.features?.proof_of_play_export === false) {
+        return { canceled: true, error: "Proof-of-play export is niet beschikbaar in dit licentieplan." };
+      }
       const ext = payload.format === "pdf" ? "pdf" : "xlsx";
       let defaultPath = payload.defaultFileName.trim() || `proof-of-play.${ext}`;
       if (!defaultPath.toLowerCase().endsWith(`.${ext}`)) {
@@ -1158,7 +1172,7 @@ function registerIpc() {
 
   ipcMain.handle("license:getStatus", async () => {
     if (licenseSvc.skipLicenseGateFromEnv()) {
-      return { gate: false, organizationLabel: null };
+      return { gate: false, organizationLabel: null, features: { automatic_sponsor_rotation: true, proof_of_play_export: true } };
     }
     if (!desktopContext) {
       return { gate: true, machinePreview: "—", message: "Desktop niet geïnitialiseerd." };
@@ -1178,6 +1192,9 @@ function registerIpc() {
           gate: false,
           organizationLabel: prev.organizationLabel ?? null,
           offlineGrace: true,
+          ...(prev.plan !== undefined ? { plan: prev.plan } : {}),
+          ...(prev.planLabel !== undefined ? { planLabel: prev.planLabel } : {}),
+          ...(prev.features !== undefined ? { features: prev.features } : {}),
         };
       }
       return {
@@ -1237,6 +1254,9 @@ function registerIpc() {
     return {
       gate: false,
       organizationLabel: r.organizationLabel,
+      ...(r.plan !== undefined ? { plan: r.plan } : {}),
+      ...(r.planLabel !== undefined ? { planLabel: r.planLabel } : {}),
+      ...(r.features !== undefined ? { features: r.features } : {}),
     };
   });
 
@@ -1276,6 +1296,9 @@ function registerIpc() {
       ok: true,
       organizationLabel: r.organizationLabel,
       status: r.status,
+      ...(r.plan !== undefined ? { plan: r.plan } : {}),
+      ...(r.planLabel !== undefined ? { planLabel: r.planLabel } : {}),
+      ...(r.features !== undefined ? { features: r.features } : {}),
     };
   });
 }
