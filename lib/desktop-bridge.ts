@@ -29,7 +29,27 @@ export type DisplayPlaybackLogPayload = {
   followMode?: boolean;
   paused?: boolean;
   playlistId?: string | null;
+  /** Periodieke ping van het display-renderer (bewijs dat JS nog draait; zie boot.log). */
+  heartbeat?: boolean;
   /** ms sinds epoch (renderer). */
+  atMs: number;
+};
+
+/** HTML-video- en watchdog-events op het stadionscherm → boot.log (main). */
+export type DisplayMediaDiagnosticPayload = {
+  source: "sponsor-budget" | "sponsor-rotation" | "single-media" | "idle-fallback" | "player-intro" | "other";
+  /** bv. error, stalled, waiting, loaded_metadata, watchdog_no_metadata_4s */
+  event: string;
+  mediaId?: string;
+  mediaTitle?: string;
+  mediaPath?: string;
+  mediaErrorCode?: number | null;
+  mediaErrorMessage?: string;
+  readyState?: number;
+  networkState?: number;
+  currentTime?: number;
+  droppedFrames?: number;
+  totalVideoFrames?: number;
   atMs: number;
 };
 
@@ -189,4 +209,6 @@ export type ElectronBridge = {
    * Geen-op bij control-ingebouwde preview (`followPlayback` / `showPreviewProgress`).
    */
   reportDisplayPlaybackContext: (payload: DisplayPlaybackLogPayload) => void;
+  /** Stadionscherm: video/decode-problemen naar boot.log (niet in browser-only). */
+  reportDisplayMediaDiagnostic: (payload: DisplayMediaDiagnosticPayload) => void;
 };

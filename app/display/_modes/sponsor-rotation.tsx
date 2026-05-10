@@ -8,6 +8,10 @@ import type { Playlist, PlaylistItemFull } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
 import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
 import {
+  reportDisplayMediaDiagnostic,
+  videoElementDiagnosticFields,
+} from "@/lib/report-display-media-diagnostic";
+import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
 } from "../_components/preview-slide-progress";
@@ -27,12 +31,40 @@ export type IdleEmptyFallback = {
 function FallbackMediaSlide({
   media,
   objectFit,
+  mediaDiagEnabled = false,
 }: {
   media: NonNullable<IdleEmptyFallback["media"]>;
   objectFit: "cover" | "contain";
+  /** Alleen stadionscherm: log HTML-video-events naar boot.log */
+  mediaDiagEnabled?: boolean;
 }) {
   const src = mediaUrl(media.path);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  const logDiag = (event: string, v?: HTMLVideoElement | null) => {
+    if (!mediaDiagEnabled || media.type !== "VIDEO") return;
+    const el = v ?? videoRef.current;
+    const throttleMs =
+      event === "error"
+        ? 0
+        : event === "loaded_metadata"
+          ? 5000
+          : event === "stalled" || event === "waiting" || event === "suspend"
+            ? 15000
+            : 0;
+    reportDisplayMediaDiagnostic(
+      {
+        source: "idle-fallback",
+        event,
+        mediaId: media.path,
+        mediaTitle: media.title,
+        mediaPath: media.path,
+        ...videoElementDiagnosticFields(el),
+        atMs: Date.now(),
+      },
+      throttleMs,
+    );
+  };
   useEffect(() => {
     if (media.type !== "VIDEO") return;
     return () => {
@@ -59,9 +91,14 @@ function FallbackMediaSlide({
             loop
             muted={!(media.playAudio ?? false)}
             playsInline
-            preload="auto"
+            preload="metadata"
             className="max-h-full max-w-full"
             style={{ objectFit: "contain", objectPosition: "center" }}
+            onLoadedMetadata={(e) => logDiag("loaded_metadata", e.currentTarget)}
+            onStalled={(e) => logDiag("stalled", e.currentTarget)}
+            onWaiting={(e) => logDiag("waiting", e.currentTarget)}
+            onSuspend={(e) => logDiag("suspend", e.currentTarget)}
+            onError={(e) => logDiag("error", e.currentTarget)}
           />
         ) : (
           <img
@@ -86,8 +123,13 @@ function FallbackMediaSlide({
           loop
           muted={!(media.playAudio ?? false)}
           playsInline
-          preload="auto"
+          preload="metadata"
           style={DISPLAY_COVER_MEDIA_STYLE}
+          onLoadedMetadata={(e) => logDiag("loaded_metadata", e.currentTarget)}
+          onStalled={(e) => logDiag("stalled", e.currentTarget)}
+          onWaiting={(e) => logDiag("waiting", e.currentTarget)}
+          onSuspend={(e) => logDiag("suspend", e.currentTarget)}
+          onError={(e) => logDiag("error", e.currentTarget)}
         />
       </div>
     );
@@ -102,9 +144,11 @@ function FallbackMediaSlide({
 function IdleEmptyVisual({
   fallback,
   mediaObjectFit,
+  mediaDiagEnabled = false,
 }: {
   fallback: IdleEmptyFallback;
   mediaObjectFit: "cover" | "contain";
+  mediaDiagEnabled?: boolean;
 }) {
   const { media, logoUrl } = fallback;
   const [imgTick, setImgTick] = useState(0);
@@ -119,7 +163,7 @@ function IdleEmptyVisual({
     return (
       <div className="absolute inset-0 overflow-hidden bg-black">
         {media.type === "VIDEO" ? (
-          <FallbackMediaSlide media={media} objectFit={mediaObjectFit} />
+          <FallbackMediaSlide media={media} objectFit={mediaObjectFit} mediaDiagEnabled={mediaDiagEnabled} />
         ) : (
           <AnimatePresence mode="wait">
             <motion.div
@@ -130,7 +174,7 @@ function IdleEmptyVisual({
               transition={{ duration: 0 }}
               className="absolute inset-0 size-full min-h-0 min-w-0"
             >
-              <FallbackMediaSlide media={media} objectFit={mediaObjectFit} />
+              <FallbackMediaSlide media={media} objectFit={mediaObjectFit} mediaDiagEnabled={mediaDiagEnabled} />
             </motion.div>
           </AnimatePresence>
         )}
@@ -246,7 +290,7 @@ export function SponsorRotation({
     if (idleEmptyFallback && (idleEmptyFallback.media || idleEmptyFallback.logoUrl)) {
       return (
         <div className="absolute inset-0 overflow-hidden bg-black">
-          <IdleEmptyVisual fallback={idleEmptyFallback} mediaObjectFit={mediaObjectFit} />
+          <IdleEmptyVisual fallback={idleEmptyFallback} mediaObjectFit={mediaObjectFit} mediaDiagEnabled={!showPreviewProgress} />
         </div>
       );
     }
@@ -270,7 +314,11 @@ export function SponsorRotation({
           transition={{ duration: 0 }}
           className="absolute inset-0 size-full min-h-0 min-w-0"
         >
-          <MediaRenderer item={current} objectFit={mediaObjectFit} />
+          <MediaRenderer
+            item={current}
+            objectFit={mediaObjectFit}
+            mediaDiagEnabled={!showPreviewProgress}
+          />
         </motion.div>
       </AnimatePresence>
       {showPreviewProgress && slideMs > 0 && (
@@ -283,12 +331,39 @@ export function SponsorRotation({
 function MediaRenderer({
   item,
   objectFit,
+  mediaDiagEnabled = false,
 }: {
   item: PlaylistItemFull;
   objectFit: "cover" | "contain";
+  mediaDiagEnabled?: boolean;
 }) {
   const src = mediaUrl(item.media.path);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  const logDiag = (event: string, v?: HTMLVideoElement | null) => {
+    if (!mediaDiagEnabled || item.media.type !== "VIDEO") return;
+    const el = v ?? videoRef.current;
+    const throttleMs =
+      event === "error"
+        ? 0
+        : event === "loaded_metadata"
+          ? 5000
+          : event === "stalled" || event === "waiting" || event === "suspend"
+            ? 15000
+            : 0;
+    reportDisplayMediaDiagnostic(
+      {
+        source: "sponsor-rotation",
+        event,
+        mediaId: item.media.id,
+        mediaTitle: item.media.title,
+        mediaPath: item.media.path,
+        ...videoElementDiagnosticFields(el),
+        atMs: Date.now(),
+      },
+      throttleMs,
+    );
+  };
 
   useEffect(() => {
     if (item.media.type !== "VIDEO") return;
@@ -316,9 +391,14 @@ function MediaRenderer({
             autoPlay
             muted={!(item.media.playAudio ?? false)}
             playsInline
-            preload="auto"
+            preload="metadata"
             className="max-h-full max-w-full"
             style={{ objectFit: "contain", objectPosition: "center" }}
+            onLoadedMetadata={(e) => logDiag("loaded_metadata", e.currentTarget)}
+            onStalled={(e) => logDiag("stalled", e.currentTarget)}
+            onWaiting={(e) => logDiag("waiting", e.currentTarget)}
+            onSuspend={(e) => logDiag("suspend", e.currentTarget)}
+            onError={(e) => logDiag("error", e.currentTarget)}
           />
         ) : (
           <img
@@ -342,8 +422,13 @@ function MediaRenderer({
           autoPlay
           muted={!(item.media.playAudio ?? false)}
           playsInline
-          preload="auto"
+          preload="metadata"
           style={DISPLAY_COVER_MEDIA_STYLE}
+          onLoadedMetadata={(e) => logDiag("loaded_metadata", e.currentTarget)}
+          onStalled={(e) => logDiag("stalled", e.currentTarget)}
+          onWaiting={(e) => logDiag("waiting", e.currentTarget)}
+          onSuspend={(e) => logDiag("suspend", e.currentTarget)}
+          onError={(e) => logDiag("error", e.currentTarget)}
         />
       </div>
     );

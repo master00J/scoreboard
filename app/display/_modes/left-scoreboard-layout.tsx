@@ -160,29 +160,31 @@ function TimerBlock({
       >
         {period}
       </div>
-      <div
-        className="mt-2 font-black tabular-nums leading-none text-white"
-        style={{
-          fontSize: theme.leftTimerPx,
-          textShadow: "0 4px 18px rgba(0,0,0,0.4)",
-          opacity: running ? 1 : 0.75,
-          color: accent,
-        }}
-      >
-        {formatTime(elapsed)}
-      </div>
-      {addedTime > 0 && (
+      <div className="mt-2 flex items-end justify-center gap-3">
         <div
-          className="mt-2 rounded px-3 py-1 font-black tabular-nums text-white"
+          className="font-black tabular-nums leading-none text-white"
           style={{
-            fontSize: Math.max(14, theme.leftTimerPx * 0.42),
-            background: accent,
-            color: "#0a0a0a",
+            fontSize: theme.leftTimerPx,
+            textShadow: "0 4px 18px rgba(0,0,0,0.4)",
+            opacity: running ? 1 : 0.75,
+            color: accent,
           }}
         >
-          +{addedTime}
+          {formatTime(elapsed)}
         </div>
-      )}
+        {addedTime > 0 && (
+          <div
+            className="mb-1 rounded px-3 py-1 font-black tabular-nums text-white"
+            style={{
+              fontSize: Math.max(14, theme.leftTimerPx * 0.35),
+              background: accent,
+              color: "#0a0a0a",
+            }}
+          >
+            +{addedTime}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

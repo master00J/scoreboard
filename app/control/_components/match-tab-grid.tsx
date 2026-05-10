@@ -212,7 +212,13 @@ function LayoutPanelWrapper({
   );
 }
 
-function LivePreviewPanel({ embedInControl }: { embedInControl?: boolean }) {
+function LivePreviewPanel({
+  embedInControl,
+  active = true,
+}: {
+  embedInControl?: boolean;
+  active?: boolean;
+}) {
   return (
     <div className="bg-card border border-border rounded-xl overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-secondary/50">
@@ -220,7 +226,13 @@ function LivePreviewPanel({ embedInControl }: { embedInControl?: boolean }) {
         <div className="text-xs text-muted-foreground">1920 × 1080</div>
       </div>
       <div className="relative aspect-video w-full bg-black">
-        <DisplayPage embedInControl={embedInControl} />
+        {active ? (
+          <DisplayPage embedInControl={embedInControl} />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-white/45">
+            Preview gepauzeerd buiten het Match-tabblad
+          </div>
+        )}
       </div>
     </div>
   );

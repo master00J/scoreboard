@@ -4,6 +4,10 @@ import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { Player, Team } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
+import {
+  reportDisplayMediaDiagnostic,
+  videoElementDiagnosticFields,
+} from "@/lib/report-display-media-diagnostic";
 
 export function PlayerIntroMode({
   player,
@@ -51,6 +55,59 @@ export function PlayerIntroMode({
               playsInline
               loop={false}
               autoPlay
+              onLoadedMetadata={(e) =>
+                reportDisplayMediaDiagnostic(
+                  {
+                    source: "player-intro",
+                    event: "loaded_metadata",
+                    mediaId: player.id,
+                    mediaTitle: `${player.firstName} ${player.lastName}`.trim(),
+                    mediaPath: player.lineupVideoPath ?? undefined,
+                    ...videoElementDiagnosticFields(e.currentTarget),
+                    atMs: Date.now(),
+                  },
+                  5000,
+                )
+              }
+              onStalled={(e) =>
+                reportDisplayMediaDiagnostic(
+                  {
+                    source: "player-intro",
+                    event: "stalled",
+                    mediaId: player.id,
+                    mediaPath: player.lineupVideoPath ?? undefined,
+                    ...videoElementDiagnosticFields(e.currentTarget),
+                    atMs: Date.now(),
+                  },
+                  15000,
+                )
+              }
+              onWaiting={(e) =>
+                reportDisplayMediaDiagnostic(
+                  {
+                    source: "player-intro",
+                    event: "waiting",
+                    mediaId: player.id,
+                    mediaPath: player.lineupVideoPath ?? undefined,
+                    ...videoElementDiagnosticFields(e.currentTarget),
+                    atMs: Date.now(),
+                  },
+                  15000,
+                )
+              }
+              onError={(e) =>
+                reportDisplayMediaDiagnostic(
+                  {
+                    source: "player-intro",
+                    event: "error",
+                    mediaId: player.id,
+                    mediaPath: player.lineupVideoPath ?? undefined,
+                    ...videoElementDiagnosticFields(e.currentTarget),
+                    atMs: Date.now(),
+                  },
+                  0,
+                )
+              }
             />
           </motion.div>
         </AnimatePresence>

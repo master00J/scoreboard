@@ -1,5 +1,6 @@
 import type { Sponsor, SponsorSection } from "./types";
 import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
+import { buildSponsorRotationMediaList } from "./sponsor-playback-order";
 
 /** Schermtijd tijdens speelhelft: aparte budgets, anders legacy `matchSeconds` voor beide. */
 export function matchPlayBudgetSeconds(s: Sponsor, matchStatus: string | undefined): number {
@@ -89,7 +90,37 @@ export function maxClipSecondsForSponsor(
 }
 
 /**
- * Duur van de sponsor-fase na een slot: langste clip van **deze** sponsor.
+ * Duur van een volledige sponsor-pass in deze fase. Bij live sponsor-slots moet
+ * een sponsor met meerdere actieve video's zijn pass kunnen uitspelen voordat
+ * de slotmap naar scorebord of een andere sponsor mag terugvallen.
+ */
+export function sponsorPassSecondsForSponsor(
+  s: Sponsor,
+  section?: SponsorSection,
+  matchStatus?: string,
+): number {
+  const media = buildSponsorRotationMediaList(
+    (s.media ?? []).filter(
+      (m) => m.active && (!section || mediaAllowedForSponsorPhase(m, section, matchStatus)),
+    ),
+    s.sponsorPlaybackOrderJson,
+    s.sponsorPlaybackRepeatsJson,
+  );
+  if (media.length === 0) return maxClipSecondsForSponsor(s, section, matchStatus);
+
+  let total = 0;
+  for (const item of media) {
+    if (item.type === "VIDEO") {
+      total += Math.max(1, item.durationSec > 0 ? item.durationSec : 10);
+    } else {
+      total += Math.max(1, item.durationSec > 0 ? item.durationSec : s.imageDefaultSec || 10);
+    }
+  }
+  return Math.min(Math.max(total, 1), 600);
+}
+
+/**
+ * Duur van de sponsor-fase na een slot: volledige pass van **deze** sponsor.
  * Fallback = sectie-max (alle sponsors), bv. onbekend id.
  */
 export function holdSecondsForSponsorPhase(
@@ -100,7 +131,7 @@ export function holdSecondsForSponsorPhase(
 ): number {
   if (sponsorId) {
     const s = sponsors.find((x) => x.id === sponsorId);
-    if (s) return maxClipSecondsForSponsor(s, section, matchStatus);
+    if (s) return sponsorPassSecondsForSponsor(s, section, matchStatus);
   }
   return maxSponsorClipSecondsForSection(sponsors, section, matchStatus);
 }

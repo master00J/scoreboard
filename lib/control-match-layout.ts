@@ -50,8 +50,8 @@ function isPanelId(x: unknown): x is MatchTabPanelId {
   return typeof x === "string" && (ALL_PANEL_IDS as string[]).includes(x);
 }
 
-function normalizeOrder(defaultOrder: MatchTabPanelId[], saved: unknown): MatchTabPanelId[] {
-  if (!Array.isArray(saved)) return defaultOrder;
+function normalizeSavedOrder(saved: unknown): MatchTabPanelId[] {
+  if (!Array.isArray(saved)) return [];
   const picked = saved.filter(isPanelId);
   const seen = new Set<MatchTabPanelId>();
   const out: MatchTabPanelId[] = [];
@@ -60,9 +60,6 @@ function normalizeOrder(defaultOrder: MatchTabPanelId[], saved: unknown): MatchT
       seen.add(id);
       out.push(id);
     }
-  }
-  for (const id of defaultOrder) {
-    if (!seen.has(id)) out.push(id);
   }
   return out;
 }
@@ -157,10 +154,16 @@ export function parseMatchTabLayoutJson(raw: string | null): MatchTabLayoutState
             Object.entries(p.collapsed).filter(([k, v]) => isPanelId(k) && typeof v === "boolean"),
           ) as Partial<Record<MatchTabPanelId, boolean>>)
         : {};
+    const orderLeft = normalizeSavedOrder(p.orderLeft);
+    const orderCenter = normalizeSavedOrder(p.orderCenter);
+    const orderRight = normalizeSavedOrder(p.orderRight);
+    if (orderLeft.length === 0 && orderCenter.length === 0 && orderRight.length === 0) {
+      return DEFAULT_MATCH_TAB_LAYOUT;
+    }
     return sanitizeMatchTabLayout({
-      orderLeft: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderLeft, p.orderLeft),
-      orderCenter: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderCenter, p.orderCenter),
-      orderRight: normalizeOrder(DEFAULT_MATCH_TAB_LAYOUT.orderRight, p.orderRight),
+      orderLeft,
+      orderCenter,
+      orderRight,
       collapsed,
     });
   } catch {

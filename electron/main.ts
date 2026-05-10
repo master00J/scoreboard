@@ -9,7 +9,134 @@ import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
 import { getAppResourceMetrics, getMemoryBreakdownForBootLog } from "./resource-metrics";
 
+/**
+ * Portable Windows-build (electron-builder): `userData` naar een map naast de .exe
+ * (`stadium-portable-data`). De control-UI laadt als `file://…/index.html`; als dat pad
+ * per sessie in een andere unpack-map ligt, wisselt de localStorage-origin en lijkt de
+ * wedstrijd-tablay-out telkens terug te vallen op standaard. Vaste userData voorkomt dat
+ * en bewaart database, uploads en `control-match-tab-layout.json` bij de portable.
+ *
+ * Moet vóór `app.whenReady()` en vóór elke andere `app.getPath("userData")`-aanroep.
+ *
+ * Na het omzetten van userData: kopieer zo nodig uit de vorige standaard-locatie (%AppData%/…):
+ * - machine-id + licentie (anders tweede “installatie” op dezelfde sleutel)
+ * - `data/` (Prisma/stadium.db: teams, wedstrijden, media, …), `uploads/`, control-tab lay-out
+ */
+function migrateArenaCueIdentityFromDefaultUserData(defaultUserData: string, portableUserData: string): void {
+  if (path.resolve(defaultUserData) === path.resolve(portableUserData)) return;
+  const fromM = path.join(defaultUserData, licenseSvc.ARENACUE_MACHINE_ID_FILENAME);
+  const fromL = path.join(defaultUserData, licenseSvc.ARENACUE_LICENSE_FILENAME);
+  const toM = path.join(portableUserData, licenseSvc.ARENACUE_MACHINE_ID_FILENAME);
+  const toL = path.join(portableUserData, licenseSvc.ARENACUE_LICENSE_FILENAME);
+  try {
+    if (!fs.existsSync(fromM) && !fs.existsSync(fromL)) return;
+    fs.mkdirSync(portableUserData, { recursive: true });
+
+    if (!fs.existsSync(toM) && !fs.existsSync(toL)) {
+      if (fs.existsSync(fromM)) fs.copyFileSync(fromM, toM);
+      if (fs.existsSync(fromL)) fs.copyFileSync(fromL, toL);
+      console.log("[electron] portable: machine-id/licentie overgezet van standaard userData");
+      return;
+    }
+
+    // Random machine-id werd al geschreven vóór geslaagde activatie; licentie staat nog in Roaming.
+    if (!fs.existsSync(toL) && fs.existsSync(fromL) && fs.existsSync(fromM)) {
+      fs.copyFileSync(fromM, toM);
+      fs.copyFileSync(fromL, toL);
+      console.log("[electron] portable: machine-id/licentie hersteld van standaard userData");
+    }
+  } catch (e) {
+    console.error("[electron] portable migrate arenacue-bestanden:", e);
+  }
+}
+
+/** Zolang de portable-map nog geen `data/stadium.db` heeft: volledige venue-kopie uit Roaming. */
+function migrateStadiumVenueBundleFromDefaultUserData(defaultUserData: string, portableUserData: string): void {
+  if (path.resolve(defaultUserData) === path.resolve(portableUserData)) return;
+  const fromDb = path.join(defaultUserData, "data", "stadium.db");
+  const toDb = path.join(portableUserData, "data", "stadium.db");
+  try {
+    if (!fs.existsSync(fromDb)) return;
+    if (fs.existsSync(toDb)) return;
+
+    const fromData = path.join(defaultUserData, "data");
+    const toData = path.join(portableUserData, "data");
+    fs.mkdirSync(toData, { recursive: true });
+    fs.cpSync(fromData, toData, { recursive: true });
+
+    const fromUploads = path.join(defaultUserData, "uploads");
+    const toUploads = path.join(portableUserData, "uploads");
+    if (fs.existsSync(fromUploads)) {
+      fs.mkdirSync(toUploads, { recursive: true });
+      fs.cpSync(fromUploads, toUploads, { recursive: true });
+    }
+
+    const layoutName = "control-match-tab-layout.json";
+    const fromLayout = path.join(defaultUserData, layoutName);
+    const toLayout = path.join(portableUserData, layoutName);
+    if (fs.existsSync(fromLayout) && !fs.existsSync(toLayout)) {
+      fs.copyFileSync(fromLayout, toLayout);
+    }
+
+    console.log("[electron] portable: venue-data (database, uploads, lay-out) overgezet van standaard userData");
+  } catch (e) {
+    console.error("[electron] portable migrate venue-data:", e);
+  }
+}
+
+function applyPortableUserDataPathEarly(): void {
+  const fromDir = process.env.PORTABLE_EXECUTABLE_DIR?.trim();
+  const fromFile = process.env.PORTABLE_EXECUTABLE_FILE?.trim();
+  const base =
+    fromDir && fromDir.length > 0
+      ? fromDir
+      : fromFile && fromFile.length > 0
+        ? path.dirname(fromFile)
+        : "";
+  if (!base) return;
+  const dataRoot = path.join(base, "stadium-portable-data");
+  try {
+    const defaultUserData = app.getPath("userData");
+    fs.mkdirSync(dataRoot, { recursive: true });
+    app.setPath("userData", dataRoot);
+    migrateArenaCueIdentityFromDefaultUserData(defaultUserData, dataRoot);
+    migrateStadiumVenueBundleFromDefaultUserData(defaultUserData, dataRoot);
+    console.log(`[electron] portable userData → ${dataRoot}`);
+  } catch (e) {
+    console.error("[electron] portable userData:", e);
+  }
+}
+
+applyPortableUserDataPathEarly();
+
 const IS_DEV = !app.isPackaged;
+const VIDEO_DECODE_FALLBACK_FLAG = "disable-accelerated-video-decode.flag";
+
+function videoDecodeFallbackFlagPath(): string {
+  return path.join(app.getPath("userData"), VIDEO_DECODE_FALLBACK_FLAG);
+}
+
+function videoDecodeFallbackEnabled(): boolean {
+  if (process.env.STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE === "1") return true;
+  try {
+    return fs.existsSync(videoDecodeFallbackFlagPath());
+  } catch {
+    return false;
+  }
+}
+
+function enableVideoDecodeFallbackFlag(reason: string): void {
+  try {
+    fs.mkdirSync(app.getPath("userData"), { recursive: true });
+    fs.writeFileSync(
+      videoDecodeFallbackFlagPath(),
+      `${new Date().toISOString()} ${reason}\n`,
+      "utf8",
+    );
+  } catch (e) {
+    bootLog(`[gpu-fallback] kon fallback-vlag niet schrijven: ${String(e)}`);
+  }
+}
 
 /**
  * Workaround bij sommige Windows GPU-drivers: hardware-videodecode rendert een zwarte
@@ -17,10 +144,10 @@ const IS_DEV = !app.isPackaged;
  * `STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE=1` — dan valt decode terug op software
  * (meer CPU; HEVC kan in de browser ontbreken — liever clips als H.264).
  */
-if (process.env.STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE === "1") {
+if (videoDecodeFallbackEnabled()) {
   app.commandLine.appendSwitch("disable-accelerated-video-decode");
   // bootLog not yet on disk path until configure — console is enough for early startup.
-  console.log("[electron] STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE=1 → disable-accelerated-video-decode");
+  console.log("[electron] disable-accelerated-video-decode actief");
 }
 
 /**
@@ -70,6 +197,7 @@ function sanitizePlaybackPayload(raw: unknown): string {
   if (o.followMode === true) parts.push("follow=1");
   if (o.paused === true) parts.push("paused=1");
   if (typeof o.playlistId === "string" && o.playlistId) parts.push(`pl=${o.playlistId.slice(0, 12)}`);
+  if (o.heartbeat === true) parts.push("hb=1");
   if (typeof o.atMs === "number") parts.push(`at=${o.atMs}`);
   const line = parts.join(" ");
   return line.length > 950 ? `${line.slice(0, 950)}…` : line;
@@ -77,6 +205,30 @@ function sanitizePlaybackPayload(raw: unknown): string {
 
 function setLastDisplayPlaybackFromIpc(raw: unknown) {
   lastDisplayPlaybackSummary = sanitizePlaybackPayload(raw);
+}
+
+function sanitizeMediaDiagnostic(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "—";
+  const o = raw as Record<string, unknown>;
+  const parts: string[] = [];
+  if (typeof o.source === "string") parts.push(`src=${o.source}`);
+  if (typeof o.event === "string") parts.push(`evt=${o.event}`);
+  if (typeof o.mediaId === "string" && o.mediaId) parts.push(`id=${String(o.mediaId).slice(0, 22)}`);
+  if (typeof o.mediaTitle === "string" && o.mediaTitle)
+    parts.push(`title=${String(o.mediaTitle).slice(0, 72)}`);
+  const bn = fileBaseOnly(o.mediaPath);
+  if (bn) parts.push(`file=${bn}`);
+  if (typeof o.mediaErrorCode === "number") parts.push(`errCode=${o.mediaErrorCode}`);
+  if (typeof o.mediaErrorMessage === "string" && o.mediaErrorMessage)
+    parts.push(`errMsg=${String(o.mediaErrorMessage).slice(0, 120)}`);
+  if (typeof o.readyState === "number") parts.push(`rs=${o.readyState}`);
+  if (typeof o.networkState === "number") parts.push(`ns=${o.networkState}`);
+  if (typeof o.currentTime === "number") parts.push(`t=${o.currentTime}`);
+  if (typeof o.droppedFrames === "number") parts.push(`drop=${o.droppedFrames}`);
+  if (typeof o.totalVideoFrames === "number") parts.push(`frames=${o.totalVideoFrames}`);
+  if (typeof o.atMs === "number") parts.push(`at=${o.atMs}`);
+  const line = parts.join(" ");
+  return line.length > 950 ? `${line.slice(0, 950)}…` : line;
 }
 
 function bootPlaybackContextSuffix(): string {
@@ -182,6 +334,9 @@ function configureDesktopContext() {
   env.STADIUM_UPLOADS_DIR = uploadsDir;
 
   bootLog(`appRoot=${root} packaged=${app.isPackaged}`);
+  bootLog(
+    `userDataDir=${userDataDir} portableEnv=${Boolean(process.env.PORTABLE_EXECUTABLE_DIR || process.env.PORTABLE_EXECUTABLE_FILE)}`,
+  );
   bootLog(`DATABASE_URL=${process.env.DATABASE_URL}`);
 
   return {
@@ -472,6 +627,12 @@ function createWindows() {
     },
   });
   void loadView(displayWindow, "display");
+  /** Navigatie/renderer-fouten op het stadionscherm (los van video-element). */
+  displayWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    bootLog(
+      `[display] did-fail-load code=${errorCode} ${errorDescription} url=${String(validatedURL ?? "").slice(0, 200)}${bootPlaybackContextSuffix()}`,
+    );
+  });
   /** Bounds op stadionscherm, dan fullscreen — geen taakbalk op die monitor. */
   displayWindow.once("ready-to-show", () => {
     applyDisplayFullscreen(displayWindow);
@@ -771,6 +932,10 @@ function registerIpc() {
 
   ipcMain.on("display:playbackContext", (_event, raw: unknown) => {
     setLastDisplayPlaybackFromIpc(raw);
+  });
+
+  ipcMain.on("display:mediaDiagnostic", (_event, raw: unknown) => {
+    bootLog(`[display-media] ${sanitizeMediaDiagnostic(raw)}`);
   });
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
@@ -1161,6 +1326,23 @@ if (!gotLock) {
           typeof details.exitCode === "number" &&
           details.exitCode !== 0;
         if (!byReason && !byExit) return;
+        const sponsorVideoContext =
+          lastDisplayPlaybackSummary.includes("src=sponsor") ||
+          lastDisplayPlaybackSummary.includes("mode=sponsor");
+        if (sponsorVideoContext && !videoDecodeFallbackEnabled()) {
+          const reason = `GPU ${details.reason} ${details.exitCode ?? ""}`.trim();
+          enableVideoDecodeFallbackFlag(reason);
+          bootLog(
+            `[app] GPU-crash tijdens sponsorvideo — schakel hardware video decode uit en herstart${bootPlaybackContextSuffix()}`,
+          );
+          try {
+            app.relaunch();
+            app.exit(0);
+          } catch (e) {
+            bootLog(`[app] GPU fallback relaunch failed ${String(e)}`);
+          }
+          return;
+        }
         bootLog(
           `[app] child-process-gone GPU reason=${details.reason} exitCode=${details.exitCode} (byReason=${byReason} byExit=${byExit}) — herladen beide vensters${bootPlaybackContextSuffix()}`,
         );
@@ -1174,6 +1356,9 @@ if (!gotLock) {
         }
       });
 
+      if (videoDecodeFallbackEnabled()) {
+        bootLog("[gpu-fallback] hardware video decode uitgeschakeld voor deze sessie");
+      }
       bootLog("Desktop runtime OK — open vensters.");
       startBootMetricsLogging();
     } catch (err) {

@@ -5,7 +5,7 @@
  * - ARENACUE_LICENSE_API_BASE — basis-URL zonder slash (default https://arenacue.be).
  * - ARENACUE_SKIP_LICENSE_GATE=1 — geen gate (alleen voor interne test).
  *
- * Bestanden in userData: arenacue-machine-id.txt, arenacue-license.json
+ * Bestanden in userData: zie ARENACUE_MACHINE_ID_FILENAME / ARENACUE_LICENSE_FILENAME.
  */
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -13,8 +13,9 @@ import os from "node:os";
 import path from "node:path";
 import { safeStorage } from "electron";
 
-const MACHINE_FILE = "arenacue-machine-id.txt";
-const LICENSE_FILE = "arenacue-license.json";
+/** Onder userData; geëxporteerd voor portable-migratie in `main.ts`. */
+export const ARENACUE_MACHINE_ID_FILENAME = "arenacue-machine-id.txt";
+export const ARENACUE_LICENSE_FILENAME = "arenacue-license.json";
 const GRACE_MS = 7 * 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 15_000;
 
@@ -90,7 +91,7 @@ export function getLicenseApiBase(): string {
 }
 
 export function getOrCreateMachineId(userDataDir: string): string {
-  const p = path.join(userDataDir, MACHINE_FILE);
+  const p = path.join(userDataDir, ARENACUE_MACHINE_ID_FILENAME);
   try {
     const s = fs.readFileSync(p, "utf8").trim();
     if (s.length >= 8 && s.length <= 256) {
@@ -106,7 +107,7 @@ export function getOrCreateMachineId(userDataDir: string): string {
 }
 
 export function readStoredLicense(userDataDir: string): StoredLicense | null {
-  const p = path.join(userDataDir, LICENSE_FILE);
+  const p = path.join(userDataDir, ARENACUE_LICENSE_FILENAME);
   try {
     const raw = fs.readFileSync(p, "utf8");
     return decryptStoredLicense(raw);
@@ -117,7 +118,7 @@ export function readStoredLicense(userDataDir: string): StoredLicense | null {
 }
 
 export function writeStoredLicense(userDataDir: string, data: StoredLicense): void {
-  const p = path.join(userDataDir, LICENSE_FILE);
+  const p = path.join(userDataDir, ARENACUE_LICENSE_FILENAME);
   fs.mkdirSync(userDataDir, { recursive: true });
   fs.writeFileSync(p, serializeStoredLicense(data), "utf8");
 }

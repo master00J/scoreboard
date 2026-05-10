@@ -88,3 +88,31 @@ Env: `SOAK_SPONSOR_POLL_MS` (default `400`), `SOAK_SPONSOR_LATE_SLACK_SEC` / `SO
 
 **Let op:** dit meet **telemetrie-timing** (renderer → desktop), geen pixel-frame-analyse. Voor “vlot op het scherm” blijft visuele controle op het fysieke output of screen recording aanbevolen; dit script vangt vooral te korte/te lange clip-rondes.
 
+## Sponsorvideo-overgangen en media/GPU fouten
+
+Script `npm run soak:sponsor-transition` monitort live `dist/stadium-portable-data/boot.log` op de foutklasse die sponsorvideo-overgangen kan laten crashen of flitsen:
+
+- `MEDIA_ELEMENT_ERROR: Player load failure: error creating media player`
+- `child-process-gone GPU` / `render-process-gone`
+- sponsor-video watchdogs
+- te veel verschillende sponsorvideo-starts binnen een kort venster
+
+Het script werkt ook zonder bridge-credentials als passieve log-monitor. Met dezelfde `SOAK_PAIRING_CODE` en `SOAK_OPERATOR_PIN` als hierboven zet het de app bij start automatisch naar `FIRST_HALF`, `SPONSOR_ROTATION` en `timer:start`.
+
+Voorbeeld korte test:
+
+```powershell
+$env:SOAK_TRANSITION_DURATION_MIN = "5"
+$env:SOAK_TRANSITION_REQUIRE_MEDIA = "1"
+npm run soak:sponsor-transition
+```
+
+Handige env opties:
+
+- `SOAK_TRANSITION_DURATION_MIN` (default `10`)
+- `SOAK_TRANSITION_RAPID_WINDOW_MS` (default `10000`)
+- `SOAK_TRANSITION_MAX_SWITCHES_PER_WINDOW` (default `3`)
+- `SOAK_TRANSITION_MAX_ERRORS` (default `0`)
+- `SOAK_BOOT_LOG` om een ander `boot.log` pad te monitoren
+- `SOAK_TRANSITION_SCAN_EXISTING=1` om ook bestaande logregels te analyseren in plaats van alleen nieuwe regels
+

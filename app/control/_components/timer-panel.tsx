@@ -13,6 +13,7 @@ export function TimerPanel() {
   const state = useDisplayStore((s) => s.state);
   const elapsed = useLiveTimerSeconds();
   const running = !!state?.timerRunning;
+  const addedTimeMinutes = Math.max(0, state?.addedTimeMinutes ?? 0);
   const [setOpen, setSetOpen] = useState(false);
   const [mm, setMm] = useState("0");
   const [ss, setSs] = useState("0");
@@ -63,6 +64,36 @@ export function TimerPanel() {
         <Button variant="outline" size="sm" onClick={() => sendCommand({ type: "timer:preset", preset: "ET2" })}>
           ⇤ ET2 (105:00)
         </Button>
+      </div>
+
+      <div className="rounded-lg border border-border bg-muted/20 p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-xs uppercase tracking-widest text-muted-foreground">
+            Blessuretijd
+          </div>
+          <div className="rounded-md bg-amber-500 px-3 py-1 text-sm font-black tabular-nums text-black">
+            +{addedTimeMinutes}
+          </div>
+        </div>
+        <div className="grid grid-cols-6 gap-2">
+          {[1, 2, 3, 4, 5].map((minutes) => (
+            <Button
+              key={minutes}
+              variant={addedTimeMinutes === minutes ? "default" : "secondary"}
+              size="sm"
+              onClick={() => sendCommand({ type: "timer:setAddedTime", minutes })}
+            >
+              +{minutes}
+            </Button>
+          ))}
+          <Button
+            variant={addedTimeMinutes === 0 ? "outline" : "warning"}
+            size="sm"
+            onClick={() => sendCommand({ type: "timer:setAddedTime", minutes: 0 })}
+          >
+            Uit
+          </Button>
+        </div>
       </div>
 
       <Dialog open={setOpen} onOpenChange={setSetOpen}>

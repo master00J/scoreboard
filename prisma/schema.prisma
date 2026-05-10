@@ -172,6 +172,8 @@ model DisplayState {
   timerRunning       Boolean   @default(false)
   timerStartedAt     DateTime?
   timerBaseSec       Int       @default(0)
+  /// Actuele blessuretijd in minuten voor live scorebord-overlay (+1, +2, ...).
+  addedTimeMinutes   Int       @default(0)
   externalCaptureSourceId  String?
   externalCaptureToDisplay Boolean @default(false)
   /// Veilige modus: forceert pure scoreboard, overrulet alle media/overlays voor noodgevallen tijdens live wedstrijd.

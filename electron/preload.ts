@@ -58,6 +58,9 @@ const bridge: ElectronBridge = {
   reportDisplayPlaybackContext: (payload) => {
     ipcRenderer.send("display:playbackContext", payload);
   },
+  reportDisplayMediaDiagnostic: (payload) => {
+    ipcRenderer.send("display:mediaDiagnostic", payload);
+  },
 };
 
 try {

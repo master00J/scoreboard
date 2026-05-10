@@ -240,7 +240,7 @@ export async function handleCommand(cmd: Command) {
         ET2: { sec: 105 * 60, status: "EXTRA_TIME" },
       };
       const p = presets[cmd.preset];
-      await updateState(stopAt(p.sec));
+      await updateState({ ...stopAt(p.sec), addedTimeMinutes: 0 });
       const s = await getState();
       if (s.matchId) {
         await prisma.match.update({
@@ -248,6 +248,10 @@ export async function handleCommand(cmd: Command) {
           data: { status: p.status },
         });
       }
+      return { ok: true };
+    }
+    case "timer:setAddedTime": {
+      await updateState({ addedTimeMinutes: cmd.minutes });
       return { ok: true };
     }
     case "match:setActive": {
@@ -262,7 +266,7 @@ export async function handleCommand(cmd: Command) {
           );
         }
       }
-      await updateState({ matchId: cmd.matchId });
+      await updateState({ matchId: cmd.matchId, addedTimeMinutes: 0 });
       return { ok: true };
     }
     case "match:setStatus": {
@@ -273,7 +277,7 @@ export async function handleCommand(cmd: Command) {
           data: { status: cmd.status },
         });
         // Bumpt DisplayState.updatedAt zodat desktop control en mobiele clients matchdata herladen.
-        await updateState({ mode: s.mode });
+        await updateState({ mode: s.mode, addedTimeMinutes: 0 });
       }
       return { ok: true };
     }

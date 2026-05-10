@@ -24,6 +24,8 @@
     "release:checksums": "node scripts/write-release-checksums.mjs",
     "soak:test": "node scripts/soak-test.mjs",
     "soak:sponsor": "node scripts/sponsor-rotation-soak.mjs",
+    "soak:sponsor-transition": "node scripts/sponsor-transition-soak.mjs",
+    "soak:sponsor-interrupt": "node scripts/sponsor-interruption-soak.mjs",
     "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-windows-icon.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder",
     "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir"
   },

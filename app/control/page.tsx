@@ -34,6 +34,7 @@ export default function ControlPage() {
   const connected = useDisplayStore((s) => s.connected);
   const state = useDisplayStore((s) => s.state);
   const [mobileBridge, setMobileBridge] = useState<MobileBridgeInfo | null>(null);
+  const [activeTab, setActiveTab] = useState("match");
   const { data: match, reload: reloadMatch } = useApi<Match>(
     state?.matchId ? `/api/matches/${state.matchId}` : null,
   );
@@ -108,7 +109,7 @@ export default function ControlPage() {
 
       <CrashRecoveryBanner />
 
-      <Tabs defaultValue="match">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="match">Match</TabsTrigger>
           <TabsTrigger value="setup">Setup</TabsTrigger>
@@ -127,7 +128,7 @@ export default function ControlPage() {
                 ? ({ "player-intro": <PlayerIntroLauncher match={match} /> } as const)
                 : {}),
               external: <ExternalCapturePanel />,
-              preview: <LivePreviewPanel embedInControl />,
+              preview: <LivePreviewPanel embedInControl active={activeTab === "match"} />,
               "match-live": <MatchLivePanel />,
               "event-log": <EventLog match={isFullMatch(match) ? match : null} />,
               "match-info": <MatchInfoPanel match={isFullMatch(match) ? match : null} />,

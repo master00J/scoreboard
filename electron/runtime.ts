@@ -127,6 +127,9 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
     ac.mediaId === payload.mediaId;
   if (clipMatches) {
     expectedSecForLog = Math.max(0, Math.round(ac.expectedPlaySec || 0));
+    if (payload.discard) {
+      ledger.activeClip = null;
+    }
     // Geen activeClip wissen op een spuriëne 0s-melding direct na mount (Strict Mode).
     // Wél wissen als er na enige tijd nog steeds 0s binnenkomt: anders blijft de HUD "Bezig"
     // terwijl het display al op scorebord-fallback staat.
@@ -144,6 +147,10 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
   ledger.updatedAtMs = Date.now();
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
+
+  if (payload.discard || bestActual <= 0) {
+    return ledger;
+  }
 
   // Proof-of-play: sla de beste bekende werkelijke duur op (monotoon stijgend).
   void persistSponsorPlayLog(payload, expectedSecForLog, bestActual).catch((err) => {
@@ -372,6 +379,7 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "safeMode", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "blackoutResumeMode", "TEXT");
+  await addColumnIfMissing("DisplayState", "addedTimeMinutes", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(
     "DisplayState",
     "substitutionQueueJson",

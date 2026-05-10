@@ -40,6 +40,10 @@ export const CommandSchema = z.discriminatedUnion("type", [
     type: z.literal("timer:preset"),
     preset: z.enum(["FIRST_HALF", "SECOND_HALF", "ET1", "ET2"]),
   }),
+  z.object({
+    type: z.literal("timer:setAddedTime"),
+    minutes: z.number().int().min(0).max(30),
+  }),
   z.object({ type: z.literal("match:setActive"), matchId: z.string().nullable() }),
   z.object({ type: z.literal("match:setStatus"), status: MatchStatus }),
   z.object({

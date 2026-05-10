@@ -55,6 +55,9 @@ export type SponsorTelemetryClipEnd = {
   actualSec: number;
   clipSessionId: string;
   startedAtMs: number;
+  /** Decode/start-fout: ledger opruimen, maar niet als proof-of-play bewaren. */
+  discard?: boolean;
+  reason?: string;
 };
 
 /**
