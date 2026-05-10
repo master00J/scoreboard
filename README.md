@@ -36,6 +36,22 @@ npm run build
 
 Produceert Windows-artifacts onder `dist/` (o.a. portable / NSIS via electron-builder). Daarna optioneel: `npm run release:checksums` voor `dist/SHA256SUMS.txt`.
 
+### Update-melding voor bestaande desktop-apps
+
+De desktop checkt bij het openen van het control panel `https://arenacue.be/api/app/release`.
+Als `APP_RELEASE_VERSION` op Vercel hoger is dan de versie in de lokale `.exe`, toont de app een updatebanner met downloadknop.
+
+Release-stappen:
+
+1. Verhoog `version` in `package.json` voordat je `npm run build` draait, bv. `0.1.1`.
+2. Upload `dist/Stadium-Scoreboard.exe` naar Supabase Storage.
+3. Zet op Vercel minstens:
+   - `APP_RELEASE_VERSION=0.1.1`
+   - `DOWNLOAD_STADIUM_EXE_REDIRECT_URL=<publieke Supabase-URL>`
+4. Redeploy de website op Vercel.
+
+Optioneel kun je `APP_RELEASE_DOWNLOAD_URL` zetten als de updatebanner een andere URL moet gebruiken dan de download-redirect. Zonder die override gebruikt `/api/app/release` automatisch `NEXT_PUBLIC_PORTAL_DOWNLOAD_URL`, daarna `DOWNLOAD_STADIUM_EXE_REDIRECT_URL`, en anders de standaard `/downloads/Stadium-Scoreboard.exe` URL.
+
 ## Systeemvereisten (productie / wedstrijddag)
 
 Richtlijn voor clubs en operators: typisch **4–6 uur** continue gebruik met **timer, regie en video** (sponsorrotatie, clips). Zie de publieke pagina **[arenacue.be/vereisten](https://arenacue.be/vereisten)** voor minimale vs. aanbevolen hardware (Windows 64-bit, RAM, SSD, GPU/drivers, tweede scherm). Kort samengevat:

@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { sanitizePortalDownloadUrl } from "@/lib/portal-download-url";
 
 export type AppReleasePayload = {
   version: string;
@@ -28,9 +29,14 @@ function readJsonFile(): Partial<AppReleasePayload> | null {
 /** Release-info voor de desktopapp (versiecheck). Env overschrijft losse velden. */
 export function getAppReleasePayload(): AppReleasePayload {
   const fromFile = readJsonFile() ?? {};
+  const fallbackDownloadUrl =
+    sanitizePortalDownloadUrl(process.env.APP_RELEASE_DOWNLOAD_URL) ??
+    sanitizePortalDownloadUrl(process.env.NEXT_PUBLIC_PORTAL_DOWNLOAD_URL) ??
+    sanitizePortalDownloadUrl(process.env.DOWNLOAD_STADIUM_EXE_REDIRECT_URL) ??
+    defaults.downloadUrl;
   const merged: AppReleasePayload = {
     version: (fromFile.version ?? defaults.version).trim() || defaults.version,
-    downloadUrl: (fromFile.downloadUrl ?? defaults.downloadUrl).trim() || defaults.downloadUrl,
+    downloadUrl: (fromFile.downloadUrl ?? fallbackDownloadUrl).trim() || fallbackDownloadUrl,
     title: fromFile.title != null ? String(fromFile.title).trim() || null : null,
     body: fromFile.body != null ? String(fromFile.body).trim() || null : null,
   };
@@ -40,7 +46,7 @@ export function getAppReleasePayload(): AppReleasePayload {
   const t = process.env.APP_RELEASE_TITLE?.trim();
   const b = process.env.APP_RELEASE_NOTES?.trim();
   if (v) merged.version = v;
-  if (u) merged.downloadUrl = u;
+  if (u) merged.downloadUrl = sanitizePortalDownloadUrl(u) ?? merged.downloadUrl;
   if (t !== undefined) merged.title = t || null;
   if (b !== undefined) merged.body = b || null;
 
