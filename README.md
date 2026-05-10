@@ -49,8 +49,15 @@ Release-stappen:
    - `APP_RELEASE_VERSION=0.1.1`
    - `DOWNLOAD_STADIUM_EXE_REDIRECT_URL=<publieke Supabase-URL>`
 4. Redeploy de website op Vercel.
+5. Als automatische update-mails actief zijn, verstuurt de Vercel Cron-route daarna één mail naar actieve licentiehouders voor deze versie.
 
 Optioneel kun je `APP_RELEASE_DOWNLOAD_URL` zetten als de updatebanner een andere URL moet gebruiken dan de download-redirect. Zonder die override gebruikt `/api/app/release` automatisch `NEXT_PUBLIC_PORTAL_DOWNLOAD_URL`, daarna `DOWNLOAD_STADIUM_EXE_REDIRECT_URL`, en anders de standaard `/downloads/Stadium-Scoreboard.exe` URL.
+
+Voor automatische update-mails moet de website `CRON_SECRET`, `RESEND_API_KEY`,
+`RESEND_FROM`, `SUPABASE_SERVICE_ROLE_KEY` en de Supabase-tabel uit
+`Website/supabase/app-release-notifications.sql` hebben. De mail wordt alleen
+verstuurd voor unieke actieve licentiehouders (`owner_email`) en per versie maar
+één keer.
 
 ## Systeemvereisten (productie / wedstrijddag)
 

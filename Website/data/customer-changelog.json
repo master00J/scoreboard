@@ -1,6 +1,16 @@
 {
   "entries": [
     {
+      "date": "2026-05-09",
+      "title": "Sponsor-timing en wedstrijdonderbrekingen",
+      "bullets": [
+        "Sponsorvideo's pauzeren nu correct tijdens wedstrijdmomenten zoals goals, kaarten en wissels, en hervatten daarna op dezelfde positie.",
+        "Onderbroken sponsorclips tellen alleen de effectief afgespeelde seconden mee, zodat sponsorbudgetten eerlijker en nauwkeuriger worden opgevolgd.",
+        "Een actieve sponsorclip blijft behouden tijdens overlays, waardoor clips niet meer vroegtijdig stoppen wanneer het scorebord tijdelijk een animatie of melding toont.",
+        "Extra controles en soak-tests toegevoegd voor sponsorrotatie in beide helften, inclusief goals, kaarten en wissels."
+      ]
+    },
+    {
       "date": "2026-05-05",
       "version": "0.1.0",
       "title": "Website: privacy, cookies en transparantie",

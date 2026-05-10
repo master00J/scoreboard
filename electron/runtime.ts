@@ -1123,11 +1123,39 @@ function parseJsonBody(req: DesktopApiRequest) {
   return JSON.parse(req.bodyText);
 }
 
+function appReleaseFeedUrl(): string {
+  const configured =
+    process.env.APP_RELEASE_FEED_URL?.trim() ||
+    process.env.NEXT_PUBLIC_APP_RELEASE_URL?.trim() ||
+    "";
+  if (configured && /^https?:\/\//i.test(configured)) {
+    return configured;
+  }
+  return "https://arenacue.be/api/app/release";
+}
+
+async function fetchAppReleaseFeed(): Promise<DesktopApiResponse> {
+  const feedUrl = new URL(appReleaseFeedUrl());
+  feedUrl.searchParams.set("_", String(Date.now()));
+  const res = await fetch(feedUrl);
+  let payload: unknown = null;
+  try {
+    payload = await res.json();
+  } catch {
+    payload = { error: "Release-feed gaf geen JSON terug." };
+  }
+  return json(res.ok ? 200 : res.status, payload);
+}
+
 export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResponse> {
   try {
     const method = req.method.toUpperCase();
     const url = new URL(`http://desktop${req.path}${req.search ?? ""}`);
     const { pathname, searchParams } = url;
+
+    if (method === "GET" && pathname === "/api/app/release") {
+      return await fetchAppReleaseFeed();
+    }
 
     if (method === "GET" && pathname === "/api/teams") {
       const teams = await prisma.team.findMany({

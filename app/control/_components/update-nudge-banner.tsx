@@ -4,9 +4,20 @@ import { useEffect, useState } from "react";
 import { isElectron } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
 
-const FEED_URL =
-  (typeof process !== "undefined" && process.env.NEXT_PUBLIC_APP_RELEASE_URL?.trim()) ||
-  "https://arenacue.be/api/app/release";
+const DEFAULT_FEED_URL = "https://arenacue.be/api/app/release";
+
+function releaseFeedUrl(): string {
+  const configured =
+    typeof process !== "undefined"
+      ? process.env?.NEXT_PUBLIC_APP_RELEASE_URL?.trim()
+      : "";
+  if (configured && /^https?:\/\//i.test(configured)) {
+    return configured;
+  }
+  return DEFAULT_FEED_URL;
+}
+
+const FEED_URL = releaseFeedUrl();
 /** Min. tijd tussen twee checks (focus/visibility); eerste check bij openen altijd. */
 const REFOCUS_CHECK_MIN_MS = 90_000;
 const LS_LAST_CHECK = "arenacue-release-last-check";
