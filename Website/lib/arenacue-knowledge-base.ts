@@ -152,6 +152,26 @@ Tabbed interface om outputs te configureren:
 - Per output zones tekenen.
 - Per zone media en playlist koppelen.
 
+### Stadionopstelling en playout
+- **Perimeter playlist** is meestal het lange veldbord rond het terrein. Gebruik hiervoor een eigen zone/output met een vaste playlist en korte sponsorblokken van vaak 10-15 seconden.
+- **Mid-tier / luifel playlist** is een tweede LED-laag of tribunescherm. Die kan synchroon dezelfde index volgen, maar met een andere sponsorlijst of andere media.
+- In de **Playout Console** ziet de operator bij voorkeur perimeter en mid-tier naast elkaar, met centrale Play/Pause/Next-bediening, timer, brightness en blackout/testbeeld.
+- Zones kunnen een vast segment krijgen (bijvoorbeeld perimeter volgt "Volledige wedstrijd", mid-tier volgt "Rust / pauze") of het globale actieve segment volgen.
+- Voor live stadiongebruik: test eerst elk outputvenster met testbeeld, controleer resolutie/processorlabel, zet brightness voorzichtig, open daarna pas fullscreen op de juiste LED-controller.
+- Gebruik **Blackout** alleen bewust: dit stuurt zwart beeld naar de output. Testbeeld is veiliger voor het afregelen van processors.
+
+### Media en playlists snel opbouwen
+- Importeer sponsorbeelden en video's via de app zodat bestanden naar de lokale app-bibliotheek worden gekopieerd. Vermijd losse verwijzingen naar USB-sticks of tijdelijke downloadmappen.
+- Maak sponsoritems eerst met herkenbare namen, daarna sleep je de playlistvolgorde goed.
+- Gebruik vaste duur per item (bijvoorbeeld 15 seconden) als operators een voorspelbare playout nodig hebben.
+- Voor budgettracking: zet doelminuten per sponsor alleen waar een sponsorcontract dat vraagt; anders laat je dit op 0.
+- Voor video op LED boarding: test H.264/MP4 vooraf op de stadion-PC en vermijd extreem zware codecs tijdens wedstrijddagen.
+
+### AI setupassistent
+- De AI setupassistent mag operators helpen met zones, perimeter/mid-tier playlists, segmenten, sponsoritems, timing, brightness en outputchecks.
+- De AI mag alleen gecontroleerde voorstellen doen die de operator bevestigt. Destructieve acties zoals alles wissen of resetten horen niet in de eerste versie.
+- Als een operator vraagt om "maak een basisopstelling", is een veilige default: twee zones (Perimeter en Mid-tier), beide 1920x256 of de opgegeven processorresolutie, scroll/hold afhankelijk van het gebruik, 10-15 seconden per sponsoritem en brightness 100% voor test.
+
 ### Synchronisatie met Scoreboard
 Optioneel kun je sponsorrotatie laten meelopen met de Scoreboard-app zodat de hoofd- en perimeterschermen niet dezelfde sponsor tegelijk tonen.
 

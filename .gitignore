@@ -28,3 +28,5 @@ legal-dist/
 
 # Apart project (eigen Git-repo): github.com/master00J/ledboarding
 ledboarding/
+!Website/app/api/ledboarding/
+!Website/app/api/ledboarding/**
