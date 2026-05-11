@@ -2,7 +2,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect, useMemo, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Image, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Image, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 
 const defaultBaseUrl = "http://192.168.1.10:17890";
 const defaultPairingCode = "";
@@ -103,6 +103,54 @@ function normalizeSnapshot(snapshot) {
   return { ...snapshot, timerElapsedSec: elapsedSec, _receivedAtMs: receivedAtMs };
 }
 
+function readCloudState(payload) {
+  if (!payload || typeof payload !== "object") return null;
+  if ("state" in payload) return payload.state;
+  if ("displayState" in payload) return payload.displayState;
+  return payload;
+}
+
+function extractMatchId(state) {
+  if (!state || typeof state !== "object") return null;
+  return state.matchId ?? state.activeMatchId ?? state.activeMatch?.id ?? state.match?.id ?? null;
+}
+
+function summarizeMatch(match) {
+  if (!match || typeof match !== "object" || !match.id) return null;
+  return {
+    id: match.id,
+    status: match.status ?? "UNKNOWN",
+    homeScore: Number(match.homeScore ?? 0),
+    awayScore: Number(match.awayScore ?? 0),
+    homeTeam: match.homeTeam,
+    awayTeam: match.awayTeam,
+  };
+}
+
+function cloudMatchesFromState(state) {
+  if (!state || typeof state !== "object") return [];
+  const byId = new Map();
+  const addMatch = (match) => {
+    const summary = summarizeMatch(match);
+    if (summary) byId.set(summary.id, summary);
+  };
+  if (Array.isArray(state.matches)) {
+    state.matches.forEach(addMatch);
+  }
+  addMatch(state.activeMatch);
+  addMatch(state.match);
+  const matchId = extractMatchId(state);
+  if (matchId && !byId.has(matchId)) {
+    byId.set(matchId, {
+      id: matchId,
+      status: state.matchStatus ?? state.status ?? state.mode ?? "ACTIVE",
+      homeScore: Number(state.homeScore ?? 0),
+      awayScore: Number(state.awayScore ?? 0),
+    });
+  }
+  return Array.from(byId.values());
+}
+
 async function callBridge(baseUrl, sessionToken, path, method = "GET", body) {
   const res = await fetch(`${baseUrl}${path}`, {
     method,
@@ -148,6 +196,8 @@ export default function App() {
   const [nowMs, setNowMs] = useState(Date.now());
   const [preparedGoalSide, setPreparedGoalSide] = useState(null);
   const [activeTab, setActiveTab] = useState("operator");
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [goalPickerSide, setGoalPickerSide] = useState(null);
 
   const canCall = useMemo(() => baseUrl.trim().length > 0 && sessionToken.trim().length > 0, [baseUrl, sessionToken]);
   const canMutate = role === "operator";
@@ -155,6 +205,120 @@ export default function App() {
 
   function cloudPath(path) {
     return path.startsWith("/api/") ? path : `/api${path}`;
+  }
+
+  function syncCloudMatchData(cloudState) {
+    const nextMatches = cloudMatchesFromState(cloudState);
+    setMatches(nextMatches);
+
+    const matchId = extractMatchId(cloudState);
+    const activeFromState = cloudState?.activeMatch ?? cloudState?.match ?? null;
+    if (activeFromState?.id) {
+      setActiveMatchDetails(activeFromState);
+      setActiveMatch(summarizeMatch(activeFromState));
+      setSelectedTeamId((current) =>
+        current === activeFromState.homeTeamId || current === activeFromState.awayTeamId
+          ? current
+          : activeFromState.homeTeamId,
+      );
+      return;
+    }
+
+    if (matchId) {
+      const activeSummary = nextMatches.find((match) => match.id === matchId) ?? {
+        id: matchId,
+        status: cloudState?.mode ?? "ACTIVE",
+        homeScore: Number(cloudState?.homeScore ?? 0),
+        awayScore: Number(cloudState?.awayScore ?? 0),
+      };
+      setActiveMatch(activeSummary);
+      return;
+    }
+
+    setActiveMatch(null);
+    setActiveMatchDetails(null);
+  }
+
+  function resetSessionForConnectionChange() {
+    setSessionToken("");
+    setSessionExpiresAt(null);
+    setSnapshot(null);
+    setMatches([]);
+    setActiveMatch(null);
+    setActiveMatchDetails(null);
+  }
+
+  function formatAuthStatus(payload) {
+    const roleText = payload.role === "operator" ? "operator" : "viewer";
+    return payload.expiresAt
+      ? `Verbonden als ${roleText} (sessie tot ${payload.expiresAt})`
+      : `Verbonden als ${roleText}`;
+  }
+
+  async function loadSnapshotWithToken(token) {
+    if (!baseUrl.trim() || !token?.trim()) return null;
+    try {
+      const response = isCloud
+        ? await callBridge(baseUrl, token, cloudPath("/control/state"))
+        : await callBridge(baseUrl, token, "/mobile/snapshot");
+      if (!response.ok) {
+        const message = response.data?.message || response.data?.error || `Snapshot fout (${response.status})`;
+        setStatus(message);
+        return null;
+      }
+      const cloudState = isCloud ? readCloudState(response.data) : null;
+      const nextSnapshot = normalizeSnapshot(isCloud ? cloudState : response.data);
+      setSnapshot(nextSnapshot);
+      if (isCloud) {
+        syncCloudMatchData(cloudState);
+        if (!cloudState) {
+          setStatus("Cloud login ok, maar desktop stuurt nog geen live state voor deze Venue ID.");
+        }
+      }
+      return nextSnapshot;
+    } catch (error) {
+      setStatus(`Snapshot mislukt: ${String(error)}`);
+      return null;
+    }
+  }
+
+  async function loadMatchesWithToken(token) {
+    if (!baseUrl.trim() || !token?.trim()) return;
+    setLoadingMatches(true);
+    try {
+      const response = isCloud
+        ? await callBridge(baseUrl, token, cloudPath("/control/state"))
+        : await callBridge(baseUrl, token, "/mobile/api/matches");
+      if (isCloud) {
+        if (!response.ok) {
+          const message = response.data?.message || response.data?.error || `Cloud state ophalen mislukt (${response.status})`;
+          setStatus(message);
+          return;
+        }
+        const cloudState = readCloudState(response.data);
+        const nextMatches = cloudMatchesFromState(cloudState);
+        syncCloudMatchData(cloudState);
+        if (nextMatches.length > 0) {
+          setStatus(`Cloud matches geladen (${nextMatches.length})`);
+        } else if (cloudState) {
+          setStatus("Cloud verbonden, maar er is nog geen actieve match of matchlijst.");
+        } else {
+          setStatus("Cloud login ok, maar desktop stuurt nog geen live state voor deze Venue ID.");
+        }
+        return;
+      }
+      if (!response.ok || !Array.isArray(response.data)) {
+        const message = response.data?.message || response.data?.error || `Matches ophalen mislukt (${response.status})`;
+        setStatus(message);
+        return;
+      }
+      setMatches(response.data);
+      setStatus(`Matches geladen (${response.data.length})`);
+    } catch (error) {
+      setStatus(`Matches fout: ${String(error)}`);
+    } finally {
+      setLoadingMatches(false);
+    }
   }
 
   async function pingHealth() {
@@ -172,53 +336,23 @@ export default function App() {
 
   async function loadSnapshot() {
     if (!canCall) return null;
-    try {
-      const response = isCloud
-        ? await callBridge(baseUrl, sessionToken, cloudPath("/control/state"))
-        : await callBridge(baseUrl, sessionToken, "/mobile/snapshot");
-      if (!response.ok) {
-        setStatus(`Snapshot fout (${response.status})`);
-        return null;
-      }
-      const nextSnapshot = normalizeSnapshot(isCloud ? response.data?.state ?? null : response.data);
-      setSnapshot(nextSnapshot);
-      return nextSnapshot;
-    } catch (error) {
-      setStatus(`Snapshot mislukt: ${String(error)}`);
-      return null;
-    }
+    return loadSnapshotWithToken(sessionToken);
   }
 
   async function loadMatches() {
     if (!canCall) return;
-    setLoadingMatches(true);
-    try {
-      const response = isCloud
-        ? await callBridge(baseUrl, sessionToken, cloudPath("/control/state"))
-        : await callBridge(baseUrl, sessionToken, "/mobile/api/matches");
-      if (isCloud) {
-        const cloudState = response.data?.state;
-        if (cloudState?.matchId) {
-          setMatches([{ id: cloudState.matchId, status: cloudState.mode ?? "UNKNOWN", homeScore: 0, awayScore: 0 }]);
-          setStatus("Cloud state geladen");
-        } else {
-          setMatches([]);
-          setStatus("Cloud state geladen (geen matchId)");
-        }
-        return;
-      }
-      if (!response.ok || !Array.isArray(response.data)) return setStatus(`Matches ophalen mislukt (${response.status})`);
-      setMatches(response.data);
-      setStatus(`Matches geladen (${response.data.length})`);
-    } catch (error) {
-      setStatus(`Matches fout: ${String(error)}`);
-    } finally {
-      setLoadingMatches(false);
-    }
+    return loadMatchesWithToken(sessionToken);
   }
 
   async function loadActiveMatchDetails(matchId) {
-    if (isCloud) return;
+    if (isCloud) {
+      const cloudMatch = snapshot?.activeMatch ?? snapshot?.match ?? null;
+      if (cloudMatch?.id === matchId) {
+        setActiveMatchDetails(cloudMatch);
+        if (!selectedTeamId) setSelectedTeamId(cloudMatch.homeTeamId);
+      }
+      return;
+    }
     if (!canCall || !matchId) return setActiveMatchDetails(null);
     const response = await callBridge(baseUrl, sessionToken, `/mobile/api/matches/${matchId}`);
     if (response.ok && response.data?.id) {
@@ -239,7 +373,8 @@ export default function App() {
       setStatus(isCloud ? "Command in cloud queue gezet." : `Command verwerkt: ${JSON.stringify(response.data)}`);
       const nextSnapshot = await loadSnapshot();
       await loadMatches();
-      if (nextSnapshot?.matchId) await loadActiveMatchDetails(nextSnapshot.matchId);
+      const nextMatchId = extractMatchId(nextSnapshot);
+      if (nextMatchId) await loadActiveMatchDetails(nextMatchId);
     } catch (error) {
       setStatus(`Command mislukt: ${String(error)}`);
     }
@@ -269,6 +404,45 @@ export default function App() {
     setPreparedGoalSide(null);
   }
 
+  function closeGoalPicker() {
+    setGoalPickerSide(null);
+    setSelectedGoalScorerId(null);
+  }
+
+  async function cancelGoalPicker() {
+    await sendCommand({ type: "goal:cancel" });
+    setPreparedGoalSide(null);
+    closeGoalPicker();
+  }
+
+  async function confirmGoalFromPicker(scorerId) {
+    if (!goalPickerSide) return;
+    await sendCommand({
+      type: "goal:trigger",
+      side: goalPickerSide,
+      scorerId: scorerId || undefined,
+    });
+    setPreparedGoalSide(null);
+    closeGoalPicker();
+  }
+
+  async function handleQuickGoal(side) {
+    const details = activeMatchDetails;
+    const team =
+      details && side === "away"
+        ? details.awayTeam
+        : details?.homeTeam;
+    if (details && team?.players?.length > 0) {
+      setSelectedTeamId(team.id);
+      setSelectedGoalScorerId(null);
+      setGoalPickerSide(side);
+      await prepareGoal(side);
+      setStatus(`Goalvisual gestart voor ${team.name}. Kies de scorer in de pop-up.`);
+      return;
+    }
+    await triggerGoalForSide(side);
+  }
+
   async function authenticate() {
     setStatus("Authenticatie...");
     try {
@@ -294,7 +468,11 @@ export default function App() {
       setSessionToken(token);
       setSessionExpiresAt(payload.expiresAt ?? null);
       setRole(payload.role === "operator" ? "operator" : "viewer");
-      setStatus(`Verbonden als ${payload.role} (sessie tot ${payload.expiresAt})`);
+      setStatus(`${formatAuthStatus(payload)}. Data laden...`);
+      const nextSnapshot = await loadSnapshotWithToken(token);
+      await loadMatchesWithToken(token);
+      const nextMatchId = extractMatchId(nextSnapshot);
+      if (nextMatchId) await loadActiveMatchDetails(nextMatchId);
     } catch (error) {
       setStatus(`Authenticatie fout: ${String(error)}`);
     }
@@ -402,15 +580,17 @@ export default function App() {
     void loadMatches();
     const t = setInterval(() => {
       void loadSnapshot();
-      if (snapshot?.matchId) void loadActiveMatchDetails(snapshot.matchId);
+      const matchId = extractMatchId(snapshot);
+      if (matchId) void loadActiveMatchDetails(matchId);
     }, 2500);
     return () => clearInterval(t);
-  }, [canCall, snapshot?.matchId]);
+  }, [canCall, extractMatchId(snapshot)]);
 
   useEffect(() => {
-    if (snapshot?.matchId) void loadActiveMatchDetails(snapshot.matchId);
+    const matchId = extractMatchId(snapshot);
+    if (matchId) void loadActiveMatchDetails(matchId);
     else setActiveMatchDetails(null);
-  }, [snapshot?.matchId]);
+  }, [extractMatchId(snapshot)]);
 
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 500);
@@ -424,35 +604,200 @@ export default function App() {
   const playersForTeam = teamForActions?.players || [];
   const displayElapsed = computeElapsedSeconds(snapshot, nowMs);
   const activeTeamSide = activeMatchDetails && selectedTeamId === activeMatchDetails.awayTeamId ? "away" : "home";
+  const homeLabel = activeMatchDetails?.homeTeam?.name || activeMatch?.homeTeam?.name || "HOME";
+  const awayLabel = activeMatchDetails?.awayTeam?.name || activeMatch?.awayTeam?.name || "AWAY";
+  const homeScore = Number(activeMatchDetails?.homeScore ?? activeMatch?.homeScore ?? snapshot?.homeScore ?? 0);
+  const awayScore = Number(activeMatchDetails?.awayScore ?? activeMatch?.awayScore ?? snapshot?.awayScore ?? 0);
+  const connectionText = canCall ? `Verbonden als ${role}` : "Niet gekoppeld";
+  const goalPickerTeam =
+    goalPickerSide && activeMatchDetails
+      ? goalPickerSide === "away"
+        ? activeMatchDetails.awayTeam
+        : activeMatchDetails.homeTeam
+      : null;
+  const goalPickerPlayers = goalPickerTeam?.players || [];
 
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={styles.container}>
-        <View style={styles.hero}>
-          <Image source={{ uri: ARENACUE_LOGO_URI }} style={styles.logo} resizeMode="contain" />
-          <View style={styles.heroText}>
-            <Text style={styles.heroEyebrow}>ArenaCue Control</Text>
-            <Text style={styles.heroSub}>Mobiele bediening voor score, timer en visuals.</Text>
+        <View style={styles.remoteHeader}>
+          <Pressable style={styles.headerIconButton} onPress={() => setMenuOpen((open) => !open)}>
+            <Text style={styles.headerIconText}>☰</Text>
+          </Pressable>
+          <View style={styles.brandCenter}>
+            <Image source={{ uri: ARENACUE_LOGO_URI }} style={styles.brandLogo} resizeMode="contain" />
+            <View>
+              <Text style={styles.brandArena}>ArenaCue</Text>
+              <Text style={styles.brandControl}>Control</Text>
+            </View>
+          </View>
+          <Pressable
+            style={styles.headerIconButton}
+            onPress={() => {
+              setActiveTab("settings");
+              setMenuOpen(false);
+            }}
+          >
+            <Text style={styles.headerIconText}>⚙</Text>
+          </Pressable>
+        </View>
+
+        {menuOpen && (
+          <View style={styles.menuCard}>
+            <Pressable
+              style={[styles.menuButton, activeTab === "operator" ? styles.menuButtonActive : null]}
+              onPress={() => {
+                setActiveTab("operator");
+                setMenuOpen(false);
+              }}
+            >
+              <Text style={styles.menuButtonText}>Wedstrijdbeheer</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.menuButton, activeTab === "settings" ? styles.menuButtonActive : null]}
+              onPress={() => {
+                setActiveTab("settings");
+                setMenuOpen(false);
+              }}
+            >
+              <Text style={styles.menuButtonText}>Koppeling</Text>
+            </Pressable>
+            <Pressable
+              style={styles.menuButton}
+              onPress={() => {
+                setMenuOpen(false);
+                void loadSnapshot();
+                void loadMatches();
+              }}
+            >
+              <Text style={styles.menuButtonText}>Herlaad data</Text>
+            </Pressable>
+          </View>
+        )}
+
+        <View style={styles.connectionPill}>
+          <View style={[styles.connectionDot, canCall ? styles.connectionDotOnline : styles.connectionDotOffline]} />
+          <Text style={styles.connectionPillText}>{connectionText}</Text>
+          <Text style={styles.connectionPillSub}>{isCloud ? "Cloud" : "Lokaal LAN"}</Text>
+        </View>
+
+        <View style={styles.remotePanel}>
+          <View style={styles.remoteTimerCard}>
+            <Text style={styles.remoteTimerValue}>{formatClock(displayElapsed)}</Text>
+            <Text style={styles.remoteTimerState}>{snapshot?.timerRunning ? "Timer loopt" : "Timer gepauzeerd"}</Text>
+          </View>
+
+          <View style={styles.remoteScoreCard}>
+            <View style={styles.scoreSide}>
+              <Text style={styles.scoreLabel}>{homeLabel}</Text>
+              <Text style={styles.scoreNumber}>{Number.isFinite(homeScore) ? homeScore : 0}</Text>
+            </View>
+            <Text style={styles.scoreDash}>-</Text>
+            <View style={styles.scoreSide}>
+              <Text style={styles.scoreLabel}>{awayLabel}</Text>
+              <Text style={styles.scoreNumber}>{Number.isFinite(awayScore) ? awayScore : 0}</Text>
+            </View>
+          </View>
+
+          <View style={styles.remoteButtonRow}>
+            <Pressable style={styles.remoteActionButton} onPress={() => handleQuickGoal("home")}>
+              <Text style={styles.remoteActionMain}>+1</Text>
+              <Text style={styles.remoteActionSub}>HOME</Text>
+            </Pressable>
+            <Pressable style={styles.remoteGhostButton} onPress={() => sendCommand({ type: "timer:set", seconds: 0 })}>
+              <Text style={styles.remoteIcon}>⟳</Text>
+            </Pressable>
+            <Pressable style={styles.remoteActionButton} onPress={() => handleQuickGoal("away")}>
+              <Text style={styles.remoteActionMain}>+1</Text>
+              <Text style={styles.remoteActionSub}>AWAY</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.remoteButtonRow}>
+            <Pressable style={styles.remoteDarkButton} onPress={() => sendCommand({ type: "score:adjust", side: "home", delta: -1 })}>
+              <Text style={styles.remoteActionMain}>−</Text>
+              <Text style={styles.remoteActionSub}>HOME</Text>
+            </Pressable>
+            <Pressable
+              style={styles.remotePlayButton}
+              onPress={() => sendCommand({ type: snapshot?.timerRunning ? "timer:pause" : "timer:start" })}
+            >
+              <Text style={styles.remotePlayIcon}>{snapshot?.timerRunning ? "Ⅱ" : "▶"}</Text>
+            </Pressable>
+            <Pressable style={styles.remoteDarkButton} onPress={() => sendCommand({ type: "score:adjust", side: "away", delta: -1 })}>
+              <Text style={styles.remoteActionMain}>−</Text>
+              <Text style={styles.remoteActionSub}>AWAY</Text>
+            </Pressable>
           </View>
         </View>
+
+        <Modal
+          visible={!!goalPickerSide && !!goalPickerTeam}
+          transparent
+          animationType="fade"
+          onRequestClose={() => void cancelGoalPicker()}
+        >
+          <View style={styles.modalBackdrop}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Kies doelpuntenmaker</Text>
+                <Text style={styles.modalSubtitle}>{goalPickerTeam?.name}</Text>
+              </View>
+              <ScrollView style={styles.modalPlayerList} contentContainerStyle={styles.modalPlayerGrid}>
+                {goalPickerPlayers.map((player) => (
+                  <Pressable
+                    key={player.id}
+                    style={[
+                      styles.modalPlayerButton,
+                      selectedGoalScorerId === player.id ? styles.modalPlayerButtonActive : null,
+                    ]}
+                    onPress={() => setSelectedGoalScorerId(player.id)}
+                  >
+                    <Text style={styles.modalPlayerNumber}>#{player.number}</Text>
+                    <Text style={styles.modalPlayerName}>
+                      {player.firstName} {player.lastName}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+              <View style={styles.modalFooter}>
+                <Pressable style={styles.buttonSecondary} onPress={() => void cancelGoalPicker()}>
+                  <Text style={styles.buttonText}>Annuleer</Text>
+                </Pressable>
+                <Pressable style={styles.buttonSecondary} onPress={() => void confirmGoalFromPicker(null)}>
+                  <Text style={styles.buttonText}>Zonder scorer</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.button, !selectedGoalScorerId ? styles.buttonDisabled : null]}
+                  disabled={!selectedGoalScorerId}
+                  onPress={() => void confirmGoalFromPicker(selectedGoalScorerId)}
+                >
+                  <Text style={styles.buttonText}>Bevestig</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        </Modal>
 
         <View style={styles.tabBar}>
           <Pressable
             style={[styles.tabButton, activeTab === "operator" ? styles.tabButtonActive : null]}
-            onPress={() => setActiveTab("operator")}
+            onPress={() => {
+              setActiveTab("operator");
+              setMenuOpen(false);
+            }}
           >
-            <Text style={[styles.tabText, activeTab === "operator" ? styles.tabTextActive : null]}>
-              Operator
-            </Text>
+            <Text style={[styles.tabText, activeTab === "operator" ? styles.tabTextActive : null]}>Wedstrijdbeheer</Text>
           </Pressable>
           <Pressable
             style={[styles.tabButton, activeTab === "settings" ? styles.tabButtonActive : null]}
-            onPress={() => setActiveTab("settings")}
+            onPress={() => {
+              setActiveTab("settings");
+              setMenuOpen(false);
+            }}
           >
-            <Text style={[styles.tabText, activeTab === "settings" ? styles.tabTextActive : null]}>
-              Instellingen
-            </Text>
+            <Text style={[styles.tabText, activeTab === "settings" ? styles.tabTextActive : null]}>Koppeling</Text>
           </Pressable>
         </View>
 
@@ -464,7 +809,10 @@ export default function App() {
           <TextInput
             style={styles.input}
             value={baseUrl}
-            onChangeText={setBaseUrl}
+            onChangeText={(value) => {
+              resetSessionForConnectionChange();
+              setBaseUrl(value);
+            }}
             autoCapitalize="none"
             placeholder="http://192.168.x.x:17890"
             placeholderTextColor="#666"
@@ -501,10 +849,22 @@ export default function App() {
           )}
           <Text style={styles.label}>Connectiemodus</Text>
           <View style={styles.row}>
-            <Pressable style={[styles.buttonSecondary, connectionMode === "cloud" ? styles.activeBorder : null]} onPress={() => setConnectionMode("cloud")}>
+            <Pressable
+              style={[styles.buttonSecondary, connectionMode === "cloud" ? styles.activeBorder : null]}
+              onPress={() => {
+                resetSessionForConnectionChange();
+                setConnectionMode("cloud");
+              }}
+            >
               <Text style={styles.buttonText}>Cloud (Optie A)</Text>
             </Pressable>
-            <Pressable style={[styles.buttonSecondary, connectionMode === "local" ? styles.activeBorder : null]} onPress={() => setConnectionMode("local")}>
+            <Pressable
+              style={[styles.buttonSecondary, connectionMode === "local" ? styles.activeBorder : null]}
+              onPress={() => {
+                resetSessionForConnectionChange();
+                setConnectionMode("local");
+              }}
+            >
               <Text style={styles.buttonText}>Lokaal LAN</Text>
             </Pressable>
           </View>
@@ -514,7 +874,10 @@ export default function App() {
               <TextInput
                 style={styles.input}
                 value={venueId}
-                onChangeText={setVenueId}
+                onChangeText={(value) => {
+                  resetSessionForConnectionChange();
+                  setVenueId(value);
+                }}
                 autoCapitalize="none"
                 placeholder="bv. genk-a"
                 placeholderTextColor="#666"
@@ -523,10 +886,22 @@ export default function App() {
           )}
           <Text style={styles.label}>Rol</Text>
           <View style={styles.row}>
-            <Pressable style={[styles.buttonSecondary, role === "viewer" ? styles.activeBorder : null]} onPress={() => setRole("viewer")}>
+            <Pressable
+              style={[styles.buttonSecondary, role === "viewer" ? styles.activeBorder : null]}
+              onPress={() => {
+                resetSessionForConnectionChange();
+                setRole("viewer");
+              }}
+            >
               <Text style={styles.buttonText}>Viewer</Text>
             </Pressable>
-            <Pressable style={[styles.buttonSecondary, role === "operator" ? styles.activeBorder : null]} onPress={() => setRole("operator")}>
+            <Pressable
+              style={[styles.buttonSecondary, role === "operator" ? styles.activeBorder : null]}
+              onPress={() => {
+                resetSessionForConnectionChange();
+                setRole("operator");
+              }}
+            >
               <Text style={styles.buttonText}>Operator</Text>
             </Pressable>
           </View>
@@ -536,7 +911,10 @@ export default function App() {
               <TextInput
                 style={styles.input}
                 value={operatorPin}
-                onChangeText={setOperatorPin}
+                onChangeText={(value) => {
+                  resetSessionForConnectionChange();
+                  setOperatorPin(value);
+                }}
                 autoCapitalize="none"
                 secureTextEntry
                 placeholder="PIN van desktop config"
@@ -550,7 +928,10 @@ export default function App() {
               <TextInput
                 style={styles.input}
                 value={pairingCode}
-                onChangeText={setPairingCode}
+                onChangeText={(value) => {
+                  resetSessionForConnectionChange();
+                  setPairingCode(value);
+                }}
                 autoCapitalize="none"
                 placeholder="6-cijferige code"
                 placeholderTextColor="#666"
@@ -580,68 +961,6 @@ export default function App() {
 
         {activeTab === "operator" && (
         <>
-        <View style={styles.card}>
-          <Text style={styles.label}>Live bediening</Text>
-          {!canMutate && <Text style={styles.status}>Viewer-modus: commando's zijn geblokkeerd.</Text>}
-          {!!activeMatchDetails && (
-            <Text style={styles.status}>
-              Score: {activeMatchDetails.homeTeam.name} {activeMatchDetails.homeScore} -{" "}
-              {activeMatchDetails.awayScore} {activeMatchDetails.awayTeam.name}
-            </Text>
-          )}
-          <View style={styles.timerPanel}>
-            <Text style={styles.timerLabel}>{snapshot?.timerRunning ? "Timer loopt" : "Timer gepauzeerd"}</Text>
-            <Text style={styles.timerValue}>{formatClock(displayElapsed)}</Text>
-          </View>
-          <View style={styles.row}>
-            <Pressable
-              style={styles.button}
-              onPress={() =>
-                sendCommand({ type: snapshot?.timerRunning ? "timer:pause" : "timer:start" })
-              }
-            >
-              <Text style={styles.buttonText}>
-                {snapshot?.timerRunning ? "Pauze timer" : "Start timer"}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={styles.button}
-              onPress={() => sendCommand({ type: "timer:set", seconds: 0 })}
-            >
-              <Text style={styles.buttonText}>Reset timer</Text>
-            </Pressable>
-          </View>
-          <View style={styles.row}>
-            <Pressable
-              style={styles.button}
-              onPress={() => triggerGoalForSide("home")}
-            >
-              <Text style={styles.buttonText}>Home goal +1</Text>
-            </Pressable>
-            <Pressable
-              style={styles.button}
-              onPress={() => triggerGoalForSide("away")}
-            >
-              <Text style={styles.buttonText}>Away goal +1</Text>
-            </Pressable>
-          </View>
-          <View style={styles.row}>
-            <Pressable
-              style={styles.buttonSecondary}
-              onPress={() => sendCommand({ type: "score:adjust", side: "home", delta: -1 })}
-            >
-              <Text style={styles.buttonText}>Home -1</Text>
-            </Pressable>
-            <Pressable
-              style={styles.buttonSecondary}
-              onPress={() => sendCommand({ type: "score:adjust", side: "away", delta: -1 })}
-            >
-              <Text style={styles.buttonText}>Away -1</Text>
-            </Pressable>
-          </View>
-          <Text style={styles.status}>Display mode: {snapshot?.mode || "onbekend"}</Text>
-        </View>
-
         <View style={styles.card}>
           <Text style={styles.label}>Matchstatus</Text>
           <View style={styles.grid}>
@@ -878,8 +1197,314 @@ const styles = StyleSheet.create({
     backgroundColor: "#09090b",
   },
   container: {
-    padding: 16,
+    padding: 14,
     gap: 14,
+    backgroundColor: "#020617",
+  },
+  remoteHeader: {
+    minHeight: 82,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 4,
+  },
+  headerIconButton: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  headerIconText: {
+    color: "#ffffff",
+    fontSize: 34,
+    fontWeight: "800",
+  },
+  brandCenter: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  brandLogo: {
+    width: 54,
+    height: 54,
+    borderRadius: 16,
+  },
+  brandArena: {
+    color: "#ffffff",
+    fontSize: 27,
+    fontWeight: "900",
+    lineHeight: 28,
+  },
+  brandControl: {
+    color: "#0ea5e9",
+    fontSize: 27,
+    fontWeight: "900",
+    lineHeight: 28,
+  },
+  menuCard: {
+    borderRadius: 18,
+    padding: 10,
+    gap: 8,
+    backgroundColor: "#071426",
+    borderWidth: 1,
+    borderColor: "#12375f",
+  },
+  menuButton: {
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#0f172a",
+    borderWidth: 1,
+    borderColor: "#1e293b",
+  },
+  menuButtonActive: {
+    backgroundColor: "#2563eb",
+    borderColor: "#60a5fa",
+  },
+  menuButtonText: {
+    color: "#ffffff",
+    fontWeight: "800",
+    textAlign: "center",
+  },
+  connectionPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "center",
+    gap: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#12375f",
+    backgroundColor: "#061224",
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  connectionDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 999,
+  },
+  connectionDotOnline: {
+    backgroundColor: "#22c55e",
+  },
+  connectionDotOffline: {
+    backgroundColor: "#f59e0b",
+  },
+  connectionPillText: {
+    color: "#e0f2fe",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  connectionPillSub: {
+    color: "#60a5fa",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  remotePanel: {
+    borderRadius: 28,
+    padding: 14,
+    gap: 14,
+    backgroundColor: "#020b18",
+    borderWidth: 1,
+    borderColor: "#0ea5e9",
+    shadowColor: "#0ea5e9",
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    elevation: 8,
+  },
+  remoteTimerCard: {
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: "#22d3ee",
+    backgroundColor: "#020817",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 18,
+  },
+  remoteTimerValue: {
+    color: "#ffffff",
+    fontSize: 72,
+    fontWeight: "900",
+    letterSpacing: 1,
+    lineHeight: 78,
+  },
+  remoteTimerState: {
+    color: "#7dd3fc",
+    fontSize: 12,
+    fontWeight: "900",
+    letterSpacing: 1.6,
+    textTransform: "uppercase",
+  },
+  remoteScoreCard: {
+    minHeight: 188,
+    flexDirection: "row",
+    alignItems: "stretch",
+    overflow: "hidden",
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "#0ea5e9",
+    backgroundColor: "#020817",
+  },
+  scoreSide: {
+    flex: 1,
+    justifyContent: "center",
+    padding: 18,
+    backgroundColor: "#0759b8",
+  },
+  scoreLabel: {
+    color: "#ffffff",
+    fontSize: 25,
+    fontWeight: "900",
+    textTransform: "uppercase",
+  },
+  scoreNumber: {
+    color: "#ffffff",
+    fontSize: 88,
+    fontWeight: "900",
+    lineHeight: 98,
+  },
+  scoreDash: {
+    width: 78,
+    color: "#ffffff",
+    backgroundColor: "#020817",
+    textAlign: "center",
+    textAlignVertical: "center",
+    fontSize: 54,
+    fontWeight: "900",
+  },
+  remoteButtonRow: {
+    flexDirection: "row",
+    gap: 12,
+  },
+  remoteActionButton: {
+    flex: 1,
+    minHeight: 92,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0878dc",
+    borderWidth: 1,
+    borderColor: "#38bdf8",
+  },
+  remoteGhostButton: {
+    flex: 1,
+    minHeight: 92,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#07182d",
+    borderWidth: 1,
+    borderColor: "#1f4970",
+  },
+  remoteDarkButton: {
+    flex: 1,
+    minHeight: 92,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#061426",
+    borderWidth: 1,
+    borderColor: "#1f4970",
+  },
+  remotePlayButton: {
+    flex: 1.4,
+    minHeight: 92,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0ea5e9",
+    borderWidth: 1,
+    borderColor: "#67e8f9",
+  },
+  remoteActionMain: {
+    color: "#ffffff",
+    fontSize: 34,
+    fontWeight: "900",
+    lineHeight: 36,
+  },
+  remoteActionSub: {
+    color: "#e0f2fe",
+    fontSize: 15,
+    fontWeight: "900",
+    marginTop: 4,
+  },
+  remoteIcon: {
+    color: "#ffffff",
+    fontSize: 44,
+    fontWeight: "900",
+  },
+  remotePlayIcon: {
+    color: "#ffffff",
+    fontSize: 48,
+    fontWeight: "900",
+  },
+  modalBackdrop: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 18,
+    backgroundColor: "rgba(2, 6, 23, 0.84)",
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 520,
+    borderRadius: 22,
+    padding: 14,
+    gap: 12,
+    backgroundColor: "#071426",
+    borderWidth: 1,
+    borderColor: "#38bdf8",
+  },
+  modalHeader: {
+    gap: 4,
+  },
+  modalTitle: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  modalSubtitle: {
+    color: "#93c5fd",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  modalPlayerList: {
+    maxHeight: 360,
+  },
+  modalPlayerGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingVertical: 4,
+  },
+  modalPlayerButton: {
+    width: "48%",
+    minHeight: 72,
+    borderRadius: 14,
+    padding: 10,
+    backgroundColor: "#0f172a",
+    borderWidth: 1,
+    borderColor: "#334155",
+    justifyContent: "center",
+  },
+  modalPlayerButtonActive: {
+    borderColor: "#60a5fa",
+    borderWidth: 2,
+    backgroundColor: "#12375f",
+  },
+  modalPlayerNumber: {
+    color: "#ffffff",
+    fontSize: 22,
+    fontWeight: "900",
+  },
+  modalPlayerName: {
+    color: "#e2e8f0",
+    fontSize: 12,
+    marginTop: 2,
+  },
+  modalFooter: {
+    flexDirection: "row",
+    gap: 8,
   },
   hero: {
     flexDirection: "row",
@@ -946,11 +1571,29 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: "#121216",
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: 18,
+    padding: 14,
     borderWidth: 1,
     borderColor: "#27272a",
     gap: 8,
+  },
+  statusCard: {
+    backgroundColor: "#071426",
+    borderRadius: 18,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#12375f",
+    gap: 8,
+  },
+  statusTitle: {
+    color: "#ffffff",
+    fontSize: 16,
+    fontWeight: "900",
+  },
+  statusMuted: {
+    color: "#93c5fd",
+    marginTop: 3,
+    lineHeight: 18,
   },
   label: {
     color: "#e4e4e7",
@@ -976,7 +1619,7 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: "#2563eb",
-    borderRadius: 8,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flex: 1,
@@ -984,11 +1627,14 @@ const styles = StyleSheet.create({
   },
   buttonSecondary: {
     backgroundColor: "#334155",
-    borderRadius: 8,
+    borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flex: 1,
     alignItems: "center",
+  },
+  buttonDisabled: {
+    opacity: 0.45,
   },
   buttonText: {
     color: "#fff",

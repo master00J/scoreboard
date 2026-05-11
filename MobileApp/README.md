@@ -1,6 +1,6 @@
-# Stadium Scoreboard Mobile
+# ArenaCue Control
 
-Testbare companion-app voor Android (Expo), bedoeld om de desktop-app op afstand te bedienen.
+Companion-app voor Android (Expo), bedoeld om ArenaCue op de wedstrijd-pc op afstand te bedienen.
 
 De **wedstrijd-PC** die de display en video draait heeft hogere eisen dan deze telefoon-app. Zie **https://arenacue.be/vereisten** (minimaal vs. aanbevolen voor lange sessies met video).
 
@@ -91,6 +91,15 @@ Vereiste desktop env vars:
   - `CONTROL_CLOUD_BASE_URL`
   - `CONTROL_DESKTOP_KEY`
   - `CONTROL_VENUE_ID`
+
+## Android package voor Google Play
+
+- Appnaam: `ArenaCue Control`
+- Package name: `be.arenacue.control`
+- Type: gratis app
+- Doel: remote-control companion voor de ArenaCue desktopsoftware
+
+Deze package name moet exact overeenkomen met de app die je in Google Play Console aanmaakt. Na de eerste upload kan Google Play de package name niet meer wijzigen.
 
 ## APK/AAB build (zonder Expo Go)
 

@@ -1,10 +1,16 @@
 {
   "expo": {
-    "name": "Stadium Scoreboard Mobile",
-    "slug": "stadium-scoreboard-mobile",
-    "version": "0.1.0",
+    "name": "ArenaCue Control",
+    "slug": "arenacue-control",
+    "description": "Mobiele remote-control companion voor de ArenaCue desktopsoftware.",
+    "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "scheme": "arenacue",
+    "icon": "./assets/icon.png",
+    "updates": {
+      "checkAutomatically": "NEVER"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -12,12 +18,31 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Camera nodig om de ArenaCue desktop QR-code te scannen."
+          "cameraPermission": "Camera nodig om de ArenaCue desktop QR-code te scannen.",
+          "recordAudioAndroid": false
         }
       ]
     ],
     "android": {
-      "package": "com.stadium.scoreboard.mobile"
+      "package": "be.arenacue.control",
+      "versionCode": 1,
+      "permissions": [
+        "INTERNET",
+        "android.permission.CAMERA"
+      ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#05070f"
+      },
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
+      "playStoreUrl": "https://play.google.com/store/apps/details?id=be.arenacue.control"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "272a2d4e-db9e-4841-9015-756a41aca195"
+      }
     }
   }
 }

@@ -7,7 +7,7 @@ import { pageMetadata } from "@/lib/seo";
 export const metadata: Metadata = pageMetadata({
   segmentTitle: "Privacy",
   description:
-    "Privacyverklaring, cookies en gegevensverwerking voor ArenaCue demo-aanvragen, licentieportal en website.",
+    "Privacyverklaring, cookies en gegevensverwerking voor ArenaCue demo-aanvragen, licentieportal, website en mobiele app.",
   path: "/privacy",
   keywordsExtra: ["AVG", "GDPR", "cookies", "gegevensbescherming"],
 });
@@ -45,7 +45,8 @@ export default function PrivacyPage() {
           <a href="https://arenacue.be" rel="noopener noreferrer">
             arenacue.be
           </a>{" "}
-          en verwante diensten (demo-aanvragen, licentieportal, administratie).
+          en verwante diensten (demo-aanvragen, licentieportal, administratie en de mobiele
+          ArenaCue Control-app).
         </p>
 
         <h2>Verwerkingsverantwoordelijke</h2>
@@ -64,6 +65,11 @@ export default function PrivacyPage() {
           <li>
             <strong>Licentie &amp; portal:</strong> licentie-informatie en activatiegegevens die je
             zelf invoert of die door de desktopsoftware worden gemeld volgens het product.
+          </li>
+          <li>
+            <strong>Mobiele ArenaCue Control-app:</strong> koppelcode, serveradres of cloud-URL,
+            venue-ID, tijdelijke sessietoken en operator/viewer-rol. De camera wordt alleen gebruikt
+            om een QR-koppelcode te scannen; er worden geen camerabeelden door ons opgeslagen.
           </li>
           <li>
             <strong>Websitebeheer:</strong> beperkte technische gegevens via hosting en beveiliging
@@ -125,6 +131,11 @@ export default function PrivacyPage() {
           Je kunt je keuze altijd wijzigen via &quot;Cookie-instellingen&quot; in de footer van de
           website.
         </p>
+        <p>
+          In de mobiele app bewaren we verbindingsinstellingen en tijdelijke sessiegegevens lokaal op
+          het toestel, zodat een operator niet telkens opnieuw hoeft te koppelen. Je kunt deze gegevens
+          verwijderen door de app-data te wissen of de app te verwijderen.
+        </p>
 
         <h2>Waarom verwerken we gegevens? (rechtsgronden)</h2>
         <ul>
@@ -171,6 +182,11 @@ export default function PrivacyPage() {
           </li>
         </ul>
         <p>
+          Wanneer cloudbediening actief is, communiceert de mobiele app met de ArenaCue API om
+          commando&apos;s naar de gekoppelde desktopsoftware door te geven. Bij lokale LAN-bediening
+          communiceert de app rechtstreeks met de wedstrijd-pc op hetzelfde netwerk.
+        </p>
+        <p>
           Een verwerking buiten de Europese Economische Ruimte kan plaatsvinden als de aanbieder
           passende waarborgen biedt (zoals standaardcontractbepalingen). Raadpleeg de privacy policies
           van deze leveranciers voor details.
@@ -206,7 +222,7 @@ export default function PrivacyPage() {
             year: "numeric",
             month: "long",
             day: "numeric",
-          }).format(new Date("2026-05-05"))}
+          }).format(new Date("2026-05-09"))}
           .
         </p>
 

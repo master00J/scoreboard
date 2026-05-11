@@ -1,4 +1,4 @@
-# ArenaCue Mobile APK build stappen
+# ArenaCue Control Android build stappen
 
 Deze checklist is bedoeld voor een andere pc waar je via Cursor/terminal de Android build wilt maken.
 
@@ -83,3 +83,14 @@ npm run build:aab
 ```
 
 Dat levert een `.aab` voor Google Play Console.
+
+Play Console app details:
+
+- App name: `ArenaCue Control`
+- Package name: `be.arenacue.control`
+- Default language: `Dutch – nl-NL`
+- App or game: `App`
+- Free or paid: `Free`
+- Privacy policy: `https://arenacue.be/privacy`
+
+Belangrijk: upload naar Google Play altijd de `.aab`, niet de interne `.apk`.

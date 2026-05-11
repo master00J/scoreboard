@@ -366,6 +366,7 @@ async function loadRuntime() {
   });
   cloudAgent = startCloudControlAgent({
     runtime: {
+      apiRequest: (req) => runtime!.apiRequest(req),
       getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
       runCommand: (command) => runtime!.runCommand(command as any),
     },

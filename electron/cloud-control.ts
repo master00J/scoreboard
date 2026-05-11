@@ -3,6 +3,13 @@ import { readStoredLicense } from "./license-service";
 import { computeElapsedSeconds } from "../lib/timer";
 
 type CloudRuntime = {
+  apiRequest?: (request: {
+    method: string;
+    path: string;
+    search?: string;
+    headers?: Record<string, string>;
+    bodyText?: string;
+  }) => Promise<{ status: number; json?: unknown; text?: string }>;
   getDisplaySnapshot: () => Promise<unknown>;
   runCommand: (command: unknown) => Promise<unknown>;
 };
@@ -62,6 +69,37 @@ function withTimerTelemetry(snapshot: unknown) {
   };
 }
 
+async function withMobileMatchData(snapshot: unknown, runtime: CloudRuntime) {
+  const state = withTimerTelemetry(snapshot);
+  if (!runtime.apiRequest || !state || typeof state !== "object" || Array.isArray(state)) {
+    return state;
+  }
+
+  const enriched = { ...state } as Record<string, unknown>;
+  const matchesResponse = await runtime.apiRequest({ method: "GET", path: "/api/matches" });
+  if (matchesResponse.status >= 200 && matchesResponse.status < 300 && Array.isArray(matchesResponse.json)) {
+    enriched.matches = matchesResponse.json;
+  }
+
+  const matchId = typeof enriched.matchId === "string" ? enriched.matchId : null;
+  if (matchId) {
+    const activeMatchResponse = await runtime.apiRequest({
+      method: "GET",
+      path: `/api/matches/${encodeURIComponent(matchId)}`,
+    });
+    if (
+      activeMatchResponse.status >= 200 &&
+      activeMatchResponse.status < 300 &&
+      activeMatchResponse.json &&
+      typeof activeMatchResponse.json === "object"
+    ) {
+      enriched.activeMatch = activeMatchResponse.json;
+    }
+  }
+
+  return enriched;
+}
+
 export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHandle | null {
   const stored = readStoredLicense(app.getPath("userData"));
   const baseUrl = (
@@ -88,7 +126,7 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
   let busy = false;
 
   async function postState() {
-    const state = withTimerTelemetry(await options.runtime.getDisplaySnapshot());
+    const state = await withMobileMatchData(await options.runtime.getDisplaySnapshot(), options.runtime);
     await fetchWithTimeout(`${cloudBaseUrl}/api/control/desktop/state`, {
       method: "POST",
       headers: {

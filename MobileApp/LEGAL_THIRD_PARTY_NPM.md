@@ -122,11 +122,8 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `@expo/fingerprint/balanced-match` | 4.0.4 | MIT |
 | `@expo/fingerprint/brace-expansion` | 5.0.5 | MIT |
 | `@expo/fingerprint/getenv` | 2.0.0 | MIT |
-| `@expo/fingerprint/glob` | 13.0.6 | BlueOak-1.0.0 |
 | `@expo/fingerprint/ignore` | 5.3.2 | MIT |
-| `@expo/fingerprint/lru-cache` | 11.3.6 | BlueOak-1.0.0 |
 | `@expo/fingerprint/minimatch` | 10.2.5 | BlueOak-1.0.0 |
-| `@expo/fingerprint/path-scurry` | 2.0.2 | BlueOak-1.0.0 |
 | `@expo/fingerprint/semver` | 7.7.4 | ISC |
 | `@expo/metro` | 54.2.0 | MIT |
 | `@expo/metro/@babel/code-frame` | 7.29.0 | MIT |
@@ -168,7 +165,6 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `@expo/package-manager/ora` | 3.4.0 | MIT |
 | `@expo/package-manager/ora/chalk` | 2.4.2 | MIT |
 | `@expo/package-manager/restore-cursor` | 2.0.0 | MIT |
-| `@expo/package-manager/signal-exit` | 3.0.7 | ISC |
 | `@expo/package-manager/strip-ansi` | 5.2.0 | MIT |
 | `@expo/package-manager/supports-color` | 5.5.0 | MIT |
 | `@expo/require-utils` | 55.0.5 | MIT |
@@ -185,17 +181,12 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `@isaacs/fs-minipass` | 4.0.1 | ISC |
 | `@isaacs/ttlcache` | 1.4.1 | ISC |
 | `@istanbuljs/load-nyc-config` | 1.1.0 | ISC |
-| `@istanbuljs/load-nyc-config/find-up` | 4.1.0 | MIT |
-| `@istanbuljs/load-nyc-config/locate-path` | 5.0.0 | MIT |
-| `@istanbuljs/load-nyc-config/p-limit` | 2.3.0 | MIT |
-| `@istanbuljs/load-nyc-config/p-locate` | 4.1.0 | MIT |
 | `@istanbuljs/schema` | 0.1.6 | MIT |
 | `@jest/create-cache-key-function` | 29.7.0 | MIT |
 | `@jest/environment` | 29.7.0 | MIT |
 | `@jest/fake-timers` | 29.7.0 | MIT |
 | `@jest/schemas` | 29.6.3 | MIT |
 | `@jest/transform` | 29.7.0 | MIT |
-| `@jest/transform/signal-exit` | 3.0.7 | ISC |
 | `@jest/transform/write-file-atomic` | 4.0.2 | ISC |
 | `@jest/types` | 29.6.3 | MIT |
 | `@jridgewell/gen-mapping` | 0.3.13 | MIT |
@@ -280,6 +271,7 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `caniuse-lite` | 1.0.30001792 | CC-BY-4.0 |
 | `chalk` | 4.1.2 | MIT |
 | `chalk/supports-color` | 7.2.0 | MIT |
+| `chownr` | 3.0.0 | BlueOak-1.0.0 |
 | `chrome-launcher` | 0.15.2 | Apache-2.0 |
 | `chromium-edge-launcher` | 0.2.0 | Apache-2.0 |
 | `ci-info` | 3.9.0 | MIT |
@@ -352,8 +344,6 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `expo/ansi-regex` | 4.1.1 | MIT |
 | `expo/ansi-styles` | 3.2.1 | MIT |
 | `expo/babel-preset-expo` | 54.0.10 | MIT |
-| `expo/balanced-match` | 4.0.4 | MIT |
-| `expo/chownr` | 3.0.0 | BlueOak-1.0.0 |
 | `expo/cli-cursor` | 2.1.0 | MIT |
 | `expo/color-convert` | 1.9.3 | MIT |
 | `expo/color-name` | 1.1.3 | MIT |
@@ -366,13 +356,9 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `expo/expo-font` | 14.0.11 | MIT |
 | `expo/expo-keep-awake` | 15.0.8 | MIT |
 | `expo/getenv` | 2.0.0 | MIT |
-| `expo/glob` | 13.0.6 | BlueOak-1.0.0 |
-| `expo/glob/brace-expansion` | 5.0.5 | MIT |
-| `expo/glob/minimatch` | 10.2.5 | BlueOak-1.0.0 |
 | `expo/has-flag` | 3.0.0 | MIT |
 | `expo/log-symbols` | 2.2.0 | MIT |
 | `expo/log-symbols/chalk` | 2.4.2 | MIT |
-| `expo/lru-cache` | 11.3.6 | BlueOak-1.0.0 |
 | `expo/mimic-fn` | 1.2.0 | MIT |
 | `expo/minimatch` | 9.0.9 | ISC |
 | `expo/minizlib` | 3.1.0 | MIT |
@@ -380,11 +366,9 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `expo/onetime` | 2.0.1 | MIT |
 | `expo/ora` | 3.4.0 | MIT |
 | `expo/ora/chalk` | 2.4.2 | MIT |
-| `expo/path-scurry` | 2.0.2 | BlueOak-1.0.0 |
 | `expo/qrcode-terminal` | 0.11.0 | (niet opgegeven in lockfile) |
 | `expo/restore-cursor` | 2.0.0 | MIT |
 | `expo/semver` | 7.7.4 | ISC |
-| `expo/signal-exit` | 3.0.7 | ISC |
 | `expo/strip-ansi` | 5.2.0 | MIT |
 | `expo/sucrase` | 3.35.1 | MIT |
 | `expo/supports-color` | 5.5.0 | MIT |
@@ -400,6 +384,7 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `finalhandler` | 1.1.2 | MIT |
 | `finalhandler/debug` | 2.6.9 | MIT |
 | `finalhandler/ms` | 2.0.0 | MIT |
+| `find-up` | 4.1.0 | MIT |
 | `flow-enums-runtime` | 0.0.6 | MIT |
 | `fontfaceobserver` | 2.3.0 | BSD-2-Clause |
 | `freeport-async` | 2.0.0 | MIT |
@@ -410,6 +395,10 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `gensync` | 1.0.0-beta.2 | MIT |
 | `get-caller-file` | 2.0.5 | ISC |
 | `get-package-type` | 0.1.0 | MIT |
+| `glob` | 13.0.6 | BlueOak-1.0.0 |
+| `glob/balanced-match` | 4.0.4 | MIT |
+| `glob/brace-expansion` | 5.0.6 | MIT |
+| `glob/minimatch` | 10.2.5 | BlueOak-1.0.0 |
 | `graceful-fs` | 4.2.11 | ISC |
 | `has-flag` | 4.0.0 | MIT |
 | `hasown` | 2.0.3 | MIT |
@@ -473,6 +462,7 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `lightningcss-win32-arm64-msvc` | 1.32.0 | MPL-2.0 |
 | `lightningcss-win32-x64-msvc` | 1.32.0 | MPL-2.0 |
 | `lines-and-columns` | 1.2.4 | MIT |
+| `locate-path` | 5.0.0 | MIT |
 | `lodash.debounce` | 4.0.8 | MIT |
 | `lodash.throttle` | 4.1.1 | MIT |
 | `loose-envify` | 1.4.0 | MIT |
@@ -533,6 +523,8 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `once` | 1.4.0 | ISC |
 | `open` | 8.4.2 | MIT |
 | `p-limit` | 3.1.0 | MIT |
+| `p-locate` | 4.1.0 | MIT |
+| `p-locate/p-limit` | 2.3.0 | MIT |
 | `p-try` | 2.2.0 | MIT |
 | `parse-png` | 2.1.0 | MIT |
 | `parse-png/pngjs` | 3.4.0 | MIT |
@@ -541,6 +533,8 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `path-is-absolute` | 1.0.1 | MIT |
 | `path-key` | 3.1.1 | MIT |
 | `path-parse` | 1.0.7 | MIT |
+| `path-scurry` | 2.0.2 | BlueOak-1.0.0 |
+| `path-scurry/lru-cache` | 11.3.6 | BlueOak-1.0.0 |
 | `picocolors` | 1.1.1 | ISC |
 | `picomatch` | 4.0.4 | MIT |
 | `pirates` | 4.0.7 | MIT |
@@ -610,6 +604,7 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `shebang-command` | 2.0.0 | MIT |
 | `shebang-regex` | 3.0.0 | MIT |
 | `shell-quote` | 1.8.3 | MIT |
+| `signal-exit` | 3.0.7 | ISC |
 | `simple-plist` | 1.3.1 | MIT |
 | `simple-plist/bplist-parser` | 0.3.1 | MIT |
 | `sisteransi` | 1.0.5 | MIT |
@@ -684,4 +679,4 @@ SPDX-licentie-identifiers waar bekend; vul ontbrekende velden aan bij upgrades.
 | `yargs-parser` | 21.1.1 | ISC |
 | `yocto-queue` | 0.1.0 | MIT |
 
-_Totaal: 678 packages._
+_Totaal: 673 packages._
