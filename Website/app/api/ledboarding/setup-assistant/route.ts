@@ -27,17 +27,27 @@ type AssistantAction = {
   payload: Record<string, unknown>;
 };
 
-const SYSTEM_PROMPT = `Je bent ArenaCue LED Setup Assistent voor stadionoperators.
+const SYSTEM_PROMPT = `Je bent ArenaCue LED Assistent voor stadionoperators.
 
-Je helpt met het volledig instellen van ArenaCue LED boarding: zones, outputs, perimeter, mid-tier/luifel, segmenten, playlists, sponsoritems, timing, helderheid en veilige output-checks.
+Je helpt met twee dingen:
+1. vragen beantwoorden over hoe ArenaCue LED boarding exact werkt;
+2. het volledig instellen van de software: zones, outputs, perimeter, mid-tier/luifel, segmenten, playlists, sponsoritems, timing, helderheid en veilige output-checks.
 
 Antwoord altijd in het Nederlands, concreet en kort. Je mag configuratie-acties voorstellen, maar alleen via JSON in dit exacte formaat:
 {
-  "message": "korte uitleg voor de operator",
+  "message": "korte uitleg voor de operator of antwoord op de vraag",
   "actions": [
     { "type": "createZone", "label": "Maak zone ...", "payload": { ... } }
   ]
 }
+
+Als de operator alleen vraagt hoe iets werkt, geef dan uitleg in "message" en zet "actions": [].
+Voor uitlegvragen geef je praktische stappen en verwijs je naar de huidige setup-snapshot als die relevant is. Voorbeelden:
+- hoe perimeter en mid-tier playlists werken;
+- wat zones, regions, segmenten en outputs betekenen;
+- hoe Play/Pause/Next, linked zones, blackout, testbeeld, brightness en budgettracking werken;
+- hoe media importeren en playlists opbouwen veilig gebeurt;
+- wat de operator moet controleren voor een matchday.
 
 Toegestane action types:
 - createZone: { name, widthPx, heightPx, processorName?, segmentId?, outputDisplayId? }
@@ -56,6 +66,8 @@ Toegestane action types:
 Belangrijke regels:
 - Stel nooit destructive acties voor zoals alles wissen of resetten.
 - Pas media/video-import niet automatisch toe; geef daar stappen voor.
+- Zeg nooit dat je een instelling al hebt aangepast wanneer je een action terugstuurt. Zeg dan altijd dat er een voorstel klaarstaat dat de operator nog moet toepassen.
+- Als de operator vraagt om brightness te verlagen/verhogen zonder exact percentage: gebruik de huidige brightness uit de snapshot en stel een concrete setBrightness action voor met ongeveer 10 procentpunten verschil, begrensd tussen 1 en 100.
 - Gebruik normale stadiondefaults: perimeter vaak brede lage resolutie, mid-tier/luifel apart, sponsoritems vaak 10-15 seconden, brightness 80-100% bij test en lager bij indoor/avond indien gevraagd.
 - Als informatie ontbreekt, stel een veilige basis voor en leg uit wat nog gecontroleerd moet worden.
 - Geef uitsluitend geldige JSON terug. Geen Markdown, geen code fences.
@@ -121,7 +133,7 @@ export async function POST(request: Request) {
           role: "user",
           content: JSON.stringify({
             instruction:
-              "Help de operator met de LED boarding setup. Geef alleen JSON terug met message en actions.",
+              "Help de operator met LED boarding. Beantwoord uitlegvragen in message met actions: [], of geef setupvoorstellen met acties. Geef alleen JSON terug met message en actions.",
             snapshot: parsed.snapshot,
             messages: parsed.messages,
           }),

@@ -69,6 +69,25 @@ const nextConfig = {
       },
     ];
   },
+  async redirects() {
+    return [
+      {
+        source: "/licenties",
+        destination: "/licenses",
+        permanent: true,
+      },
+      {
+        source: "/licentie",
+        destination: "/portal",
+        permanent: true,
+      },
+      {
+        source: "/tickets",
+        destination: "/portal",
+        permanent: true,
+      },
+    ];
+  },
   async rewrites() {
     const seg = normalizeAdminPath(process.env.NEXT_PUBLIC_ADMIN_PATH);
     if (seg === "admin") {

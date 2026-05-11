@@ -8,10 +8,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   return [
     { url: siteUrl, lastModified: now, changeFrequency: "weekly", priority: 1 },
-    { url: `${siteUrl}/privacy`, lastModified: now, changeFrequency: "monthly", priority: 0.35 },
-    { url: `${siteUrl}/licenses`, lastModified: now, changeFrequency: "monthly", priority: 0.3 },
-    { url: `${siteUrl}/licenties`, lastModified: now, changeFrequency: "monthly", priority: 0.28 },
+    { url: `${siteUrl}/functies`, lastModified: now, changeFrequency: "monthly", priority: 0.75 },
     { url: `${siteUrl}/vereisten`, lastModified: now, changeFrequency: "monthly", priority: 0.4 },
-    { url: `${siteUrl}/portal`, lastModified: now, changeFrequency: "monthly", priority: 0.45 },
+    { url: `${siteUrl}/changelog`, lastModified: now, changeFrequency: "weekly", priority: 0.35 },
+    { url: `${siteUrl}/licenses`, lastModified: now, changeFrequency: "monthly", priority: 0.25 },
+    { url: `${siteUrl}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
+    { url: `${siteUrl}/terms`, lastModified: now, changeFrequency: "yearly", priority: 0.2 },
   ];
 }

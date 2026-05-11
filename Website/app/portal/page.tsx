@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     path: "/portal",
     keywordsExtra: ["ArenaCue login", "licentie download", "klantportaal"],
   }),
-  robots: { index: true, follow: true },
+  robots: { index: false, follow: true },
 };
 
 type SearchParams = Promise<{ fout?: string }>;
