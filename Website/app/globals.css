@@ -994,11 +994,35 @@ h2 {
 
 .footer {
   display: flex;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 18px;
   padding-top: 36px;
   color: var(--muted);
   border-top: 1px solid var(--line);
+}
+
+.footer-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.footer-legal-entity,
+.legal-footer-entity {
+  margin: 0;
+  font-style: normal;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.footer-legal-entity strong,
+.legal-footer-entity strong {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .footer-links {
@@ -1013,14 +1037,22 @@ h2 {
 /* Footer op legal/functies-pagina’s: gelijk aan hoofdpagina-styling */
 .legal-footer {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 20px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
   margin-top: auto;
   padding-top: 28px;
   border-top: 1px solid var(--line);
   color: var(--muted);
   font-size: 0.9rem;
+}
+
+.legal-footer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 20px;
 }
 
 .legal-footer-links {
@@ -1916,8 +1948,14 @@ h2 {
     border-radius: 24px;
   }
 
-  .footer {
+  .footer-meta-row {
     flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .legal-footer-meta {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 

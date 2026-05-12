@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import { LegalFooter } from "@/components/legal-footer";
 import { SeoBreadcrumbJsonLd } from "@/components/seo-breadcrumb-json-ld";
+import { COMPANY_LEGAL } from "@/lib/company-legal";
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = pageMetadata({
@@ -72,7 +73,7 @@ export default function TermsPage() {
         <h2>Contact</h2>
         <p>
           Voor vragen over voorwaarden of commerciële afspraken:{" "}
-          <a href="mailto:info@arenacue.be">info@arenacue.be</a>.
+          <a href="mailto:info@arenacue.be">info@arenacue.be</a>. Uitbater: {COMPANY_LEGAL.legalName}.
         </p>
       </article>
       <LegalFooter />

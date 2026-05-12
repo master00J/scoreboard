@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Image from "next/image";
 import { LegalFooter } from "@/components/legal-footer";
+import { COMPANY_LEGAL } from "@/lib/company-legal";
 import { SeoBreadcrumbJsonLd } from "@/components/seo-breadcrumb-json-ld";
 import { pageMetadata } from "@/lib/seo";
 
@@ -51,9 +52,10 @@ export default function PrivacyPage() {
 
         <h2>Verwerkingsverantwoordelijke</h2>
         <p>
-          ArenaCue — contact:{" "}
-          <a href="mailto:info@arenacue.be">info@arenacue.be</a>. Voor specifieke rechten en vragen
-          over je gegevens kun je dit adres gebruiken.
+          {COMPANY_LEGAL.legalName}, {COMPANY_LEGAL.streetLine}, {COMPANY_LEGAL.cityLine}. BTW{" "}
+          {COMPANY_LEGAL.vatNumber}. Contact:{" "}
+          <a href="mailto:info@arenacue.be">info@arenacue.be</a>. Voor specifieke rechten en vragen over je gegevens
+          kun je dit adres gebruiken.
         </p>
 
         <h2>Welke gegevens verwerken we?</h2>

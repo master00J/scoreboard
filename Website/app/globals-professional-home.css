@@ -466,7 +466,7 @@
 }
 
 .pro-footer {
-  align-items: center;
+  align-items: stretch;
 }
 
 @media (max-width: 1180px) {

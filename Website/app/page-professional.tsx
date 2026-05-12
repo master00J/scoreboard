@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { DemoRequestForm } from "@/components/demo-request-form";
+import { FooterLegalEntity } from "@/components/footer-legal-entity";
 import { ReviewSubmitForm } from "@/components/review-submit-form";
 import { CookieSettingsTrigger } from "@/components/cookie-settings-trigger";
 import { homePageMetadata } from "@/lib/seo";
@@ -376,18 +377,21 @@ export default async function Home() {
       </section>
 
       <footer className="footer pro-footer">
-        <span>Â© {new Date().getFullYear()} ArenaCue</span>
-        <span>Scoreboard, LED boarding &amp; Display Control</span>
-        <span className="footer-links">
-          <Link href="/functies">Functies</Link>
-          <Link href="/portal">Klantportaal</Link>
-          <Link href="/changelog">Changelog</Link>
-          <a href="/privacy">Privacy</a>
-          <a href="/vereisten">Systeemvereisten</a>
-          <a href="/licenties">Licenties</a>
-          <a href="/terms">Voorwaarden</a>
-          <CookieSettingsTrigger />
-        </span>
+        <FooterLegalEntity className="footer-legal-entity" />
+        <div className="footer-meta-row">
+          <span>© {new Date().getFullYear()} ArenaCue</span>
+          <span>Scoreboard, LED boarding &amp; Display Control</span>
+          <span className="footer-links">
+            <Link href="/functies">Functies</Link>
+            <Link href="/portal">Klantportaal</Link>
+            <Link href="/changelog">Changelog</Link>
+            <a href="/privacy">Privacy</a>
+            <a href="/vereisten">Systeemvereisten</a>
+            <a href="/licenties">Licenties</a>
+            <a href="/terms">Voorwaarden</a>
+            <CookieSettingsTrigger />
+          </span>
+        </div>
       </footer>
     </main>
   );
