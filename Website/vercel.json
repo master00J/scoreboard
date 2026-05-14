@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/seo-post",
-      "schedule": "6 * * * 4"
+      "schedule": "10 * * * 4"
     }
   ]
 }

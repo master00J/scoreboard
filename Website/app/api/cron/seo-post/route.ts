@@ -41,11 +41,11 @@ async function runSeoPostCron(request: Request) {
   const url = new URL(request.url);
   const force = url.searchParams.get("force") === "1";
   const schedule = brusselsScheduleState();
-  if (!force && (!schedule.isThursday || schedule.hour !== 20 || schedule.minute !== 6)) {
+  if (!force && (!schedule.isThursday || schedule.hour !== 20 || schedule.minute !== 10)) {
     return NextResponse.json({
       ok: true,
       skipped: true,
-      reason: "SEO-cron draait alleen donderdag om 20:06 Europe/Brussels.",
+      reason: "SEO-cron draait alleen donderdag om 20:10 Europe/Brussels.",
       schedule,
     });
   }
