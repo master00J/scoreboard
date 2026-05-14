@@ -76,8 +76,8 @@ Release-flow:
 
 ## Wekelijkse AI SEO-artikels
 
-`vercel.json` roept elke donderdag elk uur `/api/cron/seo-post` aan. De route
-publiceert alleen wanneer het in `Europe/Brussels` exact 20:00 is, zodat zomer-
+`vercel.json` roept elke donderdag op minuut 6 elk uur `/api/cron/seo-post` aan. De route
+publiceert alleen wanneer het in `Europe/Brussels` exact 20:06 is, zodat zomer-
 en wintertijd correct blijven. Per datum wordt maximaal één artikel aangemaakt
 door `week_key`.
 

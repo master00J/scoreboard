@@ -21,13 +21,16 @@ function brusselsScheduleState(date = new Date()) {
     timeZone: "Europe/Brussels",
     weekday: "short",
     hour: "2-digit",
+    minute: "2-digit",
     hour12: false,
   }).formatToParts(date);
   const weekday = parts.find((part) => part.type === "weekday")?.value;
   const hour = Number(parts.find((part) => part.type === "hour")?.value);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value);
   return {
     isThursday: weekday === "Thu",
     hour,
+    minute,
   };
 }
 
@@ -38,11 +41,11 @@ async function runSeoPostCron(request: Request) {
   const url = new URL(request.url);
   const force = url.searchParams.get("force") === "1";
   const schedule = brusselsScheduleState();
-  if (!force && (!schedule.isThursday || schedule.hour !== 20)) {
+  if (!force && (!schedule.isThursday || schedule.hour !== 20 || schedule.minute !== 6)) {
     return NextResponse.json({
       ok: true,
       skipped: true,
-      reason: "SEO-cron draait alleen donderdag om 20:00 Europe/Brussels.",
+      reason: "SEO-cron draait alleen donderdag om 20:06 Europe/Brussels.",
       schedule,
     });
   }
