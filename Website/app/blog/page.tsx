@@ -21,6 +21,24 @@ export const metadata: Metadata = pageMetadata({
   ],
 });
 
+const topicLinks = [
+  {
+    href: "/arenacue-kleine-middelgrote-clubs",
+    title: "Scorebordsoftware voor kleine clubs",
+    text: "Wanneer is een lokaal scorebord met sponsorrotatie interessanter dan losse presentatie- of videotoepassingen?",
+  },
+  {
+    href: "/functies#sponsors",
+    title: "Sponsorrotatie op wedstrijddagen",
+    text: "Bekijk hoe sponsorbeelden, schermtijd en wedstrijdmomenten binnen ArenaCue samenkomen.",
+  },
+  {
+    href: "/vereisten",
+    title: "Hardware voor stadiondisplay",
+    text: "Welke Windows-pc en grafische setup heb je nodig voor stabiele video-output tijdens een volledige matchdag?",
+  },
+];
+
 export default async function BlogPage() {
   const posts = await getPublishedSeoPosts(48);
 
@@ -50,6 +68,18 @@ export default async function BlogPage() {
           Wekelijkse artikels met praktische inzichten voor sportclubs die scorebordsoftware, sponsorrotatie,
           stadiondisplay of LED boarding professioneler willen inzetten.
         </p>
+
+        <section className="features-deep-section">
+          <h2>Populaire onderwerpen</h2>
+          <div className="features-mini-grid">
+            {topicLinks.map((topic) => (
+              <Link key={topic.href} className="features-mini-card" href={topic.href}>
+                <h3>{topic.title}</h3>
+                <p>{topic.text}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
 
         <section className="features-deep-section">
           {posts.length === 0 ? (

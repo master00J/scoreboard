@@ -21,7 +21,7 @@ const stats = [
 const features = [
   {
     title: "Live scorebord",
-    body: "Bedien score, klok, fases en stadion-output vanuit één strak control panel.",
+    body: "Bedien score, klok, fases en stadion-output vanuit een strak control panel.",
     tag: "Match control",
   },
   {
@@ -91,8 +91,10 @@ export default async function Home() {
           <nav aria-label="Hoofdnavigatie">
             <a href="#features">Features</a>
             <Link href="/functies">Alle functies</Link>
+            <Link href="/arenacue-kleine-middelgrote-clubs">Voor clubs</Link>
             <a href="#software">Software</a>
             <Link href="/vereisten">Systeemvereisten</Link>
+            <Link href="/blog">Blog</Link>
             <a href="#updates">Updates</a>
             <Link href="/changelog">Changelog</Link>
             <Link href="/portal">Klantportaal</Link>
@@ -115,7 +117,7 @@ export default async function Home() {
               Live match control voor clubs en stadions
             </div>
             <h1>
-              Eén regietafel voor score, sponsors en stadionvisuals.
+              Een regietafel voor score, sponsors en stadionvisuals.
             </h1>
             <p className="hero-lead">
               ArenaCue helpt operators om elke wedstrijdfase gecontroleerd te sturen: van klok en score tot
@@ -130,7 +132,7 @@ export default async function Home() {
             <div className="hero-actions">
               <a className="primary-button" href="#contact">
                 Plan je ArenaCue demo
-                <span>→</span>
+                <span>-</span>
               </a>
               <Link className="secondary-button" href="/functies">
                 Bekijk functies
@@ -157,12 +159,12 @@ export default async function Home() {
                 <span />
               </div>
               <strong>Stadium Control</strong>
-              <small>Connected · Match mode</small>
+              <small>Connected - Match mode</small>
             </div>
             <div className="hero-preview-card pro-preview-card">
               <Image
                 src="/assets/scoreboard-preview-hero.png"
-                alt="ArenaCue control dashboard preview zonder clubnamen of officiële logo&apos;s"
+                alt="ArenaCue control dashboard preview zonder clubnamen of officiele logo&apos;s"
                 width={1672}
                 height={941}
                 className="hero-product-image pro-product-image"
@@ -172,7 +174,7 @@ export default async function Home() {
             <div className="preview-metrics" aria-label="Preview eigenschappen">
               <div>
                 <small>Output</small>
-                <strong>1920 × 1080</strong>
+                <strong>1920 x 1080</strong>
               </div>
               <div>
                 <small>Status</small>
@@ -206,7 +208,7 @@ export default async function Home() {
         </div>
         <p className="features-see-all">
           <Link href="/functies" className="secondary-button">
-            Uitgebreide functionaliteit →
+            Uitgebreide functionaliteit -
           </Link>
         </p>
       </section>
@@ -236,7 +238,7 @@ export default async function Home() {
             <p className="section-kicker">ArenaCue Scoreboard</p>
             <h2>Voor klok, score, sponsors en displays.</h2>
             <p>
-              De centrale regiesoftware voor matchdagen. Operators sturen de volledige wedstrijdflow vanuit één
+              De centrale regiesoftware voor matchdagen. Operators sturen de volledige wedstrijdflow vanuit een
               dashboard, met duidelijke preview en snelle controles.
             </p>
             <Link className="secondary-button" href="/functies">
@@ -263,7 +265,7 @@ export default async function Home() {
             <p className="section-kicker">Prijs & licentie</p>
             <h2>Prijs op aanvraag, afgestemd op je club.</h2>
             <p>
-              Elke club gebruikt een andere schermketen: één stadiondisplay, extra LED-zones, meerdere installaties of
+              Elke club gebruikt een andere schermketen: een stadiondisplay, extra LED-zones, meerdere installaties of
               begeleiding bij opstart. Daarom maken we een voorstel op maat na een korte demo of intake.
             </p>
             <ul className="check-list compact">
@@ -322,7 +324,7 @@ export default async function Home() {
           <div className="reviews-grid">
             {reviews.map((review) => (
               <article className="review-card" key={review.id}>
-                <p className="review-quote">“{review.quote}”</p>
+                <p className="review-quote">"{review.quote}"</p>
                 <div className="review-meta">
                   <strong>{review.name}</strong>
                   <span>
@@ -383,11 +385,13 @@ export default async function Home() {
           <span>Scoreboard, LED boarding &amp; Display Control</span>
           <span className="footer-links">
             <Link href="/functies">Functies</Link>
+            <Link href="/arenacue-kleine-middelgrote-clubs">Voor clubs</Link>
+            <Link href="/blog">Blog</Link>
             <Link href="/portal">Klantportaal</Link>
             <Link href="/changelog">Changelog</Link>
             <a href="/privacy">Privacy</a>
             <a href="/vereisten">Systeemvereisten</a>
-            <a href="/licenties">Licenties</a>
+            <Link href="/licenses">Licenties</Link>
             <a href="/terms">Voorwaarden</a>
             <CookieSettingsTrigger />
           </span>

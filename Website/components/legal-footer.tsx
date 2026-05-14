@@ -16,7 +16,7 @@ export function LegalFooter() {
           <Link href="/changelog">Changelog</Link>
           <Link href="/vereisten">Systeemvereisten</Link>
           <Link href="/privacy">Privacy</Link>
-          <Link href="/licenties">Licenties</Link>
+          <Link href="/licenses">Licenties</Link>
           <Link href="/terms">Voorwaarden</Link>
           <CookieSettingsTrigger />
         </span>

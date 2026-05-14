@@ -42,17 +42,30 @@ export default async function SeoBlogPostPage({ params }: PageProps) {
     "@type": "Article",
     headline: post.title,
     description: post.meta_description,
+    url: absoluteUrl(`/blog/${post.slug}`),
+    image: absoluteUrl("/assets/scoreboard-preview-hero.png"),
     datePublished: post.published_at,
     dateModified: post.published_at,
+    inLanguage: "nl-BE",
+    keywords: post.keywords,
+    articleSection: "Scoreboard software",
     author: {
       "@type": "Organization",
       name: "ArenaCue",
+      url: absoluteUrl("/"),
     },
     publisher: {
       "@type": "Organization",
       name: "ArenaCue",
+      logo: {
+        "@type": "ImageObject",
+        url: absoluteUrl("/assets/arenacue-icon.png"),
+      },
     },
-    mainEntityOfPage: absoluteUrl(`/blog/${post.slug}`),
+    mainEntityOfPage: {
+      "@type": "WebPage",
+      "@id": absoluteUrl(`/blog/${post.slug}`),
+    },
   };
 
   return (
@@ -104,6 +117,12 @@ export default async function SeoBlogPostPage({ params }: PageProps) {
             </Link>
             <Link className="secondary-button" href="/functies">
               Bekijk functies
+            </Link>
+            <Link className="secondary-button" href="/arenacue-kleine-middelgrote-clubs">
+              Voor clubs
+            </Link>
+            <Link className="secondary-button" href="/blog">
+              Meer artikels
             </Link>
           </div>
         </section>

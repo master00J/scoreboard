@@ -2190,6 +2190,16 @@ h2 {
   background: rgba(8, 18, 34, 0.52);
 }
 
+a.features-mini-card {
+  display: block;
+  text-decoration: none;
+}
+
+a.features-mini-card:hover {
+  border-color: rgba(34, 211, 238, 0.45);
+  transform: translateY(-1px);
+}
+
 .features-mini-card h3 {
   margin: 0 0 8px;
   font-size: 1rem;
