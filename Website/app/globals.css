@@ -2169,11 +2169,37 @@ h2 {
   border-top: none;
 }
 
+.features-deep-section h2,
 .features-deep-section h3 {
   margin: 0 0 14px;
   font-size: clamp(1.22rem, 2.4vw, 1.55rem);
   letter-spacing: -0.03em;
   color: var(--text);
+}
+
+.features-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.features-mini-card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(8, 18, 34, 0.52);
+}
+
+.features-mini-card h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+}
+
+.features-mini-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+  font-size: 0.94rem;
 }
 
 .features-deep-list {
@@ -2206,5 +2232,9 @@ h2 {
 @media (max-width: 680px) {
   .features-deep-page {
     padding: 28px 18px 64px;
+  }
+
+  .features-mini-grid {
+    grid-template-columns: 1fr;
   }
 }

@@ -9,6 +9,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: siteUrl, lastModified: now, changeFrequency: "weekly", priority: 1 },
     { url: `${siteUrl}/functies`, lastModified: now, changeFrequency: "monthly", priority: 0.75 },
+    {
+      url: `${siteUrl}/arenacue-kleine-middelgrote-clubs`,
+      lastModified: now,
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
     { url: `${siteUrl}/vereisten`, lastModified: now, changeFrequency: "monthly", priority: 0.4 },
     { url: `${siteUrl}/changelog`, lastModified: now, changeFrequency: "weekly", priority: 0.35 },
     { url: `${siteUrl}/licenses`, lastModified: now, changeFrequency: "monthly", priority: 0.25 },
