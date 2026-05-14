@@ -327,11 +327,11 @@ export default async function Home() {
                   <strong>{review.name}</strong>
                   <span>
                     {review.club}
-                    {review.role ? ` · ${review.role}` : ""}
+                    {review.role ? ` - ${review.role}` : ""}
                   </span>
                 </div>
                 <div className="review-rating" aria-label={`${review.rating} op 5`}>
-                  {"★".repeat(review.rating)}
+                  {"*".repeat(review.rating)}
                 </div>
               </article>
             ))}
@@ -356,7 +356,7 @@ export default async function Home() {
           <h2>Klaar om ArenaCue in je stadion of sportclub te gebruiken?</h2>
           <p>
             Plan een demo, bespreek je schermopstelling en ontvang de juiste download voor je club. We houden demo&apos;s
-            bewust overzichtelijk met één test per e-mailadres en apparaat; daarna helpen we je verder naar een
+            bewust overzichtelijk met een test per e-mailadres en apparaat; daarna helpen we je verder naar een
             volledige licentie op hetzelfde toestel.
           </p>
         </div>
@@ -379,7 +379,7 @@ export default async function Home() {
       <footer className="footer pro-footer">
         <FooterLegalEntity className="footer-legal-entity" />
         <div className="footer-meta-row">
-          <span>� {new Date().getFullYear()} ArenaCue</span>
+          <span>&copy; {new Date().getFullYear()} ArenaCue</span>
           <span>Scoreboard, LED boarding &amp; Display Control</span>
           <span className="footer-links">
             <Link href="/functies">Functies</Link>

@@ -232,8 +232,8 @@ export default function Home() {
           <p className="section-kicker">Start professioneel</p>
           <h2>Klaar om ArenaCue in je stadion of sportclub te gebruiken?</h2>
           <p>
-            Plan een demo, bespreek je schermopstelling en ontvang de juiste download voor je club. Demo&apos;s: één
-            aanvraag per e-mail en één demo per apparaat; daarna kan een volledige licentie wél op hetzelfde toestel.
+            Plan een demo, bespreek je schermopstelling en ontvang de juiste download voor je club. Demo&apos;s: een
+            aanvraag per e-mail en een demo per apparaat; daarna kan een volledige licentie wel op hetzelfde toestel.
           </p>
         </div>
         <div className="contact-stack">
@@ -254,7 +254,7 @@ export default function Home() {
       <footer className="footer">
         <FooterLegalEntity className="footer-legal-entity" />
         <div className="footer-meta-row">
-          <span>� {new Date().getFullYear()} ArenaCue</span>
+          <span>&copy; {new Date().getFullYear()} ArenaCue</span>
           <span>Scoreboard, LED boarding &amp; Display Control</span>
           <span className="footer-links">
             <Link href="/functies">Functies</Link>

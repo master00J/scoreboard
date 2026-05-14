@@ -30,6 +30,7 @@ SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 RESEND_API_KEY=<resend-api-key>
 RESEND_FROM="ArenaCue <info@arenacue.be>"
 CRON_SECRET=<lange-random-secret>
+ANTHROPIC_API_KEY=<anthropic-api-key>
 ```
 
 ## Supabase
@@ -51,6 +52,10 @@ Run `supabase/app-release-notifications.sql` om automatische update-mails
 idempotent te maken. Deze tabel onthoudt welke `APP_RELEASE_VERSION` al naar
 actieve licentiehouders is gemaild.
 
+Run `supabase/seo-posts.sql` om wekelijkse AI SEO-artikels te activeren.
+De cron-route schrijft gepubliceerde artikels naar `seo_posts`; `/blog` en
+`/blog/[slug]` lezen die automatisch uit.
+
 ## Automatische Update-mails
 
 `vercel.json` draait elk uur `/api/cron/app-release-notify`. Die route leest
@@ -68,3 +73,21 @@ Release-flow:
 2. Zet `APP_RELEASE_VERSION` op de nieuwe versie en update de download-URL indien nodig.
 3. Redeploy de website.
 4. De cron-route mailt de actieve licentiehouders één keer voor die versie.
+
+## Wekelijkse AI SEO-artikels
+
+`vercel.json` roept elke donderdag elk uur `/api/cron/seo-post` aan. De route
+publiceert alleen wanneer het in `Europe/Brussels` exact 20:00 is, zodat zomer-
+en wintertijd correct blijven. Per datum wordt maximaal één artikel aangemaakt
+door `week_key`.
+
+Vereisten op Vercel:
+
+- `CRON_SECRET`
+- `ANTHROPIC_API_KEY`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+Handmatig testen kan met `GET /api/cron/seo-post?force=1` met header
+`Authorization: Bearer <CRON_SECRET>`.
