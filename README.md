@@ -34,7 +34,18 @@ Daarna opent de app het control- en displayvenster lokaal.
 npm run build
 ```
 
-Produceert Windows-artifacts onder `dist/` (o.a. portable / NSIS via electron-builder). Daarna optioneel: `npm run release:checksums` voor `dist/SHA256SUMS.txt`.
+Produceert platform-specifieke artifacts onder `dist/`:
+
+- **Windows** (op een Windows-pc): portable + NSIS-installer (`Stadium-Scoreboard.exe`, …).
+- **macOS** (op een Mac of via GitHub Actions): DMG + ZIP per architectuur (`Stadium-Scoreboard-<versie>-arm64.dmg`, `-x64.zip`, …). Zie `docs/MAC_BUILD.md`.
+
+```bash
+npm run build              # huidig besturingssysteem
+npm run electron:build:win # alleen Windows
+npm run electron:build:mac # alleen macOS (vereist Mac of CI)
+```
+
+Daarna optioneel: `npm run release:checksums` voor `dist/SHA256SUMS.txt`.
 
 ### Update-melding voor bestaande desktop-apps
 

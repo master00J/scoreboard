@@ -301,7 +301,7 @@ export async function remoteLicenseActivate(
 
 export function defaultDeviceLabel(): string {
   const h = os.hostname();
-  return h && h.length > 0 ? h.slice(0, 120) : "Windows-pc";
+  return h && h.length > 0 ? h.slice(0, 120) : "Desktop";
 }
 
 export function withinGrace(lastVerifiedAtIso: string | undefined): boolean {

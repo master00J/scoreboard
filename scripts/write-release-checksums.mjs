@@ -18,7 +18,7 @@ try {
 
 const lines = [];
 for (const name of readdirSync(dist)) {
-  if (!/\.(exe|zip|blockmap)$/i.test(name)) continue;
+  if (!/\.(exe|zip|dmg|blockmap)$/i.test(name)) continue;
   const fp = join(dist, name);
   const buf = readFileSync(fp);
   const h = createHash("sha256").update(buf).digest("hex");
@@ -26,7 +26,7 @@ for (const name of readdirSync(dist)) {
 }
 
 if (lines.length === 0) {
-  console.warn("[checksums] geen .exe/.zip/.blockmap in dist/ — niets geschreven.");
+  console.warn("[checksums] geen .exe/.zip/.dmg/.blockmap in dist/ — niets geschreven.");
   process.exit(0);
 }
 

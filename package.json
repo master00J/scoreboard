@@ -1,6 +1,6 @@
 {
   "name": "stadium-scoreboard",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Desktop scorebord- en sponsorweergave voor stadions (Electron + Next).",
   "author": "Stadium Scoreboard",
   "private": true,
@@ -26,7 +26,9 @@
     "soak:sponsor": "node scripts/sponsor-rotation-soak.mjs",
     "soak:sponsor-transition": "node scripts/sponsor-transition-soak.mjs",
     "soak:sponsor-interrupt": "node scripts/sponsor-interruption-soak.mjs",
-    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-windows-icon.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder",
+    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder",
+    "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win",
+    "electron:build:mac": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --mac",
     "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir"
   },
   "build": {
@@ -40,6 +42,35 @@
     },
     "portable": {
       "artifactName": "Stadium-Scoreboard.${ext}"
+    },
+    "mac": {
+      "category": "public.app-category.sports",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/mac/entitlements.mac.plist",
+      "entitlementsInherit": "resources/mac/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Stadium-Scoreboard-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Stadium Scoreboard ${version}"
     },
     "win": {
       "sign": null,
@@ -135,6 +166,7 @@
     "electron-builder": "^25.1.8",
     "esbuild": "^0.27.0",
     "eslint": "^9.39.0",
+    "png2icons": "^2.0.1",
     "postcss": "^8.5.14",
     "prisma": "^5.22.0",
     "sharp": "^0.34.5",
