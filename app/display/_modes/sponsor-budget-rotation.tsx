@@ -13,8 +13,12 @@ import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import type { MediaItem, Sponsor, SponsorSection } from "@/lib/types";
 import type { DisplayMediaDiagnosticPayload } from "@/lib/desktop-bridge";
 import { matchPlayBudgetSeconds } from "@/lib/sponsor-distribution";
-import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
-import { reportSponsorClipEnd, reportSponsorClipStart } from "@/lib/use-socket";
+import { sponsorTelemetrySegmentKey, resolveVideoExpectedPlaySec } from "@/lib/sponsor-telemetry";
+import {
+  reportSponsorClipEnd,
+  reportSponsorClipProgress,
+  reportSponsorClipStart,
+} from "@/lib/use-socket";
 import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import { mediaUrl } from "@/lib/media-url";
 import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
@@ -253,6 +257,7 @@ export function SponsorBudgetRotation({
     ended: boolean;
   } | null>(null);
   const lastPausedTelemetryRef = useRef<boolean | null>(null);
+  const lastProgressReportMsRef = useRef(0);
 
   const sponsorsById = useMemo(() => {
     const m: Record<string, Sponsor> = {};
@@ -388,13 +393,6 @@ export function SponsorBudgetRotation({
       if ((st.spentPerSponsor[s.id] ?? 0) >= budgetFn(s)) return false;
       return availableMediaForSponsor(s, now).length > 0;
     });
-    if (eligibleAll.length === 0) {
-      eligibleAll = activeSponsors.filter((s) => {
-        const media = availableMediaForSponsor(s, now);
-        if (media.length === 0) return false;
-        return (st.mediaCursor[s.id] ?? 0) < media.length;
-      });
-    }
     if (!scheduledSponsorMode && eligibleAll.length === 0 && cycleBudgetForever) {
       st.spentPerSponsor = {};
       eligibleAll = activeSponsors.filter((s) => {
@@ -447,6 +445,37 @@ export function SponsorBudgetRotation({
     });
   }, []);
 
+  const pushActiveClipProgress = useCallback(
+    (
+      positionMs: number,
+      opts?: { browserSec?: number; force?: boolean; paused?: boolean },
+    ) => {
+      if (followMode || !isPlaybackOwner || !playbackTelemetry || !current) return;
+      const clip = telemetryClipRef.current;
+      if (!clip || clip.ended) return;
+      const now = Date.now();
+      if (!opts?.force && opts?.browserSec == null && now - lastProgressReportMsRef.current < 200) {
+        return;
+      }
+      lastProgressReportMsRef.current = now;
+      const pos = Math.max(0, positionMs);
+      const expectedPlaySec =
+        opts?.browserSec != null && current.item.type === "VIDEO"
+          ? resolveVideoExpectedPlaySec(current.item, current.playSec, opts.browserSec)
+          : undefined;
+      void reportSponsorClipProgress({
+        matchId: clip.matchId,
+        segmentKey: clip.segmentKey,
+        clipSessionId: clip.clipSessionId,
+        playbackPositionMs: pos,
+        startedAtMs: now - pos,
+        paused: opts?.paused,
+        ...(expectedPlaySec != null ? { expectedPlaySec } : {}),
+      });
+    },
+    [followMode, isPlaybackOwner, playbackTelemetry, current],
+  );
+
   const advanceAfterSlide = useCallback(
     (
       sponsorId: string,
@@ -475,9 +504,8 @@ export function SponsorBudgetRotation({
 
       const now = Date.now();
       /**
-       * De scheduler-filter (`sponsorIdFilter`) mag de lopende sponsor niet afkappen.
-       * Als Matchsponsor 4 actieve clips heeft, speel die lijst eerst uit voordat
-       * een nieuw scheduler-slot naar een andere sponsor mag springen.
+       * Meerdere clips van dezelfde sponsor in één pass — alleen zolang er prematch-/sectiebudget is.
+       * Lopende clip mag over budget afspelen; daarna geen volgende clip meer voor die sponsor.
        */
       const sameSponsor = sponsorsById[sponsorId];
       const sameSponsorMedia = sameSponsor ? passMediaForSponsor(sameSponsor, st.mediaCursor[sponsorId] ?? 0, now) : [];
@@ -490,7 +518,6 @@ export function SponsorBudgetRotation({
           : null;
       if (
         sameSponsorNext &&
-        sponsorIdFilter &&
         sameSponsor &&
         (st.spentPerSponsor[sponsorId] ?? 0) >= budgetFn(sameSponsor)
       ) {
@@ -639,9 +666,9 @@ export function SponsorBudgetRotation({
         videoCommitTimerRef.current = null;
         finishClipOnce(
           current,
-          capBilledSecondsForSponsorBudget(current.item, current.playSec, current.playSec),
+          capBilledSecondsForSponsorBudget(current.item, current.playSec, durationBasisSec),
         );
-      }, Math.max(1_500, catalogSec * 1000));
+      }, Math.max(1_500, durationBasisSec * 1000));
       videoFallbackTimerRef.current = setTimeout(() => {
         videoFallbackTimerRef.current = null;
         const progressed = playbackProgressMsRef.current / 1000;
@@ -1026,11 +1053,18 @@ export function SponsorBudgetRotation({
             onVideoEnded={handleVideoEnded}
             onVideoPlaybackFault={followMode ? undefined : onBudgetVideoPlaybackFault}
             onVideoDurationMs={(ms) => {
-              if (ms > 0) setVideoProgressDurationMs(ms);
+              if (ms > 0) {
+                setVideoProgressDurationMs(ms);
+                pushActiveClipProgress(playbackProgressMsRef.current, {
+                  browserSec: ms / 1000,
+                  force: true,
+                });
+              }
             }}
             onVideoProgressMs={(ms) => {
               const next = Math.max(0, ms);
               playbackProgressMsRef.current = next;
+              pushActiveClipProgress(next, { paused });
             }}
           />
         </div>

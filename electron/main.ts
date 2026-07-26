@@ -1077,6 +1077,12 @@ function registerIpc() {
     return { ok: true };
   });
 
+  ipcMain.handle("display:sponsorClipProgress", async (_, payload) => {
+    if (!runtime) throw new Error("Runtime not initialized");
+    runtime.sponsorTelemetryClipProgress(payload);
+    return { ok: true };
+  });
+
   ipcMain.handle("window:focusDisplay", async () => {
     if (!displayWindow) return;
     applyDisplayFullscreen(displayWindow);

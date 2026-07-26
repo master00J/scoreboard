@@ -6,6 +6,7 @@ import type { Command } from "./validation/commands";
 import type { ElectronBridge } from "./desktop-bridge";
 import type {
   SponsorTelemetryClipEnd,
+  SponsorTelemetryClipProgress,
   SponsorTelemetryClipStart,
 } from "./sponsor-telemetry";
 
@@ -88,6 +89,12 @@ export async function reportSponsorClipEnd(payload: SponsorTelemetryClipEnd) {
   const api = await waitForElectronApi(800);
   if (!api) return;
   await api.reportSponsorClipEnd(payload);
+}
+
+export async function reportSponsorClipProgress(payload: SponsorTelemetryClipProgress) {
+  const api = await waitForElectronApi(800);
+  if (!api?.reportSponsorClipProgress) return;
+  await api.reportSponsorClipProgress(payload);
 }
 
 export async function sendCommand(cmd: Command) {

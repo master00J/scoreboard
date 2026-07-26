@@ -42,6 +42,7 @@ const bridge: ElectronBridge = {
   getDesktopCaptureSources: () => ipcRenderer.invoke("desktop:getCaptureSources"),
   reportSponsorClipStart: (payload) => ipcRenderer.invoke("display:sponsorClipStart", payload),
   reportSponsorClipEnd: (payload) => ipcRenderer.invoke("display:sponsorClipEnd", payload),
+  reportSponsorClipProgress: (payload) => ipcRenderer.invoke("display:sponsorClipProgress", payload),
   getSponsorLedgerSnapshot: () => ipcRenderer.invoke("display:getSponsorLedger"),
   getAppVersion: () => ipcRenderer.invoke("app:getVersion"),
   openExternalUrl: (url: string) => ipcRenderer.invoke("shell:openExternal", url),

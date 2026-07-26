@@ -60,6 +60,35 @@ export type SponsorTelemetryClipEnd = {
   reason?: string;
 };
 
+/** Live sync HUD/preview met echte video-positie en gecorrigeerde spotduur. */
+export type SponsorTelemetryClipProgress = {
+  matchId: string;
+  segmentKey: string;
+  clipSessionId: string;
+  playbackPositionMs: number;
+  /** Verhoogt alleen `expectedPlaySec` in de ledger (nooit verlagen). */
+  expectedPlaySec?: number;
+  paused?: boolean;
+  /** `Date.now() - playbackPositionMs` zodat elapsed = positie in de video. */
+  startedAtMs?: number;
+};
+
+/** Zelfde logica als display `MediaRenderer` / commit-timers. */
+export function resolveVideoExpectedPlaySec(
+  item: { type: string; durationSec: number },
+  scheduledPlaySec: number,
+  browserSec: number,
+): number {
+  const catalogSec = Math.max(
+    0.5,
+    scheduledPlaySec,
+    item.durationSec > 0 ? item.durationSec : 0,
+  );
+  if (!(browserSec > 0)) return catalogSec;
+  if (browserSec > catalogSec * 3 + 90) return catalogSec;
+  return Math.max(catalogSec, browserSec);
+}
+
 /**
  * Actieve clip telt alleen mee zolang het scherm hem nog als “lopend” ziet (zelfde marge als
  * `display/page.tsx` / Sponsor-HUD). Daarna: scorebord-fase / clipEnd wacht — geen live doorschieting.
@@ -93,9 +122,7 @@ export function sponsorTelemetryActiveClipElapsedSec(
   if (activeClip.paused) {
     return Math.max(0, (activeClip.playbackPositionMs ?? 0) / 1000);
   }
-  const basePlaybackMs = Math.max(0, activeClip.playbackPositionMs ?? 0);
-  const elapsedSinceStartMs = Math.max(0, nowMs - activeClip.startedAtMs);
-  return Math.max(basePlaybackMs / 1000, elapsedSinceStartMs / 1000);
+  return Math.max(0, (nowMs - activeClip.startedAtMs) / 1000);
 }
 
 /** Totale geschatte verbruikte seconden inclusief lopende clip (display-sync). */

@@ -12,6 +12,7 @@ import type {
 import type {
   SponsorLedgerPayload,
   SponsorTelemetryClipEnd,
+  SponsorTelemetryClipProgress,
   SponsorTelemetryClipStart,
 } from "../lib/sponsor-telemetry";
 import { handleCommand } from "../server/handlers";
@@ -96,6 +97,27 @@ export function sponsorTelemetryClipStart(payload: SponsorTelemetryClipStart): S
     paused: payload.paused,
   };
   ledger.updatedAtMs = now;
+  sponsorLedgerSnapshot = ledger;
+  sendAll("display:sponsorLedger", ledger);
+  return ledger;
+}
+
+export function sponsorTelemetryClipProgress(
+  payload: SponsorTelemetryClipProgress,
+): SponsorLedgerPayload | null {
+  const ledger = sponsorLedgerSnapshot;
+  if (!ledger || ledger.matchId !== payload.matchId || ledger.segmentKey !== payload.segmentKey) {
+    return null;
+  }
+  const ac = ledger.activeClip;
+  if (!ac || ac.clipSessionId !== payload.clipSessionId) return null;
+  if (payload.expectedPlaySec != null && payload.expectedPlaySec > (ac.expectedPlaySec || 0)) {
+    ac.expectedPlaySec = payload.expectedPlaySec;
+  }
+  ac.playbackPositionMs = Math.max(0, payload.playbackPositionMs);
+  if (payload.paused != null) ac.paused = payload.paused;
+  if (payload.startedAtMs != null) ac.startedAtMs = payload.startedAtMs;
+  ledger.updatedAtMs = Date.now();
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
   return ledger;

@@ -3,6 +3,7 @@ import type { SerializedDisplayState } from "./timer";
 import type {
   SponsorLedgerPayload,
   SponsorTelemetryClipEnd,
+  SponsorTelemetryClipProgress,
   SponsorTelemetryClipStart,
 } from "./sponsor-telemetry";
 
@@ -198,6 +199,7 @@ export type ElectronBridge = {
   getDesktopCaptureSources: () => Promise<DesktopCaptureSourceInfo[]>;
   reportSponsorClipStart: (payload: SponsorTelemetryClipStart) => Promise<{ ok: boolean }>;
   reportSponsorClipEnd: (payload: SponsorTelemetryClipEnd) => Promise<{ ok: boolean }>;
+  reportSponsorClipProgress: (payload: SponsorTelemetryClipProgress) => Promise<{ ok: boolean }>;
   getSponsorLedgerSnapshot: () => Promise<SponsorLedgerPayload | null>;
   /** Huidige app-versie (package.json), voor update-melding. */
   getAppVersion: () => Promise<string>;
