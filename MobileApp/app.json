@@ -26,6 +26,7 @@
     "android": {
       "package": "be.arenacue.control",
       "versionCode": 1,
+      "usesCleartextTraffic": true,
       "permissions": [
         "INTERNET",
         "android.permission.CAMERA"

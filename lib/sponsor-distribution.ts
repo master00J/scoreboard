@@ -48,7 +48,7 @@ export function activeSponsorsForSection(
 }
 
 /**
- * Lengte van het prematch-sponsorrooster (seconden): herhalende tijdlijn voor spread/«naast scorebord».
+ * Lengte van het prematch-sponsorrooster (seconden): spread-tijdlijn voor «voor wedstrijd».
  * Bij `prematchSpreadWindowSec` > 0 op de wedstrijd: die waarde (60s … 24u), anders automatisch ≈ som prematch-budgetten.
  */
 export function prematchSpreadTimelineSeconds(
@@ -62,6 +62,21 @@ export function prematchSpreadTimelineSeconds(
     return Math.min(86400, Math.max(60, Math.floor(configured)));
   }
   return Math.max(60, budgetTotal);
+}
+
+/**
+ * Prematch-spread loopt één keer over H seconden (geen modulo): na het budget/rooster → scorebord.
+ */
+export function prematchSpreadClock(
+  elapsedSec: number,
+  timelineLenSec: number,
+): { t: number; timelineComplete: boolean } {
+  const H = Math.max(1, Math.floor(timelineLenSec));
+  const elapsed = Math.max(0, elapsedSec);
+  if (elapsed >= H) {
+    return { t: H - 1, timelineComplete: true };
+  }
+  return { t: Math.min(H - 1, Math.floor(elapsed)), timelineComplete: false };
 }
 
 /**

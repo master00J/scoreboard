@@ -154,8 +154,39 @@ function cloudMatchesFromState(state) {
   return Array.from(byId.values());
 }
 
+function normalizeBridgeBaseUrl(raw) {
+  return String(raw ?? "").trim().replace(/\/+$/, "");
+}
+
+function bridgeJsonHint(baseUrl, isCloud, status, rawText) {
+  const preview = String(rawText ?? "").trim().slice(0, 80);
+  if (!preview.startsWith("<")) return null;
+  const host = normalizeBridgeBaseUrl(baseUrl);
+  if (!isCloud && /arenacue\.(be|com)/i.test(host)) {
+    return "Je staat op Lokaal LAN maar Bridge URL wijst naar de website. Zet http://192.168.x.x:17890 (uit desktop QR).";
+  }
+  if (isCloud && /:17890\b/.test(host)) {
+    return "Je staat op Cloud maar Bridge URL is een LAN-adres. Kies Cloud + https://arenacue.be, of Lokaal LAN + pc-IP:17890.";
+  }
+  if (!isCloud) {
+    return `Geen JSON van de mobile bridge (${status}). Controleer http://…:17890, zelfde Wi‑Fi, firewall, en druk eerst Ping. Antwoord begint met: ${preview}`;
+  }
+  return `Geen JSON van de server (${status}). Antwoord begint met: ${preview}`;
+}
+
+async function readFetchJson(res, baseUrl, isCloud) {
+  const text = await res.text();
+  try {
+    return { ok: true, data: text ? JSON.parse(text) : null, text };
+  } catch {
+    const hint = bridgeJsonHint(baseUrl, isCloud, res.status, text);
+    return { ok: false, data: null, text, hint };
+  }
+}
+
 async function callBridge(baseUrl, sessionToken, path, method = "GET", body) {
-  const res = await fetch(`${baseUrl}${path}`, {
+  const root = normalizeBridgeBaseUrl(baseUrl);
+  const res = await fetch(`${root}${path}`, {
     method,
     headers: { "Content-Type": "application/json", ...(sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
@@ -327,10 +358,22 @@ export default function App() {
   async function pingHealth() {
     setStatus("Service pingen...");
     try {
-      const url = isCloud ? `${baseUrl}${cloudPath("/control/state")}` : `${baseUrl}/mobile/health`;
+      const root = normalizeBridgeBaseUrl(baseUrl);
+      const url = isCloud ? `${root}${cloudPath("/control/state")}` : `${root}/mobile/health`;
       const res = await fetch(url, {
         headers: isCloud ? { Authorization: `Bearer ${sessionToken}` } : undefined,
       });
+      if (!isCloud) {
+        const parsed = await readFetchJson(res, root, isCloud);
+        if (!parsed.ok) {
+          setStatus(parsed.hint || `Ping: geen JSON (${res.status}).`);
+          return;
+        }
+        if (res.ok && parsed.data?.service === "scoreboard-mobile-bridge") {
+          setStatus("Mobile bridge online (poort 17890).");
+          return;
+        }
+      }
       setStatus(res.ok ? "Service online" : `Fout: ${res.status}`);
     } catch (error) {
       setStatus(`Niet bereikbaar: ${String(error)}`);
@@ -449,12 +492,25 @@ export default function App() {
   async function authenticate() {
     setStatus("Authenticatie...");
     try {
+      const root = normalizeBridgeBaseUrl(baseUrl);
+      if (!root) {
+        setStatus("Vul een Bridge URL in (LAN: http://192.168.x.x:17890).");
+        return;
+      }
+      if (!isCloud && !/^https?:\/\//i.test(root)) {
+        setStatus("LAN Bridge URL moet beginnen met http:// (bv. http://192.168.0.8:17890).");
+        return;
+      }
       if (isCloud && role === "viewer" && !cloudPairToken.trim()) {
         setStatus("Viewer-login via cloud vereist een geldige pair token uit de desktop QR.");
         return;
       }
+      if (!isCloud && !pairingCode.trim()) {
+        setStatus("Vul de pairing-code uit de desktop in (Mobiele app → LAN, bv. 346454).");
+        return;
+      }
       const res = await fetch(
-        isCloud ? `${baseUrl}${cloudPath("/control/auth/session")}` : `${baseUrl}/mobile/auth/session`,
+        isCloud ? `${root}${cloudPath("/control/auth/session")}` : `${root}/mobile/auth/session`,
         {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -465,7 +521,12 @@ export default function App() {
         ),
       },
       );
-      const payload = await res.json();
+      const parsed = await readFetchJson(res, root, isCloud);
+      if (!parsed.ok) {
+        setStatus(parsed.hint || `Authenticatie: geen JSON (${res.status}).`);
+        return;
+      }
+      const payload = parsed.data;
       const token = isCloud ? payload?.token : payload?.sessionToken;
       if (!res.ok || !token) return setStatus(payload?.error || payload?.message || `Login mislukt (${res.status})`);
       setSessionToken(token);

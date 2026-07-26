@@ -12,6 +12,7 @@ import {
   holdSecondsCappedBySlotRun,
   lookupSponsorAtSecond,
   prematchSpreadTimelineSeconds,
+  prematchSpreadClock,
   resolveSponsorSpreadPhase,
   sponsorScreenSecondsConsumed,
   sponsorSectionBudgetSeconds,
@@ -320,7 +321,12 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
     const H = Math.max(1, sponsorSlotMapPrematch.length);
-    const rawT = ((now - prematchOriginRef.current) / 1000) % H;
+    const elapsedSec = (now - prematchOriginRef.current) / 1000;
+    const { t: rawT, timelineComplete } = prematchSpreadClock(elapsedSec, H);
+    if (timelineComplete) {
+      prematchPhaseHangRef.current = null;
+      return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+    }
     const t = sponsorScheduleTime(
       prematchScheduleClockRef,
       "prematch",
@@ -584,8 +590,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     ) {
       const H = Math.max(1, sponsorSlotMapPrematch.length);
       const tUnbounded = (now - prematchOriginRef.current) / 1000;
-      const t = tUnbounded % H;
-      const tNextEta = Math.min(tUnbounded, Math.max(0, H - 1e-6));
+      const { t, timelineComplete } = prematchSpreadClock(tUnbounded, H);
+      const tNextEta = timelineComplete ? H - 1 : Math.min(tUnbounded, Math.max(0, H - 1e-6));
       return rosterFrom(
         "Voor wedstrijd",
         "prematch",

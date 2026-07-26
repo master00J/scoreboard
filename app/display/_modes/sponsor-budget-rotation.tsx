@@ -484,10 +484,18 @@ export function SponsorBudgetRotation({
       const sameSponsorCursor = st.mediaCursor[sponsorId] ?? 0;
       const sameSponsorHasMoreInPass =
         sameSponsorMedia.length > 0 && sameSponsorCursor % sameSponsorMedia.length !== 0;
-      const sameSponsorNext =
+      let sameSponsorNext =
         sameSponsor && sameSponsorHasMoreInPass
           ? planForSponsorMediaList(sameSponsor, sameSponsorCursor, sameSponsorMedia)
           : null;
+      if (
+        sameSponsorNext &&
+        sponsorIdFilter &&
+        sameSponsor &&
+        (st.spentPerSponsor[sponsorId] ?? 0) >= budgetFn(sameSponsor)
+      ) {
+        sameSponsorNext = null;
+      }
       if (!sameSponsorNext && sponsorIdFilter === sponsorId) {
         completedScheduledSponsorSlotRef.current = sponsorId;
       }

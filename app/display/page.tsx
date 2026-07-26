@@ -45,6 +45,7 @@ import {
   halfWindowElapsed,
   lookupSponsorAtSecond,
   prematchSpreadTimelineSeconds,
+  prematchSpreadClock,
   resolveSponsorSpreadPhase,
 } from "@/lib/sponsor-distribution";
 import { sponsorScheduleTime, type SponsorScheduleClock } from "@/lib/sponsor-schedule-clock";
@@ -649,7 +650,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
     const H = Math.max(1, sponsorSlotMapPrematch.length);
-    const rawT = ((now - prematchOriginRef.current) / 1000) % H;
+    const elapsedSec = (now - prematchOriginRef.current) / 1000;
+    const { t: rawT, timelineComplete } = prematchSpreadClock(elapsedSec, H);
+    if (timelineComplete) {
+      prematchPhaseHangRef.current = null;
+      return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+    }
     const t = sponsorScheduleTime(
       prematchScheduleClockRef,
       "prematch",
@@ -666,8 +672,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     /**
      * Een lopende ledger-clip houdt het sponsorvlak gemount tijdens overlays.
      * Anders kan een goal/kaart/wissel midden in een spot de rotation unmounten.
+     * Na volledig prematch-rooster: niet opnieuw vasthouden via ledger.
      */
-    if (match) {
+    if (match && !timelineComplete) {
       const seg = sponsorTelemetrySegmentKey(match.id, match.status, "prematch");
       if (
         seg &&
