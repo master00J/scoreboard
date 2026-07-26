@@ -124,10 +124,11 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
 
   let disposed = false;
   let busy = false;
+  let lastStatePostErrorLogAt = 0;
 
   async function postState() {
     const state = await withMobileMatchData(await options.runtime.getDisplaySnapshot(), options.runtime);
-    await fetchWithTimeout(`${cloudBaseUrl}/api/control/desktop/state`, {
+    const res = await fetchWithTimeout(`${cloudBaseUrl}/api/control/desktop/state`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -135,6 +136,22 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
       },
       body: JSON.stringify({ venueId: cloudVenueId, state }),
     });
+    if (!res.ok) {
+      const now = Date.now();
+      if (now - lastStatePostErrorLogAt > 30_000) {
+        lastStatePostErrorLogAt = now;
+        let detail = res.statusText;
+        try {
+          const body = (await res.json()) as { message?: string };
+          if (body?.message) detail = body.message;
+        } catch {
+          /* ignore */
+        }
+        options.log(
+          `[cloud-control] state upload mislukt (${res.status}): ${detail} — controleer CONTROL_DESKTOP_KEY + Supabase control_state op ${cloudBaseUrl}`,
+        );
+      }
+    }
   }
 
   async function pullCommands(): Promise<PendingCommand[]> {

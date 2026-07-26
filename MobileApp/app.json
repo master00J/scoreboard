@@ -3,7 +3,7 @@
     "name": "ArenaCue Control",
     "slug": "arenacue-control",
     "description": "Mobiele remote-control companion voor de ArenaCue desktopsoftware.",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "scheme": "arenacue",

@@ -3,6 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { Image, Modal, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { DisplayScreen } from "./screens/DisplayScreen";
+import { MediaScreen } from "./screens/MediaScreen";
+import { SetupScreen } from "./screens/SetupScreen";
 
 const defaultBaseUrl = "http://192.168.1.10:17890";
 const defaultPairingCode = "";
@@ -655,6 +658,33 @@ export default function App() {
               <Text style={styles.menuButtonText}>Wedstrijdbeheer</Text>
             </Pressable>
             <Pressable
+              style={[styles.menuButton, activeTab === "setup" ? styles.menuButtonActive : null]}
+              onPress={() => {
+                setActiveTab("setup");
+                setMenuOpen(false);
+              }}
+            >
+              <Text style={styles.menuButtonText}>Setup</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.menuButton, activeTab === "media" ? styles.menuButtonActive : null]}
+              onPress={() => {
+                setActiveTab("media");
+                setMenuOpen(false);
+              }}
+            >
+              <Text style={styles.menuButtonText}>Media</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.menuButton, activeTab === "display" ? styles.menuButtonActive : null]}
+              onPress={() => {
+                setActiveTab("display");
+                setMenuOpen(false);
+              }}
+            >
+              <Text style={styles.menuButtonText}>Display</Text>
+            </Pressable>
+            <Pressable
               style={[styles.menuButton, activeTab === "settings" ? styles.menuButtonActive : null]}
               onPress={() => {
                 setActiveTab("settings");
@@ -780,26 +810,28 @@ export default function App() {
           </View>
         </Modal>
 
-        <View style={styles.tabBar}>
-          <Pressable
-            style={[styles.tabButton, activeTab === "operator" ? styles.tabButtonActive : null]}
-            onPress={() => {
-              setActiveTab("operator");
-              setMenuOpen(false);
-            }}
-          >
-            <Text style={[styles.tabText, activeTab === "operator" ? styles.tabTextActive : null]}>Wedstrijdbeheer</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.tabButton, activeTab === "settings" ? styles.tabButtonActive : null]}
-            onPress={() => {
-              setActiveTab("settings");
-              setMenuOpen(false);
-            }}
-          >
-            <Text style={[styles.tabText, activeTab === "settings" ? styles.tabTextActive : null]}>Koppeling</Text>
-          </Pressable>
-        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBarScroll}>
+          <View style={styles.tabBar}>
+            {[
+              { id: "operator", label: "Wedstrijd" },
+              { id: "setup", label: "Setup" },
+              { id: "media", label: "Media" },
+              { id: "display", label: "Display" },
+              { id: "settings", label: "Koppeling" },
+            ].map((tab) => (
+              <Pressable
+                key={tab.id}
+                style={[styles.tabButton, activeTab === tab.id ? styles.tabButtonActive : null]}
+                onPress={() => {
+                  setActiveTab(tab.id);
+                  setMenuOpen(false);
+                }}
+              >
+                <Text style={[styles.tabText, activeTab === tab.id ? styles.tabTextActive : null]}>{tab.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </ScrollView>
 
         {activeTab === "settings" && (
         <>
@@ -959,8 +991,92 @@ export default function App() {
         </>
         )}
 
+        {activeTab === "setup" && (
+          <SetupScreen
+            styles={styles}
+            canCall={canCall}
+            canMutate={canMutate}
+            isCloud={isCloud}
+            baseUrl={baseUrl}
+            sessionToken={sessionToken}
+            callBridge={callBridge}
+            onStatus={setStatus}
+          />
+        )}
+
+        {activeTab === "media" && (
+          <MediaScreen
+            styles={styles}
+            canCall={canCall}
+            canMutate={canMutate}
+            isCloud={isCloud}
+            baseUrl={baseUrl}
+            sessionToken={sessionToken}
+            callBridge={callBridge}
+            sendCommand={sendCommand}
+            onStatus={setStatus}
+          />
+        )}
+
+        {activeTab === "display" && (
+          <DisplayScreen
+            styles={styles}
+            canMutate={canMutate}
+            sendCommand={sendCommand}
+            snapshot={snapshot}
+            activeMatchDetails={activeMatchDetails}
+            onStatus={setStatus}
+          />
+        )}
+
         {activeTab === "operator" && (
         <>
+        <View style={styles.card}>
+          <Text style={styles.label}>Timer snel</Text>
+          <View style={styles.grid}>
+            {[
+              { preset: "FIRST_HALF", label: "1e 45'" },
+              { preset: "SECOND_HALF", label: "2e 45'" },
+              { preset: "ET1", label: "Vl. 1" },
+              { preset: "ET2", label: "Vl. 2" },
+            ].map((item) => (
+              <Pressable
+                key={item.preset}
+                style={styles.smallButton}
+                onPress={() => sendCommand({ type: "timer:preset", preset: item.preset })}
+              >
+                <Text style={styles.buttonTextSmall}>{item.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.row}>
+            <Pressable
+              style={styles.buttonSecondary}
+              onPress={() => sendCommand({ type: "timer:adjust", deltaSec: 60 })}
+            >
+              <Text style={styles.buttonText}>+1 min klok</Text>
+            </Pressable>
+            <Pressable
+              style={styles.buttonSecondary}
+              onPress={() => sendCommand({ type: "timer:adjust", deltaSec: -60 })}
+            >
+              <Text style={styles.buttonText}>−1 min klok</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.subLabel}>Extra tijd (min)</Text>
+          <View style={styles.chipsRow}>
+            {[0, 1, 2, 3, 4, 5].map((minutes) => (
+              <Pressable
+                key={minutes}
+                style={styles.chip}
+                onPress={() => sendCommand({ type: "timer:setAddedTime", minutes })}
+              >
+                <Text style={styles.chipText}>{minutes}</Text>
+              </Pressable>
+            ))}
+          </View>
+        </View>
+
         <View style={styles.card}>
           <Text style={styles.label}>Matchstatus</Text>
           <View style={styles.grid}>
@@ -1535,6 +1651,9 @@ const styles = StyleSheet.create({
     color: "#bfdbfe",
     lineHeight: 18,
   },
+  tabBarScroll: {
+    flexGrow: 1,
+  },
   tabBar: {
     flexDirection: "row",
     gap: 8,
@@ -1543,12 +1662,15 @@ const styles = StyleSheet.create({
     backgroundColor: "#0f172a",
     borderWidth: 1,
     borderColor: "#1e293b",
+    minWidth: "100%",
   },
   tabButton: {
-    flex: 1,
+    minWidth: 92,
+    flexGrow: 1,
     alignItems: "center",
     borderRadius: 10,
     paddingVertical: 10,
+    paddingHorizontal: 6,
   },
   tabButtonActive: {
     backgroundColor: "#2563eb",

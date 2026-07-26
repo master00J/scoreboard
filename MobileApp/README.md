@@ -42,6 +42,18 @@ Sneller voor klanten:
 - plak die in de app bij `Klant-koppelcode`
 - klik `Gebruik koppelcode`
 
+## App-onderdelen
+
+| Tab | LAN | Cloud |
+| --- | --- | --- |
+| **Wedstrijd** | Live score, timer, goals, kaarten, wissels | Zelfde commando's via cloud queue |
+| **Setup** | Teams, spelers, thuisploeg, wedstrijden, instellingen | Alleen uitleg — gebruik LAN op locatie |
+| **Media** | Sponsors (budgetten, actief), bibliotheek afspelen, playlists | Alleen uitleg |
+| **Display** | Modi, blackout, safe mode, timer presets, spelerintro | Commando's (operator) |
+| **Koppeling** | Bridge URL, pairing, QR | Venue + cloud token |
+
+**Uploads** (nieuwe video's, sponsorlogo's, mediakoppelingen) blijven op de **desktop** (Media-tab). De mobiele app kan bestaande media wel **triggeren** en sponsor-seconden **aanpassen** zolang je via **Lokaal LAN** gekoppeld bent als **operator**.
+
 ## Netwerkvoorwaarden
 
 - Pc en telefoon op hetzelfde wifi-netwerk

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import * as QRCode from "qrcode";
 import { useSocketSync, sendCommand, onDisplayError } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
@@ -28,6 +27,7 @@ import { exportMatch, focusDisplayWindow } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
 import { MatchTabGrid, LivePreviewPanel } from "./_components/match-tab-grid";
 import { AppResourceMeter } from "./_components/app-resource-meter";
+import { MobileBridgeMenu } from "./_components/mobile-bridge-menu";
 
 export default function ControlPage() {
   useSocketSync();
@@ -85,7 +85,7 @@ export default function ControlPage() {
         </div>
         <div className="flex items-center gap-4">
           <AppResourceMeter />
-          <MobileBridgeBadge info={mobileBridge} />
+          <MobileBridgeMenu info={mobileBridge} />
           <span className="flex items-center gap-2 text-xs">
             <span
               className={`h-3 w-3 rounded-full ${
@@ -150,158 +150,6 @@ export default function ControlPage() {
       </Tabs>
     </main>
     </LicenseActivationGate>
-  );
-}
-
-function buildLocalPairCode(bridgeUrl: string, pairingCode: string, operatorPinForQr: string) {
-  return [
-    "ACPAIR:local",
-    encodeURIComponent(bridgeUrl),
-    encodeURIComponent(pairingCode),
-    encodeURIComponent(operatorPinForQr),
-  ].join("|");
-}
-
-function MobileBridgeBadge({ info }: { info: MobileBridgeInfo | null }) {
-  const [showOperatorSecrets, setShowOperatorSecrets] = useState(false);
-  const bridgeUrl = info?.bridgeUrls[0] ?? (info?.port ? `http://localhost:${info.port}` : "");
-  const localPairCodeViewer =
-    info?.pairCodes[0] ??
-    (bridgeUrl && info?.pairingCode ? buildLocalPairCode(bridgeUrl, info.pairingCode, "") : "");
-  const localPairCodeOperator =
-    info?.pairCodesOperator?.[0] ??
-    (bridgeUrl && info?.pairingCode
-      ? buildLocalPairCode(bridgeUrl, info.pairingCode, info.operatorPin ?? "")
-      : "");
-  const activeLanPairCode = showOperatorSecrets ? localPairCodeOperator : localPairCodeViewer;
-
-  if (!info?.enabled && !info?.cloud.enabled) return null;
-
-  return (
-    <div className="flex flex-wrap gap-2">
-      {info.cloud.enabled && info.cloud.pairCode ? (
-        <div className="rounded-lg border border-green-500/40 bg-card p-3 text-xs shadow-sm">
-          <div className="flex items-center gap-3">
-            <PairCodeQr pairCode={info.cloud.pairCode} label="Cloud QR-code" />
-            <div className="flex flex-col gap-1">
-              <span className="font-semibold text-green-500">Mobiele app via cloud</span>
-              <span className="text-muted-foreground">Werkt ook buiten hetzelfde netwerk.</span>
-              <span className="font-mono text-muted-foreground">venue: {info.cloud.venueId}</span>
-              <button
-                type="button"
-                className="w-fit font-mono text-primary underline"
-                onClick={() => {
-                  void navigator.clipboard?.writeText(info.cloud.pairCode ?? "");
-                  toast({ title: "Cloud koppelcode gekopieerd" });
-                }}
-              >
-                Kopieer cloud-code
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {info.enabled && info.pairingCode ? (
-        <div className="rounded-lg border border-border bg-card p-3 text-xs shadow-sm">
-          <div className="flex items-center gap-3">
-            <PairCodeQr pairCode={activeLanPairCode} label="LAN QR-code" />
-        <div className="flex flex-col gap-1">
-          <span className="font-semibold text-foreground">Mobiele app via LAN</span>
-          <span className="text-muted-foreground">Snelste optie op hetzelfde netwerk.</span>
-          {!showOperatorSecrets ? (
-            <span className="text-muted-foreground">
-              Standaardtoon: alleen <strong>viewer</strong>-QR (geen operator-PIN in de code). Vink hieronder aan om
-              operator-koppelcode en PIN te tonen.
-            </span>
-          ) : null}
-          <span className="font-mono text-muted-foreground">pairing: {info.pairingCode}</span>
-          {info.operatorPin && showOperatorSecrets ? (
-            <span className="font-mono text-green-500">operator PIN: {info.operatorPin}</span>
-          ) : info.operatorPin ? (
-            <span className="font-mono text-muted-foreground">operator PIN: ••••••</span>
-          ) : null}
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              className="rounded border-border"
-              checked={showOperatorSecrets}
-              onChange={(e) => setShowOperatorSecrets(e.target.checked)}
-            />
-            <span>Toon operator-PIN en volledige LAN-koppelcode (QR)</span>
-          </label>
-          {bridgeUrl && (
-            <button
-              type="button"
-              className="w-fit font-mono text-primary underline"
-              title="Klik om Bridge URL te kopiëren"
-              onClick={() => {
-                void navigator.clipboard?.writeText(bridgeUrl);
-                toast({ title: "Bridge URL gekopieerd", description: bridgeUrl });
-              }}
-            >
-              {bridgeUrl}
-            </button>
-          )}
-          {activeLanPairCode && (
-            <button
-              type="button"
-              className="w-fit text-primary underline"
-              onClick={() => {
-                void navigator.clipboard?.writeText(activeLanPairCode);
-                toast({
-                  title: "LAN koppelcode gekopieerd",
-                  description: showOperatorSecrets ? "Inclusief operator-PIN" : "Alleen viewer",
-                });
-              }}
-            >
-              Kopieer LAN-code
-            </button>
-          )}
-          <span className={info.operatorPinConfigured ? "text-green-500" : "text-amber-500"}>
-            {info.operatorPinConfigured ? "operator actief" : "viewer only"}
-          </span>
-        </div>
-          </div>
-      </div>
-      ) : null}
-    </div>
-  );
-}
-
-function PairCodeQr({ pairCode, label }: { pairCode: string; label: string }) {
-  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!pairCode) {
-      setQrDataUrl(null);
-      return;
-    }
-    QRCode.toDataURL(pairCode, {
-      errorCorrectionLevel: "M",
-      margin: 1,
-      width: 132,
-      color: { dark: "#0f172a", light: "#ffffff" },
-    })
-      .then((url) => {
-        if (!cancelled) setQrDataUrl(url);
-      })
-      .catch(() => {
-        if (!cancelled) setQrDataUrl(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [pairCode]);
-
-  if (!qrDataUrl) return null;
-  return (
-    <img
-      src={qrDataUrl}
-      alt={label}
-      className="h-[96px] w-[96px] rounded-md bg-white p-1"
-    />
   );
 }
 
