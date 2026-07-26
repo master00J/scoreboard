@@ -1471,6 +1471,9 @@ function SponsorRotationLiveContent({
           matchSponsorMediaId={match.matchSponsorMediaId ?? null}
           matchSponsorMedia={match.matchSponsorMedia ?? null}
         />
+      );
+    }
+    if (prematchScoreboardNode) {
       return <>{prematchScoreboardNode}</>;
     }
     return (
