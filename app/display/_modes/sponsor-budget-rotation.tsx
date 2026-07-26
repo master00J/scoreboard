@@ -52,6 +52,26 @@ const SPONSOR_CROSS_SPONSOR_VIDEO_RELEASE_MS = 1_200;
 const sponsorBudgetPlaybackOwners = new Map<string, string>();
 let sponsorBudgetPlaybackOwnerSeq = 0;
 
+/**
+ * Rotatiecursor per sponsor, buiten de component-state.
+ *
+ * Tussen twee ingeroosterde vertoningen wordt deze component ge-unmount — het rooster
+ * toont dan het scorebord — waardoor `stateRef` opnieuw wordt opgebouwd. Stond de cursor
+ * in component-state, dan begon elke vertoning weer bij clip 1 en speelde een sponsor met
+ * meerdere bestanden altijd hetzelfde bestand. De cursor hoort bij de sponsor binnen dit
+ * segment, niet bij de mount.
+ */
+const sponsorRotationCursors = new Map<string, number>();
+/** Laatste scope waarvoor de cursors zijn genuld; voorkomt een reset bij elke mount. */
+let sponsorRotationCursorScope: string | null = null;
+
+function resetSponsorRotationCursors(scope: string): void {
+  const prefix = `${scope}::`;
+  for (const key of Array.from(sponsorRotationCursors.keys())) {
+    if (key.startsWith(prefix)) sponsorRotationCursors.delete(key);
+  }
+}
+
 function estimatePlaySec(item: MediaItem, sponsor: Sponsor): number {
   if (item.type === "VIDEO") {
     return Math.max(3, item.durationSec > 0 ? item.durationSec : 30);
@@ -300,6 +320,49 @@ export function SponsorBudgetRotation({
     [sponsors, section, matchStatus, rotationMediaForSponsor, matchSponsorMediaId],
   );
 
+  /**
+   * Scope van de rotatiecursor: zelfde wedstrijd + sectie + sponsorset ⇒ zelfde scope, dus
+   * de cursor loopt door over vertoningen heen. Wisselt de fase of de sponsorset, dan is het
+   * een nieuw segment en begint de rotatie weer bij clip 1.
+   */
+  const cursorScope = useMemo(
+    () =>
+      [
+        playbackTelemetry?.matchId ?? "no-match",
+        section,
+        matchStatus ?? "-",
+        phaseSponsorSignature,
+      ].join("::"),
+    [playbackTelemetry?.matchId, section, matchStatus, phaseSponsorSignature],
+  );
+
+  /**
+   * Scope + follow-modus via refs, zodat de lees/schrijf-helpers een stabiele identiteit
+   * houden: ze zitten in de deps van `advanceAfterSlide`, en dat is de callback waar de
+   * slide-timer aan hangt. Een wisselende identiteit zou die timer telkens herstarten.
+   */
+  const cursorScopeRef = useRef(cursorScope);
+  cursorScopeRef.current = cursorScope;
+  const followPlaybackRef = useRef(followPlayback);
+  followPlaybackRef.current = followPlayback;
+
+  const readMediaCursor = useCallback(
+    (sponsorId: string) =>
+      sponsorRotationCursors.get(`${cursorScopeRef.current}::${sponsorId}`) ?? 0,
+    [],
+  );
+  const writeMediaCursor = useCallback((sponsorId: string, value: number) => {
+    if (followPlaybackRef.current) return;
+    sponsorRotationCursors.set(`${cursorScopeRef.current}::${sponsorId}`, value);
+  }, []);
+
+  useEffect(() => {
+    if (sponsorRotationCursorScope !== cursorScope) {
+      resetSponsorRotationCursors(cursorScope);
+      sponsorRotationCursorScope = cursorScope;
+    }
+  }, [cursorScope]);
+
   useEffect(() => {
     stateRef.current = {
       mediaCursor: {},
@@ -437,8 +500,16 @@ export function SponsorBudgetRotation({
     const idx = tieBreakCursorRef.current % tied.length;
     const sponsor = tied[idx]!;
 
-    return planForSponsor(sponsor, st.mediaCursor[sponsor.id] ?? 0, now);
-  }, [activeSponsors, availableMediaForSponsor, budgetFn, cycleBudgetForever, sponsorIdFilter, planForSponsor]);
+    return planForSponsor(sponsor, readMediaCursor(sponsor.id), now);
+  }, [
+    activeSponsors,
+    availableMediaForSponsor,
+    budgetFn,
+    cycleBudgetForever,
+    sponsorIdFilter,
+    planForSponsor,
+    readMediaCursor,
+  ]);
 
   const finishTelemetryClip = useCallback((actualSec: number, opts?: { discard?: boolean; reason?: string }) => {
     const clip = telemetryClipRef.current;
@@ -510,18 +581,28 @@ export function SponsorBudgetRotation({
       finishTelemetryClip(seconds);
       const st = stateRef.current;
       st.mediaCursor[sponsorId] = mediaIndex + 1;
+      writeMediaCursor(sponsorId, mediaIndex + 1);
       tieBreakCursorRef.current++;
       const prev = st.spentPerSponsor[sponsorId] ?? 0;
       st.spentPerSponsor[sponsorId] = prev + Math.max(0, seconds);
 
       const now = Date.now();
       /**
-       * Meerdere clips van dezelfde sponsor in één pass — alleen zolang er prematch-/sectiebudget is.
-       * Lopende clip mag over budget afspelen; daarna geen volgende clip meer voor die sponsor.
+       * In een ingeroosterd slot (`sponsorIdFilter`) is één vertoning **één clip**: het
+       * rooster plant per clip, dus hier niet doorketenen naar de rest van de pass. De
+       * cursor is hierboven al opgehoogd, dus het volgende slot van deze sponsor pakt
+       * vanzelf de volgende clip (1 → 2 → 3 → 1 …).
+       *
+       * Buiten een slot (vrije rotatie) speelt de sponsor zijn pass wel aaneengesloten,
+       * zolang er sectiebudget is; de lopende clip mag over budget uitspelen.
        */
+      const scheduledSlotMode = sponsorIdFilter != null;
       const sameSponsor = sponsorsById[sponsorId];
-      const sameSponsorMedia = sameSponsor ? passMediaForSponsor(sameSponsor, st.mediaCursor[sponsorId] ?? 0, now) : [];
-      const sameSponsorCursor = st.mediaCursor[sponsorId] ?? 0;
+      const sameSponsorMedia =
+        !scheduledSlotMode && sameSponsor
+          ? passMediaForSponsor(sameSponsor, readMediaCursor(sponsorId), now)
+          : [];
+      const sameSponsorCursor = readMediaCursor(sponsorId);
       const sameSponsorHasMoreInPass =
         sameSponsorMedia.length > 0 && sameSponsorCursor % sameSponsorMedia.length !== 0;
       let sameSponsorNext =

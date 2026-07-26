@@ -62,7 +62,6 @@ import {
 } from "@/lib/sponsor-display-helpers";
 import {
   ledgerActiveClipStillLiveForMatchSegment,
-  sponsorTelemetrySegmentKey,
   type SponsorLedgerPayload,
 } from "@/lib/sponsor-telemetry";
 import { LeftScoreboardLayout } from "./_modes/left-scoreboard-layout";
@@ -690,29 +689,20 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       H,
     );
     const v = lookupSponsorAtSecond(sponsorSlotMapPrematch, t);
-    let dist = resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
+    const base = resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
       slotMap: sponsorSlotMapPrematch,
       slotT: t,
       interrupted: sponsorInterrupted,
     });
-    if (match && timing.rosterRunning) {
-      const seg = sponsorTelemetrySegmentKey(match.id, match.status, "prematch");
-      if (
-        seg &&
-        sponsorLedger &&
-        sponsorLedger.matchId === match.id &&
-        sponsorLedger.segmentKey === seg
-      ) {
-        const ac = sponsorLedger.activeClip;
-        if (ac) {
-          dist = { phase: "sponsor", sponsorFilterId: ac.sponsorId };
-        } else {
-          dist = { phase: "scoreboard", sponsorFilterId: null };
-          prematchPhaseHangRef.current = null;
-        }
-      }
-    }
-    return dist;
+    /**
+     * Zelfde ledger-regel als helft/rust: de telemetry mag een lopende clip **bevestigen**,
+     * maar nooit een start annuleren. Deed dit eerder wél (else → scorebord + hang wissen),
+     * dan bleef het rooster hangen: de clip mocht pas starten als de ledger al een actieve
+     * clip had, en de ledger kreeg er pas een als de clip startte. Na de eerste clip
+     * betekende dat: nooit meer een sponsor, terwijl de HUD wel bleef aftellen.
+     */
+    if (!match || !timing.rosterRunning) return base;
+    return ledgerAwareSponsorDistOverride(match, "prematch", sponsorLedger, base);
   }, [
     prematchSpreadActive,
     sponsorSlotMapPrematch,
@@ -1043,7 +1033,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   renderVideo
                   fallback={sponsorBudgetFallbackScoreboard}
                   cycleBudgetForever={sponsorRepeatBudgetCycles}
-                  {...matchSponsorPinProps}
+                  matchSponsorMediaId={null}
+                  matchSponsorMedia={null}
                 />
               );
             }
@@ -1468,8 +1459,15 @@ function SponsorRotationLiveContent({
           renderVideo
           fallback={sponsorBudgetFallback ?? undefined}
           cycleBudgetForever={cycleBudgetForever}
-          matchSponsorMediaId={match.matchSponsorMediaId ?? null}
-          matchSponsorMedia={match.matchSponsorMedia ?? null}
+          /**
+           * Géén matchsponsor-pin op het rooster: `applyMatchSponsorMediaPin` vervangt dan
+           * de hele medialijst van de sponsor door die ene clip, waardoor een sponsor met
+           * meerdere bestanden er in «voor wedstrijd» maar één afspeelt. De fullscreen
+           * matchsponsor-overlay is hier al uitgezet ten gunste van het rooster
+           * (`prematchMatchSponsorOverlay`), dus het rooster bepaalt wat er speelt.
+           */
+          matchSponsorMediaId={null}
+          matchSponsorMedia={null}
         />
       );
     }

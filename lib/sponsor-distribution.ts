@@ -105,15 +105,14 @@ export function maxClipSecondsForSponsor(
 }
 
 /**
- * Duur van een volledige sponsor-pass in deze fase. Bij live sponsor-slots moet
- * een sponsor met meerdere actieve video's zijn pass kunnen uitspelen voordat
- * de slotmap naar scorebord of een andere sponsor mag terugvallen.
+ * Duur (s) van elke vertoning in de rotatie van deze sponsor, in afspeelvolgorde
+ * (inclusief per-clip herhalingen). Eén vertoning = één clip.
  */
-export function sponsorPassSecondsForSponsor(
+export function sponsorRotationClipSeconds(
   s: Sponsor,
   section?: SponsorSection,
   matchStatus?: string,
-): number {
+): number[] {
   const media = buildSponsorRotationMediaList(
     (s.media ?? []).filter(
       (m) => m.active && (!section || mediaAllowedForSponsorPhase(m, section, matchStatus)),
@@ -121,32 +120,81 @@ export function sponsorPassSecondsForSponsor(
     s.sponsorPlaybackOrderJson,
     s.sponsorPlaybackRepeatsJson,
   );
-  if (media.length === 0) return maxClipSecondsForSponsor(s, section, matchStatus);
+  return media.map((item) =>
+    item.type === "VIDEO"
+      ? Math.max(1, item.durationSec > 0 ? item.durationSec : 10)
+      : Math.max(1, item.durationSec > 0 ? item.durationSec : s.imageDefaultSec || 10),
+  );
+}
 
-  let total = 0;
-  for (const item of media) {
-    if (item.type === "VIDEO") {
-      total += Math.max(1, item.durationSec > 0 ? item.durationSec : 10);
-    } else {
-      total += Math.max(1, item.durationSec > 0 ? item.durationSec : s.imageDefaultSec || 10);
-    }
-  }
+/**
+ * Duur van een volledige sponsor-pass (alle clips één keer) in deze fase.
+ * Niet meer de hang-duur — een slot toont één clip — maar wel handig om te
+ * weten hoe lang het duurt voor een sponsor al zijn bestanden gehad heeft.
+ */
+export function sponsorPassSecondsForSponsor(
+  s: Sponsor,
+  section?: SponsorSection,
+  matchStatus?: string,
+): number {
+  const clips = sponsorRotationClipSeconds(s, section, matchStatus);
+  if (clips.length === 0) return maxClipSecondsForSponsor(s, section, matchStatus);
+  const total = clips.reduce((sum, sec) => sum + sec, 0);
   return Math.min(Math.max(total, 1), 600);
 }
 
 /**
- * Duur van de sponsor-fase na een slot: volledige pass van **deze** sponsor.
- * Fallback = sectie-max (alle sponsors), bv. onbekend id.
+ * Index (0-based) van de vertoning die op seconde `t` van de slotmap loopt:
+ * hoeveel keer deze sponsor daarvóór al aan de beurt is geweest. Elke aaneengesloten
+ * run in de slotmap is één vertoning.
+ */
+export function sponsorAppearanceIndexAt(
+  map: (string | null)[],
+  sponsorId: string,
+  tSec: number,
+): number {
+  if (map.length === 0) return 0;
+  const end = Math.min(map.length - 1, Math.max(0, Math.floor(tSec)));
+  let count = 0;
+  let prev: string | null = null;
+  for (let i = 0; i <= end; i++) {
+    const cur = map[i] ?? null;
+    if (cur === sponsorId && prev !== sponsorId) count++;
+    prev = cur;
+  }
+  return Math.max(0, count - 1);
+}
+
+/**
+ * Duur van de sponsor-fase na een slot: **één clip** uit de rotatie van deze sponsor —
+ * de clip die bij deze vertoning aan de beurt is (clip 1 → 2 → 3 → 1 …).
+ *
+ * Voorheen was dit een volledige pass, terwijl het rooster met de langste losse clip
+ * rekende: een sponsor met drie clips kreeg dan 3× zijn geboekte schermtijd.
+ *
+ * Fallback = sectie-max (alle sponsors), bv. bij een onbekend id.
  */
 export function holdSecondsForSponsorPhase(
   sponsors: Sponsor[],
   section: SponsorSection,
   matchStatus: string | undefined,
   sponsorId: string | null | undefined,
+  slotMap?: (string | null)[],
+  slotT?: number,
 ): number {
   if (sponsorId) {
     const s = sponsors.find((x) => x.id === sponsorId);
-    if (s) return sponsorPassSecondsForSponsor(s, section, matchStatus);
+    if (s) {
+      const clips = sponsorRotationClipSeconds(s, section, matchStatus);
+      if (clips.length > 0) {
+        const idx =
+          slotMap && slotMap.length > 0 && slotT !== undefined
+            ? sponsorAppearanceIndexAt(slotMap, sponsorId, slotT)
+            : 0;
+        return Math.min(600, Math.max(1, Math.ceil(clips[idx % clips.length]!)));
+      }
+      return maxClipSecondsForSponsor(s, section, matchStatus);
+    }
   }
   return maxSponsorClipSecondsForSection(sponsors, section, matchStatus);
 }
@@ -182,20 +230,18 @@ export function secondsUntilSponsorRunEnds(map: (string | null)[], tSec: number)
 }
 
 /**
- * Hang-duur = volledige langste clip van deze sponsor (clip mag nooit afgekapt worden door
- * de slotmap-tikken). Slotmap-info wordt genegeerd; signature blijft compatibel.
+ * Hang-duur = de clip die bij deze vertoning speelt (nooit afgekapt door slotmap-tikken).
+ * Slotmap + tijd bepalen wélke clip uit de rotatie aan de beurt is.
  */
 export function holdSecondsCappedBySlotRun(
   sponsors: Sponsor[],
   section: SponsorSection,
   matchStatus: string | undefined,
   sponsorId: string | null | undefined,
-  _slotMap?: (string | null)[],
-  _slotT?: number,
+  slotMap?: (string | null)[],
+  slotT?: number,
 ): number {
-  void _slotMap;
-  void _slotT;
-  return holdSecondsForSponsorPhase(sponsors, section, matchStatus, sponsorId);
+  return holdSecondsForSponsorPhase(sponsors, section, matchStatus, sponsorId, slotMap, slotT);
 }
 
 /** Seconden sinds start van de actuele helft / blok (0 … H). */
@@ -335,13 +381,27 @@ export function buildSponsorSecondQueue(
 
 export type SponsorAppearancePlan = {
   id: string;
+  /** Duur van elke vertoning, in rotatievolgorde: clip 1 → 2 → 3 → 1 … */
+  appearanceSecs: number[];
+  /** Gemiddelde clipduur; alleen voor spreiding/fallback. */
   clipSec: number;
   appearances: number;
 };
 
+/** Veiligheidsrem: nooit meer vertoningen plannen dan dit, ook niet bij minieme clips. */
+const MAX_APPEARANCES_PER_SPONSOR = 500;
+
 /**
- * Slotmap-starts zijn vertoningen, geen losse budgetseconden. Een sponsor met 60s budget
- * en een clip van 30s krijgt dus ongeveer 2 starts over de fase, niet 60 starts.
+ * Slotmap-starts zijn vertoningen, geen losse budgetseconden — en één vertoning is
+ * één clip. Het budget wordt gevuld door de rotatie af te lopen (clip 1 → 2 → 3 → 1 …).
+ *
+ * Een clip wordt **nooit afgekapt**: zolang er nog budget over is start de volgende clip,
+ * en die speelt helemaal uit — ook als hij daarmee net over het budget gaat. Dat is
+ * dezelfde regel als de speler zelf hanteert (`pickNext` laat een sponsor toe zolang
+ * `spent < budget`, de lopende clip mag uitlopen).
+ *
+ * Zo krijgt een sponsor met drie clips van 20s en 120s budget zes vertoningen die samen
+ * precies zijn budget vullen, in plaats van zes volledige passes van 60s (3× te veel).
  */
 export function buildSponsorAppearancePlan(
   active: Sponsor[],
@@ -351,11 +411,32 @@ export function buildSponsorAppearancePlan(
   return active
     .map((s) => {
       const budget = sponsorSectionBudgetSeconds(s, section, matchStatus);
-      const clipSec = Math.max(1, Math.ceil(maxClipSecondsForSponsor(s, section, matchStatus)));
+      const fallbackSec = Math.max(1, Math.ceil(maxClipSecondsForSponsor(s, section, matchStatus)));
+      const rotation = sponsorRotationClipSeconds(s, section, matchStatus).map((sec) =>
+        Math.max(1, Math.ceil(sec)),
+      );
+      const cycle = rotation.length > 0 ? rotation : [fallbackSec];
+
+      const appearanceSecs: number[] = [];
+      let used = 0;
+      while (appearanceSecs.length < MAX_APPEARANCES_PER_SPONSOR) {
+        /** Op = op: geen nieuwe clip meer starten zodra het budget verbruikt is. */
+        if (used >= budget) break;
+        /** Wel starten? Dan speelt hij volledig uit, ook over het budget heen. */
+        const sec = cycle[appearanceSecs.length % cycle.length]!;
+        appearanceSecs.push(sec);
+        used += sec;
+      }
+
+      const total = appearanceSecs.reduce((sum, sec) => sum + sec, 0);
       return {
         id: s.id,
-        clipSec,
-        appearances: Math.max(0, Math.ceil(budget / clipSec)),
+        appearanceSecs,
+        clipSec:
+          appearanceSecs.length > 0
+            ? Math.max(1, Math.round(total / appearanceSecs.length))
+            : fallbackSec,
+        appearances: appearanceSecs.length,
       };
     })
     .filter((p) => p.appearances > 0);
@@ -397,29 +478,43 @@ export function buildSponsorSlotMap(
   const plan = buildSponsorAppearancePlan(active, section, matchStatus);
   if (plan.length === 0) return map;
 
-  const clipSecById = new Map(plan.map((p) => [p.id, p.clipSec]));
+  const planById = new Map(plan.map((p) => [p.id, p]));
   const rounds = buildSponsorBlockRounds(plan);
   if (rounds.length === 0) return map;
 
-  const roundDurations = rounds.map((round) =>
-    round.reduce((sum, sponsorId) => sum + (clipSecById.get(sponsorId) ?? 1), 0),
+  /**
+   * Elke vertoning is de volgende clip uit de rotatie van die sponsor, dus slots van
+   * dezelfde sponsor kunnen verschillende lengtes hebben. Wijs ze toe in rondevolgorde.
+   */
+  const cursorById = new Map<string, number>();
+  const roundItems = rounds.map((round) =>
+    round.map((sponsorId) => {
+      const p = planById.get(sponsorId);
+      const i = cursorById.get(sponsorId) ?? 0;
+      cursorById.set(sponsorId, i + 1);
+      const sec = p?.appearanceSecs[i] ?? p?.clipSec ?? 1;
+      return { id: sponsorId, sec: Math.max(1, Math.ceil(sec)) };
+    }),
+  );
+
+  const roundDurations = roundItems.map((items) =>
+    items.reduce((sum, item) => sum + item.sec, 0),
   );
   const totalSponsorSec = roundDurations.reduce((sum, dur) => sum + dur, 0);
-  const gapSec = totalSponsorSec < Hc ? (Hc - totalSponsorSec) / (rounds.length + 1) : 0;
+  const gapSec = totalSponsorSec < Hc ? (Hc - totalSponsorSec) / (roundItems.length + 1) : 0;
 
   let cursor = gapSec;
-  for (let r = 0; r < rounds.length; r++) {
+  for (let r = 0; r < roundItems.length; r++) {
     let t = Math.round(cursor);
-    for (const sponsorId of rounds[r]!) {
+    for (const item of roundItems[r]!) {
       if (t >= Hc) return map;
-      const clipSec = clipSecById.get(sponsorId) ?? 1;
       if (t >= 0) {
-        const triggerWindowSec = Math.min(3, Math.max(1, clipSec));
-        for (let w = 0; w < triggerWindowSec && t + w < Hc && w < clipSec; w++) {
-          if (map[t + w] == null) map[t + w] = sponsorId;
+        const triggerWindowSec = Math.min(3, Math.max(1, item.sec));
+        for (let w = 0; w < triggerWindowSec && t + w < Hc && w < item.sec; w++) {
+          if (map[t + w] == null) map[t + w] = item.id;
         }
       }
-      t += clipSec;
+      t += item.sec;
     }
     cursor += roundDurations[r]! + gapSec;
   }
