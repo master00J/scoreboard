@@ -20,6 +20,7 @@ import {
   type RosterCarry,
 } from "@/lib/sponsor-live-roster";
 import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
+import { prematchRosterClockSec } from "@/lib/prematch-spread-timing";
 
 function formatClock(sec: number): string {
   const t = Math.max(0, Math.round(Number(sec) || 0));
@@ -173,11 +174,11 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
         activeMatch,
         matchPlayRosterSeconds,
         halftimeT,
-        elapsedSec,
+        prematchRosterClockSec(activeMatch, sponsors, telemetryNowMs, null, elapsedSec),
       );
         if (raw) {
           const st = activeMatch.status;
-          let tClock = elapsedSec;
+          let tClock = prematchRosterClockSec(activeMatch, sponsors, telemetryNowMs, null, elapsedSec);
           if (st === "FIRST_HALF" || st === "SECOND_HALF" || st === "EXTRA_TIME") {
             tClock = matchPlayRosterSeconds;
           } else if (st === "HALF_TIME") {

@@ -48,6 +48,7 @@ import {
   prematchSpreadClock,
   resolveSponsorSpreadPhase,
 } from "@/lib/sponsor-distribution";
+import { computePrematchSpreadTiming } from "@/lib/prematch-spread-timing";
 import { sponsorScheduleTime, type SponsorScheduleClock } from "@/lib/sponsor-schedule-clock";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import {
@@ -646,16 +647,21 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   const prematchDistView = useMemo(() => {
     const now = Date.now();
-    if (!prematchSpreadActive || prematchOriginRef.current == null) {
+    if (!prematchSpreadActive) {
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
-    const H = Math.max(1, sponsorSlotMapPrematch.length);
-    const elapsedSec = (now - prematchOriginRef.current) / 1000;
-    const { t: rawT, timelineComplete } = prematchSpreadClock(elapsedSec, H);
-    if (timelineComplete) {
+    const timing = computePrematchSpreadTiming(
+      match,
+      sponsors,
+      now,
+      prematchOriginRef.current,
+    );
+    const H = timing.timelineLenSec;
+    if (timing.beforeWindow || timing.timelineComplete || !timing.rosterRunning) {
       prematchPhaseHangRef.current = null;
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
+    const { t: rawT } = prematchSpreadClock(timing.elapsedSec, H);
     const t = sponsorScheduleTime(
       prematchScheduleClockRef,
       "prematch",
@@ -669,12 +675,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       slotT: t,
       interrupted: sponsorInterrupted,
     });
-    /**
-     * Een lopende ledger-clip houdt het sponsorvlak gemount tijdens overlays.
-     * Anders kan een goal/kaart/wissel midden in een spot de rotation unmounten.
-     * Na volledig prematch-rooster: niet opnieuw vasthouden via ledger.
-     */
-    if (match && !timelineComplete) {
+    if (match && timing.rosterRunning) {
       const seg = sponsorTelemetrySegmentKey(match.id, match.status, "prematch");
       if (
         seg &&

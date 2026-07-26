@@ -2186,7 +2186,7 @@ function MatchScheduleDialog({
             </p>
           </div>
           <div>
-            <Label>Prematch: tijdsvenster sponsor-rooster (minuten, optioneel)</Label>
+            <Label>Prematch: start sponsoring vóór aftrap (minuten)</Label>
             <Input
               type="number"
               min={0}
@@ -2198,11 +2198,12 @@ function MatchScheduleDialog({
               className="mt-1 max-w-xs"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Bepaalt over hoeveel minuten de geplande sponsorclips voor «voor wedstrijd» gelijkmatig worden
-              gespreid op het scherm (herhalend rooster). Laat leeg om automatisch de som van die
-              sponsorseconden te gebruiken. Vul bv. <strong>90</strong> als je vanaf openen stadion tot aftrap
-              ruimte wilt; vaak blijft het laatste kwartier voor de opstelling vrij — plan je clips dan wat
-              vroeger in dit venster.
+              Met een <strong>geplande aftrap</strong> start het sponsorrooster automatisch{" "}
+              <strong>zoveel minuten vóór aftrap</strong> en eindigt op aftrap. De ingevulde
+              sponsorseconden «Voor wedstrijd» (bv. 2 min) worden <strong>gespreid</strong> over dat
+              venster — niet allemaal achter elkaar. Vul bv. <strong>30</strong> voor een halfuur
+              prematch-spread; laat leeg om de som van de sponsor-budgetten als venster te gebruiken.
+              Zonder aftrap: spread start wanneer je sponsorrotatie inschakelt (PREMATCH).
             </p>
           </div>
           <div>

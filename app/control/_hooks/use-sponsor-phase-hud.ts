@@ -17,6 +17,7 @@ import {
   sponsorScreenSecondsConsumed,
   sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
+import { computePrematchSpreadTiming } from "@/lib/prematch-spread-timing";
 import { sponsorRepeatBudgetCyclesFromThemeJson } from "@/lib/scoreboard-theme";
 import {
   ledgerActiveClipStillLiveForMatchSegment,
@@ -317,16 +318,21 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
   const prematchDistView = useMemo(() => {
     const now = wallNowMs;
-    if (!prematchSpreadActive || prematchOriginRef.current == null) {
+    if (!prematchSpreadActive) {
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
-    const H = Math.max(1, sponsorSlotMapPrematch.length);
-    const elapsedSec = (now - prematchOriginRef.current) / 1000;
-    const { t: rawT, timelineComplete } = prematchSpreadClock(elapsedSec, H);
-    if (timelineComplete) {
+    const timing = computePrematchSpreadTiming(
+      match,
+      sponsors,
+      now,
+      prematchOriginRef.current,
+    );
+    const H = timing.timelineLenSec;
+    if (timing.beforeWindow || timing.timelineComplete || !timing.rosterRunning) {
       prematchPhaseHangRef.current = null;
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
+    const { t: rawT } = prematchSpreadClock(timing.elapsedSec, H);
     const t = sponsorScheduleTime(
       prematchScheduleClockRef,
       "prematch",
@@ -340,7 +346,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       slotT: t,
       interrupted: sponsorInterrupted,
     });
-  }, [prematchSpreadActive, sponsorSlotMapPrematch, sponsors, phaseTick, wallNowMs, sponsorInterrupted]);
+  }, [prematchSpreadActive, match, sponsorSlotMapPrematch, sponsors, phaseTick, wallNowMs, sponsorInterrupted]);
 
   return useMemo(() => {
     const now = wallNowMs;
@@ -585,13 +591,17 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
     if (
       prematchSpreadActive &&
-      prematchOriginRef.current != null &&
       hasSponsorsForSection(sponsors, "prematch")
     ) {
-      const H = Math.max(1, sponsorSlotMapPrematch.length);
-      const tUnbounded = (now - prematchOriginRef.current) / 1000;
-      const { t, timelineComplete } = prematchSpreadClock(tUnbounded, H);
-      const tNextEta = timelineComplete ? H - 1 : Math.min(tUnbounded, Math.max(0, H - 1e-6));
+      const timing = computePrematchSpreadTiming(
+        match,
+        sponsors,
+        now,
+        prematchOriginRef.current,
+      );
+      const H = timing.timelineLenSec;
+      const t = timing.elapsedSec;
+      const tNextEta = timing.timelineComplete ? H - 1 : Math.min(t, Math.max(0, H - 1e-6));
       return rosterFrom(
         "Voor wedstrijd",
         "prematch",
