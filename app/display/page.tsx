@@ -467,6 +467,18 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     );
   }, [state, mode, match, sponsors, liveAutoHalftime]);
 
+  /**
+   * Automatische matchsponsor-fullscreen mag niet boven prematch-rooster liggen:
+   * anders speelt de clip zonder telemetry (budget/HUD) terwijl rotatie eronder telt.
+   */
+  const prematchMatchSponsorOverlay = useMemo(() => {
+    if (!prematchMatchSponsorShow) return false;
+    if (prematchSpreadActive && hasSponsorsForSection(sponsors, "prematch")) {
+      return false;
+    }
+    return true;
+  }, [prematchMatchSponsorShow, prematchSpreadActive, sponsors]);
+
   const rustEpochRef = useRef<number | null>(null);
   useEffect(() => {
     if (match?.status === "HALF_TIME" && liveAutoHalftime) {
@@ -1290,14 +1302,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       )}
 
       {state &&
-        prematchMatchSponsorShow &&
+        prematchMatchSponsorOverlay &&
         match?.matchSponsorMedia &&
         mode !== "BLACKOUT" && (
           <div className="absolute inset-0 z-[87] pointer-events-none" aria-hidden>
             <SingleMediaMode
               key={`prematch-ms-${match.matchSponsorMedia.id}`}
               media={match.matchSponsorMedia}
-              loop={match.matchSponsorMedia.type === "VIDEO"}
+              loop={false}
               showPreviewProgress={embedInControl}
               previewProgressWallClock={
                 embedInControl && match.kickoffAt

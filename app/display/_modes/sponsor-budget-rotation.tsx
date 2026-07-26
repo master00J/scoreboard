@@ -1064,7 +1064,11 @@ export function SponsorBudgetRotation({
             onVideoProgressMs={(ms) => {
               const next = Math.max(0, ms);
               playbackProgressMsRef.current = next;
-              pushActiveClipProgress(next, { paused });
+              pushActiveClipProgress(next, {
+                paused,
+                browserSec:
+                  videoProgressDurationMs > 0 ? videoProgressDurationMs / 1000 : undefined,
+              });
             }}
           />
         </div>
@@ -1387,14 +1391,12 @@ function MediaRenderer({
       const v = e.currentTarget;
       const d = v.duration;
       if (Number.isFinite(d) && d > 0) {
-        const catalogSec = Math.max(
-          0.5,
-          item.durationSec > 0 ? item.durationSec : 0,
-          committedPlaySec != null && committedPlaySec > 0 ? committedPlaySec : 0,
-        );
-        const capped =
-          d > catalogSec * 3 + 90 ? catalogSec : d;
-        onVideoDurationMs?.(capped * 1000);
+        const scheduled =
+          committedPlaySec != null && committedPlaySec > 0
+            ? committedPlaySec
+            : Math.max(0.5, item.durationSec > 0 ? item.durationSec : 30);
+        const expectedSec = resolveVideoExpectedPlaySec(item, scheduled, d);
+        onVideoDurationMs?.(expectedSec * 1000);
       }
       if (syncPlaybackMs != null) {
         const syncPlaybackSec = syncPlaybackMs / 1000;
