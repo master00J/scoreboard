@@ -26,6 +26,7 @@
     "soak:sponsor": "node scripts/sponsor-rotation-soak.mjs",
     "soak:sponsor-transition": "node scripts/sponsor-transition-soak.mjs",
     "soak:sponsor-interrupt": "node scripts/sponsor-interruption-soak.mjs",
+    "e2e:full-match": "node scripts/full-match-e2e.mjs",
     "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder",
     "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win",
     "electron:build:mac": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --mac",
