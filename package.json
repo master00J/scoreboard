@@ -1,6 +1,6 @@
 {
   "name": "stadium-scoreboard",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Desktop scorebord- en sponsorweergave voor stadions (Electron + Next).",
   "author": "Stadium Scoreboard",
   "private": true,

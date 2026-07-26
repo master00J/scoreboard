@@ -26,6 +26,7 @@ import {
   reportDisplayMediaDiagnostic,
   videoElementDiagnosticFields,
 } from "@/lib/report-display-media-diagnostic";
+import { applyMatchSponsorMediaPin } from "@/lib/match-sponsor-rotation-media";
 import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
 import { mediaAllowedForSponsorPhase } from "@/lib/sponsor-media-phases";
 import { buildSponsorRotationMediaList } from "@/lib/sponsor-playback-order";
@@ -108,12 +109,17 @@ export function SponsorBudgetRotation({
   fallback = null,
   cycleBudgetForever = false,
   paused = false,
+  matchSponsorMediaId = null,
+  matchSponsorMedia = null,
 }: {
   sponsors: Sponsor[];
   section: SponsorSection;
   matchStatus?: string;
   sponsorIdFilter?: string | null;
   playbackTelemetry?: { matchId: string; matchStatus: string } | null;
+  /** Wedstrijd → Aftrap: vaste matchsponsor-clip in prematch (niet hele sponsor-medialijst). */
+  matchSponsorMediaId?: string | null;
+  matchSponsorMedia?: MediaItem | null;
   /** Embedded control-preview: volg alleen de ledger, nooit een eigen rotatie (die mist verbruikte budget-ticks). */
   followPlayback?: boolean;
   /** Preview volgt exact de actieve clip van het hoofdscherm (via sponsor-ledger). */
@@ -176,8 +182,8 @@ export function SponsorBudgetRotation({
   }, [playbackOwnerKey]);
 
   const rotationMediaForSponsor = useCallback(
-    (sponsor: Sponsor) =>
-      buildSponsorRotationMediaList(
+    (sponsor: Sponsor) => {
+      const base = buildSponsorRotationMediaList(
         filterMediaForSponsorSpreadSection(
           (sponsor.media ?? []).filter((m) => m.active),
           section,
@@ -185,8 +191,14 @@ export function SponsorBudgetRotation({
         ),
         sponsor.sponsorPlaybackOrderJson,
         sponsor.sponsorPlaybackRepeatsJson,
-      ),
-    [section, matchStatus],
+      );
+      return applyMatchSponsorMediaPin(section, sponsor, base, {
+        matchSponsorMediaId,
+        matchSponsorMedia,
+        sponsorIdFilter,
+      });
+    },
+    [section, matchStatus, matchSponsorMediaId, matchSponsorMedia, sponsorIdFilter],
   );
   const activeSponsors = useMemo(() => {
     let list = sponsors.filter((s) => {
@@ -285,7 +297,7 @@ export function SponsorBudgetRotation({
         .map((s) => s.id)
         .sort()
         .join("|"),
-    [sponsors, section, matchStatus, rotationMediaForSponsor],
+    [sponsors, section, matchStatus, rotationMediaForSponsor, matchSponsorMediaId],
   );
 
   useEffect(() => {

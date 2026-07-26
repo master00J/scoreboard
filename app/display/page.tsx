@@ -479,6 +479,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     return true;
   }, [prematchMatchSponsorShow, prematchSpreadActive, sponsors]);
 
+  const matchSponsorPinProps = useMemo(
+    () => ({
+      matchSponsorMediaId: match?.matchSponsorMediaId ?? null,
+      matchSponsorMedia: match?.matchSponsorMedia ?? null,
+    }),
+    [match?.matchSponsorMediaId, match?.matchSponsorMedia],
+  );
+
   const rustEpochRef = useRef<number | null>(null);
   useEffect(() => {
     if (match?.status === "HALF_TIME" && liveAutoHalftime) {
@@ -765,6 +773,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           fallback={sponsorBudgetFallbackScoreboard}
           cycleBudgetForever={sponsorRepeatBudgetCycles}
           paused={sponsorInterrupted || mode !== "SPONSOR_ROTATION"}
+          {...matchSponsorPinProps}
         />
       );
     }
@@ -830,6 +839,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             fallback={sponsorBudgetFallbackScoreboard}
             cycleBudgetForever={sponsorRepeatBudgetCycles}
             paused
+            {...matchSponsorPinProps}
           />
         ) : null;
       if (mode === "GOAL_INTRO_VIDEO") {
@@ -889,6 +899,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             fallback={sponsorBudgetFallbackScoreboard}
             cycleBudgetForever={sponsorRepeatBudgetCycles}
             paused={sponsorInterrupted || mode !== "SPONSOR_ROTATION"}
+            {...matchSponsorPinProps}
           />
         );
       }
@@ -1032,6 +1043,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   renderVideo
                   fallback={sponsorBudgetFallbackScoreboard}
                   cycleBudgetForever={sponsorRepeatBudgetCycles}
+                  {...matchSponsorPinProps}
                 />
               );
             }
@@ -1146,6 +1158,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 renderVideo
                 fallback={halftimeSponsorFallback}
                 cycleBudgetForever={sponsorRepeatBudgetCycles}
+                {...matchSponsorPinProps}
               />
             ) : (
               <SponsorRotationLiveContent
@@ -1455,10 +1468,9 @@ function SponsorRotationLiveContent({
           renderVideo
           fallback={sponsorBudgetFallback ?? undefined}
           cycleBudgetForever={cycleBudgetForever}
+          matchSponsorMediaId={match.matchSponsorMediaId ?? null}
+          matchSponsorMedia={match.matchSponsorMedia ?? null}
         />
-      );
-    }
-    if (prematchScoreboardNode) {
       return <>{prematchScoreboardNode}</>;
     }
     return (
@@ -1482,6 +1494,8 @@ function SponsorRotationLiveContent({
         renderVideo
         fallback={sponsorBudgetFallback ?? undefined}
         cycleBudgetForever={cycleBudgetForever}
+        matchSponsorMediaId={match.matchSponsorMediaId ?? null}
+        matchSponsorMedia={match.matchSponsorMedia ?? null}
       />
     );
   }
