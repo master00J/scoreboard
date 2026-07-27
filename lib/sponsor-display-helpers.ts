@@ -22,6 +22,7 @@ export function sectionForStatus(status: string | undefined): SponsorSection {
   if (status === "FIRST_HALF" || status === "SECOND_HALF" || status === "EXTRA_TIME") {
     return "match";
   }
+  if (status === "FULL_TIME" || status === "POST_MATCH") return "postmatch";
   if (status === "PREMATCH" || status === "SETUP") return "prematch";
   return "prematch";
 }

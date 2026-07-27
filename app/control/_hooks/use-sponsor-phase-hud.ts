@@ -9,8 +9,10 @@ import {
   activeSponsorsForSection,
   buildSponsorSlotMap,
   halfWindowElapsed,
+  sectionSpreadClock,
   holdSecondsCappedBySlotRun,
   lookupSponsorAtSecond,
+  postmatchSpreadTimelineSeconds,
   prematchSpreadTimelineSeconds,
   prematchSpreadClock,
   resolveSponsorSpreadPhase,
@@ -159,6 +161,23 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     );
   }, [state, mode, match, sponsors, liveAutoHalftime]);
 
+  const postmatchSpreadActive = useMemo(() => {
+    if (!state || !match) return false;
+    if (mode !== "SPONSOR_ROTATION") return false;
+    if (sectionForStatus(match.status) !== "postmatch") return false;
+    return activeSponsorsForSection(sponsors, "postmatch").length > 0;
+  }, [state, match, mode, sponsors]);
+
+  const postmatchEpochRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (postmatchSpreadActive) {
+      if (postmatchEpochRef.current == null) postmatchEpochRef.current = Date.now();
+    } else {
+      postmatchEpochRef.current = null;
+      postmatchPhaseHangRef.current = null;
+    }
+  }, [postmatchSpreadActive]);
+
   const rustEpochRef = useRef<number | null>(null);
   useEffect(() => {
     if (match?.status === "HALF_TIME" && liveAutoHalftime) {
@@ -170,10 +189,17 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
   const [phaseTick, setPhaseTick] = useState(0);
   useEffect(() => {
-    if (!sponsorBesideConfigured && !liveAutoHalftime && !prematchSpreadActive) return;
+    if (
+      !sponsorBesideConfigured &&
+      !liveAutoHalftime &&
+      !prematchSpreadActive &&
+      !postmatchSpreadActive
+    ) {
+      return;
+    }
     const id = setInterval(() => setPhaseTick((n) => n + 1), 400);
     return () => clearInterval(id);
-  }, [sponsorBesideConfigured, liveAutoHalftime, prematchSpreadActive]);
+  }, [sponsorBesideConfigured, liveAutoHalftime, prematchSpreadActive, postmatchSpreadActive]);
 
   const sponsorSlotMapMatch = useMemo(() => {
     if (!match) return [] as (string | null)[];
@@ -195,8 +221,19 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     return buildSponsorSlotMap(active, "prematch", H);
   }, [sponsors, match?.id, match?.prematchSpreadWindowSec]);
 
+  const sponsorSlotMapPostmatch = useMemo(() => {
+    const active = activeSponsorsForSection(sponsors, "postmatch");
+    return buildSponsorSlotMap(active, "postmatch", postmatchSpreadTimelineSeconds(sponsors));
+  }, [sponsors, match?.id]);
+
   const tInterruptFrozen = useRef(0);
   const sponsorPhaseHangRef = useRef<{
+    sponsorId: string;
+    untilMs: number;
+    startedAtMs: number;
+    startedAtSlotIdx?: number;
+  } | null>(null);
+  const postmatchPhaseHangRef = useRef<{
     sponsorId: string;
     untilMs: number;
     startedAtMs: number;
@@ -217,6 +254,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     wasFrozen: false,
   });
   const halftimeScheduleClockRef = useRef<SponsorScheduleClock>({
+    key: "",
+    adjustedT: 0,
+    lastRawT: 0,
+    initialized: false,
+    wasFrozen: false,
+  });
+  const postmatchScheduleClockRef = useRef<SponsorScheduleClock>({
     key: "",
     adjustedT: 0,
     lastRawT: 0,
@@ -285,7 +329,16 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
       const H = Math.max(60, match.halfBreakSec);
-      const rawT = ((now - rustEpochRef.current) / 1000) % H;
+      const { t: rawT, timelineComplete } = sectionSpreadClock(
+        (now - rustEpochRef.current) / 1000,
+        H,
+        cycleBudgetForever,
+      );
+      /** Zelfde regel als het display: rusttijd om ⇒ rooster klaar. */
+      if (timelineComplete) {
+        sponsorPhaseHangRef.current = null;
+        return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+      }
       const t = sponsorScheduleTime(
         halftimeScheduleClockRef,
         `${match.id}:${match.status}:halftime`,
@@ -347,6 +400,45 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       interrupted: sponsorInterrupted,
     });
   }, [prematchSpreadActive, match, sponsorSlotMapPrematch, sponsors, phaseTick, wallNowMs, sponsorInterrupted]);
+
+  const postmatchDistView = useMemo(() => {
+    const now = wallNowMs;
+    if (!postmatchSpreadActive || !match || postmatchEpochRef.current == null) {
+      return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+    }
+    const H = postmatchSpreadTimelineSeconds(sponsors);
+    const { t: rawT, timelineComplete } = sectionSpreadClock(
+      (now - postmatchEpochRef.current) / 1000,
+      H,
+      cycleBudgetForever,
+    );
+    if (timelineComplete) {
+      postmatchPhaseHangRef.current = null;
+      return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+    }
+    const t = sponsorScheduleTime(
+      postmatchScheduleClockRef,
+      `${match.id}:postmatch`,
+      rawT,
+      sponsorInterrupted,
+      H,
+    );
+    const v = lookupSponsorAtSecond(sponsorSlotMapPostmatch, t);
+    return resolveSponsorSpreadPhase(v, sponsors, "postmatch", undefined, now, postmatchPhaseHangRef, {
+      slotMap: sponsorSlotMapPostmatch,
+      slotT: t,
+      interrupted: sponsorInterrupted,
+    });
+  }, [
+    postmatchSpreadActive,
+    match,
+    sponsors,
+    sponsorSlotMapPostmatch,
+    phaseTick,
+    wallNowMs,
+    sponsorInterrupted,
+    cycleBudgetForever,
+  ]);
 
   return useMemo(() => {
     const now = wallNowMs;
@@ -589,6 +681,24 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       );
     }
 
+    if (postmatchSpreadActive && match && hasSponsorsForSection(sponsors, "postmatch")) {
+      const H = postmatchSpreadTimelineSeconds(sponsors);
+      const tUnbounded =
+        postmatchEpochRef.current != null ? (now - postmatchEpochRef.current) / 1000 : 0;
+      const t = Math.min(tUnbounded, Math.max(0, H - 1e-6));
+      return rosterFrom(
+        "Na wedstrijd",
+        "postmatch",
+        undefined,
+        sponsorTelemetrySegmentKey(match.id, match.status, "postmatch"),
+        postmatchDistView,
+        sponsorSlotMapPostmatch,
+        t,
+        postmatchPhaseHangRef,
+        t,
+      );
+    }
+
     if (
       prematchSpreadActive &&
       hasSponsorsForSection(sponsors, "prematch")
@@ -620,6 +730,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     sponsorBesideConfigured,
     liveAutoHalftime,
     prematchSpreadActive,
+    postmatchSpreadActive,
+    postmatchDistView,
+    sponsorSlotMapPostmatch,
     match,
     sponsors,
     playlists,

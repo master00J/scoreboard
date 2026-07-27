@@ -1047,6 +1047,9 @@ function SponsorCard({
   const [matchFirstMin, setMatchFirstMin] = useState(halves.first);
   const [matchSecondMin, setMatchSecondMin] = useState(halves.second);
   const [halftimeMin, setHalftimeMin] = useState(secondsToMinutesStr(sponsor.halftimeSeconds));
+  const [postmatchMin, setPostmatchMin] = useState(
+    secondsToMinutesStr(sponsor.postmatchSeconds ?? 0),
+  );
   const [imageSec, setImageSec] = useState(sponsor.imageDefaultSec);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1075,6 +1078,7 @@ function SponsorCard({
     setMatchFirstMin(h.first);
     setMatchSecondMin(h.second);
     setHalftimeMin(secondsToMinutesStr(sponsor.halftimeSeconds));
+    setPostmatchMin(secondsToMinutesStr(sponsor.postmatchSeconds ?? 0));
     setImageSec(sponsor.imageDefaultSec);
   }, [
     sponsor.id,
@@ -1085,6 +1089,7 @@ function SponsorCard({
     sponsor.matchFirstHalfSeconds,
     sponsor.matchSecondHalfSeconds,
     sponsor.halftimeSeconds,
+    sponsor.postmatchSeconds,
     sponsor.imageDefaultSec,
   ]);
 
@@ -1198,6 +1203,7 @@ function SponsorCard({
           matchSecondHalfSeconds: m2s,
           matchSeconds: m1s + m2s,
           halftimeSeconds: minutesStrToSeconds(halftimeMin),
+          postmatchSeconds: minutesStrToSeconds(postmatchMin),
           imageDefaultSec: Math.max(1, Math.round(imageSec)),
         }),
       });
@@ -1410,6 +1416,19 @@ function SponsorCard({
               step="0.5"
               value={halftimeMin}
               onChange={(e) => setHalftimeMin(e.target.value)}
+              className="mt-1 w-full"
+            />
+          </div>
+          <div>
+            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+              Na wedstrijd
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.5"
+              value={postmatchMin}
+              onChange={(e) => setPostmatchMin(e.target.value)}
               className="mt-1 w-full"
             />
           </div>

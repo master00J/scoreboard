@@ -6,6 +6,7 @@ export const SPONSOR_MEDIA_PHASES = [
   { id: "secondHalf", label: "2e helft" },
   { id: "halftime", label: "Rust" },
   { id: "extraTime", label: "Verlenging" },
+  { id: "postmatch", label: "Na" },
 ] as const;
 
 export type SponsorMediaPhase = (typeof SPONSOR_MEDIA_PHASES)[number]["id"];
@@ -31,6 +32,7 @@ export function serializeSponsorMediaPhaseTags(tags: SponsorMediaPhase[]): strin
 export function sponsorMediaPhaseFor(section: SponsorSection, matchStatus?: string): SponsorMediaPhase {
   if (section === "prematch") return "prematch";
   if (section === "halftime") return "halftime";
+  if (section === "postmatch") return "postmatch";
   if (matchStatus === "SECOND_HALF") return "secondHalf";
   if (matchStatus === "EXTRA_TIME") return "extraTime";
   return "firstHalf";

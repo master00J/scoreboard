@@ -43,7 +43,9 @@ import {
   activeSponsorsForSection,
   buildSponsorSlotMap,
   halfWindowElapsed,
+  sectionSpreadClock,
   lookupSponsorAtSecond,
+  postmatchSpreadTimelineSeconds,
   prematchSpreadTimelineSeconds,
   prematchSpreadClock,
   resolveSponsorSpreadPhase,
@@ -495,12 +497,40 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     }
   }, [match?.status, liveAutoHalftime]);
 
+  /**
+   * Na de wedstrijd is er geen vast ankerpunt zoals de aftrap, dus de tijdlijn start
+   * op het moment dat de wedstrijd op FULL_TIME / POST_MATCH gaat.
+   */
+  const postmatchSpreadActive = useMemo(() => {
+    if (!state || !match) return false;
+    if (mode !== "SPONSOR_ROTATION") return false;
+    if (sectionForStatus(match.status) !== "postmatch") return false;
+    return activeSponsorsForSection(sponsors, "postmatch").length > 0;
+  }, [state, match, mode, sponsors]);
+
+  const postmatchEpochRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (postmatchSpreadActive) {
+      if (postmatchEpochRef.current == null) postmatchEpochRef.current = Date.now();
+    } else {
+      postmatchEpochRef.current = null;
+      postmatchPhaseHangRef.current = null;
+    }
+  }, [postmatchSpreadActive]);
+
   const [phaseTick, setPhaseTick] = useState(0);
   useEffect(() => {
-    if (!sponsorBesideConfigured && !liveAutoHalftime && !prematchSpreadActive) return;
+    if (
+      !sponsorBesideConfigured &&
+      !liveAutoHalftime &&
+      !prematchSpreadActive &&
+      !postmatchSpreadActive
+    ) {
+      return;
+    }
     const id = setInterval(() => setPhaseTick((n) => n + 1), 400);
     return () => clearInterval(id);
-  }, [sponsorBesideConfigured, liveAutoHalftime, prematchSpreadActive]);
+  }, [sponsorBesideConfigured, liveAutoHalftime, prematchSpreadActive, postmatchSpreadActive]);
 
   const sponsorSlotMapMatch = useMemo(() => {
     if (!match) return [] as (string | null)[];
@@ -521,6 +551,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const H = prematchSpreadTimelineSeconds(match ?? undefined, sponsors);
     return buildSponsorSlotMap(active, "prematch", H);
   }, [sponsors, match?.id, match?.prematchSpreadWindowSec]);
+
+  const sponsorSlotMapPostmatch = useMemo(() => {
+    const active = activeSponsorsForSection(sponsors, "postmatch");
+    return buildSponsorSlotMap(active, "postmatch", postmatchSpreadTimelineSeconds(sponsors));
+  }, [sponsors, match?.id]);
 
   /** Tijd in de helft bevriest tijdens doelpunt/wissel/kaart (geen sponsor-tijd “verloren” door die modus). */
   const tInterruptFrozen = useRef(0);
@@ -547,6 +582,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     initialized: false,
     wasFrozen: false,
   });
+  const postmatchScheduleClockRef = useRef<SponsorScheduleClock>({
+    key: "",
+    adjustedT: 0,
+    lastRawT: 0,
+    initialized: false,
+    wasFrozen: false,
+  });
   const prematchScheduleClockRef = useRef<SponsorScheduleClock>({
     key: "",
     adjustedT: 0,
@@ -554,6 +596,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     initialized: false,
     wasFrozen: false,
   });
+  const postmatchPhaseHangRef = useRef<{
+    sponsorId: string;
+    untilMs: number;
+    startedAtMs: number;
+    startedAtSlotIdx?: number;
+    lastSeenAtMs?: number;
+  } | null>(null);
   const prematchPhaseHangRef = useRef<{
     sponsorId: string;
     untilMs: number;
@@ -631,7 +680,16 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
       const H = Math.max(60, match.halfBreakSec);
-      const rawT = ((Date.now() - rustEpochRef.current) / 1000) % H;
+      const { t: rawT, timelineComplete } = sectionSpreadClock(
+        (Date.now() - rustEpochRef.current) / 1000,
+        H,
+        sponsorRepeatBudgetCycles,
+      );
+      /** Rusttijd om: rooster klaar → scorebord, niet opnieuw beginnen. */
+      if (timelineComplete) {
+        sponsorPhaseHangRef.current = null;
+        return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+      }
       const t = sponsorScheduleTime(
         halftimeScheduleClockRef,
         `${match.id}:${match.status}:halftime`,
@@ -662,6 +720,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     phaseTick,
     embedInControl,
     sponsorLedger,
+    sponsorRepeatBudgetCycles,
   ]);
 
   const prematchDistView = useMemo(() => {
@@ -712,6 +771,47 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     match,
     sponsorLedger,
     sponsorInterrupted,
+  ]);
+
+  const postmatchDistView = useMemo(() => {
+    const now = Date.now();
+    if (!postmatchSpreadActive || !match || postmatchEpochRef.current == null) {
+      return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+    }
+    const H = postmatchSpreadTimelineSeconds(sponsors);
+    const { t: rawT, timelineComplete } = sectionSpreadClock(
+      (now - postmatchEpochRef.current) / 1000,
+      H,
+      sponsorRepeatBudgetCycles,
+    );
+    /** Geboekte na-wedstrijdtijd op: rooster klaar → scorebord. */
+    if (timelineComplete) {
+      postmatchPhaseHangRef.current = null;
+      return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+    }
+    const t = sponsorScheduleTime(
+      postmatchScheduleClockRef,
+      `${match.id}:postmatch`,
+      rawT,
+      sponsorInterrupted,
+      H,
+    );
+    const v = lookupSponsorAtSecond(sponsorSlotMapPostmatch, t);
+    const base = resolveSponsorSpreadPhase(v, sponsors, "postmatch", undefined, now, postmatchPhaseHangRef, {
+      slotMap: sponsorSlotMapPostmatch,
+      slotT: t,
+      interrupted: sponsorInterrupted,
+    });
+    return ledgerAwareSponsorDistOverride(match, "postmatch", sponsorLedger, base);
+  }, [
+    postmatchSpreadActive,
+    match,
+    sponsors,
+    sponsorSlotMapPostmatch,
+    phaseTick,
+    sponsorInterrupted,
+    sponsorLedger,
+    sponsorRepeatBudgetCycles,
   ]);
 
   const sponsorClipBesideLiveBoard =
@@ -1085,6 +1185,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               followPlayback={embedInControl}
               followClip={previewFollowClip}
               prematchSpread={prematchSpreadActive ? prematchDistView : null}
+              postmatchSpread={postmatchSpreadActive ? postmatchDistView : null}
               prematchScoreboardNode={
                 match && state ? (
                   <MatchScoreboardFull
@@ -1403,6 +1504,7 @@ function SponsorRotationLiveContent({
   followPlayback = false,
   followClip = null,
   prematchSpread = null,
+  postmatchSpread = null,
   prematchScoreboardNode = null,
   sponsorBudgetFallback = null,
   cycleBudgetForever = false,
@@ -1422,6 +1524,11 @@ function SponsorRotationLiveContent({
     clipSessionId: string;
   } | null;
   prematchSpread?: {
+    phase: "scoreboard" | "sponsor";
+    sponsorFilterId: string | null;
+  } | null;
+  /** Na-wedstrijd-rooster, zelfde vorm als `prematchSpread`. */
+  postmatchSpread?: {
     phase: "scoreboard" | "sponsor";
     sponsorFilterId: string | null;
   } | null;
@@ -1476,7 +1583,43 @@ function SponsorRotationLiveContent({
     }
     return (
       <SponsorRotation
-        playlist={playlists.PREMATCH ?? playlists.IDLE}
+        playlist={pickSponsorPlaylist(playlists, match.status) ?? playlists.IDLE}
+        showPreviewProgress={showPreviewProgress}
+        idleEmptyFallback={idleEmptyFallback}
+      />
+    );
+  }
+  if (
+    section === "postmatch" &&
+    postmatchSpread &&
+    hasSponsorsForSection(sponsors, "postmatch")
+  ) {
+    if (postmatchSpread.phase === "sponsor") {
+      return (
+        <SponsorBudgetRotation
+          sponsors={sponsors}
+          section="postmatch"
+          matchStatus={match.status}
+          sponsorIdFilter={postmatchSpread.sponsorFilterId ?? undefined}
+          playbackTelemetry={playbackTelemetry}
+          followPlayback={followPlayback}
+          followClip={followClip}
+          showPreviewProgress={showPreviewProgress}
+          renderVideo
+          fallback={sponsorBudgetFallback ?? undefined}
+          cycleBudgetForever={cycleBudgetForever}
+          /** Zelfde reden als bij het prematch-rooster: geen pin over de rotatie heen. */
+          matchSponsorMediaId={null}
+          matchSponsorMedia={null}
+        />
+      );
+    }
+    if (prematchScoreboardNode) {
+      return <>{prematchScoreboardNode}</>;
+    }
+    return (
+      <SponsorRotation
+        playlist={pickSponsorPlaylist(playlists, match.status) ?? playlists.IDLE}
         showPreviewProgress={showPreviewProgress}
         idleEmptyFallback={idleEmptyFallback}
       />
@@ -1502,7 +1645,8 @@ function SponsorRotationLiveContent({
   }
   return (
     <SponsorRotation
-      playlist={playlists.PREMATCH ?? playlists.IDLE}
+      /** Na de wedstrijd hoort de POSTMATCH-playlist te draaien, niet die van vóór de match. */
+      playlist={pickSponsorPlaylist(playlists, match.status) ?? playlists.IDLE}
       showPreviewProgress={showPreviewProgress}
       idleEmptyFallback={idleEmptyFallback}
     />

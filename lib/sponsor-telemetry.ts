@@ -9,6 +9,7 @@ export function sponsorTelemetrySegmentKey(
   if (!matchId) return null;
   if (section === "prematch") return `${matchId}:prematch`;
   if (section === "halftime") return `${matchId}:halftime`;
+  if (section === "postmatch") return `${matchId}:postmatch`;
   if (section !== "match") return null;
   if (matchStatus === "FIRST_HALF") return `${matchId}:FIRST_HALF`;
   if (matchStatus === "SECOND_HALF") return `${matchId}:SECOND_HALF`;

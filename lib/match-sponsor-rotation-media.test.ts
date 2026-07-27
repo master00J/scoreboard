@@ -37,6 +37,7 @@ const sponsor: Sponsor = {
   matchFirstHalfSeconds: 0,
   matchSecondHalfSeconds: 0,
   halftimeSeconds: 0,
+  postmatchSeconds: 0,
   imageDefaultSec: 10,
   createdAt: "2026-01-01T00:00:00.000Z",
   media: [heylen, bb],

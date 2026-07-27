@@ -136,6 +136,8 @@ export type Sponsor = {
   matchFirstHalfSeconds: number;
   matchSecondHalfSeconds: number;
   halftimeSeconds: number;
+  /** Schermtijd na de wedstrijd (full time / post match). */
+  postmatchSeconds: number;
   imageDefaultSec: number;
   /** JSON-array van media-id's: volgorde tijdens sponsorrotatie op display; null = uploadvolgorde. */
   sponsorPlaybackOrderJson?: string | null;
@@ -145,7 +147,7 @@ export type Sponsor = {
   media?: MediaItem[];
 };
 
-export type SponsorSection = "prematch" | "match" | "halftime";
+export type SponsorSection = "prematch" | "match" | "halftime" | "postmatch";
 
 export type PlaylistSlot =
   | "IDLE"

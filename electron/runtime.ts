@@ -435,6 +435,7 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("Sponsor", "secondHalfSponsorSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "matchFirstHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Sponsor", "matchSecondHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Sponsor", "postmatchSeconds", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Sponsor", "sponsorPlaybackOrderJson", "TEXT");
   await addColumnIfMissing("Sponsor", "sponsorPlaybackRepeatsJson", "TEXT");
   await migrateSponsorMatchHalfFromLegacy();
@@ -1423,6 +1424,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         prematchSeconds?: number;
         matchSeconds?: number;
         halftimeSeconds?: number;
+        postmatchSeconds?: number;
         imageDefaultSec?: number;
         active?: boolean;
       };
@@ -1439,6 +1441,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           matchFirstHalfSeconds: m1 > 0 || m2 > 0 ? m1 : legacyM,
           matchSecondHalfSeconds: m2,
           halftimeSeconds: body.halftimeSeconds ?? 0,
+          postmatchSeconds: body.postmatchSeconds ?? 0,
           imageDefaultSec: body.imageDefaultSec ?? 10,
           active: body.active ?? true,
         },
@@ -1458,6 +1461,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         matchFirstHalfSeconds: true,
         matchSecondHalfSeconds: true,
         halftimeSeconds: true,
+        postmatchSeconds: true,
         imageDefaultSec: true,
         active: true,
         sponsorPlaybackOrderJson: true,

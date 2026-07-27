@@ -9,6 +9,7 @@ const sponsors: Sponsor[] = [
     active: true,
     prematchSeconds: 120,
     halftimeSeconds: 0,
+    postmatchSeconds: 0,
     matchSeconds: 0,
     matchFirstHalfSeconds: 0,
     matchSecondHalfSeconds: 0,

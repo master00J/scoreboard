@@ -1181,6 +1181,7 @@ export function SponsorBudgetRotation({
 function budgetFor(s: Sponsor, section: SponsorSection, matchStatus?: string): number {
   if (section === "prematch") return s.prematchSeconds;
   if (section === "halftime") return s.halftimeSeconds;
+  if (section === "postmatch") return s.postmatchSeconds ?? 0;
   return matchPlayBudgetSeconds(s, matchStatus);
 }
 

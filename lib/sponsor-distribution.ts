@@ -21,6 +21,7 @@ export function sponsorSectionBudgetSeconds(
 ): number {
   if (section === "prematch") return Math.max(0, s.prematchSeconds);
   if (section === "halftime") return Math.max(0, s.halftimeSeconds);
+  if (section === "postmatch") return Math.max(0, s.postmatchSeconds ?? 0);
   return matchPlayBudgetSeconds(s, matchStatus);
 }
 
@@ -31,6 +32,7 @@ export function sponsorBudgetSectionFromMatchStatus(
   if (status === "FIRST_HALF" || status === "SECOND_HALF" || status === "EXTRA_TIME") {
     return "match";
   }
+  if (status === "FULL_TIME" || status === "POST_MATCH") return "postmatch";
   return "prematch";
 }
 
@@ -77,6 +79,38 @@ export function prematchSpreadClock(
     return { t: H - 1, timelineComplete: true };
   }
   return { t: Math.min(H - 1, Math.floor(elapsed)), timelineComplete: false };
+}
+
+/**
+ * Lengte van het na-wedstrijd-rooster: som van de postmatch-budgetten (min. 60s).
+ * Anders dan prematch is er geen vast eindpunt (zoals de aftrap), dus de tijdlijn
+ * is precies zo lang als de geboekte schermtijd.
+ */
+export function postmatchSpreadTimelineSeconds(sponsors: Sponsor[]): number {
+  const active = activeSponsorsForSection(sponsors, "postmatch");
+  const budgetTotal = active.reduce((a, s) => a + Math.max(0, s.postmatchSeconds ?? 0), 0);
+  return Math.max(60, budgetTotal);
+}
+
+/**
+ * Rust- en na-wedstrijd-rooster: net als prematch één keer over H seconden.
+ *
+ * Voorheen liep de rustklok met `% H` en begon het rooster dus eindeloos opnieuw zodra
+ * de pauze-tijdlijn om was — sponsors bleven spelen nadat hun geboekte rusttijd op was.
+ * De budgetten zijn binnen H ingepland, dus als H voorbij is, is het rooster klaar.
+ *
+ * `loopForever` (instelling «budget-cycli herhalen») houdt het oude, doorlopende gedrag.
+ */
+export function sectionSpreadClock(
+  elapsedSec: number,
+  timelineLenSec: number,
+  loopForever = false,
+): { t: number; timelineComplete: boolean } {
+  const H = Math.max(1, Math.floor(timelineLenSec));
+  const elapsed = Math.max(0, elapsedSec);
+  if (loopForever) return { t: elapsed % H, timelineComplete: false };
+  if (elapsed >= H) return { t: H - 1, timelineComplete: true };
+  return { t: elapsed, timelineComplete: false };
 }
 
 /**

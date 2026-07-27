@@ -3,7 +3,8 @@
 
 generator client {
   provider      = "prisma-client-js"
-  binaryTargets = ["native", "darwin-arm64", "darwin-x64", "windows"]
+  // `darwin` is de macOS x64-target; `darwin-x64` bestaat niet en liet `prisma generate` falen.
+  binaryTargets = ["native", "darwin-arm64", "darwin", "windows"]
 }
 
 datasource db {
@@ -125,6 +126,8 @@ model Sponsor {
   matchFirstHalfSeconds   Int  @default(0)
   matchSecondHalfSeconds  Int  @default(0)
   halftimeSeconds   Int         @default(0)
+  /// Schermtijd na de wedstrijd (full time / post match).
+  postmatchSeconds  Int         @default(0)
   imageDefaultSec   Int         @default(10)
   /// Optioneel: eigen seconden vol scorebord vs. sponsorbeeld (leeg = standaard uit Setup).
   firstHalfScoreboardSec   Int?

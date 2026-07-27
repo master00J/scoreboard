@@ -3,10 +3,14 @@ import type { MediaItem, Sponsor } from "./types";
 import {
   buildSponsorAppearancePlan,
   buildSponsorSlotMap,
+  sectionSpreadClock,
   holdSecondsCappedBySlotRun,
+  postmatchSpreadTimelineSeconds,
   sponsorAppearanceIndexAt,
+  sponsorSectionBudgetSeconds,
   sponsorScreenSecondsConsumed,
 } from "./sponsor-distribution";
+import { sectionForStatus } from "./sponsor-display-helpers";
 
 function media(id: string, durationSec: number): MediaItem {
   return {
@@ -87,6 +91,54 @@ describe("hold per vertoning volgt de rotatie", () => {
     expect(holdSecondsCappedBySlotRun([s], "prematch", undefined, "sp", map, starts[0]!)).toBe(30);
     expect(holdSecondsCappedBySlotRun([s], "prematch", undefined, "sp", map, starts[1]!)).toBe(20);
     expect(holdSecondsCappedBySlotRun([s], "prematch", undefined, "sp", map, starts[2]!)).toBe(10);
+  });
+});
+
+describe("rustklok stopt in plaats van te wrappen", () => {
+  it("loopt één keer over de pauzeduur en meldt dan klaar", () => {
+    expect(sectionSpreadClock(0, 900)).toEqual({ t: 0, timelineComplete: false });
+    expect(sectionSpreadClock(450, 900)).toEqual({ t: 450, timelineComplete: false });
+    // Regressie: hier begon het rooster vroeger opnieuw (`% H` → t = 0).
+    expect(sectionSpreadClock(900, 900)).toEqual({ t: 899, timelineComplete: true });
+    expect(sectionSpreadClock(1200, 900)).toEqual({ t: 899, timelineComplete: true });
+  });
+
+  it("blijft doorlopen met de instelling «budget-cycli herhalen»", () => {
+    expect(sectionSpreadClock(900, 900, true)).toEqual({ t: 0, timelineComplete: false });
+    expect(sectionSpreadClock(1050, 900, true)).toEqual({ t: 150, timelineComplete: false });
+  });
+});
+
+describe("na-wedstrijd sectie", () => {
+  function postmatchSponsor(seconds: number, clips: number[]): Sponsor {
+    return { ...sponsor(0, clips), postmatchSeconds: seconds } as unknown as Sponsor;
+  }
+
+  it("FULL_TIME en POST_MATCH horen bij de postmatch-sectie", () => {
+    expect(sectionForStatus("FULL_TIME")).toBe("postmatch");
+    expect(sectionForStatus("POST_MATCH")).toBe("postmatch");
+    // Regressie: deze vielen door naar "prematch", waardoor het rooster nooit liep.
+    expect(sectionForStatus("PREMATCH")).toBe("prematch");
+    expect(sectionForStatus("HALF_TIME")).toBe("halftime");
+  });
+
+  it("gebruikt het eigen postmatch-budget, niet dat van de wedstrijd", () => {
+    const s = postmatchSponsor(90, [30]);
+    expect(sponsorSectionBudgetSeconds(s, "postmatch")).toBe(90);
+    expect(sponsorSectionBudgetSeconds(s, "prematch")).toBe(0);
+  });
+
+  it("plant vertoningen binnen het postmatch-budget", () => {
+    const s = postmatchSponsor(90, [30, 20]);
+    const plan = buildSponsorAppearancePlan([s], "postmatch");
+    // 30,20,30 = 80 < 90 → nog budget, dus clip 4 (20s) start ook en loopt uit → 100.
+    expect(plan[0]!.appearanceSecs).toEqual([30, 20, 30, 20]);
+  });
+
+  it("tijdlijn is zo lang als de geboekte postmatch-tijd", () => {
+    expect(postmatchSpreadTimelineSeconds([postmatchSponsor(300, [30])])).toBe(300);
+    // Ondergrens zodat een klein budget nog steeds een bruikbaar rooster geeft.
+    expect(postmatchSpreadTimelineSeconds([postmatchSponsor(10, [30])])).toBe(60);
   });
 });
 

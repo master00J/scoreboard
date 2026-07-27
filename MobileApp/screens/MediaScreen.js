@@ -7,6 +7,7 @@ const BUDGET_FIELDS = [
   { key: "halftimeSeconds", label: "Rust" },
   { key: "matchFirstHalfSeconds", label: "1e helft" },
   { key: "matchSecondHalfSeconds", label: "2e helft" },
+  { key: "postmatchSeconds", label: "Na wedstrijd" },
 ];
 
 export function MediaScreen({
