@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useDisplayStore } from "@/lib/store";
 import { computeElapsedSeconds } from "@/lib/timer";
+import { computeShotClockSeconds } from "@/lib/timer";
 
 /**
  * Smooth local timer. Only reads authoritative `timerStartedAt` + `timerBaseSec`
@@ -38,6 +39,27 @@ export function useLiveTimerSeconds(): number {
       timerRunning: state.timerRunning,
       timerStartedAt: state.timerStartedAt,
       timerBaseSec: state.timerBaseSec,
+    },
+    now,
+  );
+}
+
+/** Vloeiende lokale countdown voor de onafhankelijke shotclock. */
+export function useLiveShotClockSeconds(): number {
+  const state = useDisplayStore((s) => s.state);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 100);
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (!state) return 0;
+  return computeShotClockSeconds(
+    {
+      shotClockRunning: state.shotClockRunning,
+      shotClockStartedAt: state.shotClockStartedAt,
+      shotClockBaseSec: state.shotClockBaseSec,
     },
     now,
   );

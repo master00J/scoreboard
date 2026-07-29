@@ -2,7 +2,21 @@ import path from "path";
 import { prisma } from "../lib/prisma";
 import type { Command } from "../lib/validation/commands";
 import { isLivePlayingMatchStatus } from "../lib/live-cycle-settings";
-import { computeElapsedSeconds, runFrom, stopAt } from "../lib/timer";
+import {
+  computeElapsedSeconds,
+  computeShotClockSeconds,
+  pauseShotClockAt,
+  runFrom,
+  runShotClockFrom,
+  stopAt,
+} from "../lib/timer";
+import {
+  getSportProfile,
+  lifecycleStatusForPeriod,
+  normalizeSport,
+  resetStatsForNewPeriod,
+  resetTimeoutsForNewPeriod,
+} from "../lib/sports";
 import type { SubPair } from "./match-lineup";
 import {
   applySubToFieldRoster,
@@ -201,7 +215,11 @@ export async function handleCommand(cmd: Command) {
     case "timer:pause": {
       const s = await getState();
       const elapsed = computeElapsedSeconds(s);
-      await updateState(stopAt(elapsed));
+      const shotClock = computeShotClockSeconds(s);
+      await updateState({
+        ...stopAt(elapsed),
+        ...(s.shotClockRunning ? pauseShotClockAt(shotClock) : {}),
+      });
       return { ok: true };
     }
     case "timer:adjust": {
@@ -254,19 +272,75 @@ export async function handleCommand(cmd: Command) {
       await updateState({ addedTimeMinutes: cmd.minutes });
       return { ok: true };
     }
+    case "shotclock:start": {
+      const s = await getState();
+      if (!s.matchId) throw new Error("No active match");
+      const match = await prisma.match.findUnique({
+        where: { id: s.matchId },
+        select: { sport: true },
+      });
+      const profile = getSportProfile(match?.sport);
+      if (profile.shotClockPresets.length === 0) {
+        throw new Error(`Shotclock is niet beschikbaar voor ${profile.label}.`);
+      }
+      const remaining = computeShotClockSeconds(s);
+      await updateState(
+        runShotClockFrom(remaining > 0 ? remaining : profile.shotClockPresets[0]!),
+      );
+      return { ok: true };
+    }
+    case "shotclock:pause": {
+      const s = await getState();
+      await updateState(pauseShotClockAt(computeShotClockSeconds(s)));
+      return { ok: true };
+    }
+    case "shotclock:reset": {
+      const s = await getState();
+      if (!s.matchId) throw new Error("No active match");
+      const match = await prisma.match.findUnique({
+        where: { id: s.matchId },
+        select: { sport: true },
+      });
+      const profile = getSportProfile(match?.sport);
+      const seconds = cmd.seconds ?? profile.shotClockPresets[0] ?? 24;
+      if (!profile.shotClockPresets.includes(seconds)) {
+        throw new Error(`Shotclock ${seconds}s is niet beschikbaar voor ${profile.label}.`);
+      }
+      await updateState(
+        s.shotClockRunning ? runShotClockFrom(seconds) : pauseShotClockAt(seconds),
+      );
+      return { ok: true };
+    }
+    case "shotclock:set": {
+      const s = await getState();
+      await updateState(
+        s.shotClockRunning
+          ? runShotClockFrom(cmd.seconds)
+          : pauseShotClockAt(cmd.seconds),
+      );
+      return { ok: true };
+    }
     case "match:setActive": {
+      let shotClockBaseSec = 0;
       if (cmd.matchId != null) {
         const m = await prisma.match.findUnique({
           where: { id: cmd.matchId },
-          select: { closedAt: true },
+          select: { closedAt: true, sport: true },
         });
         if (m?.closedAt) {
           throw new Error(
             "Deze wedstrijd is afgesloten (rapportage bewaard). Heropen in Setup → Matches of kies een andere wedstrijd.",
           );
         }
+        shotClockBaseSec = getSportProfile(m?.sport).shotClockPresets[0] ?? 0;
       }
-      await updateState({ matchId: cmd.matchId, addedTimeMinutes: 0 });
+      await updateState({
+        matchId: cmd.matchId,
+        addedTimeMinutes: 0,
+        shotClockRunning: false,
+        shotClockStartedAt: null,
+        shotClockBaseSec,
+      });
       return { ok: true };
     }
     case "match:setStatus": {
@@ -277,8 +351,111 @@ export async function handleCommand(cmd: Command) {
           data: { status: cmd.status },
         });
         // Bumpt DisplayState.updatedAt zodat desktop control en mobiele clients matchdata herladen.
-        await updateState({ mode: s.mode, addedTimeMinutes: 0 });
+        const pausesClock =
+          cmd.status === "HALF_TIME" ||
+          cmd.status === "FULL_TIME" ||
+          cmd.status === "POST_MATCH";
+        await updateState({
+          mode: s.mode,
+          addedTimeMinutes: 0,
+          ...(pausesClock ? stopAt(computeElapsedSeconds(s)) : {}),
+          ...(pausesClock ? pauseShotClockAt(computeShotClockSeconds(s)) : {}),
+        });
       }
+      return { ok: true };
+    }
+    case "sport:setPeriod": {
+      const s = await getState();
+      if (!s.matchId) throw new Error("No active match");
+      const match = await prisma.match.findUnique({ where: { id: s.matchId } });
+      if (!match) throw new Error("Match not found");
+      const sport = normalizeSport(match.sport);
+      const profile = getSportProfile(sport);
+      if (cmd.period > profile.periodCount) {
+        throw new Error(`${profile.label} heeft ${profile.periodCount} reguliere periodes.`);
+      }
+
+      const data: Parameters<typeof prisma.match.update>[0]["data"] = {
+        currentPeriod: cmd.period,
+        status: lifecycleStatusForPeriod(sport, cmd.period),
+      };
+      if (resetTimeoutsForNewPeriod(sport, match.currentPeriod, cmd.period)) {
+        data.homeTimeouts = 0;
+        data.awayTimeouts = 0;
+      }
+      if (resetStatsForNewPeriod(sport)) {
+        data.homeFouls = 0;
+        data.awayFouls = 0;
+      }
+      if (profile.hasSets && cmd.period !== match.currentPeriod) {
+        data.homeScore = 0;
+        data.awayScore = 0;
+      }
+      await prisma.match.update({ where: { id: match.id }, data });
+      const periodStartSec =
+        profile.timerMode === "COUNT_UP"
+          ? Math.max(0, (cmd.period - 1) * match.periodDurationSec)
+          : 0;
+      await updateState({
+        ...stopAt(periodStartSec),
+        ...pauseShotClockAt(profile.shotClockPresets[0] ?? 0),
+        mode: "MATCH",
+        addedTimeMinutes: 0,
+      });
+      await logMatchEvent(match.id, {
+        type: "PERIOD",
+        minute: 0,
+        note: `${profile.periodLabel} ${cmd.period}`,
+      });
+      return { ok: true };
+    }
+    case "sport:statAdjust": {
+      const s = await getState();
+      if (!s.matchId) throw new Error("No active match");
+      const match = await prisma.match.findUnique({ where: { id: s.matchId } });
+      if (!match) throw new Error("Match not found");
+      const profile = getSportProfile(match.sport);
+      const sidePrefix = cmd.side === "home" ? "home" : "away";
+      let column:
+        | "homeTimeouts"
+        | "awayTimeouts"
+        | "homeFouls"
+        | "awayFouls"
+        | "homeSets"
+        | "awaySets";
+      let current: number;
+      let max = 99;
+
+      if (cmd.stat === "timeout") {
+        max = profile.timeoutLimitForPeriod(match.currentPeriod);
+        if (max <= 0) throw new Error(`Time-outs zijn niet actief voor ${profile.label}.`);
+        column = `${sidePrefix}Timeouts` as typeof column;
+        current = match[column];
+      } else if (cmd.stat === "foul") {
+        if (!profile.statLabel) {
+          throw new Error(`Fouten/straffen zijn niet actief voor ${profile.label}.`);
+        }
+        column = `${sidePrefix}Fouls` as typeof column;
+        current = match[column];
+      } else {
+        if (!profile.hasSets) throw new Error(`Setstanden zijn niet actief voor ${profile.label}.`);
+        column = `${sidePrefix}Sets` as typeof column;
+        current = match[column];
+        max = Math.ceil(profile.periodCount / 2);
+      }
+
+      const next = Math.max(0, Math.min(max, current + cmd.delta));
+      await prisma.match.update({
+        where: { id: match.id },
+        data: { [column]: next },
+      });
+      await updateState({ mode: s.mode });
+      await logMatchEvent(match.id, {
+        type: cmd.stat.toUpperCase(),
+        minute: currentMinute(computeElapsedSeconds(s)),
+        teamId: cmd.side === "home" ? match.homeTeamId : match.awayTeamId,
+        note: `${current} -> ${next}`,
+      });
       return { ok: true };
     }
     case "score:set": {

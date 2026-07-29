@@ -41,8 +41,43 @@ export function runFrom(seconds: number, now: Date = new Date()) {
   };
 }
 
-export type SerializedDisplayState = Omit<DisplayState, "timerStartedAt" | "updatedAt"> & {
+/** Shotclock telt af vanaf `baseSec` zolang hij loopt. */
+export function computeShotClockSeconds(state: {
+  shotClockRunning: boolean;
+  shotClockStartedAt: Date | string | null;
+  shotClockBaseSec: number;
+}, now: number = Date.now()): number {
+  const base = Math.max(0, state.shotClockBaseSec);
+  if (!state.shotClockRunning || !state.shotClockStartedAt) return base;
+  const started =
+    state.shotClockStartedAt instanceof Date
+      ? state.shotClockStartedAt.getTime()
+      : new Date(state.shotClockStartedAt).getTime();
+  return Math.max(0, base - (now - started) / 1000);
+}
+
+export function pauseShotClockAt(seconds: number) {
+  return {
+    shotClockRunning: false,
+    shotClockStartedAt: null,
+    shotClockBaseSec: Math.max(0, Math.ceil(seconds)),
+  };
+}
+
+export function runShotClockFrom(seconds: number, now: Date = new Date()) {
+  return {
+    shotClockRunning: seconds > 0,
+    shotClockStartedAt: seconds > 0 ? now : null,
+    shotClockBaseSec: Math.max(0, Math.ceil(seconds)),
+  };
+}
+
+export type SerializedDisplayState = Omit<
+  DisplayState,
+  "timerStartedAt" | "shotClockStartedAt" | "updatedAt"
+> & {
   timerStartedAt: string | null;
+  shotClockStartedAt: string | null;
   updatedAt: string;
 };
 
@@ -50,6 +85,7 @@ export function serializeDisplayState(s: DisplayState): SerializedDisplayState {
   return {
     ...s,
     timerStartedAt: s.timerStartedAt ? s.timerStartedAt.toISOString() : null,
+    shotClockStartedAt: s.shotClockStartedAt ? s.shotClockStartedAt.toISOString() : null,
     updatedAt: s.updatedAt.toISOString(),
   };
 }

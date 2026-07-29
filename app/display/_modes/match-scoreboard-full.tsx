@@ -8,6 +8,7 @@ import {
   mergeScoreboardTheme,
 } from "@/lib/scoreboard-theme";
 import { TeamLogo } from "./scoreboard-strip";
+import { getSportProfile, type SportProfile } from "@/lib/sports";
 
 /**
  * Volledig scherm tijdens de match zonder sponsorpaneel: thuis links, uit rechts,
@@ -19,6 +20,7 @@ export function MatchScoreboardFull({
   running,
   period,
   addedTime = 0,
+  shotClock = 0,
   theme: themeProp,
 }: {
   match: Match;
@@ -26,9 +28,11 @@ export function MatchScoreboardFull({
   running: boolean;
   period: string;
   addedTime?: number;
+  shotClock?: number;
   theme?: ResolvedScoreboardTheme;
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
+  const profile = getSportProfile(match.sport);
 
   return (
     <motion.div
@@ -45,15 +49,33 @@ export function MatchScoreboardFull({
           ${theme.contentAreaBg}`,
       }}
     >
-      <TeamSide team={match.homeTeam} score={match.homeScore} theme={theme} />
+      <TeamSide
+        team={match.homeTeam}
+        score={match.homeScore}
+        timeouts={match.homeTimeouts}
+        fouls={match.homeFouls}
+        sets={match.homeSets}
+        profile={profile}
+        theme={theme}
+      />
       <CenterBlock
         elapsed={elapsed}
         running={running}
         period={period}
         addedTime={addedTime}
+        shotClock={shotClock}
+        showShotClock={profile.shotClockPresets.length > 0}
         theme={theme}
       />
-      <TeamSide team={match.awayTeam} score={match.awayScore} theme={theme} />
+      <TeamSide
+        team={match.awayTeam}
+        score={match.awayScore}
+        timeouts={match.awayTimeouts}
+        fouls={match.awayFouls}
+        sets={match.awaySets}
+        profile={profile}
+        theme={theme}
+      />
     </motion.div>
   );
 }
@@ -61,10 +83,18 @@ export function MatchScoreboardFull({
 function TeamSide({
   team,
   score,
+  timeouts,
+  fouls,
+  sets,
+  profile,
   theme,
 }: {
   team: Match["homeTeam"];
   score: number;
+  timeouts: number;
+  fouls: number;
+  sets: number;
+  profile: SportProfile;
   theme: ResolvedScoreboardTheme;
 }) {
   return (
@@ -97,6 +127,13 @@ function TeamSide({
       >
         {score}
       </div>
+      {(profile.timeoutLimitForPeriod(1) > 0 || profile.statLabel || profile.hasSets) && (
+        <div className="flex flex-wrap items-center justify-center gap-3 text-center text-xl font-bold uppercase tracking-wider text-white/65">
+          {profile.hasSets && <span>Sets {sets}</span>}
+          {profile.timeoutLimitForPeriod(1) > 0 && <span>TO {timeouts}</span>}
+          {profile.statLabel && <span>{profile.statLabel} {fouls}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -106,12 +143,16 @@ function CenterBlock({
   running,
   period,
   addedTime,
+  shotClock,
+  showShotClock,
   theme,
 }: {
   elapsed: number;
   running: boolean;
   period: string;
   addedTime: number;
+  shotClock: number;
+  showShotClock: boolean;
   theme: ResolvedScoreboardTheme;
 }) {
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
@@ -156,6 +197,16 @@ function CenterBlock({
           </div>
         )}
       </div>
+      {showShotClock && (
+        <div className="mt-2 rounded-xl border border-red-400/50 bg-red-600/15 px-6 py-3 text-center">
+          <div className="text-sm font-bold uppercase tracking-[0.3em] text-red-200/80">
+            Shotclock
+          </div>
+          <div className="mt-1 text-6xl font-black tabular-nums leading-none text-red-400">
+            {Math.ceil(shotClock)}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

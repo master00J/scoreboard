@@ -2,8 +2,10 @@
 
 import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
+import { getSportProfile, sportBreakLabel } from "@/lib/sports";
 
 export function HalfTimeMode({ match }: { match: Match }) {
+  const profile = getSportProfile(match.sport);
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -13,7 +15,7 @@ export function HalfTimeMode({ match }: { match: Match }) {
       className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 to-black"
     >
       <div className="text-[96px] uppercase tracking-[0.3em] text-white/40 mb-8">
-        Half-time · Rust
+        {sportBreakLabel(match.sport)}
       </div>
       <div className="flex items-center gap-16">
         <div className="text-[72px] font-bold text-white/80">
@@ -30,11 +32,17 @@ export function HalfTimeMode({ match }: { match: Match }) {
           {match.awayTeam.shortName}
         </div>
       </div>
+      {profile.hasSets && (
+        <div className="mt-10 text-5xl font-bold uppercase tracking-widest text-white/60">
+          Sets {match.homeSets} – {match.awaySets}
+        </div>
+      )}
     </motion.div>
   );
 }
 
 export function FullTimeMode({ match }: { match: Match }) {
+  const profile = getSportProfile(match.sport);
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -74,6 +82,11 @@ export function FullTimeMode({ match }: { match: Match }) {
           </div>
         </div>
       </div>
+      {profile.hasSets && (
+        <div className="mt-10 text-5xl font-bold uppercase tracking-widest text-white/60">
+          Sets {match.homeSets} – {match.awaySets}
+        </div>
+      )}
     </motion.div>
   );
 }

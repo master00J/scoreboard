@@ -52,6 +52,20 @@ model Match {
   matchSponsorMedia   MediaItem? @relation("MatchSponsorMedia", fields: [matchSponsorMediaId], references: [id], onDelete: SetNull)
   halfDurationSec Int          @default(2700)
   halfBreakSec    Int          @default(900)
+  /// Sportprofiel bepaalt periodes, klokrichting en beschikbare live-statistieken.
+  sport           String       @default("FOOTBALL")
+  /// Actieve helft, quarter of set. Bestaande voetbalmatches starten in periode 1.
+  currentPeriod   Int          @default(1)
+  /// Duur van één actieve periode. Voor volleybal 0 omdat er geen wedstrijdklok is.
+  periodDurationSec Int        @default(2700)
+  /// Sportspecifieke live-tellers. Time-outs en fouten/straffen gelden voor de actieve regels-sectie.
+  homeTimeouts    Int          @default(0)
+  awayTimeouts    Int          @default(0)
+  homeFouls       Int          @default(0)
+  awayFouls       Int          @default(0)
+  /// Alleen zichtbaar bij sporten met sets (momenteel volleybal).
+  homeSets        Int          @default(0)
+  awaySets        Int          @default(0)
   /// Lengte (s) van het herhalende prematch-sponsorrooster op het scherm. 0 = automatisch (≈ som van sponsor-«voor»-budgetten, min. 60s).
   prematchSpreadWindowSec Int @default(0)
   status          String       @default("SETUP")
@@ -117,6 +131,21 @@ model ScheduledMediaCue {
   createdAt   DateTime  @default(now())
 }
 
+/// Opgeslagen scorebord-layout die je kunt toepassen zonder JSON te bewerken.
+/// `themeJson` bevat alleen visuele thema-keys — geen afspeelgedrag.
+model ScoreboardTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  /// Vrij label, bv. "Jupiler Pro League" of "Beker".
+  label     String?
+  themeJson String
+  /// Meegeleverd voorbeeld: mag niet verwijderd worden, wel gedupliceerd.
+  isBuiltIn Boolean  @default(false)
+  sortIndex Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 model Sponsor {
   id                String      @id @default(cuid())
   name              String
@@ -176,6 +205,11 @@ model DisplayState {
   timerRunning       Boolean   @default(false)
   timerStartedAt     DateTime?
   timerBaseSec       Int       @default(0)
+  /// Onafhankelijke shotclock; alleen getoond voor sportprofielen die dit ondersteunen.
+  shotClockRunning   Boolean   @default(false)
+  shotClockStartedAt DateTime?
+  /// Resterende seconden op het moment van starten/pauzeren.
+  shotClockBaseSec   Int       @default(24)
   /// Actuele blessuretijd in minuten voor live scorebord-overlay (+1, +2, ...).
   addedTimeMinutes   Int       @default(0)
   externalCaptureSourceId  String?

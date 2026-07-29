@@ -12,7 +12,8 @@ import { ScaleContainer } from "@/components/scale-container";
 import { useSocketSync, sendCommand } from "@/lib/use-socket";
 import type { DisplayModeT } from "@/lib/validation/commands";
 import { useDisplayStore } from "@/lib/store";
-import { useLiveTimerSeconds } from "@/lib/use-timer";
+import { useLiveShotClockSeconds, useLiveTimerSeconds } from "@/lib/use-timer";
+import { sportClockSeconds, sportPeriodLabel } from "@/lib/sports";
 import type {
   AppSettings,
   Match,
@@ -129,6 +130,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const connected = useDisplayStore((s) => s.connected);
   const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
   const elapsed = useLiveTimerSeconds();
+  const shotClock = useLiveShotClockSeconds();
 
   const [match, setMatch] = useState<Match | null>(null);
   const [playlists, setPlaylists] = useState<Record<PlaylistSlot, Playlist | null>>({
@@ -395,7 +397,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   }, [subIn, subOut, match]);
 
   const cardPlayer = activePlayer;
-  const period = humanPeriod(match?.status);
+  const period = humanPeriod(match);
+  const scoreboardClock = sportClockSeconds(
+    match?.sport,
+    elapsed,
+    match?.periodDurationSec,
+  );
   const currentMinute = Math.floor(elapsed / 60);
   const addedTimeMinutes = Math.max(0, state?.addedTimeMinutes ?? 0);
 
@@ -405,7 +412,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       return (
         <MatchScoreboardFull
           match={match}
-          elapsed={elapsed}
+          elapsed={scoreboardClock}
+          shotClock={shotClock}
           running={state.timerRunning ?? false}
           period={period}
           addedTime={addedTimeMinutes}
@@ -420,7 +428,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         idleEmptyFallback={idleEmptyFallback}
       />
     );
-  }, [state, match, elapsed, period, addedTimeMinutes, scoreboardTheme, playlists, embedInControl, idleEmptyFallback]);
+  }, [state, match, scoreboardClock, shotClock, period, addedTimeMinutes, scoreboardTheme, playlists, embedInControl, idleEmptyFallback]);
 
   const halftimeSponsorFallback = useMemo(() => {
     if (!match) return null;
@@ -713,6 +721,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     match,
     sponsors,
     elapsed,
+    scoreboardClock,
+    shotClock,
     mode,
     sponsorInterrupted,
     sponsorSlotMapMatch,
@@ -1031,7 +1041,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         <MatchScoreboardFull
           key="sponsor-panel-scoreboard"
           match={match}
-          elapsed={elapsed}
+          elapsed={scoreboardClock}
+          shotClock={shotClock}
           running={state.timerRunning ?? false}
           period={period}
           addedTime={addedTimeMinutes}
@@ -1081,7 +1092,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           <MatchScoreboardFull
             key="safe-mode-scoreboard"
             match={match}
-            elapsed={elapsed}
+            elapsed={scoreboardClock}
+            shotClock={shotClock}
             running={state.timerRunning ?? false}
             period={period}
             addedTime={addedTimeMinutes}
@@ -1143,7 +1155,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 <MatchScoreboardFull
                   key="idle-prematch-scoreboard"
                   match={match}
-                  elapsed={elapsed}
+                  elapsed={scoreboardClock}
+                  shotClock={shotClock}
                   running={state.timerRunning ?? false}
                   period={period}
                   addedTime={addedTimeMinutes}
@@ -1191,7 +1204,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   <MatchScoreboardFull
                     key="prematch-spread-gap-board"
                     match={match}
-                    elapsed={elapsed}
+                    elapsed={scoreboardClock}
+                    shotClock={shotClock}
                     running={state.timerRunning ?? false}
                     period={period}
                     addedTime={addedTimeMinutes}
@@ -1220,7 +1234,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             <MatchScoreboardFull
               key="match-board-full"
               match={match}
-              elapsed={elapsed}
+              elapsed={scoreboardClock}
+              shotClock={shotClock}
               running={state.timerRunning ?? false}
               period={period}
               addedTime={addedTimeMinutes}
@@ -1275,7 +1290,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             <MatchScoreboardFull
               key="player-intro-fallback-board"
               match={match}
-              elapsed={elapsed}
+              elapsed={scoreboardClock}
+              shotClock={shotClock}
               running={state.timerRunning ?? false}
               period={period}
               addedTime={addedTimeMinutes}
@@ -1334,7 +1350,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             <MatchScoreboardFull
               key="sponsor-fs-scoreboard"
               match={match}
-              elapsed={elapsed}
+              elapsed={scoreboardClock}
+              shotClock={shotClock}
               running={state.timerRunning ?? false}
               period={period}
               addedTime={addedTimeMinutes}
@@ -1379,7 +1396,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         <div className="absolute inset-0 z-[88]">
           <LeftScoreboardLayout
             match={match}
-            elapsed={elapsed}
+            elapsed={scoreboardClock}
+            shotClock={shotClock}
             running={state?.timerRunning ?? false}
             period={period}
             addedTime={addedTimeMinutes}
@@ -1444,7 +1462,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         >
           <LeftScoreboardLayout
             match={match}
-            elapsed={elapsed}
+            elapsed={scoreboardClock}
+            shotClock={shotClock}
             running={state.timerRunning ?? false}
             period={period}
             addedTime={addedTimeMinutes}
@@ -1470,7 +1489,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       {useLeftLayout && match && (
         <LeftScoreboardLayout
           match={match}
-          elapsed={elapsed}
+          elapsed={scoreboardClock}
+          shotClock={shotClock}
           running={state?.timerRunning ?? false}
           period={period}
           addedTime={addedTimeMinutes}
@@ -1851,14 +1871,18 @@ function GoalIntroFallback() {
   );
 }
 
-function humanPeriod(status?: string): string {
+function humanPeriod(match: Match | null): string {
+  const status = match?.status;
+  if (match && (status === "FIRST_HALF" || status === "SECOND_HALF" || status === "EXTRA_TIME")) {
+    return sportPeriodLabel(match.sport, match.currentPeriod);
+  }
   switch (status) {
     case "FIRST_HALF":
       return "1ST HALF";
     case "SECOND_HALF":
       return "2ND HALF";
     case "HALF_TIME":
-      return "HALF-TIME";
+      return "PAUZE";
     case "FULL_TIME":
       return "FULL-TIME";
     case "EXTRA_TIME":

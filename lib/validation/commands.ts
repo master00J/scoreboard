@@ -44,8 +44,28 @@ export const CommandSchema = z.discriminatedUnion("type", [
     type: z.literal("timer:setAddedTime"),
     minutes: z.number().int().min(0).max(30),
   }),
+  z.object({ type: z.literal("shotclock:start") }),
+  z.object({ type: z.literal("shotclock:pause") }),
+  z.object({
+    type: z.literal("shotclock:reset"),
+    seconds: z.number().int().min(1).max(99).optional(),
+  }),
+  z.object({
+    type: z.literal("shotclock:set"),
+    seconds: z.number().int().min(0).max(99),
+  }),
   z.object({ type: z.literal("match:setActive"), matchId: z.string().nullable() }),
   z.object({ type: z.literal("match:setStatus"), status: MatchStatus }),
+  z.object({
+    type: z.literal("sport:setPeriod"),
+    period: z.number().int().min(1).max(9),
+  }),
+  z.object({
+    type: z.literal("sport:statAdjust"),
+    stat: z.enum(["timeout", "foul", "set"]),
+    side: z.enum(["home", "away"]),
+    delta: z.number().int().min(-10).max(10),
+  }),
   z.object({
     type: z.literal("score:set"),
     homeScore: z.number().int().nonnegative(),

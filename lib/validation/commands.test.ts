@@ -12,6 +12,24 @@ describe("CommandSchema", () => {
     expect(r.success).toBe(true);
   });
 
+  it("accepteert multisport- en shotclockcommando's", () => {
+    expect(CommandSchema.safeParse({ type: "sport:setPeriod", period: 4 }).success).toBe(true);
+    expect(
+      CommandSchema.safeParse({
+        type: "sport:statAdjust",
+        stat: "timeout",
+        side: "home",
+        delta: 1,
+      }).success,
+    ).toBe(true);
+    expect(
+      CommandSchema.safeParse({ type: "shotclock:reset", seconds: 14 }).success,
+    ).toBe(true);
+    expect(
+      CommandSchema.safeParse({ type: "shotclock:reset", seconds: 120 }).success,
+    ).toBe(false);
+  });
+
   it("wijst onbekend type af", () => {
     const r = CommandSchema.safeParse({ type: "nope" });
     expect(r.success).toBe(false);

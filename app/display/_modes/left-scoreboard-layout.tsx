@@ -9,6 +9,7 @@ import {
   mergeScoreboardTheme,
 } from "@/lib/scoreboard-theme";
 import { TeamLogo } from "./scoreboard-strip";
+import { getSportProfile, type SportProfile } from "@/lib/sports";
 
 /**
  * Vast 1920×1080-layout tijdens actieve match / sponsor naast scorebord.
@@ -22,6 +23,7 @@ export function LeftScoreboardLayout({
   running,
   period,
   addedTime = 0,
+  shotClock = 0,
   theme: themeProp,
   children,
 }: {
@@ -30,10 +32,12 @@ export function LeftScoreboardLayout({
   running: boolean;
   period: string;
   addedTime?: number;
+  shotClock?: number;
   theme?: ResolvedScoreboardTheme;
   children?: React.ReactNode;
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
+  const profile = getSportProfile(match.sport);
   const barW = theme.leftBarWidthPx;
   const barH = theme.bottomBarHeightPx;
   const grad = frameGradientCss(theme);
@@ -61,7 +65,15 @@ export function LeftScoreboardLayout({
             {i > 0 && <Divider />}
             {seg === "home" && (
               <div className="flex min-h-0 flex-1 flex-col">
-                <TeamBlock team={match.homeTeam} score={match.homeScore} theme={theme} />
+                <TeamBlock
+                  team={match.homeTeam}
+                  score={match.homeScore}
+                  timeouts={match.homeTimeouts}
+                  fouls={match.homeFouls}
+                  sets={match.homeSets}
+                  profile={profile}
+                  theme={theme}
+                />
               </div>
             )}
             {seg === "timer" && (
@@ -70,12 +82,22 @@ export function LeftScoreboardLayout({
                 running={running}
                 period={period}
                 addedTime={addedTime}
+                shotClock={shotClock}
+                showShotClock={profile.shotClockPresets.length > 0}
                 theme={theme}
               />
             )}
             {seg === "away" && (
               <div className="flex min-h-0 flex-1 flex-col">
-                <TeamBlock team={match.awayTeam} score={match.awayScore} theme={theme} />
+                <TeamBlock
+                  team={match.awayTeam}
+                  score={match.awayScore}
+                  timeouts={match.awayTimeouts}
+                  fouls={match.awayFouls}
+                  sets={match.awaySets}
+                  profile={profile}
+                  theme={theme}
+                />
               </div>
             )}
           </Fragment>
@@ -113,10 +135,18 @@ function Divider() {
 function TeamBlock({
   team,
   score,
+  timeouts,
+  fouls,
+  sets,
+  profile,
   theme,
 }: {
   team: Match["homeTeam"];
   score: number;
+  timeouts: number;
+  fouls: number;
+  sets: number;
+  profile: SportProfile;
   theme: ResolvedScoreboardTheme;
 }) {
   return (
@@ -131,6 +161,13 @@ function TeamBlock({
       >
         {score}
       </div>
+      {(profile.timeoutLimitForPeriod(1) > 0 || profile.statLabel || profile.hasSets) && (
+        <div className="flex flex-wrap justify-center gap-2 px-2 text-center text-[13px] font-bold uppercase tracking-wide text-white/65">
+          {profile.hasSets && <span>Sets {sets}</span>}
+          {profile.timeoutLimitForPeriod(1) > 0 && <span>TO {timeouts}</span>}
+          {profile.statLabel && <span>{profile.statLabel} {fouls}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -140,12 +177,16 @@ function TimerBlock({
   running,
   period,
   addedTime,
+  shotClock,
+  showShotClock,
   theme,
 }: {
   elapsed: number;
   running: boolean;
   period: string;
   addedTime: number;
+  shotClock: number;
+  showShotClock: boolean;
   theme: ResolvedScoreboardTheme;
 }) {
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
@@ -185,6 +226,11 @@ function TimerBlock({
           </div>
         )}
       </div>
+      {showShotClock && (
+        <div className="mt-2 rounded border border-red-400/50 bg-red-600/20 px-3 py-1 text-2xl font-black tabular-nums text-red-300">
+          {Math.ceil(shotClock)}
+        </div>
+      )}
     </div>
   );
 }

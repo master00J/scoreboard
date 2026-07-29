@@ -8,9 +8,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import type { AppSettings, Match, Player } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { isFullMatch } from "@/lib/is-full-match";
-import { defaultField11FromRoster } from "@/lib/match-field-lineup";
+import { defaultFieldFromRoster } from "@/lib/match-field-lineup";
 import { squadOnFieldAndBench } from "@/lib/match-squad";
 import { toast } from "@/components/ui/toast";
+import { getSportProfile } from "@/lib/sports";
+import { SportLiveControls } from "./sport-live-controls";
 
 export function MatchLivePanel() {
   const state = useDisplayStore((s) => s.state);
@@ -35,16 +37,18 @@ export function MatchLivePanel() {
     );
   }
 
-  const homeGoalVisualEnabled = settings?.goalVisualHomeEnabled ?? true;
-  const awayGoalVisualEnabled = settings?.goalVisualAwayEnabled ?? false;
+  const profile = getSportProfile(match.sport);
+  const isGoalSport = profile.scoreLabel === "Goal";
+  const homeGoalVisualEnabled = isGoalSport && (settings?.goalVisualHomeEnabled ?? true);
+  const awayGoalVisualEnabled = isGoalSport && (settings?.goalVisualAwayEnabled ?? false);
 
-  async function handleGoalClick(side: "home" | "away") {
+  async function handleScoreClick(side: "home" | "away", points: number) {
     const visualEnabled = side === "home" ? homeGoalVisualEnabled : awayGoalVisualEnabled;
-    if (visualEnabled) {
+    if (points === 1 && visualEnabled) {
       setScoreModal(side);
       return;
     }
-    await sendCommand({ type: "score:adjust", side, delta: 1 });
+    await sendCommand({ type: "score:adjust", side, delta: points });
   }
 
   return (
@@ -64,7 +68,9 @@ export function MatchLivePanel() {
           team={match.homeTeam}
           score={match.homeScore}
           goalVisualEnabled={homeGoalVisualEnabled}
-          onGoalClick={() => void handleGoalClick("home")}
+          scoreLabel={profile.scoreLabel}
+          increments={profile.scoreIncrements}
+          onScoreClick={(points) => void handleScoreClick("home", points)}
           onAdjust={(d) => sendCommand({ type: "score:adjust", side: "home", delta: d })}
         />
         <SideControl
@@ -72,10 +78,14 @@ export function MatchLivePanel() {
           team={match.awayTeam}
           score={match.awayScore}
           goalVisualEnabled={awayGoalVisualEnabled}
-          onGoalClick={() => void handleGoalClick("away")}
+          scoreLabel={profile.scoreLabel}
+          increments={profile.scoreIncrements}
+          onScoreClick={(points) => void handleScoreClick("away", points)}
           onAdjust={(d) => sendCommand({ type: "score:adjust", side: "away", delta: d })}
         />
       </div>
+
+      <SportLiveControls match={match} />
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <Button variant="secondary" onClick={() => setSubModal(true)}>
@@ -102,7 +112,7 @@ export function MatchLivePanel() {
             sendCommand({ type: "match:setStatus", status: "HALF_TIME" })
           }
         >
-          Half-time
+          Pauze
         </Button>
       </div>
 
@@ -149,14 +159,18 @@ function SideControl({
   team,
   score,
   goalVisualEnabled,
-  onGoalClick,
+  scoreLabel,
+  increments,
+  onScoreClick,
   onAdjust,
 }: {
   side: "home" | "away";
   team: { name: string; shortName: string; primaryColor: string };
   score: number;
   goalVisualEnabled: boolean;
-  onGoalClick: () => void;
+  scoreLabel: string;
+  increments: number[];
+  onScoreClick: (points: number) => void;
   onAdjust: (delta: number) => void;
 }) {
   return (
@@ -176,17 +190,22 @@ function SideControl({
       <div className="text-center text-[88px] font-black tabular-nums leading-none">
         {score}
       </div>
-      <div className="flex gap-2">
-        <Button
-          size="lg"
-          className="flex-1 bg-green-500 hover:bg-green-600 text-black text-lg font-black"
-          onClick={onGoalClick}
-        >
-          GOAL +1
-          <span className="block text-[10px] font-semibold opacity-75">
-            {goalVisualEnabled ? "met visual" : "alleen score"}
-          </span>
-        </Button>
+      <div className="flex flex-wrap gap-2">
+        {increments.map((points) => (
+          <Button
+            key={points}
+            size="lg"
+            className="min-w-24 flex-1 bg-green-500 hover:bg-green-600 text-black text-lg font-black"
+            onClick={() => onScoreClick(points)}
+          >
+            {scoreLabel.toUpperCase()} +{points}
+            {scoreLabel === "Goal" && points === 1 && (
+              <span className="block text-[10px] font-semibold opacity-75">
+                {goalVisualEnabled ? "met visual" : "alleen score"}
+              </span>
+            )}
+          </Button>
+        ))}
         <Button variant="outline" onClick={() => onAdjust(-1)}>
           −1
         </Button>
@@ -325,11 +344,12 @@ function MatchFieldLineupDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const maximumPlayers = getSportProfile(match.sport).fieldPlayers;
   const [saving, setSaving] = useState(false);
   const [homeSel, setHomeSel] = useState<Set<string>>(() => {
     const ids = match.homeFieldPlayerIds;
     if (ids && ids.length > 0) return new Set(ids);
-    return new Set(defaultField11FromRoster(match.homeTeam.players ?? []));
+    return new Set(defaultFieldFromRoster(match.homeTeam.players ?? [], maximumPlayers));
   });
 
   const roster = match.homeTeam.players ?? [];
@@ -339,15 +359,15 @@ function MatchFieldLineupDialog({
     setHomeSel((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
-      else if (next.size < 11) next.add(id);
+      else if (next.size < maximumPlayers) next.add(id);
       return next;
     });
   }
 
   async function save() {
-    if (homeSel.size < 1 || homeSel.size > 11) {
+    if (homeSel.size < 1 || homeSel.size > maximumPlayers) {
       toast({
-        title: "Kies 1 tot 11 spelers voor de thuisploeg op het veld",
+        title: `Kies 1 tot ${maximumPlayers} spelers voor de thuisploeg op het veld`,
         variant: "error",
       });
       return;
@@ -380,12 +400,12 @@ function MatchFieldLineupDialog({
           <DialogTitle>Wie staat op het veld? (thuisploeg)</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground mb-3">
-          Alleen <strong>thuis</strong>: max. 11 spelers (geen coaches). Bepaalt de thuislijsten bij{" "}
+          Alleen <strong>thuis</strong>: max. {maximumPlayers} spelers (geen coaches). Bepaalt de thuislijsten bij{" "}
           <strong>Wissel</strong> en wordt bij getoonde wissels bijgewerkt. Uitploeg: standaard
           basiself (rugnummer) zoals de server die zet, tenzij die al in de wedstrijd staat.
         </p>
         <div className="text-xs font-medium text-foreground mb-3">
-          {match.homeTeam.shortName} · {homeSel.size}/11
+          {match.homeTeam.shortName} · {homeSel.size}/{maximumPlayers}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[52vh] overflow-y-auto pr-1">
           {squad.map((p) => {

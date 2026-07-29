@@ -14,9 +14,16 @@ export function parsePlayerIdArrayJson(raw: string | null | undefined): string[]
 export function defaultField11FromRoster(
   players: { id: string; number: number; isCoach: boolean }[],
 ): string[] {
+  return defaultFieldFromRoster(players, 11);
+}
+
+export function defaultFieldFromRoster(
+  players: { id: string; number: number; isCoach: boolean }[],
+  maximum: number,
+): string[] {
   const field = players.filter((p) => !p.isCoach);
   field.sort((a, b) => a.number - b.number);
-  return field.slice(0, 11).map((p) => p.id);
+  return field.slice(0, Math.max(1, maximum)).map((p) => p.id);
 }
 
 export function applySubstitutionToFieldIds(

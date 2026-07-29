@@ -1,6 +1,6 @@
 import { app } from "electron";
 import { readStoredLicense } from "./license-service";
-import { computeElapsedSeconds } from "../lib/timer";
+import { computeElapsedSeconds, computeShotClockSeconds } from "../lib/timer";
 
 type CloudRuntime = {
   apiRequest?: (request: {
@@ -57,6 +57,9 @@ function withTimerTelemetry(snapshot: unknown) {
     timerRunning?: boolean;
     timerStartedAt?: string | null;
     timerBaseSec?: number;
+    shotClockRunning?: boolean;
+    shotClockStartedAt?: string | null;
+    shotClockBaseSec?: number;
   };
   return {
     ...state,
@@ -64,6 +67,11 @@ function withTimerTelemetry(snapshot: unknown) {
       timerRunning: !!state.timerRunning,
       timerStartedAt: state.timerStartedAt ?? null,
       timerBaseSec: Number(state.timerBaseSec ?? 0),
+    }),
+    shotClockRemainingSec: computeShotClockSeconds({
+      shotClockRunning: !!state.shotClockRunning,
+      shotClockStartedAt: state.shotClockStartedAt ?? null,
+      shotClockBaseSec: Number(state.shotClockBaseSec ?? 0),
     }),
     timerElapsedAtMs: Date.now(),
   };

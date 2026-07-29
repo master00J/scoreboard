@@ -33,7 +33,7 @@ export function SetupScoreboardThemeSection({
   settings,
   reloadSettings,
 }: {
-  settings: AppSettings | undefined;
+  settings: AppSettings | null | undefined;
   reloadSettings: () => void;
 }) {
   const resolved = useMemo(

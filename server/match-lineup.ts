@@ -1,9 +1,10 @@
 import { prisma } from "../lib/prisma";
 import {
   applySubstitutionToFieldIds,
-  defaultField11FromRoster,
+  defaultFieldFromRoster,
   parsePlayerIdArrayJson,
 } from "../lib/match-field-lineup";
+import { getSportProfile } from "../lib/sports";
 
 export type SubPair = { teamId: string; playerOutId: string; playerInId: string };
 
@@ -82,11 +83,12 @@ export async function ensureDefaultMatchFieldLineups(matchId: string): Promise<v
   const home = parsePlayerIdArrayJson(m.homeFieldPlayerIdsJson);
   const away = parsePlayerIdArrayJson(m.awayFieldPlayerIdsJson);
   if (home.length > 0 && away.length > 0) return;
+  const maximum = getSportProfile(m.sport).fieldPlayers;
 
   const nuHome =
-    home.length > 0 ? home : defaultField11FromRoster(m.homeTeam.players ?? []);
+    home.length > 0 ? home : defaultFieldFromRoster(m.homeTeam.players ?? [], maximum);
   const nuAway =
-    away.length > 0 ? away : defaultField11FromRoster(m.awayTeam.players ?? []);
+    away.length > 0 ? away : defaultFieldFromRoster(m.awayTeam.players ?? [], maximum);
 
   await prisma.match.update({
     where: { id: matchId },

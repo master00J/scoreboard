@@ -1,6 +1,12 @@
 import type { BrowserWindow } from "electron";
 import { prisma } from "../lib/prisma";
-import { computeElapsedSeconds, serializeDisplayState } from "../lib/timer";
+import {
+  computeElapsedSeconds,
+  computeShotClockSeconds,
+  pauseShotClockAt,
+  serializeDisplayState,
+} from "../lib/timer";
+import { getSportProfile, normalizeSport } from "../lib/sports";
 import { CommandSchema, type Command } from "../lib/validation/commands";
 import type {
   CommandAck,
@@ -15,6 +21,11 @@ import type {
   SponsorTelemetryClipProgress,
   SponsorTelemetryClipStart,
 } from "../lib/sponsor-telemetry";
+import {
+  applyTemplateToThemeJson,
+  builtInTemplateRows,
+  sanitizeTemplateThemeJson,
+} from "../lib/scoreboard-templates";
 import { handleCommand } from "../server/handlers";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
@@ -408,6 +419,17 @@ async function ensureSqliteSchema() {
     `TEXT NOT NULL DEFAULT '[]'`,
   );
 
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "ScoreboardTemplate" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "label" TEXT,
+    "themeJson" TEXT NOT NULL,
+    "isBuiltIn" BOOLEAN NOT NULL DEFAULT 0,
+    "sortIndex" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Sponsor" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
@@ -427,6 +449,18 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("Match", "matchSponsorMediaId", "TEXT");
   await addColumnIfMissing("Match", "closedAt", "DATETIME");
   await addColumnIfMissing("Match", "prematchSpreadWindowSec", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "sport", `TEXT NOT NULL DEFAULT 'FOOTBALL'`);
+  await addColumnIfMissing("Match", "currentPeriod", "INTEGER NOT NULL DEFAULT 1");
+  await addColumnIfMissing("Match", "periodDurationSec", "INTEGER NOT NULL DEFAULT 2700");
+  await addColumnIfMissing("Match", "homeTimeouts", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "awayTimeouts", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "homeFouls", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "awayFouls", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "homeSets", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "awaySets", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "shotClockRunning", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "shotClockStartedAt", "DATETIME");
+  await addColumnIfMissing("DisplayState", "shotClockBaseSec", "INTEGER NOT NULL DEFAULT 24");
   await addColumnIfMissing("Sponsor", "firstHalfScoreboardSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "firstHalfSponsorSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "halftimeScoreboardSec", "INTEGER");
@@ -711,6 +745,27 @@ async function setIdleFallbackMediaId(mediaId: string | null) {
   );
 }
 
+/**
+ * Zorgt dat de meegeleverde templates bestaan. Naam/label worden bijgewerkt zodat
+ * updates van de app doorkomen, maar gebruikers-templates blijven ongemoeid en een
+ * verwijderde built-in komt terug (ze zijn bedoeld als vertrekpunt).
+ */
+async function ensureBuiltInScoreboardTemplates(): Promise<void> {
+  for (const row of builtInTemplateRows()) {
+    await prisma.scoreboardTemplate.upsert({
+      where: { id: row.id },
+      update: {
+        name: row.name,
+        label: row.label,
+        themeJson: row.themeJson,
+        sortIndex: row.sortIndex,
+        isBuiltIn: true,
+      },
+      create: row,
+    });
+  }
+}
+
 async function buildSettingsApiJson() {
   const s = await getAppSettings();
   let idleFallbackMedia: unknown = null;
@@ -891,6 +946,9 @@ async function detachDisplayStateForMatchId(matchId: string): Promise<void> {
       timerRunning: false,
       timerStartedAt: null,
       timerBaseSec: 0,
+      shotClockRunning: false,
+      shotClockStartedAt: null,
+      shotClockBaseSec: 0,
     },
   });
   resetSponsorLedger();
@@ -939,7 +997,14 @@ function startTickLoop() {
   if (tickInterval) return;
   tickInterval = setInterval(async () => {
     try {
-      const state = await getStateRow();
+      let state = await getStateRow();
+      if (state.shotClockRunning && computeShotClockSeconds(state) <= 0) {
+        state = await prisma.displayState.update({
+          where: { id: 1 },
+          data: pauseShotClockAt(0),
+        });
+        sendAll("display:state", serializeDisplayState(state));
+      }
       const tick: TickPayload = {
         elapsed: computeElapsedSeconds(state),
         running: state.timerRunning,
@@ -1410,6 +1475,87 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       return json(200, { ok: true });
     }
 
+    if (pathname === "/api/scoreboard-templates" && method === "GET") {
+      await ensureBuiltInScoreboardTemplates();
+      const rows = await prisma.scoreboardTemplate.findMany({
+        orderBy: [{ isBuiltIn: "desc" }, { sortIndex: "asc" }, { name: "asc" }],
+      });
+      return json(200, rows);
+    }
+
+    if (pathname === "/api/scoreboard-templates" && method === "POST") {
+      const body = parseJsonBody(req) as {
+        name?: string;
+        label?: string | null;
+        themeJson?: string | null;
+      };
+      const name = (body.name ?? "").trim().slice(0, 80);
+      if (!name) return json(400, { error: "Naam is verplicht." });
+      const row = await prisma.scoreboardTemplate.create({
+        data: {
+          name,
+          label: body.label?.trim().slice(0, 80) || null,
+          themeJson: sanitizeTemplateThemeJson(body.themeJson),
+          isBuiltIn: false,
+          sortIndex: 0,
+        },
+      });
+      return json(200, row);
+    }
+
+    const templateId = pathname.match(/^\/api\/scoreboard-templates\/([^/]+)$/)?.[1];
+
+    if (templateId && method === "PATCH") {
+      const existing = await prisma.scoreboardTemplate.findUnique({ where: { id: templateId } });
+      if (!existing) return json(404, { error: "Template niet gevonden." });
+      if (existing.isBuiltIn) {
+        return json(400, { error: "Meegeleverde templates zijn niet aanpasbaar — dupliceer ze." });
+      }
+      const body = parseJsonBody(req) as {
+        name?: string;
+        label?: string | null;
+        themeJson?: string | null;
+      };
+      const data: Record<string, unknown> = {};
+      if (typeof body.name === "string" && body.name.trim()) {
+        data.name = body.name.trim().slice(0, 80);
+      }
+      if (body.label !== undefined) data.label = body.label?.trim().slice(0, 80) || null;
+      if (body.themeJson !== undefined) data.themeJson = sanitizeTemplateThemeJson(body.themeJson);
+      const row = await prisma.scoreboardTemplate.update({ where: { id: templateId }, data });
+      return json(200, row);
+    }
+
+    if (templateId && method === "DELETE") {
+      const existing = await prisma.scoreboardTemplate.findUnique({ where: { id: templateId } });
+      if (!existing) return json(404, { error: "Template niet gevonden." });
+      if (existing.isBuiltIn) {
+        return json(400, { error: "Meegeleverde templates kunnen niet verwijderd worden." });
+      }
+      await prisma.scoreboardTemplate.delete({ where: { id: templateId } });
+      return json(200, { ok: true });
+    }
+
+    const applyId = pathname.match(/^\/api\/scoreboard-templates\/([^/]+)\/apply$/)?.[1];
+    if (applyId && method === "POST") {
+      const tpl = await prisma.scoreboardTemplate.findUnique({ where: { id: applyId } });
+      if (!tpl) return json(404, { error: "Template niet gevonden." });
+      const settings = await prisma.appSettings.findFirst();
+      /** Layout uit de template, afspeelinstellingen uit de huidige settings. */
+      const nextJson = applyTemplateToThemeJson(settings?.scoreboardThemeJson, tpl.themeJson);
+      if (settings) {
+        await prisma.appSettings.update({
+          where: { id: settings.id },
+          data: { scoreboardThemeJson: nextJson },
+        });
+      } else {
+        await prisma.appSettings.create({ data: { scoreboardThemeJson: nextJson } });
+      }
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ok: true, scoreboardThemeJson: nextJson });
+    }
+
     if (pathname === "/api/sponsors" && method === "GET") {
       const sponsors = await prisma.sponsor.findMany({
         include: { media: { orderBy: { createdAt: "asc" } } },
@@ -1502,7 +1648,11 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         matchSponsorMediaId?: string | null;
         halfDurationSec?: number;
         halfBreakSec?: number;
+        sport?: string;
+        periodDurationSec?: number;
       };
+      const sport = normalizeSport(body.sport);
+      const sportProfile = getSportProfile(sport);
       let sponsorId: string | null = null;
       if (typeof body.matchSponsorMediaId === "string" && body.matchSponsorMediaId.length > 0) {
         const mi = await prisma.mediaItem.findUnique({ where: { id: body.matchSponsorMediaId } });
@@ -1515,7 +1665,13 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           awayTeamId: body.awayTeamId,
           kickoffAt: body.kickoffAt ? new Date(body.kickoffAt) : null,
           matchSponsorMediaId: sponsorId,
-          halfDurationSec: body.halfDurationSec ?? 2700,
+          sport,
+          currentPeriod: 1,
+          periodDurationSec:
+            typeof body.periodDurationSec === "number" && body.periodDurationSec >= 0
+              ? Math.floor(body.periodDurationSec)
+              : sportProfile.defaultPeriodDurationSec,
+          halfDurationSec: body.halfDurationSec ?? sportProfile.defaultPeriodDurationSec,
           halfBreakSec: body.halfBreakSec ?? 900,
         },
         include: { homeTeam: true, awayTeam: true, matchSponsorMedia: true },
@@ -1587,6 +1743,22 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         if (typeof body.status === "string") data.status = body.status;
         if (typeof body.homeScore === "number") data.homeScore = body.homeScore;
         if (typeof body.awayScore === "number") data.awayScore = body.awayScore;
+        if (typeof body.sport === "string") {
+          const sport = normalizeSport(body.sport);
+          const profile = getSportProfile(sport);
+          data.sport = sport;
+          data.currentPeriod = 1;
+          data.periodDurationSec = profile.defaultPeriodDurationSec;
+          data.homeTimeouts = 0;
+          data.awayTimeouts = 0;
+          data.homeFouls = 0;
+          data.awayFouls = 0;
+          data.homeSets = 0;
+          data.awaySets = 0;
+        }
+        if (typeof body.periodDurationSec === "number" && Number.isFinite(body.periodDurationSec)) {
+          data.periodDurationSec = Math.max(0, Math.min(24 * 60 * 60, Math.floor(body.periodDurationSec)));
+        }
         if (body.kickoffAt === null) data.kickoffAt = null;
         else if (typeof body.kickoffAt === "string") data.kickoffAt = new Date(body.kickoffAt);
 
@@ -1618,6 +1790,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           }
         }
 
+        const maximumPlayersForMatch = getSportProfile(cur.sport).fieldPlayers;
+
         function validateLineup(
           players: { id: string }[] | undefined,
           ids: string[],
@@ -1626,8 +1800,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           const allowed = new Set((players ?? []).map((p) => p.id));
           const uniq = new Set(ids);
           if (uniq.size !== ids.length) throw new Error(`${label}: dubbele speler`);
-          if (ids.length < 1 || ids.length > 11) {
-            throw new Error(`${label}: kies 1 tot 11 spelers op het veld`);
+          if (ids.length < 1 || ids.length > maximumPlayersForMatch) {
+            throw new Error(`${label}: kies 1 tot ${maximumPlayersForMatch} spelers op het veld`);
           }
           for (const id of ids) {
             if (!allowed.has(id)) throw new Error(`${label}: speler hoort niet bij dit team`);

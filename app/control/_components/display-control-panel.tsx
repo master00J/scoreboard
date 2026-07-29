@@ -11,6 +11,7 @@ import { useLicenseFeatures } from "@/lib/use-license-features";
 import type { Match, MatchEvent, Player, MediaItem } from "@/lib/types";
 import type { MatchStatusT } from "@/lib/validation/commands";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
+import { getSportProfile } from "@/lib/sports";
 
 const PHASES: { status: MatchStatusT; label: string; hint?: string }[] = [
   { status: "PREMATCH", label: "Voor wedstrijd", hint: "SETUP of PREMATCH" },
@@ -38,6 +39,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
   const mode = state?.mode ?? "IDLE";
   const safeMode = state?.safeMode ?? false;
   const livePlay = isLivePlayingMatchStatus(activeMatch?.status);
+  const sportProfile = getSportProfile(activeMatch?.sport);
   const { isFeatureAllowed, planLabel } = useLicenseFeatures();
   const automaticSponsorsAllowed = isFeatureAllowed("automatic_sponsor_rotation");
 
@@ -215,7 +217,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           Start sponsors daarna manueel met <strong>Scorebord + sponsors</strong>. Geen actieve wedstrijd? Activeer eerst een match.
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {PHASES.map((p) => (
+          {sportProfile.id === "FOOTBALL" ? PHASES.map((p) => (
             <Button
               key={p.status}
               size="sm"
@@ -227,7 +229,37 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             >
               {p.label}
             </Button>
-          ))}
+          )) : (
+            <>
+              {Array.from({ length: sportProfile.periodCount }, (_, index) => index + 1).map((period) => (
+                <Button
+                  key={period}
+                  size="sm"
+                  variant={activeMatch?.currentPeriod === period && livePlay ? "default" : "outline"}
+                  disabled={!activeMatch}
+                  onClick={() => void sendCommand({ type: "sport:setPeriod", period })}
+                >
+                  {sportProfile.periodLabel} {period}
+                </Button>
+              ))}
+              <Button
+                size="sm"
+                variant={activeMatch?.status === "HALF_TIME" ? "default" : "outline"}
+                disabled={!activeMatch}
+                onClick={() => void applyPhase("HALF_TIME")}
+              >
+                Pauze
+              </Button>
+              <Button
+                size="sm"
+                variant={activeMatch?.status === "FULL_TIME" ? "default" : "outline"}
+                disabled={!activeMatch}
+                onClick={() => void applyPhase("FULL_TIME")}
+              >
+                Einde
+              </Button>
+            </>
+          )}
         </div>
         {!activeMatch && (
           <p className="text-[11px] text-amber-600/90 dark:text-amber-400/90">

@@ -13,6 +13,17 @@ const defaultVenueId = "default";
 const STORAGE_KEY = "scoreboard_mobile_session_v1";
 const MATCH_STATUSES = ["SETUP", "PREMATCH", "FIRST_HALF", "HALF_TIME", "SECOND_HALF", "EXTRA_TIME", "FULL_TIME", "POST_MATCH"];
 const ARENACUE_LOGO_URI = "https://arenacue.be/assets/arenacue-icon.png";
+const SPORT_PROFILES = {
+  FOOTBALL: { label: "Voetbal", periodLabel: "Helft", periods: 2, timer: "up", score: "Goal", increments: [1], timeouts: 0, stat: null, shot: [] },
+  FUTSAL: { label: "Futsal", periodLabel: "Helft", periods: 2, timer: "down", score: "Goal", increments: [1], timeouts: 1, stat: "Teamfouten", shot: [] },
+  BASKETBALL: { label: "Basketbal", periodLabel: "Quarter", periods: 4, timer: "down", score: "Punten", increments: [1, 2, 3], timeouts: 3, stat: "Teamfouten", shot: [24, 14] },
+  VOLLEYBALL: { label: "Volleybal", periodLabel: "Set", periods: 5, timer: "none", score: "Punt", increments: [1], timeouts: 2, stat: null, shot: [] },
+  HOCKEY: { label: "Hockey", periodLabel: "Quarter", periods: 4, timer: "down", score: "Goal", increments: [1], timeouts: 0, stat: "Straffen", shot: [] },
+};
+
+function sportProfile(sport) {
+  return SPORT_PROFILES[String(sport || "FOOTBALL").toUpperCase()] || SPORT_PROFILES.FOOTBALL;
+}
 
 function fullName(player) {
   return `#${player.number} ${player.firstName} ${player.lastName}`;
@@ -29,6 +40,14 @@ function computeElapsedSeconds(snapshot, nowMs = Date.now()) {
   if (!snapshot.timerRunning || !snapshot.timerStartedAt) return Math.max(0, Math.floor(baseSec));
   const receivedAtMs = Number(snapshot._receivedAtMs ?? nowMs);
   return Math.max(0, Math.floor(baseSec + (nowMs - receivedAtMs) / 1000));
+}
+
+function computeShotClockSeconds(snapshot, nowMs = Date.now()) {
+  if (!snapshot) return 0;
+  const receivedAtMs = Number(snapshot._receivedAtMs ?? nowMs);
+  const base = Number(snapshot.shotClockRemainingSec ?? snapshot.shotClockBaseSec ?? 0);
+  const delta = snapshot.shotClockRunning ? (nowMs - receivedAtMs) / 1000 : 0;
+  return Math.max(0, base - delta);
 }
 
 function formatClock(totalSeconds) {
@@ -667,6 +686,15 @@ export default function App() {
       : null;
   const playersForTeam = teamForActions?.players || [];
   const displayElapsed = computeElapsedSeconds(snapshot, nowMs);
+  const activeSportProfile = sportProfile(activeMatchDetails?.sport);
+  const periodDurationSec = Number(
+    activeMatchDetails?.periodDurationSec ?? activeSportProfile.defaultPeriodDurationSec ?? 0,
+  );
+  const displayMatchClock =
+    activeSportProfile.timer === "down"
+      ? Math.max(0, periodDurationSec - displayElapsed)
+      : displayElapsed;
+  const displayShotClock = computeShotClockSeconds(snapshot, nowMs);
   const activeTeamSide = activeMatchDetails && selectedTeamId === activeMatchDetails.awayTeamId ? "away" : "home";
   const homeLabel = activeMatchDetails?.homeTeam?.name || activeMatch?.homeTeam?.name || "HOME";
   const awayLabel = activeMatchDetails?.awayTeam?.name || activeMatch?.awayTeam?.name || "AWAY";
@@ -775,7 +803,9 @@ export default function App() {
 
         <View style={styles.remotePanel}>
           <View style={styles.remoteTimerCard}>
-            <Text style={styles.remoteTimerValue}>{formatClock(displayElapsed)}</Text>
+            <Text style={styles.remoteTimerValue}>
+              {activeSportProfile.timer === "none" ? "--:--" : formatClock(displayMatchClock)}
+            </Text>
             <Text style={styles.remoteTimerState}>{snapshot?.timerRunning ? "Timer loopt" : "Timer gepauzeerd"}</Text>
           </View>
 
@@ -791,17 +821,56 @@ export default function App() {
             </View>
           </View>
 
+          {activeSportProfile.increments.length > 1 && (
+            <View style={styles.remoteButtonRow}>
+              {activeSportProfile.increments.slice(1).map((points) => (
+                <Pressable
+                  key={`home-${points}`}
+                  style={styles.remoteDarkButton}
+                  onPress={() => sendCommand({ type: "score:adjust", side: "home", delta: points })}
+                >
+                  <Text style={styles.remoteActionMain}>+{points}</Text>
+                  <Text style={styles.remoteActionSub}>HOME</Text>
+                </Pressable>
+              ))}
+              {activeSportProfile.increments.slice(1).map((points) => (
+                <Pressable
+                  key={`away-${points}`}
+                  style={styles.remoteDarkButton}
+                  onPress={() => sendCommand({ type: "score:adjust", side: "away", delta: points })}
+                >
+                  <Text style={styles.remoteActionMain}>+{points}</Text>
+                  <Text style={styles.remoteActionSub}>AWAY</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
           <View style={styles.remoteButtonRow}>
-            <Pressable style={styles.remoteActionButton} onPress={() => handleQuickGoal("home")}>
+            <Pressable
+              style={styles.remoteActionButton}
+              onPress={() =>
+                activeSportProfile.score === "Goal"
+                  ? handleQuickGoal("home")
+                  : sendCommand({ type: "score:adjust", side: "home", delta: 1 })
+              }
+            >
               <Text style={styles.remoteActionMain}>+1</Text>
-              <Text style={styles.remoteActionSub}>HOME</Text>
+              <Text style={styles.remoteActionSub}>HOME · {activeSportProfile.score}</Text>
             </Pressable>
             <Pressable style={styles.remoteGhostButton} onPress={() => sendCommand({ type: "timer:set", seconds: 0 })}>
               <Text style={styles.remoteIcon}>⟳</Text>
             </Pressable>
-            <Pressable style={styles.remoteActionButton} onPress={() => handleQuickGoal("away")}>
+            <Pressable
+              style={styles.remoteActionButton}
+              onPress={() =>
+                activeSportProfile.score === "Goal"
+                  ? handleQuickGoal("away")
+                  : sendCommand({ type: "score:adjust", side: "away", delta: 1 })
+              }
+            >
               <Text style={styles.remoteActionMain}>+1</Text>
-              <Text style={styles.remoteActionSub}>AWAY</Text>
+              <Text style={styles.remoteActionSub}>AWAY · {activeSportProfile.score}</Text>
             </Pressable>
           </View>
 
@@ -1092,6 +1161,145 @@ export default function App() {
 
         {activeTab === "operator" && (
         <>
+        {activeMatchDetails && (
+          <View style={styles.card}>
+            <Text style={styles.label}>{activeSportProfile.label} · periodes en regels</Text>
+            <Text style={styles.subLabel}>
+              {activeSportProfile.periodLabel} {Number(activeMatchDetails.currentPeriod ?? 1)}
+            </Text>
+            <View style={styles.grid}>
+              {Array.from({ length: activeSportProfile.periods }, (_, index) => index + 1).map((period) => (
+                <Pressable
+                  key={period}
+                  style={styles.smallButton}
+                  onPress={() => sendCommand({ type: "sport:setPeriod", period })}
+                >
+                  <Text style={styles.buttonTextSmall}>
+                    {activeSportProfile.periodLabel} {period}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {activeSportProfile.timeouts > 0 && (
+              <>
+                <Text style={styles.subLabel}>Time-outs gebruikt</Text>
+                <View style={styles.row}>
+                  {["home", "away"].map((side) => (
+                    <View key={`timeout-${side}`} style={styles.scoreSide}>
+                      <Text style={styles.scoreLabel}>{side === "home" ? "HOME" : "AWAY"}</Text>
+                      <Text style={styles.scoreNumber}>
+                        {Number(activeMatchDetails[side === "home" ? "homeTimeouts" : "awayTimeouts"] ?? 0)}
+                      </Text>
+                      <View style={styles.row}>
+                        <Pressable
+                          style={styles.smallButton}
+                          onPress={() => sendCommand({ type: "sport:statAdjust", stat: "timeout", side, delta: -1 })}
+                        >
+                          <Text style={styles.buttonTextSmall}>−</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.smallButton}
+                          onPress={() => sendCommand({ type: "sport:statAdjust", stat: "timeout", side, delta: 1 })}
+                        >
+                          <Text style={styles.buttonTextSmall}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
+
+            {activeSportProfile.stat && (
+              <>
+                <Text style={styles.subLabel}>{activeSportProfile.stat}</Text>
+                <View style={styles.row}>
+                  {["home", "away"].map((side) => (
+                    <View key={`foul-${side}`} style={styles.scoreSide}>
+                      <Text style={styles.scoreLabel}>{side === "home" ? "HOME" : "AWAY"}</Text>
+                      <Text style={styles.scoreNumber}>
+                        {Number(activeMatchDetails[side === "home" ? "homeFouls" : "awayFouls"] ?? 0)}
+                      </Text>
+                      <View style={styles.row}>
+                        <Pressable
+                          style={styles.smallButton}
+                          onPress={() => sendCommand({ type: "sport:statAdjust", stat: "foul", side, delta: -1 })}
+                        >
+                          <Text style={styles.buttonTextSmall}>−</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.smallButton}
+                          onPress={() => sendCommand({ type: "sport:statAdjust", stat: "foul", side, delta: 1 })}
+                        >
+                          <Text style={styles.buttonTextSmall}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
+
+            {activeSportProfile.label === "Volleybal" && (
+              <>
+                <Text style={styles.subLabel}>Gewonnen sets</Text>
+                <View style={styles.row}>
+                  {["home", "away"].map((side) => (
+                    <View key={`set-${side}`} style={styles.scoreSide}>
+                      <Text style={styles.scoreLabel}>{side === "home" ? "HOME" : "AWAY"}</Text>
+                      <Text style={styles.scoreNumber}>
+                        {Number(activeMatchDetails[side === "home" ? "homeSets" : "awaySets"] ?? 0)}
+                      </Text>
+                      <View style={styles.row}>
+                        <Pressable
+                          style={styles.smallButton}
+                          onPress={() => sendCommand({ type: "sport:statAdjust", stat: "set", side, delta: -1 })}
+                        >
+                          <Text style={styles.buttonTextSmall}>−</Text>
+                        </Pressable>
+                        <Pressable
+                          style={styles.smallButton}
+                          onPress={() => sendCommand({ type: "sport:statAdjust", stat: "set", side, delta: 1 })}
+                        >
+                          <Text style={styles.buttonTextSmall}>+</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
+
+            {activeSportProfile.shot.length > 0 && (
+              <>
+                <Text style={styles.subLabel}>Shotclock · {Math.ceil(displayShotClock)}s</Text>
+                <View style={styles.row}>
+                  <Pressable
+                    style={styles.button}
+                    onPress={() =>
+                      sendCommand({ type: snapshot?.shotClockRunning ? "shotclock:pause" : "shotclock:start" })
+                    }
+                  >
+                    <Text style={styles.buttonText}>
+                      {snapshot?.shotClockRunning ? "Pauze" : "Start"}
+                    </Text>
+                  </Pressable>
+                  {activeSportProfile.shot.map((seconds) => (
+                    <Pressable
+                      key={seconds}
+                      style={styles.buttonSecondary}
+                      onPress={() => sendCommand({ type: "shotclock:reset", seconds })}
+                    >
+                      <Text style={styles.buttonText}>Reset {seconds}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </>
+            )}
+          </View>
+        )}
+
         <View style={styles.card}>
           <Text style={styles.label}>Timer snel</Text>
           <View style={styles.grid}>

@@ -66,6 +66,16 @@ export type Match = {
   matchSponsorMedia?: MediaItem | null;
   halfDurationSec: number;
   halfBreakSec: number;
+  /** Sportprofiel voor regels, periodes en klokgedrag. */
+  sport: import("./sports").SportType;
+  currentPeriod: number;
+  periodDurationSec: number;
+  homeTimeouts: number;
+  awayTimeouts: number;
+  homeFouls: number;
+  awayFouls: number;
+  homeSets: number;
+  awaySets: number;
   /**
    * Prematch: lengte van het herhalende sponsor-slotrooster (seconden).
    * 0 = automatisch: ongeveer de som van geplande «voor wedstrijd»-seconden per sponsor (min. 60).

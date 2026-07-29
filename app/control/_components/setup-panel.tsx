@@ -13,9 +13,11 @@ import { toast } from "@/components/ui/toast";
 import { isElectron, selectFilesViaDialog, selectFolderViaDialog, exportVenueBackup } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
+import { SetupScoreboardTemplatesSection } from "./setup-scoreboard-templates";
 import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
 import { SetupDisplayCanvasSection } from "./setup-display-canvas";
 import { AssetHealthCheck } from "./asset-health-check";
+import { getSportProfile, SPORT_TYPES, type SportType } from "@/lib/sports";
 
 type VisualField = "goalVideoPath" | "subImagePath" | "lineupVideoPath";
 
@@ -309,6 +311,7 @@ export function SetupPanel() {
         </div>
       </section>
 
+      <SetupScoreboardTemplatesSection settings={settings} reloadSettings={reloadSettings} />
       <SetupScoreboardThemeSection settings={settings} reloadSettings={reloadSettings} />
 
       <SetupDisplayCanvasSection settings={settings ?? null} reloadSettings={reloadSettings} />
@@ -340,6 +343,9 @@ export function SetupPanel() {
                 <div className="font-semibold">{m.homeTeam.name}</div>
                 <div className="text-muted-foreground text-sm">vs</div>
                 <div className="font-semibold">{m.awayTeam.name}</div>
+                <span className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
+                  {getSportProfile(m.sport).label}
+                </span>
                 {m.closedAt ? (
                   <span className="text-[10px] uppercase tracking-wide rounded px-2 py-0.5 bg-muted text-muted-foreground border border-border">
                     Afgesloten
@@ -1761,6 +1767,8 @@ function MatchDialog({
   onSaved: () => void;
 }) {
   const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [sport, setSport] = useState<SportType>("FOOTBALL");
+  const sportProfile = getSportProfile(sport);
   const [awayId, setAwayId] = useState(
     teams.find((team) => team.id !== homeTeam?.id)?.id ?? "",
   );
@@ -1857,6 +1865,8 @@ function MatchDialog({
     const payload: Record<string, unknown> = {
       homeTeamId: homeTeam.id,
       awayTeamId: resolvedAwayId,
+      sport,
+      periodDurationSec: sportProfile.defaultPeriodDurationSec,
       kickoffAt: kickoffLocal.trim() ? localDatetimeToIso(kickoffLocal) : null,
       matchSponsorMediaId: matchSponsorMediaId.trim() ? matchSponsorMediaId : null,
     };
@@ -1881,6 +1891,31 @@ function MatchDialog({
         <DialogHeader>
           <DialogTitle>New match</DialogTitle>
         </DialogHeader>
+        <div className="rounded-lg border border-border p-3">
+          <Label>Sport</Label>
+          <Select
+            value={sport}
+            onChange={(event) => setSport(event.target.value as SportType)}
+            className="mt-1"
+          >
+            {SPORT_TYPES.map((sportId) => (
+              <option key={sportId} value={sportId}>
+                {getSportProfile(sportId).label}
+              </option>
+            ))}
+          </Select>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {sportProfile.periodCount} × {sportProfile.periodLabel.toLowerCase()}
+            {sportProfile.timerMode === "NONE"
+              ? " · zonder wedstrijdklok"
+              : ` · ${Math.round(sportProfile.defaultPeriodDurationSec / 60)} minuten · ${
+                  sportProfile.timerMode === "COUNT_DOWN" ? "aftellend" : "optellend"
+                }`}
+            {sportProfile.shotClockPresets.length > 0
+              ? ` · shotclock ${sportProfile.shotClockPresets.join("/")}`
+              : ""}
+          </p>
+        </div>
         {!homeTeam ? (
           <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
             Stel eerst in de Setup-tab een vast home team in.
