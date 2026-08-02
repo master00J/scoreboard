@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useSocketSync, sendCommand, onDisplayError } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
@@ -30,6 +31,7 @@ import { AppResourceMeter } from "./_components/app-resource-meter";
 import { MobileBridgeMenu } from "./_components/mobile-bridge-menu";
 
 export default function ControlPage() {
+  const { t } = useTranslation();
   useSocketSync();
   const connected = useDisplayStore((s) => s.connected);
   const state = useDisplayStore((s) => s.state);
@@ -60,10 +62,10 @@ export default function ControlPage() {
   // Surface server error toasts
   useEffect(() => {
     const onErr = (p: { message: string }) => {
-      toast({ title: "Command failed", description: p.message, variant: "error" });
+      toast({ title: t("shell.commandFailed"), description: p.message, variant: "error" });
     };
     return onDisplayError(onErr);
-  }, []);
+  }, [t]);
 
   return (
     <LicenseActivationGate>
@@ -74,13 +76,13 @@ export default function ControlPage() {
 
       <header className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Stadium Control</h1>
+          <h1 className="text-3xl font-bold">{t("shell.title")}</h1>
           <p className="text-sm text-muted-foreground">
             {!state?.matchId
-              ? "No active match"
+              ? t("shell.noActiveMatch")
               : isFullMatch(match)
                 ? `${match.homeTeam.name} vs ${match.awayTeam.name} · ${match.status}`
-                : "Match wordt geladen…"}
+                : t("shell.matchLoading")}
           </p>
         </div>
         <div className="flex items-center gap-4">
@@ -92,17 +94,17 @@ export default function ControlPage() {
                 connected ? "bg-green-500 animate-pulse-dot" : "bg-red-500"
               }`}
             />
-            {connected ? "Connected" : "Disconnected"}
+            {connected ? t("common.connected") : t("common.disconnected")}
           </span>
           <span className="px-2 py-1 rounded bg-secondary text-xs font-mono">
-            mode: {state?.mode ?? "…"}
+            {t("shell.mode")}: {state?.mode ?? "…"}
           </span>
           <button
             type="button"
             onClick={() => void focusDisplayWindow()}
             className="text-xs underline text-muted-foreground"
           >
-            Open /display
+            {t("shell.openDisplay")}
           </button>
         </div>
       </header>
@@ -111,10 +113,10 @@ export default function ControlPage() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
-          <TabsTrigger value="match">Match</TabsTrigger>
-          <TabsTrigger value="setup">Setup</TabsTrigger>
-          <TabsTrigger value="media">Media</TabsTrigger>
-          <TabsTrigger value="reports">Rapporten</TabsTrigger>
+          <TabsTrigger value="match">{t("shell.tabMatch")}</TabsTrigger>
+          <TabsTrigger value="setup">{t("shell.tabSetup")}</TabsTrigger>
+          <TabsTrigger value="media">{t("shell.tabMedia")}</TabsTrigger>
+          <TabsTrigger value="reports">{t("shell.tabReports")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="match" forceMount>

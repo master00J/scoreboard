@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
@@ -13,6 +14,7 @@ import { toast } from "@/components/ui/toast";
 import { isElectron, selectFilesViaDialog, selectFolderViaDialog, exportVenueBackup } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
+import { normalizeUiLocale, type UiLocale } from "@/lib/i18n";
 import { SetupScoreboardTemplatesSection } from "./setup-scoreboard-templates";
 import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
 import { SetupDisplayCanvasSection } from "./setup-display-canvas";
@@ -21,22 +23,25 @@ import { getSportProfile, SPORT_TYPES, type SportType } from "@/lib/sports";
 
 type VisualField = "goalVideoPath" | "subImagePath" | "lineupVideoPath";
 
-const VISUAL_LABELS: Record<VisualField, { title: string; extensions: string[] }> = {
-  goalVideoPath: {
-    title: "Goal-viering video's",
-    extensions: ["mp4", "webm", "mov", "m4v"],
-  },
-  subImagePath: {
-    title: "Wissel afbeeldingen",
-    extensions: ["png", "jpg", "jpeg", "webp"],
-  },
-  lineupVideoPath: {
-    title: "Opstelling / lineup-video's (Spelerintro)",
-    extensions: ["mp4", "webm", "mov", "m4v"],
-  },
-};
-
 export function SetupPanel() {
+  const { t, i18n } = useTranslation();
+  const visualLabels = useMemo(
+    (): Record<VisualField, { title: string; extensions: string[] }> => ({
+      goalVideoPath: {
+        title: t("setup.goalVideos"),
+        extensions: ["mp4", "webm", "mov", "m4v"],
+      },
+      subImagePath: {
+        title: t("setup.subImages"),
+        extensions: ["png", "jpg", "jpeg", "webp"],
+      },
+      lineupVideoPath: {
+        title: t("setup.lineupVideos"),
+        extensions: ["mp4", "webm", "mov", "m4v"],
+      },
+    }),
+    [t],
+  );
   const { data: teams, reload: reloadTeams } = useApi<Team[]>("/api/teams");
   const { data: matches, reload: reloadMatches } = useApi<Match[]>("/api/matches");
   const { data: settings, reload: reloadSettings } = useApi<AppSettings>("/api/settings");
@@ -54,6 +59,22 @@ export function SetupPanel() {
   const [scheduleMatch, setScheduleMatch] = useState<Match | null>(null);
   const [visualsField, setVisualsField] = useState<VisualField | null>(null);
 
+  async function setUiLocale(next: UiLocale) {
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ uiLocale: next }),
+    });
+    if (!res.ok) {
+      toast({ title: t("language.saveFailed"), variant: "error" });
+      return;
+    }
+    await i18n.changeLanguage(next);
+    window.dispatchEvent(new CustomEvent("arenacue:ui-locale", { detail: next }));
+    toast({ title: t("language.saved"), variant: "success" });
+    reloadSettings();
+  }
+
   async function setHomeTeam(teamId: string | null) {
     const res = await fetch("/api/settings", {
       method: "PATCH",
@@ -61,7 +82,7 @@ export function SetupPanel() {
       body: JSON.stringify({ homeTeamId: teamId }),
     });
     if (!res.ok) {
-      toast({ title: "Kon home team niet opslaan", variant: "error" });
+      toast({ title: t("setup.homeTeamSaveFailed"), variant: "error" });
       return;
     }
     reloadSettings();
@@ -69,7 +90,7 @@ export function SetupPanel() {
 
   async function pickGoalIntroVideo() {
     const paths = await selectFilesViaDialog({
-      title: "Selecteer algemene GOAL-intro video",
+      title: t("setup.goalIntroPick"),
       filters: [{ name: "Video", extensions: ["mp4", "webm", "mov", "m4v"] }],
     });
     if (paths.length === 0) return;
@@ -80,13 +101,13 @@ export function SetupPanel() {
     });
     if (!res.ok) {
       toast({
-        title: "Goal-intro video opslaan mislukt",
+        title: t("setup.goalIntroSaveFailed"),
         description: await res.text(),
         variant: "error",
       });
       return;
     }
-    toast({ title: "Goal-intro video ingesteld", variant: "success" });
+    toast({ title: t("setup.goalIntroSaved"), variant: "success" });
     reloadSettings();
   }
 
@@ -109,7 +130,7 @@ export function SetupPanel() {
       }),
     });
     if (!res.ok) {
-      toast({ title: "Goalvisual-instelling opslaan mislukt", variant: "error" });
+      toast({ title: t("setup.goalVisualSaveFailed"), variant: "error" });
       return;
     }
     reloadSettings();
@@ -122,22 +143,35 @@ export function SetupPanel() {
       body: JSON.stringify({ idleFallbackMediaId: mediaId }),
     });
     if (!res.ok) {
-      toast({ title: "Standaardmedia niet opgeslagen", variant: "error" });
+      toast({ title: t("setup.idleMediaSaveFailed"), variant: "error" });
       return;
     }
     reloadSettings();
   }
 
+  const currentLocale = normalizeUiLocale(settings?.uiLocale ?? i18n.language);
+
   return (
     <div className="flex flex-col gap-6">
+      <section className="bg-card border border-border rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-1">{t("language.title")}</h2>
+        <p className="text-sm text-muted-foreground mb-3">{t("language.description")}</p>
+        <Label htmlFor="ui-locale">{t("language.label")}</Label>
+        <Select
+          id="ui-locale"
+          className="mt-2 max-w-xs"
+          value={currentLocale}
+          onChange={(event) => void setUiLocale(normalizeUiLocale(event.target.value))}
+        >
+          <option value="nl">{t("language.nl")}</option>
+          <option value="en">{t("language.en")}</option>
+          <option value="fr">{t("language.fr")}</option>
+        </Select>
+      </section>
       {isElectron ? (
         <section className="bg-card border border-border rounded-xl p-6">
-          <h2 className="text-lg font-semibold mb-1">Venue-backup</h2>
-          <p className="text-sm text-muted-foreground mb-3">
-            Maakt een ZIP met de lokale database (<code className="text-xs">data/stadium.db</code>) en een kopie
-            van <code className="text-xs">uploads/</code>. Ook via het menu: Bestand → Exporteer venue-backup.
-            Herstel: zie <code className="text-xs">docs/MATCHDAY.md</code>.
-          </p>
+          <h2 className="text-lg font-semibold mb-1">{t("setup.venueBackupTitle")}</h2>
+          <p className="text-sm text-muted-foreground mb-3">{t("setup.venueBackupBody")}</p>
           <Button
             variant="outline"
             size="sm"
@@ -146,32 +180,30 @@ export function SetupPanel() {
                 const r = await exportVenueBackup();
                 if (r.canceled) return;
                 if (!r.ok) {
-                  toast({ title: "Backup mislukt", description: r.error ?? "", variant: "error" });
+                  toast({ title: t("setup.backupFailed"), description: r.error ?? "", variant: "error" });
                   return;
                 }
                 toast({
-                  title: "Backup opgeslagen",
+                  title: t("setup.backupSaved"),
                   description: r.filePath ?? "",
                   variant: "success",
                 });
               })();
             }}
           >
-            Exporteer backup (ZIP)…
+            {t("setup.exportBackup")}
           </Button>
         </section>
       ) : null}
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-center justify-between mb-4 gap-4">
           <div>
-            <h2 className="text-lg font-semibold">Vast home team</h2>
-            <div className="text-sm text-muted-foreground">
-              Dit team wordt automatisch gebruikt als thuisploeg bij nieuwe wedstrijden.
-            </div>
+            <h2 className="text-lg font-semibold">{t("setup.homeTeamTitle")}</h2>
+            <div className="text-sm text-muted-foreground">{t("setup.homeTeamBody")}</div>
           </div>
           {homeTeam && (
             <Button variant="outline" size="sm" onClick={() => void setHomeTeam(null)}>
-              Wis home team
+              {t("setup.clearHomeTeam")}
             </Button>
           )}
         </div>
@@ -1472,7 +1504,7 @@ function BulkVisualsDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const meta = VISUAL_LABELS[field];
+  const meta = visualLabels[field];
   const players = (team.players ?? []).slice().sort((a, b) => a.number - b.number);
 
   const [files, setFiles] = useState<Array<{ name: string; path: string }>>([]);

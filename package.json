@@ -1,6 +1,6 @@
 {
   "name": "stadium-scoreboard",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Desktop scorebord- en sponsorweergave voor stadions (Electron + Next).",
   "author": "Stadium Scoreboard",
   "private": true,
@@ -98,7 +98,8 @@
       "allowToChangeInstallationDirectory": true,
       "installerLanguages": [
         "nl-NL",
-        "en-US"
+        "en-US",
+        "fr-FR"
       ],
       "language": "1043"
     },
@@ -145,6 +146,7 @@
     "clsx": "^2.1.1",
     "exceljs": "^4.4.0",
     "framer-motion": "^11.18.2",
+    "i18next": "^26.3.6",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "lucide-react": "^0.477.0",
@@ -152,6 +154,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.75.0",
+    "react-i18next": "^17.0.11",
     "tailwind-merge": "^2.6.1",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^3.25.0",

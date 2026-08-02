@@ -1,6 +1,8 @@
 import { createRoot } from "react-dom/client";
+import { useEffect, useState } from "react";
 import ControlPage from "@/app/control/page";
 import DisplayPage from "@/app/display/page";
+import { DEFAULT_LOCALE, I18nProvider, normalizeUiLocale, type UiLocale } from "@/lib/i18n";
 
 function extractPathFromInput(input: RequestInfo | URL): string | null {
   if (typeof input === "string") return input;
@@ -156,6 +158,52 @@ function AppRouter() {
   return <ControlPage />;
 }
 
+function Root() {
+  const [locale, setLocale] = useState<UiLocale>(DEFAULT_LOCALE);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = (await res.json()) as { uiLocale?: string };
+          if (!cancelled) setLocale(normalizeUiLocale(data.uiLocale));
+        }
+      } catch {
+        /* keep default */
+      } finally {
+        if (!cancelled) setReady(true);
+      }
+    })();
+
+    const onLocale = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      setLocale(normalizeUiLocale(detail));
+    };
+    window.addEventListener("arenacue:ui-locale", onLocale as EventListener);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("arenacue:ui-locale", onLocale as EventListener);
+    };
+  }, []);
+
+  if (!ready) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+        Loading…
+      </div>
+    );
+  }
+
+  return (
+    <I18nProvider locale={locale}>
+      <AppRouter />
+    </I18nProvider>
+  );
+}
+
 installDesktopFetchShim();
 
 const root = document.getElementById("root");
@@ -163,4 +211,4 @@ if (!root) {
   throw new Error("Renderer root not found");
 }
 
-createRoot(root).render(<AppRouter />);
+createRoot(root).render(<Root />);

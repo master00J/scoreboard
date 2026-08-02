@@ -1,0 +1,83 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "remove": "Remove",
+    "edit": "Edit",
+    "close": "Close",
+    "export": "Export",
+    "import": "Import",
+    "loading": "Loading…",
+    "connected": "Connected",
+    "disconnected": "Disconnected",
+    "success": "Success",
+    "error": "Error"
+  },
+  "shell": {
+    "title": "Stadium Control",
+    "noActiveMatch": "No active match",
+    "matchLoading": "Loading match…",
+    "openDisplay": "Open /display",
+    "tabMatch": "Match",
+    "tabSetup": "Setup",
+    "tabMedia": "Media",
+    "tabReports": "Reports",
+    "commandFailed": "Command failed",
+    "mode": "mode"
+  },
+  "language": {
+    "title": "Language",
+    "description": "Choose the language of the control interface. Saved on this device.",
+    "label": "Interface language",
+    "nl": "Nederlands",
+    "en": "English",
+    "fr": "Français",
+    "saved": "Language saved",
+    "saveFailed": "Could not save language"
+  },
+  "license": {
+    "checking": "Checking licence…",
+    "title": "ArenaCue licence",
+    "body": "Activate this installation with your licence key. Machine id (for support):",
+    "keyLabel": "Licence key",
+    "activate": "Activate on this PC",
+    "activating": "Working…",
+    "openPortal": "Licence & download (website)",
+    "keyTooShort": "Enter your full licence key (format ARENA-…).",
+    "unexpectedError": "Unexpected error. Please try again.",
+    "afterActivate": "After activation you can view your installs at arenacue.be/portal with the same key and your email address."
+  },
+  "setup": {
+    "venueBackupTitle": "Venue backup",
+    "venueBackupBody": "Creates a ZIP with the local database (data/stadium.db) and a copy of uploads/. Also via the menu: File → Export venue backup.",
+    "exportBackup": "Export backup (ZIP)…",
+    "backupFailed": "Backup failed",
+    "backupSaved": "Backup saved",
+    "homeTeamTitle": "Fixed home team",
+    "homeTeamBody": "This team is used automatically as the home side for new matches.",
+    "clearHomeTeam": "Clear home team",
+    "homeTeamSaveFailed": "Could not save home team",
+    "goalIntroPick": "Select general GOAL intro video",
+    "goalIntroSaveFailed": "Could not save goal intro video",
+    "goalIntroSaved": "Goal intro video set",
+    "goalVisualSaveFailed": "Could not save goal visual setting",
+    "idleMediaSaveFailed": "Could not save default media",
+    "goalVideos": "Goal celebration videos",
+    "subImages": "Substitution images",
+    "lineupVideos": "Line-up videos (player intro)"
+  },
+  "media": {
+    "title": "Sponsors & screen time",
+    "library": "Media library"
+  },
+  "reports": {
+    "title": "Proof-of-play"
+  },
+  "menu": {
+    "file": "File",
+    "view": "View",
+    "quit": "Quit",
+    "exportVenueBackup": "Export venue backup"
+  }
+}

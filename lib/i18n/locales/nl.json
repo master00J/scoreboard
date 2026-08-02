@@ -1,0 +1,83 @@
+{
+  "common": {
+    "save": "Opslaan",
+    "cancel": "Annuleren",
+    "delete": "Verwijderen",
+    "remove": "Verwijderen",
+    "edit": "Bewerken",
+    "close": "Sluiten",
+    "export": "Exporteren",
+    "import": "Importeren",
+    "loading": "Laden…",
+    "connected": "Verbonden",
+    "disconnected": "Verbroken",
+    "success": "Gelukt",
+    "error": "Fout"
+  },
+  "shell": {
+    "title": "Stadium Control",
+    "noActiveMatch": "Geen actieve wedstrijd",
+    "matchLoading": "Match wordt geladen…",
+    "openDisplay": "Open /display",
+    "tabMatch": "Match",
+    "tabSetup": "Setup",
+    "tabMedia": "Media",
+    "tabReports": "Rapporten",
+    "commandFailed": "Commando mislukt",
+    "mode": "modus"
+  },
+  "language": {
+    "title": "Taal",
+    "description": "Kies de taal van de bedieningsinterface. Wordt opgeslagen op dit toestel.",
+    "label": "Interfacetaal",
+    "nl": "Nederlands",
+    "en": "English",
+    "fr": "Français",
+    "saved": "Taal opgeslagen",
+    "saveFailed": "Taal opslaan mislukt"
+  },
+  "license": {
+    "checking": "Licentie controleren…",
+    "title": "ArenaCue-licentie",
+    "body": "Activeer deze installatie met je licentiesleutel. Machine-id (voor support):",
+    "keyLabel": "Licentiesleutel",
+    "activate": "Activeren op deze pc",
+    "activating": "Bezig…",
+    "openPortal": "Licentie & download (website)",
+    "keyTooShort": "Voer je volledige licentiesleutel in (formaat ARENA-…).",
+    "unexpectedError": "Onverwachte fout. Probeer opnieuw.",
+    "afterActivate": "Na activeren kun je je installaties bekijken op arenacue.be/portal met dezelfde sleutel en je e-mailadres."
+  },
+  "setup": {
+    "venueBackupTitle": "Venue-backup",
+    "venueBackupBody": "Maakt een ZIP met de lokale database (data/stadium.db) en een kopie van uploads/. Ook via het menu: Bestand → Exporteer venue-backup.",
+    "exportBackup": "Exporteer backup (ZIP)…",
+    "backupFailed": "Backup mislukt",
+    "backupSaved": "Backup opgeslagen",
+    "homeTeamTitle": "Vast home team",
+    "homeTeamBody": "Dit team wordt automatisch gebruikt als thuisploeg bij nieuwe wedstrijden.",
+    "clearHomeTeam": "Wis home team",
+    "homeTeamSaveFailed": "Kon home team niet opslaan",
+    "goalIntroPick": "Selecteer algemene GOAL-intro video",
+    "goalIntroSaveFailed": "Goal-intro video opslaan mislukt",
+    "goalIntroSaved": "Goal-intro video ingesteld",
+    "goalVisualSaveFailed": "Goalvisual-instelling opslaan mislukt",
+    "idleMediaSaveFailed": "Standaardmedia niet opgeslagen",
+    "goalVideos": "Goal-viering video's",
+    "subImages": "Wissel afbeeldingen",
+    "lineupVideos": "Opstelling / lineup-video's (Spelerintro)"
+  },
+  "media": {
+    "title": "Sponsors & schermtijd",
+    "library": "Mediabibliotheek"
+  },
+  "reports": {
+    "title": "Proof-of-play"
+  },
+  "menu": {
+    "file": "Bestand",
+    "view": "Weergave",
+    "quit": "Afsluiten",
+    "exportVenueBackup": "Exporteer venue-backup"
+  }
+}

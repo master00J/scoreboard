@@ -408,6 +408,7 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("AppSettings", "displaySafeZoneVisible", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("AppSettings", "displaySafeZoneMarginPx", "INTEGER NOT NULL DEFAULT 40");
   await addColumnIfMissing("AppSettings", "idleFallbackMediaId", "TEXT");
+  await addColumnIfMissing("AppSettings", "uiLocale", `TEXT NOT NULL DEFAULT 'nl'`);
   await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "safeMode", "BOOLEAN NOT NULL DEFAULT 0");
@@ -632,6 +633,7 @@ type AppSettingsRow = {
   displaySafeZoneVisible?: boolean | number | null;
   displaySafeZoneMarginPx?: number | null;
   idleFallbackMediaId?: string | null;
+  uiLocale?: string | null;
 };
 
 function defaultLiveCycle(): LiveCycleStored {
@@ -659,6 +661,10 @@ function clampLiveCyclePhasing(p: LiveCycleStored): LiveCycleStored {
   };
 }
 
+function normalizeUiLocale(raw: string | null | undefined): "nl" | "en" | "fr" {
+  return raw === "en" || raw === "fr" ? raw : "nl";
+}
+
 async function getAppSettings(): Promise<{
   id: number;
   homeTeamId: string | null;
@@ -672,6 +678,7 @@ async function getAppSettings(): Promise<{
   displayScalingMode: "cover" | "contain" | "exact";
   displaySafeZoneVisible: boolean;
   displaySafeZoneMarginPx: number;
+  uiLocale: "nl" | "en" | "fr";
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
@@ -682,7 +689,8 @@ async function getAppSettings(): Promise<{
       "secondHalfScoreboardSec", "secondHalfSponsorSec",
       "scoreboardThemeJson",
       "displayCanvasWidth", "displayCanvasHeight",
-      "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx"
+      "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx",
+      "uiLocale"
      FROM "AppSettings" WHERE "id" = 1`,
   );
   const row = rows[0];
@@ -709,6 +717,7 @@ async function getAppSettings(): Promise<{
       displaySafeZoneVisible:
         row.displaySafeZoneVisible == null ? false : Boolean(row.displaySafeZoneVisible),
       displaySafeZoneMarginPx: row.displaySafeZoneMarginPx ?? 40,
+      uiLocale: normalizeUiLocale(row.uiLocale),
     };
   }
   await prisma.$executeRawUnsafe(
@@ -727,6 +736,7 @@ async function getAppSettings(): Promise<{
     displayScalingMode: "cover",
     displaySafeZoneVisible: false,
     displaySafeZoneMarginPx: 40,
+    uiLocale: "nl",
     ...defaults,
   };
 }
@@ -816,7 +826,15 @@ async function buildSettingsApiJson() {
     idleFallbackMediaId: s.idleFallbackMediaId,
     idleFallbackMedia,
     homeTeamBranding,
+    uiLocale: s.uiLocale,
   };
+}
+
+async function setUiLocale(locale: "nl" | "en" | "fr") {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "uiLocale" = ? WHERE "id" = 1`,
+    locale,
+  );
 }
 
 async function setGoalIntroVideoPath(videoPath: string | null) {
@@ -1329,7 +1347,11 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           displaySafeZoneVisible?: boolean;
           displaySafeZoneMarginPx?: number;
           idleFallbackMediaId?: string | null;
+          uiLocale?: "nl" | "en" | "fr";
         }) ?? {};
+      if ("uiLocale" in body && body.uiLocale) {
+        await setUiLocale(normalizeUiLocale(body.uiLocale));
+      }
       if ("homeTeamId" in body) {
         const homeTeamId = body.homeTeamId ?? null;
         if (homeTeamId) {

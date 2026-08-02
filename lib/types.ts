@@ -37,6 +37,8 @@ export type AppSettings = {
   /** Toon safe-zone overlay op stadiondisplay (handig tijdens setup van LED-cabinets). */
   displaySafeZoneVisible?: boolean;
   displaySafeZoneMarginPx?: number;
+  /** Interfacetaal: nl | en | fr. */
+  uiLocale?: "nl" | "en" | "fr";
 };
 
 export type Player = {

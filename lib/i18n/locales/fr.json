@@ -1,0 +1,83 @@
+{
+  "common": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "delete": "Supprimer",
+    "remove": "Retirer",
+    "edit": "Modifier",
+    "close": "Fermer",
+    "export": "Exporter",
+    "import": "Importer",
+    "loading": "Chargement…",
+    "connected": "Connecté",
+    "disconnected": "Déconnecté",
+    "success": "Succès",
+    "error": "Erreur"
+  },
+  "shell": {
+    "title": "Stadium Control",
+    "noActiveMatch": "Aucun match actif",
+    "matchLoading": "Chargement du match…",
+    "openDisplay": "Ouvrir /display",
+    "tabMatch": "Match",
+    "tabSetup": "Configuration",
+    "tabMedia": "Médias",
+    "tabReports": "Rapports",
+    "commandFailed": "Commande échouée",
+    "mode": "mode"
+  },
+  "language": {
+    "title": "Langue",
+    "description": "Choisissez la langue de l’interface de régie. Enregistrée sur cet appareil.",
+    "label": "Langue de l’interface",
+    "nl": "Nederlands",
+    "en": "English",
+    "fr": "Français",
+    "saved": "Langue enregistrée",
+    "saveFailed": "Impossible d’enregistrer la langue"
+  },
+  "license": {
+    "checking": "Vérification de la licence…",
+    "title": "Licence ArenaCue",
+    "body": "Activez cette installation avec votre clé de licence. Id machine (support) :",
+    "keyLabel": "Clé de licence",
+    "activate": "Activer sur ce PC",
+    "activating": "En cours…",
+    "openPortal": "Licence & téléchargement (site)",
+    "keyTooShort": "Saisissez votre clé complète (format ARENA-…).",
+    "unexpectedError": "Erreur inattendue. Réessayez.",
+    "afterActivate": "Après activation, consultez vos installations sur arenacue.be/portal avec la même clé et votre e-mail."
+  },
+  "setup": {
+    "venueBackupTitle": "Sauvegarde venue",
+    "venueBackupBody": "Crée un ZIP avec la base locale (data/stadium.db) et une copie de uploads/. Aussi via le menu : Fichier → Exporter sauvegarde venue.",
+    "exportBackup": "Exporter la sauvegarde (ZIP)…",
+    "backupFailed": "Échec de la sauvegarde",
+    "backupSaved": "Sauvegarde enregistrée",
+    "homeTeamTitle": "Équipe à domicile fixe",
+    "homeTeamBody": "Cette équipe est utilisée automatiquement comme domicile pour les nouveaux matchs.",
+    "clearHomeTeam": "Effacer l’équipe domicile",
+    "homeTeamSaveFailed": "Impossible d’enregistrer l’équipe domicile",
+    "goalIntroPick": "Sélectionner la vidéo d’intro BUT générale",
+    "goalIntroSaveFailed": "Échec d’enregistrement de la vidéo d’intro but",
+    "goalIntroSaved": "Vidéo d’intro but définie",
+    "goalVisualSaveFailed": "Échec d’enregistrement du réglage visuel but",
+    "idleMediaSaveFailed": "Médias par défaut non enregistrés",
+    "goalVideos": "Vidéos de célébration de but",
+    "subImages": "Images de remplacement",
+    "lineupVideos": "Vidéos de composition (intro joueur)"
+  },
+  "media": {
+    "title": "Sponsors & temps d’écran",
+    "library": "Médiathèque"
+  },
+  "reports": {
+    "title": "Proof-of-play"
+  },
+  "menu": {
+    "file": "Fichier",
+    "view": "Affichage",
+    "quit": "Quitter",
+    "exportVenueBackup": "Exporter sauvegarde venue"
+  }
+}
