@@ -3,6 +3,7 @@ export type MatchTabPanelId =
   | "display"
   | "sponsor-hud"
   | "sponsor-overview"
+  | "sponsor-timeline"
   | "player-intro"
   | "external"
   | "preview"
@@ -25,6 +26,7 @@ export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
     "display",
     "sponsor-hud",
     "sponsor-overview",
+    "sponsor-timeline",
     "player-intro",
     "external",
   ],
@@ -38,6 +40,7 @@ const ALL_PANEL_IDS: MatchTabPanelId[] = [
   "display",
   "sponsor-hud",
   "sponsor-overview",
+  "sponsor-timeline",
   "player-intro",
   "external",
   "preview",
@@ -196,6 +199,7 @@ export const MATCH_TAB_PANEL_LABELS: Record<MatchTabPanelId, string> = {
   display: "Display & modus",
   "sponsor-hud": "Sponsor HUD",
   "sponsor-overview": "Sponsors live",
+  "sponsor-timeline": "Sponsor timeline",
   "player-intro": "Speler-intro",
   external: "Externe capture",
   preview: "Live preview",

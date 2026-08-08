@@ -78,6 +78,7 @@ import { SponsorRotation, type IdleEmptyFallback } from "./_modes/sponsor-rotati
 import { SponsorBudgetRotation } from "./_modes/sponsor-budget-rotation";
 import { HalfTimeMode, FullTimeMode } from "./_modes/halftime-fulltime";
 import { DisplayWatchdog } from "./_components/watchdog";
+import { DisplayHealthMonitor } from "./_components/display-health-monitor";
 import { ExternalCaptureVideo } from "@/components/external-capture-video";
 
 /** Modes die naast het scorebord in het content-vlak staan (niet fullscreen over het canvas). */
@@ -1087,7 +1088,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         height={displayCanvas.height}
         scalingMode={displayCanvas.mode}
       >
-        {!embedInControl && <DisplayWatchdog />}
+        {!embedInControl && (
+          <>
+            <DisplayWatchdog />
+            <DisplayHealthMonitor />
+          </>
+        )}
         {match ? (
           <MatchScoreboardFull
             key="safe-mode-scoreboard"
@@ -1123,7 +1129,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       safeZoneVisible={displayCanvas.safeZoneVisible && !embedInControl}
       safeZoneMarginPx={displayCanvas.safeZoneMarginPx}
     >
-      {!embedInControl && <DisplayWatchdog />}
+      {!embedInControl && (
+        <>
+          <DisplayWatchdog />
+          <DisplayHealthMonitor />
+        </>
+      )}
 
       {/* Fullscreen modes */}
       <AnimatePresence mode="sync">

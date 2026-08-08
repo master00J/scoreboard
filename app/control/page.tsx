@@ -14,6 +14,7 @@ import { MediaPanel } from "./_components/media-panel";
 import { ProofOfPlayPanel } from "./_components/proof-of-play-panel";
 import { DisplayControlPanel, EventLog } from "./_components/display-control-panel";
 import { SponsorLiveOverview } from "./_components/sponsor-live-overview";
+import { SponsorTimelinePreview } from "./_components/sponsor-timeline-preview";
 import { ExternalCapturePanel } from "./_components/external-capture-panel";
 import { PlayerIntroLauncher } from "./_components/player-intro-launcher";
 import { CrashRecoveryBanner } from "./_components/crash-recovery";
@@ -126,6 +127,7 @@ export default function ControlPage() {
               display: <DisplayControlPanel activeMatch={isFullMatch(match) ? match : null} />,
               "sponsor-hud": <SponsorPhaseHud match={isFullMatch(match) ? match : null} />,
               "sponsor-overview": <SponsorLiveOverview activeMatch={isFullMatch(match) ? match : null} />,
+              "sponsor-timeline": <SponsorTimelinePreview match={isFullMatch(match) ? match : null} />,
               ...(isFullMatch(match)
                 ? ({ "player-intro": <PlayerIntroLauncher match={match} /> } as const)
                 : {}),
