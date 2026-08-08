@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
+import { StableClockText } from "@/components/stable-clock-text";
 import { formatTime } from "@/lib/utils";
 import {
   type ResolvedScoreboardTheme,
@@ -173,17 +174,16 @@ function CenterBlock({
         </div>
       )}
       <div className="flex items-end justify-center gap-4">
-        <div
-          className="font-black tabular-nums leading-none text-white"
+        <StableClockText
+          value={formatTime(elapsed)}
+          className="font-black leading-none text-white"
           style={{
             fontSize: theme.fullTimerPx,
             textShadow: "0 6px 36px rgba(0,0,0,0.5)",
             opacity: running ? 1 : 0.82,
             color: accent,
           }}
-        >
-          {formatTime(elapsed)}
-        </div>
+        />
         {theme.fullShowAddedTime && addedTime > 0 && (
           <div
             className="mb-1 rounded-md px-4 py-2 font-black tabular-nums"

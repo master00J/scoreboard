@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment } from "react";
+import { StableClockText } from "@/components/stable-clock-text";
 import { formatTime } from "@/lib/utils";
 import type { Match } from "@/lib/types";
 import {
@@ -202,17 +203,16 @@ function TimerBlock({
         {period}
       </div>
       <div className="mt-2 flex items-end justify-center gap-3">
-        <div
-          className="font-black tabular-nums leading-none text-white"
+        <StableClockText
+          value={formatTime(elapsed)}
+          className="font-black leading-none text-white"
           style={{
             fontSize: theme.leftTimerPx,
             textShadow: "0 4px 18px rgba(0,0,0,0.4)",
             opacity: running ? 1 : 0.75,
             color: accent,
           }}
-        >
-          {formatTime(elapsed)}
-        </div>
+        />
         {addedTime > 0 && (
           <div
             className="mb-1 rounded px-3 py-1 font-black tabular-nums text-white"

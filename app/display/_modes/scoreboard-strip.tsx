@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
+import { StableClockText } from "@/components/stable-clock-text";
 import { formatTime } from "@/lib/utils";
 import { mediaUrl } from "@/lib/media-url";
 
@@ -60,12 +61,11 @@ export function ScoreboardStrip({
             <div className="text-[24px] uppercase tracking-widest text-white/40">
               {period ?? "LIVE"}
             </div>
-            <div
-              className="text-[72px] font-black tabular-nums leading-none"
+            <StableClockText
+              value={formatTime(elapsed)}
+              className="text-[72px] font-black leading-none"
               style={{ color: running ? "#22c55e" : "#f59e0b" }}
-            >
-              {formatTime(elapsed)}
-            </div>
+            />
             {addedTime > 0 && (
               <div className="mt-1 px-3 py-1 bg-amber-500 text-black rounded-md text-[24px] font-bold tabular-nums">
                 +{addedTime}

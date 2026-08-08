@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
+import { StableClockText } from "@/components/stable-clock-text";
 import { formatTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -52,12 +53,17 @@ export function TimerPanel() {
       <div className="text-xs uppercase tracking-widest text-muted-foreground">
         {profile.label} · {t("timer.title")}
       </div>
-      <div
-        className="text-center text-[96px] font-black tabular-nums leading-none"
-        style={{ color: running ? "#22c55e" : "#f59e0b" }}
-      >
-        {hasClock ? formatTime(displaySeconds) : t("timer.noClock")}
-      </div>
+      {hasClock ? (
+        <StableClockText
+          value={formatTime(displaySeconds)}
+          className="mx-auto text-center text-[96px] font-black leading-none"
+          style={{ color: running ? "#22c55e" : "#f59e0b" }}
+        />
+      ) : (
+        <div className="text-center text-[96px] font-black leading-none text-muted-foreground">
+          {t("timer.noClock")}
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <Button
           size="xl"
