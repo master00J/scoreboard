@@ -31,7 +31,7 @@ export function Tabs({
   };
   return (
     <Ctx.Provider value={{ value: current, setValue }}>
-      <div className={className}>{children}</div>
+      <div className={cn("relative flex min-h-0 flex-col", className)}>{children}</div>
     </Ctx.Provider>
   );
 }
@@ -104,17 +104,21 @@ export function TabsContent({
   if (!active && !forceMount) return null;
   return (
     <div
-      className={cn("mt-4", className)}
+      className={cn("mt-4 min-h-0", active ? "flex flex-1 flex-col" : null, className)}
       aria-hidden={!active}
+      // forceMount: buiten beeld houden zonder document-overflow (geen left:-100000px)
       style={
         active
           ? undefined
           : {
-              position: "absolute",
-              left: "-100000px",
-              top: 0,
-              width: "100%",
+              position: "fixed",
+              inset: 0,
+              width: "100vw",
+              height: "100vh",
+              opacity: 0,
               pointerEvents: "none",
+              overflow: "hidden",
+              zIndex: -1,
             }
       }
     >

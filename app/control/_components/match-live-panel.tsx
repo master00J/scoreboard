@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
@@ -12,9 +13,11 @@ import { defaultFieldFromRoster } from "@/lib/match-field-lineup";
 import { squadOnFieldAndBench } from "@/lib/match-squad";
 import { toast } from "@/components/ui/toast";
 import { getSportProfile } from "@/lib/sports";
+import { tMatchStatus } from "@/lib/i18n/t-phase";
 import { SportLiveControls } from "./sport-live-controls";
 
 export function MatchLivePanel() {
+  const { t } = useTranslation();
   const state = useDisplayStore((s) => s.state);
   const { data: match, reload } = useApi<Match>(
     state?.matchId ? `/api/matches/${state.matchId}` : null,
@@ -32,7 +35,7 @@ export function MatchLivePanel() {
   if (!isFullMatch(match)) {
     return (
       <div className="bg-card border border-border rounded-xl p-6 text-center text-muted-foreground">
-        No active match. Create or select a match in <span className="font-semibold text-foreground">Setup</span>.
+        {t("matchLive.noMatch")}
       </div>
     );
   }
@@ -55,10 +58,10 @@ export function MatchLivePanel() {
     <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="text-xs uppercase tracking-widest text-muted-foreground">
-          Live Match
+          {t("matchLive.title")}
         </div>
         <div className="text-xs text-muted-foreground">
-          {match.homeTeam.name} vs {match.awayTeam.name} · status: {match.status}
+          {match.homeTeam.name} vs {match.awayTeam.name} · {tMatchStatus(t, match.status)}
         </div>
       </div>
 
@@ -89,22 +92,22 @@ export function MatchLivePanel() {
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <Button variant="secondary" onClick={() => setSubModal(true)}>
-          Wissel
+          {t("matchLive.sub")}
         </Button>
         <Button variant="outline" onClick={() => setLineupModal(true)}>
-          Opstelling veld
+          {t("matchLive.lineup")}
         </Button>
         <Button
           className="bg-amber-500 text-black hover:bg-amber-600"
           onClick={() => setCardModal("YELLOW")}
         >
-          Yellow card
+          {t("matchLive.yellowCard")}
         </Button>
         <Button
           className="bg-red-600 hover:bg-red-700 text-white"
           onClick={() => setCardModal("RED")}
         >
-          Red card
+          {t("matchLive.redCard")}
         </Button>
         <Button
           variant="outline"
@@ -112,7 +115,7 @@ export function MatchLivePanel() {
             sendCommand({ type: "match:setStatus", status: "HALF_TIME" })
           }
         >
-          Pauze
+          {t("common.pause")}
         </Button>
       </div>
 
@@ -173,6 +176,7 @@ function SideControl({
   onScoreClick: (points: number) => void;
   onAdjust: (delta: number) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="rounded-lg p-4 border flex flex-col gap-3"
@@ -183,7 +187,7 @@ function SideControl({
           className="text-xs font-bold uppercase tracking-widest"
           style={{ color: team.primaryColor }}
         >
-          {side === "home" ? "HOME" : "AWAY"}
+          {side === "home" ? t("common.home") : t("common.away")}
         </div>
         <div className="text-xs text-muted-foreground truncate">{team.name}</div>
       </div>
@@ -198,16 +202,18 @@ function SideControl({
             className="min-w-24 flex-1 bg-green-500 hover:bg-green-600 text-black text-lg font-black"
             onClick={() => onScoreClick(points)}
           >
-            {scoreLabel.toUpperCase()} +{points}
+            {scoreLabel === "Goal" && points === 1
+              ? t("matchLive.goalPlus")
+              : `${scoreLabel.toUpperCase()} +${points}`}
             {scoreLabel === "Goal" && points === 1 && (
               <span className="block text-[10px] font-semibold opacity-75">
-                {goalVisualEnabled ? "met visual" : "alleen score"}
+                {goalVisualEnabled ? t("matchLive.withVisual") : t("matchLive.scoreOnly")}
               </span>
             )}
           </Button>
         ))}
         <Button variant="outline" onClick={() => onAdjust(-1)}>
-          −1
+          {t("matchLive.minusOne")}
         </Button>
       </div>
     </div>
@@ -223,6 +229,7 @@ function ScorerPicker({
   side: "home" | "away";
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const team = side === "home" ? match.homeTeam : match.awayTeam;
   const players = team.players ?? [];
   const [scorerId, setScorerId] = useState<string | null>(null);
@@ -248,12 +255,11 @@ function ScorerPicker({
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>
-            Goal · {team.name} — select scorer
+            {t("matchLive.goalTitle", { team: team.name, action: t("matchLive.selectScorer") })}
           </DialogTitle>
         </DialogHeader>
         <div className="text-xs text-muted-foreground mb-2">
-          Algemene goal-video (uit Setup) of GOAL-playlist speelt — kies de scorer voor een
-          persoonlijke clip indien ingesteld (media of goal-video uit map), anders het tekst-doelpunt.
+          {t("matchLive.scorerHelp")}
         </div>
         <div className="grid grid-cols-4 gap-2 max-h-[60vh] overflow-auto">
           {players.map((p) => (
@@ -271,11 +277,11 @@ function ScorerPicker({
                     className="text-[9px] font-bold uppercase tracking-wider bg-green-500/20 text-green-400 rounded px-1.5 py-0.5"
                     title={
                       p.goalMediaId
-                        ? "Persoonlijke goal-video (uit media)"
-                        : "Persoonlijke goal-video (uit map-import)"
+                        ? t("matchLive.personalGoalMedia")
+                        : t("matchLive.personalGoalMap")
                     }
                   >
-                    video
+                    {t("media.typeVideo")}
                   </span>
                 )}
               </div>
@@ -288,7 +294,7 @@ function ScorerPicker({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => handleClose(false)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             variant="outline"
@@ -297,7 +303,7 @@ function ScorerPicker({
               onClose();
             }}
           >
-            Skip scorer
+            {t("matchLive.skipScorer")}
           </Button>
           <Button
             disabled={!scorerId}
@@ -310,7 +316,7 @@ function ScorerPicker({
               onClose();
             }}
           >
-            Confirm GOAL
+            {t("matchLive.confirmGoal")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -344,6 +350,7 @@ function MatchFieldLineupDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const maximumPlayers = getSportProfile(match.sport).fieldPlayers;
   const [saving, setSaving] = useState(false);
   const [homeSel, setHomeSel] = useState<Set<string>>(() => {
@@ -367,7 +374,7 @@ function MatchFieldLineupDialog({
   async function save() {
     if (homeSel.size < 1 || homeSel.size > maximumPlayers) {
       toast({
-        title: `Kies 1 tot ${maximumPlayers} spelers voor de thuisploeg op het veld`,
+        title: t("matchLive.lineupCountError", { n: maximumPlayers }),
         variant: "error",
       });
       return;
@@ -383,10 +390,10 @@ function MatchFieldLineupDialog({
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) {
-        toast({ title: body.error ?? "Opslaan mislukt", variant: "error" });
+        toast({ title: body.error ?? t("media.saveFailed"), variant: "error" });
         return;
       }
-      toast({ title: "Opstelling opgeslagen", variant: "success" });
+      toast({ title: t("matchLive.lineupSaved"), variant: "success" });
       onSaved();
     } finally {
       setSaving(false);
@@ -397,12 +404,10 @@ function MatchFieldLineupDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>Wie staat op het veld? (thuisploeg)</DialogTitle>
+          <DialogTitle>{t("matchLive.lineupTitle")}</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground mb-3">
-          Alleen <strong>thuis</strong>: max. {maximumPlayers} spelers (geen coaches). Bepaalt de thuislijsten bij{" "}
-          <strong>Wissel</strong> en wordt bij getoonde wissels bijgewerkt. Uitploeg: standaard
-          basiself (rugnummer) zoals de server die zet, tenzij die al in de wedstrijd staat.
+          {t("matchLive.lineupHelp", { n: maximumPlayers })}
         </p>
         <div className="text-xs font-medium text-foreground mb-3">
           {match.homeTeam.shortName} · {homeSel.size}/{maximumPlayers}
@@ -432,10 +437,10 @@ function MatchFieldLineupDialog({
         </div>
         <DialogFooter className="mt-4">
           <Button variant="outline" onClick={onClose}>
-            Sluiten
+            {t("common.close")}
           </Button>
           <Button onClick={() => void save()} disabled={saving}>
-            {saving ? "Opslaan…" : "Opslaan opstelling"}
+            {saving ? t("common.loading") : t("matchLive.saveLineup")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -452,6 +457,7 @@ function SubPicker({
   onClose: () => void;
   onRequestLineup?: () => void;
 }) {
+  const { t } = useTranslation();
   const [teamId, setTeamId] = useState<string>(match.homeTeamId);
   const [outId, setOutId] = useState<string | null>(null);
   const [inId, setInId] = useState<string | null>(null);
@@ -518,13 +524,10 @@ function SubPicker({
     <Dialog open onOpenChange={onClose}>
       <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>Wissel · meerdere na elkaar mogelijk</DialogTitle>
+          <DialogTitle>{t("matchLive.subTitle", { team: team.name })}</DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground mb-3">
-          Links wie op het veld staat (volgens <strong>Opstelling veld</strong>), rechts de bank.
-          Kies uit en in, voeg eventueel toe aan de lijst, daarna <strong>Start op scherm</strong>{" "}
-          (elk ca. 6 s). Zonder opstelling: eerste 11 op rugnummer, bijgewerkt via eerdere wissels in
-          het logboek.
+          {t("matchLive.subHelp")}
         </p>
         <div className="flex gap-2 mb-4">
           <Button
@@ -550,20 +553,20 @@ function SubPicker({
         </div>
         <div className="grid grid-cols-2 gap-4">
           <PlayerColumn
-            title="Op het veld · uit"
+            title={t("matchLive.playerOut")}
             players={onField}
             selectedId={outId}
             excludeId={inId}
             onSelect={setOutId}
-            emptyMessage="Geen spelers op het veld volgens de opstelling — gebruik Opstelling veld of controleer het team."
+            emptyMessage={t("matchLive.noOnField")}
           />
           <PlayerColumn
-            title="Bank · in"
+            title={t("matchLive.playerIn")}
             players={bench}
             selectedId={inId}
             excludeId={outId}
             onSelect={setInId}
-            emptyMessage="Geen wisselspelers (alle geselecteerden staan op het veld, of te weinig spelers in het team)."
+            emptyMessage={t("matchLive.noBench")}
           />
         </div>
         <div className="flex flex-wrap items-center gap-2 mt-3">
@@ -574,13 +577,13 @@ function SubPicker({
             disabled={!outId || !inId}
             onClick={addCurrentToQueue}
           >
-            Toevoegen aan wissellijst
+            {t("matchLive.addToSubQueue")}
           </Button>
         </div>
         {pending.length > 0 && (
           <div className="mt-4 rounded-lg border border-border bg-muted/30 p-3 space-y-2">
             <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Wissellijst ({pending.length})
+              {t("matchLive.subQueue", { count: pending.length })}
             </div>
             <ul className="space-y-1.5 text-sm">
               {pending.map((line, i) => (
@@ -596,7 +599,7 @@ function SubPicker({
                     className="shrink-0 h-7 px-2"
                     onClick={() => setPending((p) => p.filter((_, j) => j !== i))}
                   >
-                    Verwijder
+                    {t("common.remove")}
                   </Button>
                 </li>
               ))}
@@ -611,16 +614,16 @@ function SubPicker({
               className="mr-auto"
               onClick={() => onRequestLineup()}
             >
-              Opstelling veld…
+              {t("matchLive.lineup")}…
             </Button>
           )}
           <Button variant="outline" onClick={onClose}>
-            Annuleren
+            {t("common.cancel")}
           </Button>
           <Button disabled={readyCount === 0} onClick={() => void startOnDisplay()}>
             {readyCount <= 1
-              ? "Start wissel op scherm"
-              : `Start ${readyCount} wissels op scherm`}
+              ? t("matchLive.startSub")
+              : t("matchLive.startSubsBatch", { count: readyCount })}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -637,6 +640,7 @@ function CardPicker({
   color: "YELLOW" | "RED";
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [teamId, setTeamId] = useState<string>(match.homeTeamId);
   const [playerId, setPlayerId] = useState<string | null>(null);
   const team = teamId === match.homeTeamId ? match.homeTeam : match.awayTeam;
@@ -646,7 +650,7 @@ function CardPicker({
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>
-            {color === "YELLOW" ? "Yellow card" : "Red card"}
+            {color === "YELLOW" ? t("matchLive.yellowCard") : t("matchLive.redCard")}
           </DialogTitle>
         </DialogHeader>
         <div className="flex gap-2 mb-4">
@@ -670,14 +674,14 @@ function CardPicker({
           </Button>
         </div>
         <PlayerColumn
-          title={`Select player · ${team.name}`}
+          title={t("matchLive.selectPlayer", { side: team.name })}
           players={team.players ?? []}
           selectedId={playerId}
           onSelect={setPlayerId}
         />
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             disabled={!playerId}
@@ -691,7 +695,7 @@ function CardPicker({
               onClose();
             }}
           >
-            Apply
+            {t("common.apply")}
           </Button>
         </DialogFooter>
       </DialogContent>

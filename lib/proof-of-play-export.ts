@@ -42,6 +42,46 @@ export type ProofOfPlayExportMeta = {
   avgFulfillmentPercent: number;
 };
 
+/** Vertalingen voor export-headers / segmentlabels — doorgeven vanuit UI via t(). */
+export type ProofOfPlayExportLabels = {
+  title: string;
+  generated: string;
+  filter: string;
+  kpi: string;
+  value: string;
+  plays: string;
+  totalActual: string;
+  totalExpected: string;
+  fulfillment: string;
+  perSponsor: string;
+  sheetReport: string;
+  sheetDetail: string;
+  colEnd: string;
+  colSponsor: string;
+  colMedia: string;
+  colMatch: string;
+  colKickoff: string;
+  colMatchStatus: string;
+  colPhase: string;
+  colExpectedSec: string;
+  colActualSec: string;
+  colSessionId: string;
+  totals: string;
+  totalsLine: string;
+  colTurns: string;
+  colActualShort: string;
+  colExpectedShort: string;
+  noDetail: string;
+  detailHeading: string;
+  colExpectedSecShort: string;
+  colActualSecShort: string;
+  segmentPrematch: string;
+  segmentHalftime: string;
+  segmentFirstHalf: string;
+  segmentSecondHalf: string;
+  segmentExtraTime: string;
+};
+
 const BRAND_RGB: [number, number, number] = [37, 99, 235];
 
 export function formatSecForExport(total: number): string {
@@ -52,23 +92,70 @@ export function formatSecForExport(total: number): string {
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
 
-export function formatDateTimeNl(iso: string): string {
+export function formatDateTimeLocale(iso: string, locale = "nl-BE"): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.valueOf())) return iso;
-  return d.toLocaleString("nl-BE", {
+  return d.toLocaleString(locale, {
     dateStyle: "short",
     timeStyle: "short",
   });
 }
 
-export function formatSegmentNl(key: string): string {
-  if (key.includes(":prematch")) return "Voor wedstrijd";
-  if (key.includes(":halftime")) return "Rust";
-  if (key.includes(":FIRST_HALF")) return "1e helft";
-  if (key.includes(":SECOND_HALF")) return "2e helft";
-  if (key.includes(":EXTRA_TIME")) return "Verlenging";
+/** @deprecated Gebruik formatDateTimeLocale */
+export function formatDateTimeNl(iso: string): string {
+  return formatDateTimeLocale(iso, "nl-BE");
+}
+
+export function formatSegmentKey(key: string, labels: ProofOfPlayExportLabels): string {
+  if (key.includes(":prematch")) return labels.segmentPrematch;
+  if (key.includes(":halftime")) return labels.segmentHalftime;
+  if (key.includes(":FIRST_HALF")) return labels.segmentFirstHalf;
+  if (key.includes(":SECOND_HALF")) return labels.segmentSecondHalf;
+  if (key.includes(":EXTRA_TIME")) return labels.segmentExtraTime;
   return key;
+}
+
+/** @deprecated Gebruik formatSegmentKey met labels */
+export function formatSegmentNl(key: string): string {
+  return formatSegmentKey(key, {
+    title: "ArenaCue · Proof-of-play",
+    generated: "Gegenereerd",
+    filter: "Filter",
+    kpi: "KPI",
+    value: "Waarde",
+    plays: "Aantal afspeelbeurten",
+    totalActual: "Totale schermtijd (werkelijk)",
+    totalExpected: "Totale verwachte schermtijd",
+    fulfillment: "Realisatiegraad",
+    perSponsor: "Per sponsor",
+    sheetReport: "Rapport",
+    sheetDetail: "Detail",
+    colEnd: "Einde",
+    colSponsor: "Sponsor",
+    colMedia: "Media",
+    colMatch: "Wedstrijd",
+    colKickoff: "Kickoff",
+    colMatchStatus: "Matchstatus",
+    colPhase: "Fase",
+    colExpectedSec: "Verwacht (s)",
+    colActualSec: "Werkelijk (s)",
+    colSessionId: "Sessie-id",
+    totals: "Totalen",
+    totalsLine: "",
+    colTurns: "Beurten",
+    colActualShort: "Werkelijk",
+    colExpectedShort: "Verwacht",
+    noDetail: "Geen detailrijen voor deze filter.",
+    detailHeading: "Detail — alle gelogde afspeelbeurten in deze export",
+    colExpectedSecShort: "Verw. (s)",
+    colActualSecShort: "Werk. (s)",
+    segmentPrematch: "Voor wedstrijd",
+    segmentHalftime: "Rust",
+    segmentFirstHalf: "1e helft",
+    segmentSecondHalf: "2e helft",
+    segmentExtraTime: "Verlenging",
+  });
 }
 
 function matchLabel(r: ProofOfPlayRow): string {
@@ -83,27 +170,39 @@ function fulfillmentPct(actual: number, expected: number): string {
   return `${Math.round((actual / expected) * 100)}%`;
 }
 
+function interpolate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => String(vars[key] ?? ""));
+}
+
 export async function buildProofOfPlayXlsx(
   rows: ProofOfPlayRow[],
   summary: ProofOfPlaySummaryRow[],
   meta: ProofOfPlayExportMeta,
+  labels: ProofOfPlayExportLabels,
+  dateLocale = "nl-BE",
 ): Promise<Uint8Array> {
   const wb = new ExcelJS.Workbook();
   wb.creator = "ArenaCue";
 
   const overview: (string | number)[][] = [
-    ["ArenaCue · Proof-of-play"],
-    ["Gegenereerd", formatDateTimeNl(meta.generatedAtIso)],
-    ["Filter", meta.filterLabel],
+    [labels.title],
+    [labels.generated, formatDateTimeLocale(meta.generatedAtIso, dateLocale)],
+    [labels.filter, meta.filterLabel],
     [],
-    ["KPI", "Waarde"],
-    ["Aantal afspeelbeurten", meta.totalPlays],
-    ["Totale schermtijd (werkelijk)", formatSecForExport(meta.totalActualSec)],
-    ["Totale verwachte schermtijd", formatSecForExport(meta.totalExpectedSec)],
-    ["Realisatiegraad", `${meta.avgFulfillmentPercent}%`],
+    [labels.kpi, labels.value],
+    [labels.plays, meta.totalPlays],
+    [labels.totalActual, formatSecForExport(meta.totalActualSec)],
+    [labels.totalExpected, formatSecForExport(meta.totalExpectedSec)],
+    [labels.fulfillment, `${meta.avgFulfillmentPercent}%`],
     [],
-    ["Per sponsor"],
-    ["Sponsor", "Afspeelbeurten", "Werkelijke tijd", "Verwachte tijd", "Realisatie"],
+    [labels.perSponsor],
+    [
+      labels.colSponsor,
+      labels.colTurns,
+      labels.colActualShort,
+      labels.colExpectedShort,
+      labels.fulfillment,
+    ],
   ];
   for (const s of summary) {
     overview.push([
@@ -115,7 +214,7 @@ export async function buildProofOfPlayXlsx(
     ]);
   }
 
-  const wsRapport = wb.addWorksheet("Rapport");
+  const wsRapport = wb.addWorksheet(labels.sheetReport);
   overview.forEach((row) => wsRapport.addRow(row));
   wsRapport.getColumn(1).width = 32;
   wsRapport.getColumn(2).width = 22;
@@ -124,31 +223,31 @@ export async function buildProofOfPlayXlsx(
   wsRapport.getColumn(5).width = 12;
 
   const detailHead = [
-    "Einde",
-    "Sponsor",
-    "Media",
-    "Wedstrijd",
-    "Kickoff",
-    "Matchstatus",
-    "Fase",
-    "Verwacht (s)",
-    "Werkelijk (s)",
-    "Sessie-id",
+    labels.colEnd,
+    labels.colSponsor,
+    labels.colMedia,
+    labels.colMatch,
+    labels.colKickoff,
+    labels.colMatchStatus,
+    labels.colPhase,
+    labels.colExpectedSec,
+    labels.colActualSec,
+    labels.colSessionId,
   ];
   const detailBody = rows.map((r) => [
-    formatDateTimeNl(r.endedAt),
+    formatDateTimeLocale(r.endedAt, dateLocale),
     r.sponsorName,
     r.mediaTitle,
     matchLabel(r),
-    r.match?.kickoffAt ? formatDateTimeNl(r.match.kickoffAt) : "—",
+    r.match?.kickoffAt ? formatDateTimeLocale(r.match.kickoffAt, dateLocale) : "—",
     r.matchStatus ?? "—",
-    formatSegmentNl(r.segmentKey),
+    formatSegmentKey(r.segmentKey, labels),
     r.expectedSec,
     r.actualSec,
     r.clipSessionId,
   ]);
 
-  const wsDetail = wb.addWorksheet("Detail");
+  const wsDetail = wb.addWorksheet(labels.sheetDetail);
   wsDetail.addRow(detailHead);
   detailBody.forEach((r) => wsDetail.addRow(r));
   wsDetail.getColumn(1).width = 18;
@@ -174,6 +273,8 @@ export function buildProofOfPlayPdf(
   rows: ProofOfPlayRow[],
   summary: ProofOfPlaySummaryRow[],
   meta: ProofOfPlayExportMeta,
+  labels: ProofOfPlayExportLabels,
+  dateLocale = "nl-BE",
 ): Uint8Array {
   const doc = new jsPDF({
     orientation: "landscape",
@@ -186,9 +287,11 @@ export function buildProofOfPlayPdf(
   doc.rect(0, 0, pageW, 13, "F");
   doc.setTextColor(255, 255, 255);
   doc.setFontSize(14);
-  doc.text("ArenaCue · Proof-of-play", 10, 8.5);
+  doc.text(labels.title, 10, 8.5);
   doc.setFontSize(8.5);
-  doc.text(formatDateTimeNl(meta.generatedAtIso), pageW - 10, 8.5, { align: "right" });
+  doc.text(formatDateTimeLocale(meta.generatedAtIso, dateLocale), pageW - 10, 8.5, {
+    align: "right",
+  });
 
   doc.setTextColor(33, 37, 41);
   doc.setFontSize(9);
@@ -197,14 +300,19 @@ export function buildProofOfPlayPdf(
     meta.filterLabel.length > 160
       ? `${meta.filterLabel.slice(0, 157)}…`
       : meta.filterLabel;
-  doc.text(`Filter: ${filterShort}`, 10, y);
+  doc.text(`${labels.filter}: ${filterShort}`, 10, y);
   y += 5;
   doc.setFont("helvetica", "bold");
-  doc.text("Totalen", 10, y);
+  doc.text(labels.totals, 10, y);
   y += 4;
   doc.setFont("helvetica", "normal");
   doc.text(
-    `Afspeelbeurten: ${meta.totalPlays}   ·   Werkelijk: ${formatSecForExport(meta.totalActualSec)}   ·   Verwacht: ${formatSecForExport(meta.totalExpectedSec)}   ·   Realisatie: ${meta.avgFulfillmentPercent}%`,
+    interpolate(labels.totalsLine, {
+      plays: meta.totalPlays,
+      actual: formatSecForExport(meta.totalActualSec),
+      expected: formatSecForExport(meta.totalExpectedSec),
+      pct: meta.avgFulfillmentPercent,
+    }),
     10,
     y,
   );
@@ -212,7 +320,15 @@ export function buildProofOfPlayPdf(
 
   autoTable(doc, {
     startY: y,
-    head: [["Sponsor", "Beurten", "Werkelijk", "Verwacht", "Realisatie"]],
+    head: [
+      [
+        labels.colSponsor,
+        labels.colTurns,
+        labels.colActualShort,
+        labels.colExpectedShort,
+        labels.fulfillment,
+      ],
+    ],
     body: summary.map((s) => [
       s.sponsorName,
       String(s.plays),
@@ -242,37 +358,37 @@ export function buildProofOfPlayPdf(
   if (rows.length === 0) {
     doc.setFontSize(9);
     doc.setTextColor(100, 100, 100);
-    doc.text("Geen detailrijen voor deze filter.", 10, afterSummary + 8);
+    doc.text(labels.noDetail, 10, afterSummary + 8);
   } else {
     doc.addPage();
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(33, 37, 41);
-    doc.text("Detail — alle gelogde afspeelbeurten in deze export", 10, 14);
+    doc.text(labels.detailHeading, 10, 14);
     doc.setFont("helvetica", "normal");
 
     autoTable(doc, {
       startY: 20,
       head: [
         [
-          "Einde",
-          "Sponsor",
-          "Media",
-          "Wedstrijd",
-          "Fase",
-          "Verw. (s)",
-          "Werk. (s)",
+          labels.colEnd,
+          labels.colSponsor,
+          labels.colMedia,
+          labels.colMatch,
+          labels.colPhase,
+          labels.colExpectedSecShort,
+          labels.colActualSecShort,
         ],
       ],
       body: rows.map((r) => {
         const media =
           r.mediaTitle.length > 48 ? `${r.mediaTitle.slice(0, 45)}…` : r.mediaTitle;
         return [
-          formatDateTimeNl(r.endedAt),
+          formatDateTimeLocale(r.endedAt, dateLocale),
           r.sponsorName,
           media,
           matchLabel(r),
-          formatSegmentNl(r.segmentKey),
+          formatSegmentKey(r.segmentKey, labels),
           String(r.expectedSec),
           String(r.actualSec),
         ];
@@ -323,4 +439,46 @@ export function downloadProofOfPlayFile(
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
+}
+
+export function proofOfPlayLabelsFromT(t: (key: string) => string): ProofOfPlayExportLabels {
+  const k = (key: string) => t(`reports.export.${key}`);
+  return {
+    title: k("title"),
+    generated: k("generated"),
+    filter: k("filter"),
+    kpi: k("kpi"),
+    value: k("value"),
+    plays: k("plays"),
+    totalActual: k("totalActual"),
+    totalExpected: k("totalExpected"),
+    fulfillment: k("fulfillment"),
+    perSponsor: k("perSponsor"),
+    sheetReport: k("sheetReport"),
+    sheetDetail: k("sheetDetail"),
+    colEnd: k("colEnd"),
+    colSponsor: k("colSponsor"),
+    colMedia: k("colMedia"),
+    colMatch: k("colMatch"),
+    colKickoff: k("colKickoff"),
+    colMatchStatus: k("colMatchStatus"),
+    colPhase: k("colPhase"),
+    colExpectedSec: k("colExpectedSec"),
+    colActualSec: k("colActualSec"),
+    colSessionId: k("colSessionId"),
+    totals: k("totals"),
+    totalsLine: k("totalsLine"),
+    colTurns: k("colTurns"),
+    colActualShort: k("colActualShort"),
+    colExpectedShort: k("colExpectedShort"),
+    noDetail: k("noDetail"),
+    detailHeading: k("detailHeading"),
+    colExpectedSecShort: k("colExpectedSecShort"),
+    colActualSecShort: k("colActualSecShort"),
+    segmentPrematch: k("segmentPrematch"),
+    segmentHalftime: k("segmentHalftime"),
+    segmentFirstHalf: k("segmentFirstHalf"),
+    segmentSecondHalf: k("segmentSecondHalf"),
+    segmentExtraTime: k("segmentExtraTime"),
+  };
 }

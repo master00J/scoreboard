@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
@@ -30,7 +31,6 @@ import { mediaUrl } from "@/lib/media-url";
 import {
   parseSponsorMediaPhaseTags,
   serializeSponsorMediaPhaseTags,
-  sponsorMediaPhaseLabel,
   SPONSOR_MEDIA_PHASES,
   type SponsorMediaPhase,
 } from "@/lib/sponsor-media-phases";
@@ -41,11 +41,16 @@ import {
   parseSponsorPlaybackRepeatsJson,
 } from "@/lib/sponsor-playback-order";
 
-const SCHEDULED_CUE_PHASES = [
-  { value: "FIRST_HALF", label: "1e helft" },
-  { value: "SECOND_HALF", label: "2e helft" },
-  { value: "EXTRA_TIME", label: "Verlenging" },
-] as const;
+const SCHEDULED_CUE_PHASES = ["FIRST_HALF", "SECOND_HALF", "EXTRA_TIME"] as const;
+
+const MEDIA_PHASE_I18N: Record<string, string> = {
+  prematch: "media.phasePrematch",
+  firstHalf: "media.phaseFirstHalf",
+  secondHalf: "media.phaseSecondHalf",
+  halftime: "media.phaseHalftime",
+  extraTime: "media.phaseExtraTime",
+  postmatch: "media.phasePostmatch",
+};
 
 async function patchMediaJson(
   mediaId: string,
@@ -78,6 +83,7 @@ async function appendSponsorPlaybackOrderRow(sponsorId: string, mediaId: string)
 }
 
 export function MediaPanel() {
+  const { t } = useTranslation();
   const displayState = useDisplayStore((s) => s.state);
   const matchPollUrl =
     displayState?.matchId != null
@@ -119,7 +125,7 @@ export function MediaPanel() {
       if (!m.sponsorId) continue;
       const sid = m.sponsorId;
       if (!map.has(sid)) {
-        map.set(sid, { name: m.sponsorName ?? "Sponsor", items: [] });
+        map.set(sid, { name: m.sponsorName ?? t("sponsors.colSponsor"), items: [] });
       }
       map.get(sid)!.items.push(m);
     }
@@ -131,7 +137,7 @@ export function MediaPanel() {
       }))
       .sort((a, b) => a.name.localeCompare(b.name, "nl"));
     return { loose, groups };
-  }, [visibleMedia]);
+  }, [visibleMedia, t]);
 
   /** Register a local file (Electron) — no copying, just store the path. */
   async function registerLocalFile(filePath: string) {
@@ -144,7 +150,7 @@ export function MediaPanel() {
         durationSec = await readVideoDuration(mediaUrl(filePath));
       } catch {
         toast({
-          title: "Videoduur niet gelezen",
+          title: t("media.videoDurationUnread"),
           description: fileName,
           variant: "error",
         });
@@ -166,11 +172,11 @@ export function MediaPanel() {
   /** Pick files via Electron's native dialog (no upload needed). */
   async function onSelectLocal() {
     const paths = await selectFilesViaDialog({
-      title: "Selecteer media bestanden",
+      title: t("media.selectFilesTitle"),
       filters: [
-        { name: "Media", extensions: ["mp4", "webm", "mov", "avi", "jpg", "jpeg", "png", "gif", "webp"] },
-        { name: "Video", extensions: ["mp4", "webm", "mov", "avi"] },
-        { name: "Afbeelding", extensions: ["jpg", "jpeg", "png", "gif", "webp"] },
+        { name: t("media.filterMedia"), extensions: ["mp4", "webm", "mov", "avi", "jpg", "jpeg", "png", "gif", "webp"] },
+        { name: t("media.filterVideo"), extensions: ["mp4", "webm", "mov", "avi"] },
+        { name: t("media.filterImage"), extensions: ["jpg", "jpeg", "png", "gif", "webp"] },
       ],
       multiSelections: true,
     });
@@ -190,7 +196,7 @@ export function MediaPanel() {
       fd.append("file", file);
       const up = await fetch("/api/upload", { method: "POST", body: fd });
       if (!up.ok) {
-        toast({ title: `Upload failed: ${file.name}`, variant: "error" });
+        toast({ title: t("media.uploadFailed", { name: file.name }), variant: "error" });
         continue;
       }
       const uploaded = await up.json();
@@ -201,7 +207,7 @@ export function MediaPanel() {
           durationSec = await readVideoDuration(uploaded.path);
         } catch {
           toast({
-            title: "Videoduur niet gelezen",
+            title: t("media.videoDurationUnread"),
             description: file.name,
             variant: "error",
           });
@@ -227,28 +233,27 @@ export function MediaPanel() {
   return (
     <div className="flex flex-col gap-4">
       <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="text-lg font-semibold">Media instellen</h2>
+        <h2 className="text-lg font-semibold">{t("media.title")}</h2>
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Werk stap voor stap: koppel sponsorbestanden en minuten, beheer losse bestanden in de bibliotheek,
-          en gebruik playlists alleen voor vaste momenten zoals idle, rust of goal.
+          {t("media.introBody")}
         </p>
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <div className="rounded-lg border border-border bg-background/60 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">1. Sponsors</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">1. {t("media.tabSponsors")}</div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Belangrijkste workflow voor wedstrijdsponsoring: minuten per fase + media per sponsor.
+              {t("media.stepSponsorsHint")}
             </p>
           </div>
           <div className="rounded-lg border border-border bg-background/60 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">2. Bibliotheek</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">2. {t("media.tabLibrary")}</div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Alle losse video&apos;s en beelden beheren, testen, duur corrigeren en eventueel later koppelen.
+              {t("media.stepLibraryHint")}
             </p>
           </div>
           <div className="rounded-lg border border-border bg-background/60 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">3. Playlists</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">3. {t("media.tabPlaylists")}</div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Vaste clip-lijsten voor momenten zonder sponsorbudget of voor algemene goalclips.
+              {t("media.stepPlaylistsHint")}
             </p>
           </div>
         </div>
@@ -257,16 +262,16 @@ export function MediaPanel() {
       <Tabs defaultValue="sponsors" className="space-y-4">
         <TabsList className="h-auto w-full flex-wrap justify-start">
           <TabsTrigger value="sponsors" className="min-w-36">
-            Sponsors
+            {t("media.tabSponsors")}
           </TabsTrigger>
           <TabsTrigger value="library" className="min-w-36">
-            Bibliotheek
+            {t("media.tabLibrary")}
           </TabsTrigger>
           <TabsTrigger value="playlists" className="min-w-36">
-            Playlists
+            {t("media.tabPlaylists")}
           </TabsTrigger>
           <TabsTrigger value="scheduled" className="min-w-36">
-            Tijdscues
+            {t("media.tabCues")}
           </TabsTrigger>
         </TabsList>
 
@@ -282,15 +287,13 @@ export function MediaPanel() {
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-lg font-semibold">Bibliotheek</h2>
+            <h2 className="text-lg font-semibold">{t("media.tabLibrary")}</h2>
             <p className="text-xs text-muted-foreground mt-1 max-w-xl">
-              Video&apos;s: duur wordt automatisch uit het bestand gelezen. Afbeeldingen: kies hier hoe lang
-              ze per keer tonen (je kunt dit later per item aanpassen). Automatisch aangemaakte spelers-doelvideo&apos;s
-              (los bestand op speler) verschijnen niet hier — die blijven technisch bewaard voor het display.
+              {t("media.libraryHelp")}
             </p>
           </div>
           <div className="flex items-center gap-2 shrink-0">
-            <Label className="text-xs whitespace-nowrap">Duur foto (s)</Label>
+            <Label className="text-xs whitespace-nowrap">{t("media.imageDurationLabel")}</Label>
             <Input
               type="number"
               min={1}
@@ -306,18 +309,18 @@ export function MediaPanel() {
         <div className="mb-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
           <Input
             type="search"
-            placeholder="Zoek op titel, type of sponsor…"
+            placeholder={t("media.searchPlaceholder")}
             value={mediaSearch}
             onChange={(e) => setMediaSearch(e.target.value)}
             className="h-10"
           />
           {isElectron ? (
             <Button onClick={onSelectLocal} disabled={uploading}>
-              {uploading ? "Bezig..." : "Selecteer bestanden…"}
+              {uploading ? t("common.busy") : t("media.selectFiles")}
             </Button>
           ) : (
             <label className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground cursor-pointer text-sm font-semibold hover:opacity-90">
-              {uploading ? "Uploading..." : "Upload media"}
+              {uploading ? t("media.uploading") : t("media.uploadMedia")}
               <input
                 ref={fileRef}
                 type="file"
@@ -331,32 +334,29 @@ export function MediaPanel() {
         </div>
         <div className="mb-3 text-xs text-muted-foreground space-y-1">
           <p>
-            {visibleMedia.length} van {libraryMedia.length} item(s) in deze weergave
+            {t("media.visibleCount", { visible: visibleMedia.length, total: libraryMedia.length })}
             {media.length > libraryMedia.length ? (
               <>
                 {" "}
-                · {media.length - libraryMedia.length} technisch verborgen (o.a. auto spelers-doelvideo)
+                · {t("media.hiddenTechnical", { count: media.length - libraryMedia.length })}
               </>
             ) : null}
             .
           </p>
-          <p>
-            Gegroepeerd: <strong>Los (geen sponsor)</strong> en daarna <strong>per sponsor</strong>. Koppel media
-            vooral via de tab <strong>Sponsors</strong>.
-          </p>
+          <p>{t("media.groupHint")}</p>
         </div>
         {libraryMedia.length === 0 ? (
           <div className="text-sm text-muted-foreground">
-            Nog geen mediabestanden. Upload hier of via Sponsors → bestanden toevoegen.
+            {t("media.libraryEmpty")}
           </div>
         ) : visibleMedia.length === 0 ? (
-          <div className="text-sm text-muted-foreground">Geen media gevonden voor deze zoekterm.</div>
+          <div className="text-sm text-muted-foreground">{t("media.searchEmpty")}</div>
         ) : (
           <div className="space-y-8">
             {libraryBySponsor.loose.length > 0 ? (
               <div>
                 <h3 className="text-sm font-semibold text-foreground mb-3 pb-1 border-b border-border">
-                  Los (geen sponsor) · {libraryBySponsor.loose.length}
+                  {t("media.groupLooseCount", { count: libraryBySponsor.loose.length })}
                 </h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                   {libraryBySponsor.loose.map((m) => (
@@ -395,19 +395,11 @@ export function MediaPanel() {
         <TabsContent value="playlists" className="mt-0">
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="text-xs text-muted-foreground max-w-3xl space-y-1.5 mb-4">
-          <p>
-            <strong>Playlists</strong> zijn los van de <strong>sponsor-minuten</strong> hierboven: het zijn vaste
-            clip-lijsten per moment (IDLE, PREMATCH, HALFTIME, …). Het scherm pakt ze vooral als er{" "}
-            <strong>geen</strong> actieve sponsors met schermtijd zijn voor die situatie, of als aanvulling naast het
-            scorebord.
-          </p>
-          <p>
-            Heb je sponsors met ingevulde minuten en gekoppelde media, dan bepaalt vooral het{" "}
-            <strong>sponsor-rooster</strong> wat je ziet tijdens de wedstrijd — niet deze playlists.
-          </p>
+          <p>{t("media.playlistsHelp1")}</p>
+          <p>{t("media.playlistsHelp2")}</p>
         </div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Playlists</h2>
+          <h2 className="text-lg font-semibold">{t("media.tabPlaylists")}</h2>
         </div>
         <Tabs defaultValue="IDLE">
           <TabsList>
@@ -419,8 +411,7 @@ export function MediaPanel() {
             <TabsContent key={slot} value={slot}>
               {slot === "GOAL" && (
                 <div className="text-xs text-muted-foreground mb-2">
-                  Algemene doelpuntclip: alleen als er <strong>geen</strong> algemene goal-video in Setup staat; anders
-                  wint die. Eerste actieve item in deze playlist anders.
+                  {t("media.goalPlaylistHint")}
                 </div>
               )}
               <PlaylistEditor
@@ -455,9 +446,10 @@ function ScheduledCuesSection({
   cues: ScheduledMediaCue[];
   onChange: () => void;
 }) {
+  const { t } = useTranslation();
   const activeMedia = media.filter((m) => m.active).sort((a, b) => a.title.localeCompare(b.title));
   const [mediaId, setMediaId] = useState(activeMedia[0]?.id ?? "");
-  const [matchStatus, setMatchStatus] = useState<(typeof SCHEDULED_CUE_PHASES)[number]["value"]>("FIRST_HALF");
+  const [matchStatus, setMatchStatus] = useState<(typeof SCHEDULED_CUE_PHASES)[number]>("FIRST_HALF");
   const [timeText, setTimeText] = useState("12:00");
   const [saving, setSaving] = useState(false);
 
@@ -468,7 +460,7 @@ function ScheduledCuesSection({
   async function addCue() {
     const triggerSec = parseClockInput(timeText);
     if (!mediaId || triggerSec == null) {
-      toast({ title: "Kies media en vul een tijd in zoals 12:30", variant: "error" });
+      toast({ title: t("media.cueInvalidInput"), variant: "error" });
       return;
     }
     setSaving(true);
@@ -479,11 +471,11 @@ function ScheduledCuesSection({
     });
     setSaving(false);
     if (!res.ok) {
-      toast({ title: "Tijdscue opslaan mislukt", variant: "error" });
+      toast({ title: t("media.cueSaveFailed"), variant: "error" });
       return;
     }
     onChange();
-    toast({ title: `Tijdscue toegevoegd op ${formatCueClock(triggerSec)}` });
+    toast({ title: t("media.cueAdded", { time: formatCueClock(triggerSec) }) });
   }
 
   async function patchCue(id: string, body: Record<string, unknown>) {
@@ -493,14 +485,14 @@ function ScheduledCuesSection({
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      toast({ title: "Tijdscue aanpassen mislukt", variant: "error" });
+      toast({ title: t("media.cuePatchFailed"), variant: "error" });
       return;
     }
     onChange();
   }
 
   async function deleteCue(id: string) {
-    if (!confirm("Tijdscue verwijderen?")) return;
+    if (!confirm(t("media.cueDeleteConfirm"))) return;
     await fetch(`/api/scheduled-media-cues/${id}`, { method: "DELETE" });
     onChange();
   }
@@ -508,16 +500,15 @@ function ScheduledCuesSection({
   return (
     <section className="bg-card border border-border rounded-xl p-6 space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Tijdscues</h2>
+        <h2 className="text-lg font-semibold">{t("media.tabCues")}</h2>
         <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
-          Toon een specifieke video of foto automatisch fullscreen op een exact matchtijdstip. De cue ligt bovenop
-          het normale programma; daarna loopt het scorebord/sponsorprogramma verder.
+          {t("media.cuesHelp")}
         </p>
       </div>
 
       <div className="grid gap-2 md:grid-cols-[1fr_150px_120px_auto] md:items-end">
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Media</span>
+          <span className="text-muted-foreground">{t("media.cueMedia")}</span>
           <select
             value={mediaId}
             onChange={(e) => setMediaId(e.target.value)}
@@ -525,25 +516,25 @@ function ScheduledCuesSection({
           >
             {activeMedia.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.title} ({m.type === "VIDEO" ? "video" : "foto"})
+                {m.title} ({m.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")})
               </option>
             ))}
           </select>
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Fase</span>
+          <span className="text-muted-foreground">{t("media.cuePhase")}</span>
           <select
             value={matchStatus}
             onChange={(e) => setMatchStatus(e.target.value as typeof matchStatus)}
             className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
           >
             {SCHEDULED_CUE_PHASES.map((p) => (
-              <option key={p.value} value={p.value}>{p.label}</option>
+              <option key={p} value={p}>{t(`phases.${p}`)}</option>
             ))}
           </select>
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">Tijd</span>
+          <span className="text-muted-foreground">{t("media.cueTime")}</span>
           <Input
             value={timeText}
             onChange={(e) => setTimeText(e.target.value)}
@@ -552,13 +543,13 @@ function ScheduledCuesSection({
           />
         </label>
         <Button type="button" onClick={() => void addCue()} disabled={saving || activeMedia.length === 0}>
-          Toevoegen
+          {t("common.add")}
         </Button>
       </div>
 
       <div className="rounded-lg border border-border overflow-hidden">
         {cues.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">Nog geen tijdscues ingesteld.</div>
+          <div className="p-4 text-sm text-muted-foreground">{t("media.cuesEmpty")}</div>
         ) : (
           <div className="divide-y divide-border">
             {cues.map((cue) => (
@@ -569,17 +560,17 @@ function ScheduledCuesSection({
                     checked={cue.enabled}
                     onChange={(e) => void patchCue(cue.id, { enabled: e.target.checked })}
                   />
-                  Actief
+                  {t("common.active")}
                 </label>
                 <div className="text-xs font-mono">{formatCueClock(cue.triggerSec)}</div>
                 <div className="min-w-0">
                   <div className="truncate text-sm font-medium">{cue.media.title}</div>
                   <div className="text-xs text-muted-foreground">
-                    {phaseLabel(cue.matchStatus)} · {cue.media.type === "VIDEO" ? "video" : "foto"} · {cue.media.durationSec}s
+                    {phaseLabel(cue.matchStatus, t)} · {cue.media.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")} · {cue.media.durationSec}s
                   </div>
                 </div>
                 <Button type="button" variant="ghost" size="sm" onClick={() => void deleteCue(cue.id)}>
-                  Verwijder
+                  {t("common.delete")}
                 </Button>
               </div>
             ))}
@@ -599,6 +590,7 @@ function MediaCard({
   onChange: () => void;
   lockManualSponsorInterrupt?: boolean;
 }) {
+  const { t } = useTranslation();
   const [durDraft, setDurDraft] = useState(String(item.durationSec));
 
   useEffect(() => {
@@ -608,15 +600,15 @@ function MediaCard({
   async function saveImageDuration() {
     const n = parseInt(durDraft, 10);
     if (!Number.isFinite(n)) {
-      toast({ title: "Ongeldig getal", variant: "error" });
+      toast({ title: t("media.invalidNumber"), variant: "error" });
       return;
     }
     const sec = clampMediaDurationSec(n);
     const ok = await patchMediaJson(item.id, { durationSec: sec });
     if (ok) {
       onChange();
-      toast({ title: `Duur opgeslagen (${sec}s)` });
-    } else toast({ title: "Opslaan mislukt", variant: "error" });
+      toast({ title: t("media.durationSaved", { sec }) });
+    } else toast({ title: t("media.saveFailed"), variant: "error" });
   }
 
   async function rescanVideoDuration() {
@@ -625,12 +617,12 @@ function MediaCard({
       const ok = await patchMediaJson(item.id, { durationSec: sec });
       if (ok) {
         onChange();
-        toast({ title: `Videoduur: ${sec}s` });
-      } else toast({ title: "Opslaan mislukt", variant: "error" });
+        toast({ title: t("media.videoDuration", { sec }) });
+      } else toast({ title: t("media.saveFailed"), variant: "error" });
     } catch {
       toast({
-        title: "Videoduur niet gelezen",
-        description: "Controleer het bestand of het pad.",
+        title: t("media.videoDurationUnread"),
+        description: t("media.videoDurationUnreadHint"),
         variant: "error",
       });
     }
@@ -649,7 +641,7 @@ function MediaCard({
         <div className="truncate font-semibold">{item.title}</div>
         {item.type === "VIDEO" ? (
           <div className="flex flex-col gap-1">
-            <div className="text-muted-foreground">Video · {item.durationSec}s (ingesteld)</div>
+            <div className="text-muted-foreground">{t("media.videoDurationSet", { sec: item.durationSec })}</div>
             <Button
               size="sm"
               variant="outline"
@@ -657,12 +649,12 @@ function MediaCard({
               type="button"
               onClick={() => void rescanVideoDuration()}
             >
-              Duur opnieuw uit bestand
+              {t("media.rescanDuration")}
             </Button>
           </div>
         ) : (
           <div className="flex flex-col gap-1">
-            <Label className="text-[10px] text-muted-foreground">Tonen (seconden)</Label>
+            <Label className="text-[10px] text-muted-foreground">{t("media.showSeconds")}</Label>
             <div className="flex gap-1">
               <Input
                 type="number"
@@ -679,7 +671,7 @@ function MediaCard({
                 type="button"
                 onClick={() => void saveImageDuration()}
               >
-                Opslaan
+                {t("common.save")}
               </Button>
             </div>
           </div>
@@ -692,18 +684,17 @@ function MediaCard({
               onChange={async (e) => {
                 const ok = await patchMediaJson(item.id, { playAudio: e.target.checked });
                 if (ok) onChange();
-                else toast({ title: "Kon geluid niet opslaan", variant: "error" });
+                else toast({ title: t("media.audioSaveFailed"), variant: "error" });
               }}
             />
-            Geluid op display
+            {t("media.playAudio")}
           </label>
         )}
         <SponsorMediaPhasePicker media={item} onChange={onChange} />
         <div className="flex gap-1">
           {lockManualSponsorInterrupt ? (
             <div className="flex-1 text-[9px] text-muted-foreground leading-snug px-1 py-1.5 border border-dashed border-border rounded-md">
-              Tijdens speelhelft: sponsors via Sponsors (seconden per fase) en Display → Scorebord +
-              sponsors.
+              {t("media.playNowLockedHint")}
             </div>
           ) : (
             <Button
@@ -718,14 +709,14 @@ function MediaCard({
                 })
               }
             >
-              Play now
+              {t("media.playNow")}
             </Button>
           )}
           <Button
             size="sm"
             variant="ghost"
             onClick={async () => {
-              if (!confirm("Delete media?")) return;
+              if (!confirm(t("media.deleteMediaConfirm"))) return;
               await fetch(`/api/media/${item.id}`, { method: "DELETE" });
               onChange();
             }}
@@ -749,6 +740,7 @@ function PlaylistEditor({
   media: MediaItem[];
   onChange: () => void;
 }) {
+  const { t } = useTranslation();
   const [adding, setAdding] = useState(false);
 
   async function addItem(mediaId: string) {
@@ -786,10 +778,10 @@ function PlaylistEditor({
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted-foreground">
-          {items.length} item(s) · plays during {slot.toLowerCase()}
+          {t("media.playlistItemCount", { count: items.length, slot: slot.toLowerCase() })}
         </div>
         <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>
-          {adding ? "Close" : "Add item"}
+          {adding ? t("common.close") : t("media.addPlaylistItem")}
         </Button>
       </div>
       {adding && (
@@ -812,7 +804,7 @@ function PlaylistEditor({
               </button>
             ))}
             {media.length === 0 && (
-              <div className="text-muted-foreground text-xs">Upload media first.</div>
+              <div className="text-muted-foreground text-xs">{t("media.uploadFirst")}</div>
             )}
           </div>
         </div>
@@ -862,6 +854,7 @@ function SponsorsSection({
   reloadMedia: () => void;
   activeMatch: Match | null;
 }) {
+  const { t } = useTranslation();
   const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
   const sponsors = sponsorsRaw ?? [];
   const elapsedSec = useLiveTimerSeconds();
@@ -909,7 +902,7 @@ function SponsorsSection({
         body: JSON.stringify({ name }),
       });
       if (!res.ok) {
-        toast({ title: "Kon sponsor niet aanmaken", variant: "error" });
+        toast({ title: t("media.sponsorCreateFailed"), variant: "error" });
         return;
       }
       setNewName("");
@@ -920,7 +913,7 @@ function SponsorsSection({
   }
 
   async function removeSponsor(id: string) {
-    if (!confirm("Sponsor verwijderen? Zijn media blijven in de library staan.")) return;
+    if (!confirm(t("media.deleteSponsorConfirm"))) return;
     await fetch(`/api/sponsors/${id}`, { method: "DELETE" });
     reloadSponsors();
     reloadMedia();
@@ -930,31 +923,25 @@ function SponsorsSection({
     <section className="bg-card border border-border rounded-xl p-6">
       <div className="flex items-start justify-between gap-4 mb-4">
         <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-semibold">Sponsors &amp; schermtijd</h2>
+          <h2 className="text-lg font-semibold">{t("media.title")}</h2>
           <div className="mt-3 grid max-w-4xl gap-2 text-xs md:grid-cols-3">
             <div className="rounded-lg border border-border bg-muted/25 p-3">
-              <div className="font-semibold text-foreground">1. Minuten invullen</div>
-              <p className="mt-1 text-muted-foreground">
-                Voor wedstrijd, 1e helft, 2e helft en rust. Alles is in minuten.
-              </p>
+              <div className="font-semibold text-foreground">{t("media.sponsorStep1Title")}</div>
+              <p className="mt-1 text-muted-foreground">{t("media.sponsorStep1Body")}</p>
             </div>
             <div className="rounded-lg border border-border bg-muted/25 p-3">
-              <div className="font-semibold text-foreground">2. Media koppelen</div>
-              <p className="mt-1 text-muted-foreground">
-                Voeg bestanden toe bij de sponsor of koppel bestaande media uit de bibliotheek.
-              </p>
+              <div className="font-semibold text-foreground">{t("media.sponsorStep2Title")}</div>
+              <p className="mt-1 text-muted-foreground">{t("media.sponsorStep2Body")}</p>
             </div>
             <div className="rounded-lg border border-border bg-muted/25 p-3">
-              <div className="font-semibold text-foreground">3. Fases kiezen</div>
-              <p className="mt-1 text-muted-foreground">
-                Per bestand kun je bepalen in welke wedstrijdfase het mag verschijnen.
-              </p>
+              <div className="font-semibold text-foreground">{t("media.sponsorStep3Title")}</div>
+              <p className="mt-1 text-muted-foreground">{t("media.sponsorStep3Body")}</p>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0 relative z-10">
           <Input
-            placeholder="Nieuwe sponsornaam"
+            placeholder={t("media.newSponsorName")}
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onKeyDown={(e) => {
@@ -963,7 +950,7 @@ function SponsorsSection({
             className="w-56"
           />
           <Button onClick={addSponsor} disabled={adding || !newName.trim()}>
-            {adding ? "Bezig…" : "Toevoegen"}
+            {adding ? t("common.loading") : t("media.addSponsor")}
           </Button>
         </div>
       </div>
@@ -971,7 +958,7 @@ function SponsorsSection({
       <div className="flex flex-col gap-4 mt-6">
         {sponsors.length === 0 && (
           <div className="text-sm text-muted-foreground">
-            Nog geen sponsors. Voeg er een toe om media en schermtijd in te stellen.
+            {t("media.sponsorsEmpty")}
           </div>
         )}
         {sponsors.map((s) => (
@@ -1040,6 +1027,7 @@ function SponsorCard({
   onChange: () => void;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   const halves = matchHalfMinutesFromSponsor(sponsor);
   const [name, setName] = useState(sponsor.name);
   const [active, setActive] = useState(sponsor.active);
@@ -1112,7 +1100,7 @@ function SponsorCard({
       body: JSON.stringify({ sponsorPlaybackOrderJson: JSON.stringify(ids) }),
     });
     if (!res.ok) {
-      toast({ title: "Volgorde opslaan mislukt", variant: "error" });
+      toast({ title: t("media.orderSaveFailed"), variant: "error" });
       return;
     }
     onChange();
@@ -1137,7 +1125,7 @@ function SponsorCard({
       }),
     });
     if (!res.ok) {
-      toast({ title: "Herhalingen opslaan mislukt", variant: "error" });
+      toast({ title: t("media.repeatsSaveFailed"), variant: "error" });
       return;
     }
     onChange();
@@ -1181,7 +1169,7 @@ function SponsorCard({
       }),
     });
     if (!res.ok) {
-      toast({ title: "Standaardvolgorde niet gezet", variant: "error" });
+      toast({ title: t("media.orderResetFailed"), variant: "error" });
       return;
     }
     onChange();
@@ -1208,7 +1196,7 @@ function SponsorCard({
         }),
       });
       onChange();
-      toast({ title: "Sponsor opgeslagen" });
+      toast({ title: t("media.sponsorSaved") });
     } finally {
       setSaving(false);
     }
@@ -1224,7 +1212,7 @@ function SponsorCard({
         durationSec = await readVideoDuration(mediaUrl(filePath));
       } catch {
         toast({
-          title: "Videoduur niet gelezen",
+          title: t("media.videoDurationUnread"),
           description: fileName,
           variant: "error",
         });
@@ -1250,9 +1238,9 @@ function SponsorCard({
 
   async function onUploadSponsorFiles() {
     const paths = await selectFilesViaDialog({
-      title: `Media voor ${sponsor.name}`,
+      title: t("media.filesForSponsor", { name: sponsor.name }),
       filters: [
-        { name: "Media", extensions: ["mp4", "webm", "mov", "avi", "jpg", "jpeg", "png", "gif", "webp"] },
+        { name: t("media.filterMedia"), extensions: ["mp4", "webm", "mov", "avi", "jpg", "jpeg", "png", "gif", "webp"] },
       ],
       multiSelections: true,
     });
@@ -1284,7 +1272,7 @@ function SponsorCard({
   }
 
   async function deleteMedia(mediaId: string) {
-    if (!confirm("Media definitief verwijderen?")) return;
+    if (!confirm(t("media.deleteMediaConfirm"))) return;
     await fetch(`/api/media/${mediaId}`, { method: "DELETE" });
     onChange();
   }
@@ -1359,17 +1347,16 @@ function SponsorCard({
           <span className="font-medium text-foreground">{liveRoster.label}</span>
           <span className="text-muted-foreground">
             {" "}
-            · schermtijd verbruikt {formatMin(liveRoster.consumed)} · rest {formatMin(liveRoster.remaining)} · budget{" "}
-            {formatMin(liveRoster.budget)}
+            · {t("media.liveConsumed", { time: formatMin(liveRoster.consumed) })} · {t("media.liveRest", { time: formatMin(liveRoster.remaining) })} · {t("media.liveBudget", { time: formatMin(liveRoster.budget) })}
           </span>
         </div>
       )}
       <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
-        <div className="text-xs font-semibold text-foreground">Schermtijd per segment (minuten)</div>
+        <div className="text-xs font-semibold text-foreground">{t("media.budgetPerSegment")}</div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-              Voor wedstrijd
+              {t("media.budgetPrematch")}
             </Label>
             <Input
               type="number"
@@ -1382,7 +1369,7 @@ function SponsorCard({
           </div>
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-              1e helft (spel)
+              {t("media.budgetFirstHalf")}
             </Label>
             <Input
               type="number"
@@ -1395,7 +1382,7 @@ function SponsorCard({
           </div>
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-              2e helft (spel)
+              {t("media.budgetSecondHalf")}
             </Label>
             <Input
               type="number"
@@ -1408,7 +1395,7 @@ function SponsorCard({
           </div>
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-              Rust
+              {t("media.budgetHalftime")}
             </Label>
             <Input
               type="number"
@@ -1421,7 +1408,7 @@ function SponsorCard({
           </div>
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
-              Na wedstrijd
+              {t("media.budgetPostmatch")}
             </Label>
             <Input
               type="number"
@@ -1434,22 +1421,20 @@ function SponsorCard({
           </div>
         </div>
         <p className="text-[10px] text-muted-foreground leading-snug">
-          Alleen actieve sponsors met media tellen mee. Leeg = 0. Bestaande sponsors met alleen één
-          wedstrijdtijd in de database: vul die minuten in bij <strong>1e helft</strong>;{" "}
-          <strong>2e helft</strong> op 0 tenzij je bewust splitst.
+          {t("media.budgetHelp")}
         </p>
       </div>
 
       <div className="flex items-start gap-3 flex-wrap">
         <div className="flex-1 min-w-[220px]">
-          <Label className="text-xs">Sponsornaam</Label>
+          <Label className="text-xs">{t("media.sponsorName")}</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div>
           <Label className="text-xs">
-            Standaard duur foto&apos;s (s)
+            {t("media.defaultImageDuration")}
             <span className="block font-normal text-muted-foreground normal-case">
-              Nieuwe uploads bij deze sponsor; video&apos;s volgen het bestand.
+              {t("media.defaultImageDurationHint")}
             </span>
           </Label>
           <Input
@@ -1467,10 +1452,10 @@ function SponsorCard({
               checked={active}
               onChange={(e) => setActive(e.target.checked)}
             />
-            Actief
+            {t("common.active")}
           </label>
           <Button size="sm" onClick={save} disabled={saving}>
-            {saving ? "Opslaan…" : "Opslaan"}
+            {saving ? t("common.saving") : t("common.save")}
           </Button>
           <Button size="sm" variant="ghost" onClick={onRemove}>
             ✕
@@ -1480,17 +1465,19 @@ function SponsorCard({
 
       <div className="flex items-center justify-between">
         <div className="text-xs text-muted-foreground">
-          {sponsorMedia.length} bestand(en) gekoppeld · schermtijd totaal{" "}
-          {formatMin(
-            sponsor.prematchSeconds +
-              sponsorMatchBudgetTotal(sponsor) +
-              sponsor.halftimeSeconds
-          )}
+          {t("media.filesLinked", {
+            count: sponsorMedia.length,
+            time: formatMin(
+              sponsor.prematchSeconds +
+                sponsorMatchBudgetTotal(sponsor) +
+                sponsor.halftimeSeconds
+            ),
+          })}
         </div>
         <div className="flex items-center gap-2">
           {isElectron && (
             <Button size="sm" variant="outline" onClick={onUploadSponsorFiles} disabled={uploading}>
-              {uploading ? "Bezig…" : "Bestanden toevoegen…"}
+              {uploading ? t("common.busy") : t("media.addFiles")}
             </Button>
           )}
           {unassignedMedia.length > 0 && (
@@ -1502,17 +1489,9 @@ function SponsorCard({
       {orderedSponsorMedia.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/30 px-2 py-2 text-[11px] text-muted-foreground">
           <span>
-            <span className="font-medium text-foreground">Rotatie</span> op het stadionscherm: per clip{" "}
-            <span className="font-medium text-foreground">herhaling</span> (1–20 = zo vaak achter elkaar in de
-            ronde).{" "}
-            {orderedSponsorMedia.length > 1 ? (
-              <>
-                <span className="font-medium text-foreground">Volgorde</span> met ↑/↓ of sleep vanaf de
-                videovoorbeeld-strook. Lege instelling = uploadvolgorde, herhaling 1×.
-              </>
-            ) : (
-              <>Lege volgorde-instelling = uploadvolgorde.</>
-            )}
+            {orderedSponsorMedia.length > 1
+              ? t("media.rotationHelpMulti")
+              : t("media.rotationHelpSingle")}
           </span>
           {(sponsor.sponsorPlaybackOrderJson || sponsor.sponsorPlaybackRepeatsJson) && (
             <Button
@@ -1522,7 +1501,7 @@ function SponsorCard({
               className="h-7 shrink-0 text-[11px]"
               onClick={() => void clearSponsorPlaybackOrder()}
             >
-              Standaard (volgorde + herhaling)
+              {t("media.resetOrderRepeats")}
             </Button>
           )}
         </div>
@@ -1600,7 +1579,7 @@ function SponsorCard({
                       className="h-6 flex-1 px-1 text-[10px]"
                       disabled={orderedSponsorMedia[0]?.id === m.id}
                       onClick={() => void moveSponsorMediaOrder(m.id, -1)}
-                      title="Eerder in rotatie"
+                      title={t("media.moveEarlier")}
                     >
                       ↑
                     </Button>
@@ -1611,7 +1590,7 @@ function SponsorCard({
                       className="h-6 flex-1 px-1 text-[10px]"
                       disabled={orderedSponsorMedia[orderedSponsorMedia.length - 1]?.id === m.id}
                       onClick={() => void moveSponsorMediaOrder(m.id, 1)}
-                      title="Later in rotatie"
+                      title={t("media.moveLater")}
                     >
                       ↓
                     </Button>
@@ -1625,16 +1604,16 @@ function SponsorCard({
                       onChange={async (e) => {
                         const ok = await patchMediaJson(m.id, { playAudio: e.target.checked });
                         if (ok) onChange();
-                        else toast({ title: "Kon geluid niet opslaan", variant: "error" });
+                        else toast({ title: t("media.audioSaveFailed"), variant: "error" });
                       }}
                     />
-                    Geluid op display
+                    {t("media.playAudio")}
                   </label>
                 )}
                 <SponsorMediaPhasePicker media={m} onChange={onChange} />
                 <div className="flex gap-1">
                   <Button size="sm" variant="ghost" className="flex-1 text-[10px]" onClick={() => detach(m.id)}>
-                    Ontkoppel
+                    {t("media.detach")}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={() => deleteMedia(m.id)}>
                     ✕
@@ -1658,6 +1637,7 @@ function SponsorClipRepeatField({
   serverRepeat: number;
   onCommit: (mediaId: string, raw: number) => void | Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [local, setLocal] = useState(() => String(serverRepeat));
   useEffect(() => {
     setLocal(String(serverRepeat));
@@ -1681,7 +1661,7 @@ function SponsorClipRepeatField({
       onKeyDown={(e) => {
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
       }}
-      title="Aantal keer achter elkaar in één rotatieronde (1–20)"
+      title={t("media.repeatTitle")}
     />
   );
 }
@@ -1693,11 +1673,12 @@ function AttachExistingDropdown({
   media: MediaItem[];
   onPick: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
       <Button size="sm" variant="outline" onClick={() => setOpen((v) => !v)}>
-        {open ? "Sluiten" : "Bestaande media koppelen"}
+        {open ? t("common.close") : t("media.attachExisting")}
       </Button>
       {open && (
         <div className="absolute right-0 top-full mt-1 z-10 w-72 max-h-72 overflow-auto rounded-lg border border-border bg-popover shadow-xl p-2">
@@ -1727,15 +1708,26 @@ function SponsorMediaPhasePicker({
   media: MediaItem;
   onChange: () => void;
 }) {
+  const { t } = useTranslation();
   const tags = parseSponsorMediaPhaseTags(media.sponsorPhaseTagsJson);
   const allPhases = tags.length === 0;
+
+  function phaseName(id: string): string {
+    const key = MEDIA_PHASE_I18N[id];
+    return key ? t(key) : id;
+  }
+
+  function phasesSummary(): string {
+    if (tags.length === 0) return t("media.allPhasesLabel");
+    return tags.map(phaseName).join(", ");
+  }
 
   async function save(next: SponsorMediaPhase[]) {
     const ok = await patchMediaJson(media.id, {
       sponsorPhaseTagsJson: serializeSponsorMediaPhaseTags(next),
     });
     if (ok) onChange();
-    else toast({ title: "Kon fases niet opslaan", variant: "error" });
+    else toast({ title: t("media.phasesSaveFailed"), variant: "error" });
   }
 
   async function toggle(tag: SponsorMediaPhase, checked: boolean) {
@@ -1750,9 +1742,9 @@ function SponsorMediaPhasePicker({
     <div className="rounded-md border border-border/70 bg-muted/20 p-2">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-[10px] font-medium text-foreground">Sponsor-fases</div>
+          <div className="text-[10px] font-medium text-foreground">{t("media.sponsorPhases")}</div>
           <div className="text-[9px] text-muted-foreground">
-            {sponsorMediaPhaseLabel(media.sponsorPhaseTagsJson)}
+            {phasesSummary()}
           </div>
         </div>
         <Button
@@ -1762,7 +1754,7 @@ function SponsorMediaPhasePicker({
           type="button"
           onClick={() => void save([])}
         >
-          Alle
+          {t("media.allPhases")}
         </Button>
       </div>
       <div className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1">
@@ -1773,13 +1765,13 @@ function SponsorMediaPhasePicker({
               checked={allPhases || tags.includes(phase.id)}
               onChange={(e) => void toggle(phase.id, e.target.checked)}
             />
-            {phase.label}
+            {phaseName(phase.id)}
           </label>
         ))}
       </div>
       {allPhases && (
         <div className="mt-1 text-[9px] text-muted-foreground">
-          Alle fases actief. Vink een fase uit/aan om specifiek te kiezen.
+          {t("media.allPhasesHint")}
         </div>
       )}
     </div>
@@ -1828,8 +1820,10 @@ function formatCueClock(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function phaseLabel(status: string): string {
-  return SCHEDULED_CUE_PHASES.find((p) => p.value === status)?.label ?? status;
+function phaseLabel(status: string, t: (key: string) => string): string {
+  return SCHEDULED_CUE_PHASES.includes(status as (typeof SCHEDULED_CUE_PHASES)[number])
+    ? t(`phases.${status}`)
+    : status;
 }
 
 /** Afbeelding / afgeronde videoseconds voor opslag (1 … 600). */

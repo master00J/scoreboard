@@ -6,9 +6,11 @@ import {
   sectionSpreadClock,
   holdSecondsCappedBySlotRun,
   postmatchSpreadTimelineSeconds,
+  resolveSponsorSpreadPhase,
   sponsorAppearanceIndexAt,
   sponsorSectionBudgetSeconds,
   sponsorScreenSecondsConsumed,
+  type SponsorPhaseHangRef,
 } from "./sponsor-distribution";
 import { sectionForStatus } from "./sponsor-display-helpers";
 
@@ -152,5 +154,44 @@ describe("verbruikte schermtijd blijft in de buurt van het budget", () => {
     expect(consumed).toBeGreaterThan(0);
     // Hoogstens één lopende clip overschot — nooit een veelvoud van het budget.
     expect(consumed).toBeLessThanOrEqual(120 + 20);
+  });
+});
+
+describe("resolveSponsorSpreadPhase — gap na hang", () => {
+  it("geeft na verlopen hang eerst scorebord zodat de volgende clip mag starten", () => {
+    const s = sponsor(60, [10]);
+    const hangRef: SponsorPhaseHangRef = {
+      current: {
+        sponsorId: "sp",
+        untilMs: 1_000,
+        startedAtMs: 0,
+        startedAtSlotIdx: 0,
+        lastSeenAtMs: 1_000,
+      },
+    };
+    const afterHang = resolveSponsorSpreadPhase(
+      { phase: "sponsor", sponsorId: "sp" },
+      [s],
+      "prematch",
+      undefined,
+      1_500,
+      hangRef,
+      { slotMap: Array(60).fill("sp"), slotT: 15 },
+    );
+    expect(afterHang).toEqual({ phase: "scoreboard", sponsorFilterId: null });
+    expect(hangRef.current).toBeNull();
+
+    const next = resolveSponsorSpreadPhase(
+      { phase: "sponsor", sponsorId: "sp" },
+      [s],
+      "prematch",
+      undefined,
+      1_900,
+      hangRef,
+      { slotMap: Array(60).fill("sp"), slotT: 16 },
+    );
+    expect(next.phase).toBe("sponsor");
+    expect(next.sponsorFilterId).toBe("sp");
+    expect(hangRef.current?.sponsorId).toBe("sp");
   });
 });

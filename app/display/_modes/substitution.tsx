@@ -29,7 +29,7 @@ export function SubstitutionMode({
       >
         Substitution · {team?.name ?? ""} · {minute}'
       </div>
-      <div className="flex max-w-full flex-wrap justify-center gap-6 px-6 sm:gap-8">
+      <div className="flex max-w-full flex-wrap justify-center gap-10 px-6">
         <PlayerCard player={playerOut} label="OUT" color="#ef4444" arrow="↓" />
         <PlayerCard player={playerIn} label="IN" color="#22c55e" arrow="↑" />
       </div>
@@ -57,9 +57,10 @@ function PlayerCard({
       initial={{ y: 60, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.4 }}
-      className="flex min-w-0 max-w-[min(520px,calc(50vw-40px))] flex-col items-center"
+      // Vaste breedte: OUT/IN even groot, naam wrapt eronder i.p.v. de kaart te verbreden.
+      className="flex w-[380px] max-w-[min(380px,calc(50vw-48px))] shrink-0 flex-col items-center"
     >
-      <div className="flex items-center gap-3 mb-3">
+      <div className="mb-3 flex items-center gap-3">
         <span className="font-black leading-none" style={{ fontSize: 48, color }}>
           {arrow}
         </span>
@@ -71,12 +72,12 @@ function PlayerCard({
         <img
           src={mediaUrl(player.subImagePath ?? player.photoPath)}
           alt=""
-          className="w-full max-w-[380px] rounded-xl object-cover"
+          className="w-full rounded-xl object-cover"
           style={{ aspectRatio: "380 / 440", border: `5px solid ${color}` }}
         />
       ) : (
         <div
-          className="flex aspect-[380/440] w-full max-w-[380px] items-center justify-center rounded-xl bg-slate-800 font-black text-white"
+          className="flex aspect-[380/440] w-full items-center justify-center rounded-xl bg-slate-800 font-black text-white"
           style={{
             border: `5px solid ${color}`,
             fontSize: 240,
@@ -85,14 +86,11 @@ function PlayerCard({
           {player.number}
         </div>
       )}
-      <div
-        className="font-bold text-white/70 mt-3"
-        style={{ fontSize: 32 }}
-      >
+      <div className="mt-3 font-bold text-white/70" style={{ fontSize: 32 }}>
         #{player.number}
       </div>
       <div
-        className="w-full max-w-full px-1 text-center text-balance break-words font-black uppercase leading-snug text-white"
+        className="w-full px-1 text-center font-black uppercase leading-snug text-white break-words"
         style={{ fontSize: nameFontSize }}
       >
         {displayName}

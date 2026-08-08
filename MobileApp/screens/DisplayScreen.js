@@ -29,8 +29,6 @@ export function DisplayScreen({
 }) {
   const homePlayers = activeMatchDetails?.homeTeam?.players ?? [];
   const awayPlayers = activeMatchDetails?.awayTeam?.players ?? [];
-  const safeMode = snapshot?.safeMode ?? false;
-
   const allPlayers = useMemo(
     () => [
       ...homePlayers.map((p) => ({ ...p, side: "home" })),
@@ -60,12 +58,6 @@ export function DisplayScreen({
         <View style={styles.row}>
           <Pressable style={styles.button} onPress={() => canMutate && sendCommand({ type: "display:blackout" })}>
             <Text style={styles.buttonText}>Blackout toggle</Text>
-          </Pressable>
-          <Pressable
-            style={styles.buttonSecondary}
-            onPress={() => canMutate && sendCommand({ type: "display:setSafeMode", enabled: !safeMode })}
-          >
-            <Text style={styles.buttonText}>Safe mode {safeMode ? "UIT" : "AAN"}</Text>
           </Pressable>
         </View>
         <Pressable

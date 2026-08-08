@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { Match, Sponsor, SponsorSection } from "@/lib/types";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
@@ -12,11 +13,11 @@ import {
 
 type PhaseKey = "prematch" | "h1" | "h2" | "halftime";
 
-const PHASES: Array<{ key: PhaseKey; label: string; status: string[] }> = [
-  { key: "prematch", label: "Voorkant", status: ["SETUP", "PREMATCH"] },
-  { key: "h1", label: "1e helft", status: ["FIRST_HALF"] },
-  { key: "h2", label: "2e helft", status: ["SECOND_HALF", "EXTRA_TIME"] },
-  { key: "halftime", label: "Rust", status: ["HALF_TIME"] },
+const PHASES: Array<{ key: PhaseKey; status: string[]; phaseStatusKey: string }> = [
+  { key: "prematch", status: ["SETUP", "PREMATCH"], phaseStatusKey: "PREMATCH" },
+  { key: "h1", status: ["FIRST_HALF"], phaseStatusKey: "FIRST_HALF" },
+  { key: "h2", status: ["SECOND_HALF", "EXTRA_TIME"], phaseStatusKey: "SECOND_HALF" },
+  { key: "halftime", status: ["HALF_TIME"], phaseStatusKey: "HALF_TIME" },
 ];
 
 function sectionForPhase(phase: PhaseKey): SponsorSection {
@@ -42,8 +43,11 @@ export function SponsorTimelinePreview({
 }: {
   match: Match | null;
 }) {
+  const { t } = useTranslation();
   const displayStateUpdatedAt = useDisplayStore((s) => s.state?.updatedAt);
-  const { data: sponsors = [] } = useApi<Sponsor[]>("/api/sponsors");
+  // useApi start met null — default `= []` vangt dat niet op (alleen undefined).
+  const { data: sponsorsData } = useApi<Sponsor[]>("/api/sponsors");
+  const sponsors = Array.isArray(sponsorsData) ? sponsorsData : [];
 
   useEffect(() => {
     displayStateUpdatedAt;
@@ -57,14 +61,16 @@ export function SponsorTimelinePreview({
   }, [matchStatus]);
 
   const timelineData = useMemo(() => {
-    if (!matchStatus || !sponsors || sponsors.length === 0) return [];
+    if (!matchStatus || sponsors.length === 0) return [];
     return PHASES.map((phase) => {
       const section = sectionForPhase(phase.key);
-      const phaseSponsors = activeSponsorsForSection(sponsors, section, matchStatus);
+      const phaseStatus =
+        phase.key === "h1" ? "FIRST_HALF" : phase.key === "h2" ? "SECOND_HALF" : matchStatus;
+      const phaseSponsors = activeSponsorsForSection(sponsors, section, phaseStatus);
 
       return {
         phase: phase.key,
-        label: phase.label,
+        phaseStatusKey: phase.phaseStatusKey,
         sponsors: phaseSponsors.map((s) => ({
           id: s.id,
           name: s.name,
@@ -81,7 +87,7 @@ export function SponsorTimelinePreview({
   }, [sponsors, matchStatus]);
 
   const activeSponsorNames = useMemo(() => {
-    if (!matchStatus || !sponsors || sponsors.length === 0) return [];
+    if (!matchStatus || sponsors.length === 0) return [];
     const section = sponsorBudgetSectionFromMatchStatus(matchStatus);
     const active = activeSponsorsForSection(sponsors, section, matchStatus);
     return active.map((s) => s.name);
@@ -95,19 +101,21 @@ export function SponsorTimelinePreview({
     <div className="bg-card border border-border rounded-xl p-4">
       <div className="mb-4">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-          Sponsor Timeline
+          {t("sponsors.timelineTitle")}
         </h3>
         <div className="text-xs text-muted-foreground">
           <div className="mb-2">
-            Fase:{" "}
-            <span className="text-foreground font-medium">{currentPhase.label}</span>
+            {t("sponsors.phaseLabel")}{" "}
+            <span className="text-foreground font-medium">
+              {t(`phases.${currentPhase.phaseStatusKey}`)}
+            </span>
           </div>
           <div>
-            Actief nu:{" "}
+            {t("sponsors.activeNow")}{" "}
             {activeSponsorNames.length > 0 ? (
               <span className="text-foreground font-medium">{activeSponsorNames.join(", ")}</span>
             ) : (
-              <span className="text-muted-foreground italic">geen</span>
+              <span className="text-muted-foreground italic">{t("common.none").toLowerCase()}</span>
             )}
           </div>
         </div>
@@ -124,7 +132,9 @@ export function SponsorTimelinePreview({
             }`}
           >
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-xs font-semibold text-foreground">{phaseData.label}</h4>
+              <h4 className="text-xs font-semibold text-foreground">
+                {t(`phases.${phaseData.phaseStatusKey}`)}
+              </h4>
               {phaseData.totalBudget > 0 && (
                 <span className="text-xs font-mono bg-secondary/50 px-2 py-1 rounded">
                   {Math.floor(phaseData.totalBudget / 60)}m {phaseData.totalBudget % 60}s
@@ -134,7 +144,7 @@ export function SponsorTimelinePreview({
 
             {phaseData.sponsors.length === 0 ? (
               <div className="text-[10px] text-muted-foreground italic py-2">
-                Geen sponsors met budget in deze fase
+                {t("sponsors.noBudgetInPhase")}
               </div>
             ) : (
               <div className="space-y-2">
@@ -177,7 +187,7 @@ export function SponsorTimelinePreview({
 
                       {!sponsor.hasMedia && (
                         <div className="text-[10px] text-red-500/80">
-                          Geen actieve media gekoppeld
+                          {t("sponsors.noActiveMedia")}
                         </div>
                       )}
                     </div>
@@ -192,15 +202,15 @@ export function SponsorTimelinePreview({
       <div className="mt-4 pt-3 border-t border-border/50 text-[10px] text-muted-foreground space-y-1">
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-emerald-500" />
-          <span>Sponsor actief in huidige fase</span>
+          <span>{t("sponsors.legendActive")}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-amber-500/70" />
-          <span>Sponsor inactief</span>
+          <span>{t("sponsors.legendInactive")}</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-3 h-3 rounded-full bg-gray-500/50" />
-          <span>Geen media gekoppeld</span>
+          <span>{t("sponsors.legendNoMedia")}</span>
         </div>
       </div>
     </div>

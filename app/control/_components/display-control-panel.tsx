@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDisplayStore } from "@/lib/store";
@@ -13,13 +14,13 @@ import type { MatchStatusT } from "@/lib/validation/commands";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
 import { getSportProfile } from "@/lib/sports";
 
-const PHASES: { status: MatchStatusT; label: string; hint?: string }[] = [
-  { status: "PREMATCH", label: "Voor wedstrijd", hint: "SETUP of PREMATCH" },
-  { status: "FIRST_HALF", label: "1e helft" },
-  { status: "HALF_TIME", label: "Rust" },
-  { status: "SECOND_HALF", label: "2e helft" },
-  { status: "EXTRA_TIME", label: "Verlenging" },
-  { status: "FULL_TIME", label: "Einde", hint: "na afloop evt. POST via status rechts" },
+const PHASES: { status: MatchStatusT; hint?: string }[] = [
+  { status: "PREMATCH", hint: "SETUP of PREMATCH" },
+  { status: "FIRST_HALF" },
+  { status: "HALF_TIME" },
+  { status: "SECOND_HALF" },
+  { status: "EXTRA_TIME" },
+  { status: "FULL_TIME", hint: "na afloop / full time" },
 ];
 
 function phaseButtonActive(phaseStatus: MatchStatusT, current?: string): boolean {
@@ -34,10 +35,10 @@ function phaseButtonActive(phaseStatus: MatchStatusT, current?: string): boolean
 }
 
 export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null }) {
+  const { t } = useTranslation();
   const state = useDisplayStore((s) => s.state);
   const tick = useDisplayStore((s) => s.tick);
   const mode = state?.mode ?? "IDLE";
-  const safeMode = state?.safeMode ?? false;
   const livePlay = isLivePlayingMatchStatus(activeMatch?.status);
   const sportProfile = getSportProfile(activeMatch?.sport);
   const { isFeatureAllowed, planLabel } = useLicenseFeatures();
@@ -63,17 +64,6 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
     await window.electronAPI.reloadDisplayWindow();
   }, []);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey && e.shiftKey)) return;
-      if (e.key !== "S" && e.key !== "s") return;
-      if (isEditable(e.target)) return;
-      e.preventDefault();
-      void sendCommand({ type: "display:setSafeMode", enabled: !safeMode });
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [safeMode]);
   const { data: mediaRaw } = useApi<MediaItem[]>("/api/media");
   const mediaList = useMemo(
     () =>
@@ -96,10 +86,23 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
     );
   }, [mediaList, mediaSearch]);
 
-  const applyPhase = useCallback(async (status: MatchStatusT) => {
-    await sendCommand({ type: "match:setStatus", status });
-    await sendCommand({ type: "display:setMode", mode: "MATCH" });
-  }, []);
+  const applyPhase = useCallback(
+    async (status: MatchStatusT) => {
+      await sendCommand({ type: "match:setStatus", status });
+      /**
+       * Speelhelften: automatisch «Scorebord + sponsors» (naast-layout).
+       * Andere fases: alleen scorebord — operator kan sponsors manueel aanzetten.
+       */
+      const liveHalfWithSponsors =
+        automaticSponsorsAllowed &&
+        (status === "FIRST_HALF" || status === "SECOND_HALF" || status === "EXTRA_TIME");
+      await sendCommand({
+        type: "display:setMode",
+        mode: liveHalfWithSponsors ? "SPONSOR_ROTATION" : "MATCH",
+      });
+    },
+    [automaticSponsorsAllowed],
+  );
 
   async function playMediaOnce() {
     if (!mediaPickId) return;
@@ -123,7 +126,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
     <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-4">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs uppercase tracking-widest text-muted-foreground">
-          Scherm &amp; fase
+          {t("display.title")}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse-dot" />
@@ -133,88 +136,47 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
         </div>
       </div>
 
-      {safeMode && (
-        <div className="rounded-md border border-red-500/60 bg-red-500/10 p-3 text-xs leading-snug">
-          <p className="font-bold uppercase tracking-widest text-red-600 dark:text-red-400">
-            Veilige modus actief
-          </p>
-          <p className="mt-1 text-foreground/90">
-            Het scherm toont enkel het scorebord. Geen sponsors, geen overlays, geen externe capture.
-            Druk <kbd className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10px]">Ctrl+Shift+S</kbd> of de knop hieronder om uit te schakelen.
-          </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-2 w-full border-red-500/60 hover:bg-red-500/20"
-            onClick={() => void sendCommand({ type: "display:setSafeMode", enabled: false })}
-          >
-            Veilige modus uitschakelen
-          </Button>
-        </div>
-      )}
-
-      {!safeMode && (
+      {isElectron && (
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
             variant="outline"
-            className="text-[11px] h-8 border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-500/10 hover:text-red-700 dark:hover:text-red-300"
-            title="Forceert pure scoreboard. Sneltoets: Ctrl+Shift+S"
-            onClick={() => void sendCommand({ type: "display:setSafeMode", enabled: true })}
+            className="text-[11px] h-8"
+            title={t("display.restartDisplay")}
+            onClick={() => void reloadDisplay()}
           >
-            Noodknop: veilige modus (Ctrl+Shift+S)
+            {t("display.restartDisplay")}
           </Button>
-          {isElectron && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="text-[11px] h-8"
-              title="Herstart enkel het display-venster (handig als het scherm vastgelopen lijkt)"
-              onClick={() => void reloadDisplay()}
-            >
-              Display herstarten
-            </Button>
-          )}
         </div>
       )}
 
-      {displayLikelyStuck && !safeMode && (
+      {displayLikelyStuck && (
         <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-3 text-xs leading-snug">
           <p className="font-bold uppercase tracking-widest text-amber-700 dark:text-amber-300">
-            Display lijkt vastgelopen
+            {t("display.stuckTitle")}
           </p>
           <p className="mt-1 text-foreground/90">
-            Het scherm stuurt al {Math.round(heartbeatStaleMs / 1000)}s geen update meer terwijl
-            de timer loopt. Activeer de noodknop of herstart het display-venster.
+            {t("display.stuckBody", { seconds: Math.round(heartbeatStaleMs / 1000) })}
           </p>
-          <div className="mt-2 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-amber-500/60"
-              onClick={() => void sendCommand({ type: "display:setSafeMode", enabled: true })}
-            >
-              Veilige modus aan
-            </Button>
-            {isElectron && (
+          {isElectron && (
+            <div className="mt-2 flex flex-wrap gap-2">
               <Button
                 size="sm"
                 variant="outline"
                 className="border-amber-500/60"
                 onClick={() => void reloadDisplay()}
               >
-                Display herstarten
+                {t("display.restartDisplay")}
               </Button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
       <section className="space-y-2">
-        <div className="text-xs font-medium text-foreground/90">Wedstrijdfase</div>
+        <div className="text-xs font-medium text-foreground/90">{t("display.phaseTitle")}</div>
         <p className="text-[11px] text-muted-foreground leading-snug">
-          Zet de fase van de wedstrijd; het scherm blijft op <strong>alleen scorebord</strong>.
-          Start sponsors daarna manueel met <strong>Scorebord + sponsors</strong>. Geen actieve wedstrijd? Activeer eerst een match.
+          {t("display.phaseHint")}
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {sportProfile.id === "FOOTBALL" ? PHASES.map((p) => (
@@ -227,7 +189,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
               title={p.hint}
               onClick={() => void applyPhase(p.status)}
             >
-              {p.label}
+              {t(`phases.${p.status}`)}
             </Button>
           )) : (
             <>
@@ -248,7 +210,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
                 disabled={!activeMatch}
                 onClick={() => void applyPhase("HALF_TIME")}
               >
-                Pauze
+                {t("display.pause")}
               </Button>
               <Button
                 size="sm"
@@ -256,20 +218,20 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
                 disabled={!activeMatch}
                 onClick={() => void applyPhase("FULL_TIME")}
               >
-                Einde
+                {t("phases.FULL_TIME")}
               </Button>
             </>
           )}
         </div>
         {!activeMatch && (
           <p className="text-[11px] text-amber-600/90 dark:text-amber-400/90">
-            Geen actieve wedstrijd — faseknoppen zijn uitgeschakeld.
+            {t("display.noActiveMatch")}
           </p>
         )}
       </section>
 
       <section className="space-y-2 border-t border-border pt-4">
-        <div className="text-xs font-medium text-foreground/90">Scorebord vs. sponsorronde</div>
+        <div className="text-xs font-medium text-foreground/90">{t("display.boardVsSponsors")}</div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Button
             size="lg"
@@ -279,14 +241,14 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             title={
               automaticSponsorsAllowed
                 ? undefined
-                : "Automatische sponsorrotatie is niet beschikbaar in dit licentieplan."
+                : t("display.sponsorsLicenseOff", { plan: "" })
             }
             onClick={() => void backToLiveProgram()}
           >
-            Scorebord + sponsors
+            {t("display.boardPlusSponsors")}
             {livePlay && (
               <span className="block text-[10px] font-normal opacity-80 mt-1">
-                sponsors volgens Media → Sponsors
+                {t("display.boardPlusSponsorsHint")}
               </span>
             )}
           </Button>
@@ -296,41 +258,41 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             className="h-auto min-h-[3rem] py-3 whitespace-normal text-center leading-snug"
             onClick={() => void sendCommand({ type: "display:setMode", mode: "MATCH" })}
           >
-            Alleen scorebord
+            {t("display.boardOnly")}
             <span className="block text-[10px] font-normal opacity-80 mt-1">
-              geen sponsorclips naast het scorebord
+              {t("display.boardOnlyHint")}
             </span>
           </Button>
         </div>
         {!automaticSponsorsAllowed && (
           <p className="text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-snug rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-            Automatische sponsorrotatie is uitgeschakeld voor dit licentieplan
-            {planLabel ? ` (${planLabel})` : ""}. Een operator kan wel losse media handmatig starten.
+            {t("display.sponsorsLicenseOff", {
+              plan: planLabel ? ` (${planLabel})` : "",
+            })}
           </p>
         )}
       </section>
 
       <section className="space-y-2 border-t border-border pt-4">
-        <div className="text-xs font-medium text-foreground/90">Eenmalig media (fullscreen)</div>
+        <div className="text-xs font-medium text-foreground/90">{t("display.oneOffTitle")}</div>
         <p className="text-[11px] text-muted-foreground leading-snug">
-          Kies een bestand uit je mediabibliotheek en toon het één keer volledig. Daarna terug naar het normale
-          wedstrijdscherm. (Meer beheer: tab <strong>Media</strong>.)
+          {t("display.oneOffPick")}
         </p>
         <div className="space-y-2">
           <Input
             type="search"
-            placeholder="Zoek op titel, type of duur…"
+            placeholder={t("display.oneOffSearch")}
             value={mediaSearch}
             onChange={(e) => setMediaSearch(e.target.value)}
             className="h-10"
-            aria-label="Zoek in mediabibliotheek"
+            aria-label={t("display.oneOffSearch")}
           />
           <div className="max-h-44 overflow-y-auto rounded-md border border-input bg-background">
             {filteredMediaList.length === 0 ? (
               <div className="px-3 py-4 text-xs text-muted-foreground text-center">
                 {mediaList.length === 0
-                  ? "Nog geen media — voeg bestanden toe via tab Media."
-                  : "Geen resultaten voor deze zoekterm."}
+                  ? "Nog geen media."
+                  : "Geen resultaten."}
               </div>
             ) : (
               <ul className="divide-y divide-border">
@@ -356,7 +318,6 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           </div>
           {mediaPickId && (
             <p className="text-[11px] text-muted-foreground">
-              Geselecteerd:{" "}
               <strong className="text-foreground">
                 {mediaList.find((m) => m.id === mediaPickId)?.title ?? "—"}
               </strong>
@@ -365,7 +326,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
                 className="ml-2 underline text-foreground/80 hover:text-foreground"
                 onClick={() => setMediaPickId("")}
               >
-                wissen
+                {t("common.clear")}
               </button>
             </p>
           )}
@@ -378,10 +339,10 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             variant={oneOffMedia ? "default" : "secondary"}
             onClick={() => void playMediaOnce()}
           >
-            Toon op scherm
+            {t("display.oneOffShow")}
           </Button>
           <Button type="button" variant="outline" className="sm:flex-1" onClick={() => void backToLiveProgram()}>
-            Terug: scorebord + sponsors
+            {t("display.boardPlusSponsors")}
           </Button>
         </div>
       </section>
@@ -399,6 +360,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
 }
 
 export function EventLog({ match }: { match: Match | null }) {
+  const { t } = useTranslation();
   const { data: fresh, reload } = useApi<Match>(match ? `/api/matches/${match.id}` : null);
   const state = useDisplayStore((s) => s.state);
 
@@ -413,10 +375,10 @@ export function EventLog({ match }: { match: Match | null }) {
 
   return (
     <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-3">
-      <h2 className="text-lg font-semibold">Event log</h2>
+      <h2 className="text-lg font-semibold">{t("display.eventLog")}</h2>
       <div className="flex flex-col gap-1 max-h-80 overflow-auto">
         {events.length === 0 && (
-          <div className="text-sm text-muted-foreground">No events yet.</div>
+          <div className="text-sm text-muted-foreground">{t("display.noEvents")}</div>
         )}
         {events.map((e) => (
           <EventRow
@@ -443,6 +405,7 @@ function EventRow({
   playerMap: Record<string, Player>;
   onUndo: () => void;
 }) {
+  const { t } = useTranslation();
   const p = event.playerInId ? playerMap[event.playerInId] : null;
   const out = event.playerOutId ? playerMap[event.playerOutId] : null;
 
@@ -469,11 +432,11 @@ function EventRow({
         {event.type === "GOAL" && p && `Goal — ${p.firstName} ${p.lastName} (#${p.number})`}
         {event.type === "SUB" && (
           <>
-            Sub: {out ? `${out.lastName}` : "?"} → {p ? `${p.lastName}` : "?"}
+            {t("matchLive.sub")}: {out ? `${out.lastName}` : "?"} → {p ? `${p.lastName}` : "?"}
           </>
         )}
-        {event.type === "CARD_YELLOW" && p && `Yellow — ${p.lastName}`}
-        {event.type === "CARD_RED" && p && `Red — ${p.lastName}`}
+        {event.type === "CARD_YELLOW" && p && `${t("display.yellow")} ${p.lastName}`}
+        {event.type === "CARD_RED" && p && `${t("display.red")} ${p.lastName}`}
         {event.type === "TIMER_ADJUST" && <span className="text-muted-foreground">{event.note}</span>}
       </span>
       <Button size="sm" variant="ghost" onClick={onUndo}>

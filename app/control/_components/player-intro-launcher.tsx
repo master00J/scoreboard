@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,6 +16,7 @@ import { sendCommand } from "@/lib/use-socket";
 import type { Match, Player, Team } from "@/lib/types";
 
 export function PlayerIntroLauncher({ match }: { match: Match | null }) {
+  const { t } = useTranslation();
   const state = useDisplayStore((s) => s.state);
   const [autoAdvance, setAutoAdvance] = useState(false);
   const [intervalSec, setIntervalSec] = useState(3);
@@ -78,10 +80,11 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
   }, [autoAdvance, intervalSec, players, idx, state?.mode]);
 
   if (!match) return null;
+  const currentMatch = match;
 
-  function launch(team: "home" | "away") {
-    const t = team === "home" ? match.homeTeam : match.awayTeam;
-    setSelectedTeamId(t.id);
+  function launch(side: "home" | "away") {
+    const selected = side === "home" ? currentMatch.homeTeam : currentMatch.awayTeam;
+    setSelectedTeamId(selected.id);
     sendCommand({
       type: "display:setMode",
       mode: "PLAYER_INTRO",
@@ -91,7 +94,7 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
 
   function pickPlayer(p: Player) {
     const teamId =
-      p.teamId === match.homeTeamId ? match.homeTeamId : match.awayTeamId;
+      p.teamId === currentMatch.homeTeamId ? currentMatch.homeTeamId : currentMatch.awayTeamId;
     setSelectedTeamId(teamId);
     sendCommand({
       type: "display:setMode",
@@ -113,79 +116,76 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
   return (
     <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-3">
       <div>
-        <h2 className="text-lg font-semibold">Spelerintro</h2>
+        <h2 className="text-lg font-semibold">{t("playerIntro.title")}</h2>
         <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-          Kies hier een team of een speler. Zonder keuze blijft het scherm het <strong className="text-foreground/90">scorebord</strong>{" "}
-          tonen — <strong className="text-foreground/90">niet</strong> alleen de knop “Spelerintro” in Display mode gebruiken zonder speler.
+          {t("playerIntro.help", { title: t("playerIntro.title") })}
         </p>
         <p className="text-[11px] text-muted-foreground leading-relaxed border-l-2 border-primary/40 pl-2">
-          <strong className="text-foreground/85">Custom visuals:</strong> zet per speler een{" "}
-          <strong className="text-foreground/85">lineup-video</strong> (fullscreen) en/of{" "}
-          <strong className="text-foreground/85">foto</strong> (grafisch sjabloon zonder video) onder{" "}
-          <span className="text-foreground/90">Setup → team → speler bewerken</span>, of bulk onder{" "}
-          <span className="text-foreground/90">Opstelling video’s…</span>.
+          {t("playerIntro.customVisuals")}
         </p>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Button type="button" onClick={() => launch("home")}>
-          Start: {match.homeTeam.shortName ?? match.homeTeam.name}
+          {t("playerIntro.start")}: {currentMatch.homeTeam.shortName ?? currentMatch.homeTeam.name}
         </Button>
         <Button type="button" onClick={() => launch("away")}>
-          Start: {match.awayTeam.shortName ?? match.awayTeam.name}
+          {t("playerIntro.start")}: {currentMatch.awayTeam.shortName ?? currentMatch.awayTeam.name}
         </Button>
       </div>
       <Button type="button" variant="outline" onClick={() => setOrderDialogOpen(true)}>
-        Intro-volgorde klaarzetten…
+        {t("playerIntro.prepareOrder")}
       </Button>
 
       {state?.mode === "PLAYER_INTRO" && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-2 border border-border rounded-lg p-2 bg-muted/20">
             <div className="text-[11px] text-muted-foreground leading-snug">
-              Intro staat klaar. Gebruik nu vooral <strong className="text-foreground/90">Volgende</strong> om de stadiumomroeper te volgen.
+              {t("playerIntro.readyHint")}
             </div>
             <div className="flex gap-2">
             <Button
               type="button"
               size="sm"
-              variant={selectedTeamId === match.homeTeamId ? "default" : "outline"}
-              onClick={() => setSelectedTeamId(match.homeTeamId)}
+              variant={selectedTeamId === currentMatch.homeTeamId ? "default" : "outline"}
+              onClick={() => setSelectedTeamId(currentMatch.homeTeamId)}
             >
-              {match.homeTeam.shortName ?? "Thuis"}
+              {currentMatch.homeTeam.shortName ?? t("common.home")}
             </Button>
             <Button
               type="button"
               size="sm"
-              variant={selectedTeamId === match.awayTeamId ? "default" : "outline"}
-              onClick={() => setSelectedTeamId(match.awayTeamId)}
+              variant={selectedTeamId === currentMatch.awayTeamId ? "default" : "outline"}
+              onClick={() => setSelectedTeamId(currentMatch.awayTeamId)}
             >
-              {match.awayTeam.shortName ?? "Uit"}
+              {currentMatch.awayTeam.shortName ?? t("common.away")}
             </Button>
             </div>
           </div>
 
           <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-            Live-volgorde · {activeTeam?.shortName ?? activeTeam?.name ?? "—"}
+            {t("playerIntro.liveOrder", {
+              team: activeTeam?.shortName ?? activeTeam?.name ?? "—",
+            })}
           </div>
           <div className="rounded-lg border border-border bg-muted/20 p-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-xs text-muted-foreground">Huidig</div>
+                <div className="text-xs text-muted-foreground">{t("playerIntro.current")}</div>
                 <div className="truncate text-sm font-semibold">
                   {idx >= 0 && players[idx]
                     ? `#${players[idx]!.number} ${players[idx]!.firstName} ${players[idx]!.lastName}`
-                    : "Nog geen speler gestart"}
+                    : t("playerIntro.noPlayers")}
                 </div>
               </div>
               <div className="min-w-0 text-right">
-                <div className="text-xs text-muted-foreground">Volgende</div>
+                <div className="text-xs text-muted-foreground">{t("playerIntro.next")}</div>
                 <div className="truncate text-sm font-semibold text-primary">
                   {players[idx + 1] ?? (idx < 0 ? players[0] : null)
                     ? (() => {
                         const p = players[idx + 1] ?? players[0]!;
                         return `#${p.number} ${p.firstName} ${p.lastName}`;
                       })()
-                    : "Einde lijst"}
+                    : t("playerIntro.endOfList")}
                 </div>
               </div>
             </div>
@@ -221,7 +221,7 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
                   checked={autoAdvance}
                   onChange={(e) => setAutoAdvance(e.target.checked)}
                 />
-                Auto
+                {t("playerIntro.auto")}
               </label>
               <input
                 type="number"
@@ -231,15 +231,15 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
                 onChange={(e) => setIntervalSec(Number(e.target.value))}
                 className="w-14 h-7 rounded bg-background border border-border px-2 text-xs"
               />
-              <span>s</span>
+              <span>{t("common.seconds")}</span>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-2">
             <Button type="button" variant="outline" onClick={() => step(-1)}>
-              ← Vorige
+              {t("playerIntro.prev")}
             </Button>
             <Button type="button" variant="outline" onClick={() => step(1)}>
-              Volgende →
+              {t("playerIntro.nextBtn")}
             </Button>
           </div>
         </>
@@ -251,12 +251,12 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
         size="sm"
         onClick={() => sendCommand({ type: "display:setMode", mode: "TEAM_INTRO" })}
       >
-        Teamintro tonen
+        {t("playerIntro.showTeamIntro")}
       </Button>
 
       {orderDialogOpen && (
         <IntroOrderDialog
-          match={match}
+          match={currentMatch}
           orders={introOrders}
           setOrders={setIntroOrders}
           selectedTeamId={selectedTeamId}
@@ -283,6 +283,7 @@ function IntroOrderDialog({
   onSelectTeam: (id: string) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const team = selectedTeamId === match.awayTeamId ? match.awayTeam : match.homeTeam;
   const allPlayers = sortedPlayers(team);
   const selectedIds = orders[team.id] ?? defaultIntroOrder(match, team);
@@ -319,40 +320,42 @@ function IntroOrderDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent size="xl">
         <DialogHeader>
-          <DialogTitle>Spelerintro-volgorde klaarzetten</DialogTitle>
+          <DialogTitle>{t("playerIntro.orderDialogTitle")}</DialogTitle>
           <DialogDescription>
-            Zet vooraf de volgorde klaar. Tijdens de aankondiging hoef je dan enkel op Volgende te klikken.
+            {t("playerIntro.orderDialogDesc")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-wrap gap-2 mb-4">
-          {[match.homeTeam, match.awayTeam].map((t) => (
+          {[match.homeTeam, match.awayTeam].map((teamOpt) => (
             <Button
-              key={t.id}
+              key={teamOpt.id}
               type="button"
               size="sm"
-              variant={team.id === t.id ? "default" : "outline"}
-              onClick={() => onSelectTeam(t.id)}
+              variant={team.id === teamOpt.id ? "default" : "outline"}
+              onClick={() => onSelectTeam(teamOpt.id)}
             >
-              {t.shortName || t.name}
+              {teamOpt.shortName || teamOpt.name}
             </Button>
           ))}
           <Button type="button" size="sm" variant="outline" onClick={() => setTeamOrder(defaultIntroOrder(match, team))}>
-            Reset naar basis 11
+            {t("playerIntro.resetBase11")}
           </Button>
           <Button type="button" size="sm" variant="outline" onClick={() => setTeamOrder(allPlayers.slice(0, 11).map((p) => p.id))}>
-            Eerste 11 op nummer
+            {t("playerIntro.first11ByNumber")}
           </Button>
           <Button type="button" size="sm" variant="ghost" onClick={() => setTeamOrder([])}>
-            Leegmaken
+            {t("playerIntro.clearOrder")}
           </Button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_1fr] gap-4">
           <section className="rounded-lg border border-border p-3">
             <div className="mb-2 flex items-center justify-between">
-              <div className="text-sm font-semibold">Gekozen volgorde · {selectedPlayers.length}</div>
-              <div className="text-[10px] text-muted-foreground">Sleep spelers om te herschikken</div>
+              <div className="text-sm font-semibold">
+                {t("playerIntro.chosenOrder", { count: selectedPlayers.length })}
+              </div>
+              <div className="text-[10px] text-muted-foreground">{t("playerIntro.dragHint")}</div>
             </div>
             <div className="flex flex-col gap-1.5">
               {selectedPlayers.map((p, i) => (
@@ -405,13 +408,13 @@ function IntroOrderDialog({
                 </div>
               ))}
               {selectedPlayers.length === 0 && (
-                <div className="text-xs text-muted-foreground">Nog geen spelers gekozen.</div>
+                <div className="text-xs text-muted-foreground">{t("playerIntro.noneChosen")}</div>
               )}
             </div>
           </section>
 
           <section className="rounded-lg border border-border p-3">
-            <div className="mb-2 text-sm font-semibold">Beschikbare spelers</div>
+            <div className="mb-2 text-sm font-semibold">{t("playerIntro.availablePlayers")}</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-1.5">
               {available.map((p) => (
                 <button
@@ -425,19 +428,21 @@ function IntroOrderDialog({
                     {p.firstName} {p.lastName}
                   </span>
                   {(p.lineupVideoPath || p.photoPath) && (
-                    <span className="text-[9px] text-primary">{p.lineupVideoPath ? "Video" : "Foto"}</span>
+                    <span className="text-[9px] text-primary">
+                      {p.lineupVideoPath ? t("media.typeVideo") : t("media.typeImage")}
+                    </span>
                   )}
                 </button>
               ))}
               {available.length === 0 && (
-                <div className="text-xs text-muted-foreground">Alle spelers zitten in de volgorde.</div>
+                <div className="text-xs text-muted-foreground">{t("playerIntro.allInOrder")}</div>
               )}
             </div>
           </section>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Sluiten</Button>
+          <Button variant="outline" onClick={onClose}>{t("common.close")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

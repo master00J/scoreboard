@@ -1,9 +1,11 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import type { Match } from "@/lib/types";
 import { useSponsorPhaseHud } from "../_hooks/use-sponsor-phase-hud";
 
 export function SponsorPhaseHud({ match }: { match: Match | null }) {
+  const { t } = useTranslation();
   const model = useSponsorPhaseHud(match);
 
   if (model.kind === "inactive") {
@@ -14,7 +16,7 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
     return (
       <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
         <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
-          Sponsor-timing
+          {t("sponsors.hudTiming")}
         </div>
         <p>{model.label}</p>
       </div>
@@ -27,15 +29,17 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">
-        Sponsor op scherm · {model.contextLabel}
+        {t("sponsors.hudTitle")} · {model.contextLabel}
       </div>
 
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-lg font-semibold">
-          {model.phase === "sponsor" ? (model.sponsorName ?? "Sponsor") : "Scorebord"}
+          {model.phase === "sponsor"
+            ? (model.sponsorName ?? t("sponsors.hudSponsor"))
+            : t("sponsors.hudScoreboard")}
         </span>
         <span className="text-xs font-mono text-muted-foreground shrink-0">
-          {model.phase === "sponsor" ? "Bezig" : "Wacht"}
+          {model.phase === "sponsor" ? t("sponsors.hudBusy") : t("sponsors.hudWait")}
         </span>
       </div>
 
@@ -48,9 +52,9 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
             />
           </div>
           <div className="flex justify-between text-xs text-muted-foreground">
-            <span>Clip voortgang</span>
+            <span>{t("sponsors.clipProgress")}</span>
             {model.clipRemainingSec != null && (
-              <span>{model.clipRemainingSec.toFixed(1)} s resterend</span>
+              <span>{t("sponsors.clipRemaining", { sec: model.clipRemainingSec.toFixed(1) })}</span>
             )}
           </div>
         </div>
@@ -58,15 +62,25 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
 
       {model.phase === "scoreboard" && (
         <p className="text-xs text-muted-foreground leading-relaxed">
-          {model.nextSlotEtaSec != null ? (
-            <>
-              Volgende sponsor in beeld over <strong>{model.nextSlotEtaSec.toFixed(1)} s</strong>
-            </>
-          ) : (
-            <>Geen volgende sponsor-slot meer in dit blok.</>
-          )}
+          {model.prematchWindowOpensInSec != null
+            ? t("sponsors.prematchWindowOpensIn", {
+                sec: formatHudSeconds(model.prematchWindowOpensInSec),
+              })
+            : model.prematchTimelineComplete
+              ? t("sponsors.prematchTimelineDone")
+              : model.nextSlotEtaSec != null
+                ? t("sponsors.nextIn", { sec: model.nextSlotEtaSec.toFixed(1) })
+                : t("sponsors.noNext")}
         </p>
       )}
     </div>
   );
+}
+
+function formatHudSeconds(totalSec: number): string {
+  const s = Math.max(0, Math.ceil(totalSec));
+  if (s < 60) return `${s}`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r > 0 ? `${m}:${String(r).padStart(2, "0")}` : `${m}:00`;
 }

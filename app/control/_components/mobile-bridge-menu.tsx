@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import * as QRCode from "qrcode";
 import { toast } from "@/components/ui/toast";
 import type { MobileBridgeInfo } from "@/lib/desktop-bridge";
@@ -45,6 +46,7 @@ function PairCodeQr({ pairCode, label }: { pairCode: string; label: string }) {
 }
 
 function MobileBridgePanel({ info }: { info: MobileBridgeInfo }) {
+  const { t } = useTranslation();
   const [showOperatorSecrets, setShowOperatorSecrets] = useState(false);
   const bridgeUrl = info.bridgeUrls[0] ?? (info.port ? `http://localhost:${info.port}` : "");
   const localPairCodeViewer =
@@ -62,20 +64,20 @@ function MobileBridgePanel({ info }: { info: MobileBridgeInfo }) {
       {info.cloud.enabled && info.cloud.pairCode ? (
         <div className="rounded-lg border border-green-500/40 bg-card p-3 text-xs shadow-sm">
           <div className="flex items-start gap-3">
-            <PairCodeQr pairCode={info.cloud.pairCode} label="Cloud QR-code" />
+            <PairCodeQr pairCode={info.cloud.pairCode} label={t("bridge.cloudQrAlt")} />
             <div className="flex flex-col gap-1">
-              <span className="font-semibold text-green-500">Mobiele app via cloud</span>
-              <span className="text-muted-foreground">Werkt ook buiten hetzelfde netwerk.</span>
+              <span className="font-semibold text-green-500">{t("bridge.cloudTitle")}</span>
+              <span className="text-muted-foreground">{t("bridge.cloudHint")}</span>
               <span className="font-mono text-muted-foreground">venue: {info.cloud.venueId}</span>
               <button
                 type="button"
                 className="w-fit font-mono text-primary underline"
                 onClick={() => {
                   void navigator.clipboard?.writeText(info.cloud.pairCode ?? "");
-                  toast({ title: "Cloud koppelcode gekopieerd" });
+                  toast({ title: t("bridge.cloudCodeCopied") });
                 }}
               >
-                Kopieer cloud-code
+                {t("bridge.copyUrl")}
               </button>
             </div>
           </div>
@@ -85,21 +87,24 @@ function MobileBridgePanel({ info }: { info: MobileBridgeInfo }) {
       {info.enabled && info.pairingCode ? (
         <div className="rounded-lg border border-border bg-card p-3 text-xs shadow-sm">
           <div className="flex items-start gap-3">
-            <PairCodeQr pairCode={activeLanPairCode} label="LAN QR-code" />
+            <PairCodeQr pairCode={activeLanPairCode} label={t("bridge.lanQrAlt")} />
             <div className="flex flex-col gap-1">
-              <span className="font-semibold text-foreground">Mobiele app via LAN</span>
-              <span className="text-muted-foreground">Snelste optie op hetzelfde netwerk.</span>
+              <span className="font-semibold text-foreground">{t("bridge.lanTitle")}</span>
+              <span className="text-muted-foreground">{t("bridge.hint")}</span>
               {!showOperatorSecrets ? (
-                <span className="text-muted-foreground">
-                  Standaardtoon: alleen <strong>viewer</strong>-QR (geen operator-PIN in de code). Vink hieronder aan
-                  om operator-koppelcode en PIN te tonen.
-                </span>
+                <span className="text-muted-foreground">{t("bridge.viewerOnlyHint")}</span>
               ) : null}
-              <span className="font-mono text-muted-foreground">pairing: {info.pairingCode}</span>
+              <span className="font-mono text-muted-foreground">
+                {t("bridge.pairingLabel")} {info.pairingCode}
+              </span>
               {info.operatorPin && showOperatorSecrets ? (
-                <span className="font-mono text-green-500">operator PIN: {info.operatorPin}</span>
+                <span className="font-mono text-green-500">
+                  {t("bridge.operatorPinLabel")} {info.operatorPin}
+                </span>
               ) : info.operatorPin ? (
-                <span className="font-mono text-muted-foreground">operator PIN: ••••••</span>
+                <span className="font-mono text-muted-foreground">
+                  {t("bridge.operatorPinLabel")} ••••••
+                </span>
               ) : null}
               <label className="flex items-center gap-2 cursor-pointer select-none">
                 <input
@@ -108,16 +113,16 @@ function MobileBridgePanel({ info }: { info: MobileBridgeInfo }) {
                   checked={showOperatorSecrets}
                   onChange={(e) => setShowOperatorSecrets(e.target.checked)}
                 />
-                <span>Toon operator-PIN en volledige LAN-koppelcode (QR)</span>
+                <span>{t("bridge.showOperatorSecrets")}</span>
               </label>
               {bridgeUrl ? (
                 <button
                   type="button"
                   className="w-fit font-mono text-primary underline"
-                  title="Klik om Bridge URL te kopiëren"
+                  title={t("bridge.copyUrl")}
                   onClick={() => {
                     void navigator.clipboard?.writeText(bridgeUrl);
-                    toast({ title: "Bridge URL gekopieerd", description: bridgeUrl });
+                    toast({ title: t("bridge.copyUrl"), description: bridgeUrl });
                   }}
                 >
                   {bridgeUrl}
@@ -130,16 +135,16 @@ function MobileBridgePanel({ info }: { info: MobileBridgeInfo }) {
                   onClick={() => {
                     void navigator.clipboard?.writeText(activeLanPairCode);
                     toast({
-                      title: "LAN koppelcode gekopieerd",
-                      description: showOperatorSecrets ? "Inclusief operator-PIN" : "Alleen viewer",
+                      title: t("bridge.lanCodeCopied"),
+                      description: showOperatorSecrets ? t("bridge.withPin") : t("bridge.viewerOnly"),
                     });
                   }}
                 >
-                  Kopieer LAN-code
+                  {t("bridge.copyUrl")}
                 </button>
               ) : null}
               <span className={info.operatorPinConfigured ? "text-green-500" : "text-amber-500"}>
-                {info.operatorPinConfigured ? "operator actief" : "viewer only"}
+                {info.operatorPinConfigured ? t("bridge.connected") : t("bridge.viewerOnlyStatus")}
               </span>
             </div>
           </div>
@@ -150,6 +155,7 @@ function MobileBridgePanel({ info }: { info: MobileBridgeInfo }) {
 }
 
 export function MobileBridgeMenu({ info }: { info: MobileBridgeInfo | null }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -187,7 +193,7 @@ export function MobileBridgeMenu({ info }: { info: MobileBridgeInfo | null }) {
       >
         <span className="flex items-center gap-1.5">
           <span className={`h-2 w-2 rounded-full ${cloudActive || lanActive ? "bg-green-500" : "bg-muted-foreground"}`} />
-          Mobiele app
+          {t("bridge.title")}
         </span>
         <span className="text-muted-foreground">{open ? "▴" : "▾"}</span>
       </button>
@@ -195,12 +201,12 @@ export function MobileBridgeMenu({ info }: { info: MobileBridgeInfo | null }) {
       {open ? (
         <div
           role="dialog"
-          aria-label="Mobiele app koppelen"
+          aria-label={t("bridge.title")}
           className="absolute right-0 top-[calc(100%+8px)] z-50 w-[min(92vw,420px)] rounded-xl border border-border bg-card shadow-xl"
         >
           <div className="border-b border-border px-4 py-3">
-            <p className="text-sm font-semibold">Mobiele app koppelen</p>
-            <p className="text-xs text-muted-foreground">Scan een QR-code of kopieer de koppelcode.</p>
+            <p className="text-sm font-semibold">{t("bridge.title")}</p>
+            <p className="text-xs text-muted-foreground">{t("bridge.hint")}</p>
           </div>
           <MobileBridgePanel info={info} />
         </div>

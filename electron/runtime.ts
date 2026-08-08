@@ -34,6 +34,7 @@ type RuntimeOptions = {
   getControlWindow: () => BrowserWindow | null;
   getDisplayWindow: () => BrowserWindow | null;
   log: (line: string) => void;
+  onUiLocaleChanged?: (locale: "nl" | "en" | "fr") => void;
 };
 
 let opts: RuntimeOptions | null = null;
@@ -835,6 +836,16 @@ async function setUiLocale(locale: "nl" | "en" | "fr") {
     `UPDATE "AppSettings" SET "uiLocale" = ? WHERE "id" = 1`,
     locale,
   );
+  try {
+    opts?.onUiLocaleChanged?.(locale);
+  } catch {
+    /* menu rebuild best-effort */
+  }
+}
+
+export async function getUiLocale(): Promise<"nl" | "en" | "fr"> {
+  const s = await getAppSettings();
+  return normalizeUiLocale(s.uiLocale);
 }
 
 async function setGoalIntroVideoPath(videoPath: string | null) {
@@ -1672,6 +1683,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         halfBreakSec?: number;
         sport?: string;
         periodDurationSec?: number;
+        prematchSpreadWindowSec?: number | null;
       };
       const sport = normalizeSport(body.sport);
       const sportProfile = getSportProfile(sport);
@@ -1681,12 +1693,18 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         if (!mi) return json(400, { error: "Matchsponsor-media niet gevonden" });
         sponsorId = mi.id;
       }
+      let prematchSpreadWindowSec = 0;
+      if (typeof body.prematchSpreadWindowSec === "number" && Number.isFinite(body.prematchSpreadWindowSec)) {
+        const n = Math.floor(body.prematchSpreadWindowSec);
+        prematchSpreadWindowSec = n <= 0 ? 0 : Math.min(86400, Math.max(60, n));
+      }
       const match = await prisma.match.create({
         data: {
           homeTeamId: body.homeTeamId,
           awayTeamId: body.awayTeamId,
           kickoffAt: body.kickoffAt ? new Date(body.kickoffAt) : null,
           matchSponsorMediaId: sponsorId,
+          prematchSpreadWindowSec,
           sport,
           currentPeriod: 1,
           periodDurationSec:

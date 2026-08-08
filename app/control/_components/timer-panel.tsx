@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
@@ -13,6 +14,7 @@ import type { Match } from "@/lib/types";
 import { getSportProfile, sportClockSeconds, sportHasMainClock } from "@/lib/sports";
 
 export function TimerPanel() {
+  const { t } = useTranslation();
   const state = useDisplayStore((s) => s.state);
   const { data: match, reload } = useApi<Match>(
     state?.matchId ? `/api/matches/${state.matchId}` : null,
@@ -26,21 +28,35 @@ export function TimerPanel() {
   const [setOpen, setSetOpen] = useState(false);
   const [mm, setMm] = useState("0");
   const [ss, setSs] = useState("0");
+  const [injuryDraft, setInjuryDraft] = useState(String(addedTimeMinutes));
 
   useEffect(() => {
     reload();
   }, [state?.updatedAt, reload]);
 
+  useEffect(() => {
+    setInjuryDraft(String(addedTimeMinutes));
+  }, [addedTimeMinutes]);
+
+  function applyInjuryMinutes(raw: string) {
+    const parsed = Number.parseInt(raw.trim(), 10);
+    const minutes = Number.isFinite(parsed) ? Math.max(0, Math.min(30, parsed)) : 0;
+    setInjuryDraft(String(minutes));
+    if (minutes !== addedTimeMinutes) {
+      void sendCommand({ type: "timer:setAddedTime", minutes });
+    }
+  }
+
   return (
     <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-4">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">
-        {profile.label} · wedstrijdklok
+        {profile.label} · {t("timer.title")}
       </div>
       <div
         className="text-center text-[96px] font-black tabular-nums leading-none"
         style={{ color: running ? "#22c55e" : "#f59e0b" }}
       >
-        {hasClock ? formatTime(displaySeconds) : "GEEN KLOK"}
+        {hasClock ? formatTime(displaySeconds) : t("timer.noClock")}
       </div>
       <div className="grid grid-cols-2 gap-2">
         <Button
@@ -49,7 +65,7 @@ export function TimerPanel() {
           disabled={!hasClock}
           onClick={() => sendCommand({ type: running ? "timer:pause" : "timer:start" })}
         >
-          {running ? "Pause" : "Start"}
+          {running ? t("common.pause") : t("common.start")}
         </Button>
         <Button
           size="xl"
@@ -57,28 +73,22 @@ export function TimerPanel() {
           disabled={!hasClock}
           onClick={() => setSetOpen(true)}
         >
-          Set time
+          {t("timer.setTime")}
         </Button>
-      </div>
-      <div className="grid grid-cols-4 gap-2">
-        <AdjustBtn label="-1m" delta={profile.timerMode === "COUNT_DOWN" ? 60 : -60} disabled={!hasClock} />
-        <AdjustBtn label="-10s" delta={profile.timerMode === "COUNT_DOWN" ? 10 : -10} disabled={!hasClock} />
-        <AdjustBtn label="+10s" delta={profile.timerMode === "COUNT_DOWN" ? -10 : 10} disabled={!hasClock} />
-        <AdjustBtn label="+1m" delta={profile.timerMode === "COUNT_DOWN" ? -60 : 60} disabled={!hasClock} />
       </div>
       {profile.id === "FOOTBALL" ? (
       <div className="grid grid-cols-2 gap-2">
         <Button variant="outline" size="sm" onClick={() => sendCommand({ type: "timer:preset", preset: "FIRST_HALF" })}>
-          ⇤ 1st half (0:00)
+          {t("timer.presetFirst")}
         </Button>
         <Button variant="outline" size="sm" onClick={() => sendCommand({ type: "timer:preset", preset: "SECOND_HALF" })}>
-          ⇤ 2nd half (45:00)
+          {t("timer.presetSecond")}
         </Button>
         <Button variant="outline" size="sm" onClick={() => sendCommand({ type: "timer:preset", preset: "ET1" })}>
-          ⇤ ET1 (90:00)
+          {t("timer.presetEt1")}
         </Button>
         <Button variant="outline" size="sm" onClick={() => sendCommand({ type: "timer:preset", preset: "ET2" })}>
-          ⇤ ET2 (105:00)
+          {t("timer.presetEt2")}
         </Button>
       </div>
       ) : (
@@ -96,58 +106,72 @@ export function TimerPanel() {
         </div>
       )}
 
-      {profile.id === "FOOTBALL" && <div className="rounded-lg border border-border bg-muted/20 p-3">
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="text-xs uppercase tracking-widest text-muted-foreground">
-            Blessuretijd
+      {profile.id === "FOOTBALL" && (
+        <div className="rounded-lg border border-border bg-muted/20 p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs uppercase tracking-widest text-muted-foreground">
+              {t("timer.injuryTime")}
+            </div>
+            <div className="rounded-md bg-amber-500 px-3 py-1 text-sm font-black tabular-nums text-black">
+              +{addedTimeMinutes}
+            </div>
           </div>
-          <div className="rounded-md bg-amber-500 px-3 py-1 text-sm font-black tabular-nums text-black">
-            +{addedTimeMinutes}
-          </div>
-        </div>
-        <div className="grid grid-cols-6 gap-2">
-          {[1, 2, 3, 4, 5].map((minutes) => (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground shrink-0">+</span>
+            <Input
+              type="number"
+              min={0}
+              max={30}
+              step={1}
+              inputMode="numeric"
+              aria-label={t("timer.injuryAria")}
+              value={injuryDraft}
+              onChange={(e) => setInjuryDraft(e.target.value)}
+              onBlur={() => applyInjuryMinutes(injuryDraft)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              className="h-10 font-mono text-base"
+            />
+            <span className="text-sm text-muted-foreground shrink-0">{t("common.minutes")}</span>
             <Button
-              key={minutes}
-              variant={addedTimeMinutes === minutes ? "default" : "secondary"}
+              type="button"
               size="sm"
-              onClick={() => sendCommand({ type: "timer:setAddedTime", minutes })}
+              variant="outline"
+              disabled={addedTimeMinutes === 0}
+              onClick={() => applyInjuryMinutes("0")}
             >
-              +{minutes}
+              {t("timer.injuryOff")}
             </Button>
-          ))}
-          <Button
-            variant={addedTimeMinutes === 0 ? "outline" : "warning"}
-            size="sm"
-            onClick={() => sendCommand({ type: "timer:setAddedTime", minutes: 0 })}
-          >
-            Uit
-          </Button>
+          </div>
         </div>
-      </div>}
+      )}
 
       <Dialog open={setOpen} onOpenChange={setSetOpen}>
         <DialogContent size="sm">
           <DialogHeader>
-            <DialogTitle>Set exact time</DialogTitle>
+            <DialogTitle>{t("timer.setTimeTitle")}</DialogTitle>
           </DialogHeader>
           <div className="flex items-center gap-3">
             <Input
               type="number"
               value={mm}
               onChange={(e) => setMm(e.target.value)}
-              placeholder="Minutes"
+              placeholder={t("timer.minutesPlaceholder")}
             />
             <span className="text-2xl">:</span>
             <Input
               type="number"
               value={ss}
               onChange={(e) => setSs(e.target.value)}
-              placeholder="Seconds"
+              placeholder={t("timer.secondsPlaceholder")}
             />
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSetOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setSetOpen(false)}>{t("common.cancel")}</Button>
             <Button
               onClick={() => {
                 const requested = Math.max(0, Number(mm) * 60 + Number(ss));
@@ -162,32 +186,11 @@ export function TimerPanel() {
                 setSetOpen(false);
               }}
             >
-              Apply
+              {t("common.apply")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  );
-}
-
-function AdjustBtn({
-  label,
-  delta,
-  disabled,
-}: {
-  label: string;
-  delta: number;
-  disabled?: boolean;
-}) {
-  return (
-    <Button
-      variant="secondary"
-      size="sm"
-      disabled={disabled}
-      onClick={() => sendCommand({ type: "timer:adjust", deltaSec: delta })}
-    >
-      {label}
-    </Button>
   );
 }

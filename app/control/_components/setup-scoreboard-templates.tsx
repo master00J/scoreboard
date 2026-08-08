@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
@@ -24,6 +25,7 @@ export function SetupScoreboardTemplatesSection({
   settings: AppSettings | null | undefined;
   reloadSettings: () => void;
 }) {
+  const { t } = useTranslation();
   const [templates, setTemplates] = useState<ScoreboardTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -50,15 +52,15 @@ export function SetupScoreboardTemplatesSection({
     [settings?.scoreboardThemeJson],
   );
 
-  async function applyTemplate(t: ScoreboardTemplate) {
-    setBusyId(t.id);
+  async function applyTemplate(tpl: ScoreboardTemplate) {
+    setBusyId(tpl.id);
     try {
-      const res = await fetch(`/api/scoreboard-templates/${t.id}/apply`, { method: "POST" });
+      const res = await fetch(`/api/scoreboard-templates/${tpl.id}/apply`, { method: "POST" });
       if (!res.ok) {
-        toast({ title: "Toepassen mislukt", variant: "error" });
+        toast({ title: t("setup.templatesApplyFailed"), variant: "error" });
         return;
       }
-      toast({ title: `Layout "${t.name}" toegepast`, variant: "success" });
+      toast({ title: t("setup.templatesApplied", { name: tpl.name }), variant: "success" });
       reloadSettings();
     } finally {
       setBusyId(null);
@@ -68,7 +70,7 @@ export function SetupScoreboardTemplatesSection({
   async function saveCurrentAsTemplate() {
     const name = newName.trim();
     if (!name) {
-      toast({ title: "Geef de layout een naam", variant: "error" });
+      toast({ title: t("setup.templatesNeedName"), variant: "error" });
       return;
     }
     const res = await fetch("/api/scoreboard-templates", {
@@ -81,79 +83,78 @@ export function SetupScoreboardTemplatesSection({
       }),
     });
     if (!res.ok) {
-      toast({ title: "Opslaan mislukt", variant: "error" });
+      toast({ title: t("setup.saveFailed"), variant: "error" });
       return;
     }
     setNewName("");
     setNewLabel("");
-    toast({ title: `Layout "${name}" opgeslagen`, variant: "success" });
+    toast({ title: t("setup.templatesSaved", { name }), variant: "success" });
     void load();
   }
 
-  async function duplicateTemplate(t: ScoreboardTemplate) {
+  async function duplicateTemplate(tpl: ScoreboardTemplate) {
     const res = await fetch("/api/scoreboard-templates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        name: `${t.name} (kopie)`,
-        label: t.label,
-        themeJson: t.themeJson,
+        name: t("setup.templatesCopySuffix", { name: tpl.name }),
+        label: tpl.label,
+        themeJson: tpl.themeJson,
       }),
     });
     if (!res.ok) {
-      toast({ title: "Dupliceren mislukt", variant: "error" });
+      toast({ title: t("setup.templatesDuplicateFailed"), variant: "error" });
       return;
     }
-    toast({ title: "Kopie gemaakt", variant: "success" });
+    toast({ title: t("setup.templatesDuplicated"), variant: "success" });
     void load();
   }
 
-  async function deleteTemplate(t: ScoreboardTemplate) {
-    if (!confirm(`"${t.name}" verwijderen?`)) return;
-    const res = await fetch(`/api/scoreboard-templates/${t.id}`, { method: "DELETE" });
+  async function deleteTemplate(tpl: ScoreboardTemplate) {
+    if (!confirm(t("setup.templatesDeleteConfirm", { name: tpl.name }))) return;
+    const res = await fetch(`/api/scoreboard-templates/${tpl.id}`, { method: "DELETE" });
     if (!res.ok) {
-      toast({ title: "Verwijderen mislukt", variant: "error" });
+      toast({ title: t("setup.templatesDeleteFailed"), variant: "error" });
       return;
     }
-    toast({ title: "Layout verwijderd", variant: "success" });
+    toast({ title: t("setup.templatesDeleted"), variant: "success" });
     void load();
   }
 
   return (
     <section className="space-y-4">
       <div>
-        <h3 className="text-sm font-semibold">Layout-bibliotheek</h3>
+        <h3 className="text-sm font-semibold">{t("setup.templatesTitle")}</h3>
         <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-          Kies een opgeslagen scorebord-layout of bewaar je huidige instellingen als nieuwe layout.
-          Een layout bevat alleen de vormgeving — sponsorrotatie en afspeelgedrag blijven ongewijzigd.
+          {t("setup.templatesBody")}
         </p>
       </div>
 
       {loading ? (
-        <p className="text-xs text-muted-foreground">Laden…</p>
+        <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {templates.map((t) => {
-            const isCurrent = JSON.stringify(extractVisualTheme(t.themeJson)) === currentVisual;
+          {templates.map((tpl) => {
+            const isCurrent = JSON.stringify(extractVisualTheme(tpl.themeJson)) === currentVisual;
             return (
               <div
-                key={t.id}
+                key={tpl.id}
                 className={`rounded-xl border p-3 space-y-3 ${
                   isCurrent ? "border-emerald-600/70 bg-emerald-950/20" : "border-zinc-800"
                 }`}
               >
-                <TemplatePreview themeJson={t.themeJson} />
+                <TemplatePreview themeJson={tpl.themeJson} />
 
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{t.name}</div>
-                    {t.label ? (
-                      <div className="text-[11px] text-muted-foreground truncate">{t.label}</div>
+                    <div className="text-sm font-medium truncate">{tpl.name}</div>
+                    {tpl.label ? (
+                      <div className="text-[11px] text-muted-foreground truncate">{tpl.label}</div>
                     ) : null}
                   </div>
-                  {t.isBuiltIn ? (
+                  {tpl.isBuiltIn ? (
                     <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
-                      Standaard
+                      {t("setup.templatesBuiltIn")}
                     </span>
                   ) : null}
                 </div>
@@ -161,17 +162,17 @@ export function SetupScoreboardTemplatesSection({
                 <div className="flex flex-wrap gap-2">
                   <Button
                     size="sm"
-                    disabled={busyId === t.id || isCurrent}
-                    onClick={() => void applyTemplate(t)}
+                    disabled={busyId === tpl.id || isCurrent}
+                    onClick={() => void applyTemplate(tpl)}
                   >
-                    {isCurrent ? "Actief" : "Toepassen"}
+                    {isCurrent ? t("common.active") : t("setup.templatesApply")}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => void duplicateTemplate(t)}>
-                    Dupliceren
+                  <Button size="sm" variant="outline" onClick={() => void duplicateTemplate(tpl)}>
+                    {t("setup.templatesDuplicate")}
                   </Button>
-                  {!t.isBuiltIn ? (
-                    <Button size="sm" variant="ghost" onClick={() => void deleteTemplate(t)}>
-                      Verwijderen
+                  {!tpl.isBuiltIn ? (
+                    <Button size="sm" variant="ghost" onClick={() => void deleteTemplate(tpl)}>
+                      {t("common.delete")}
                     </Button>
                   ) : null}
                 </div>
@@ -182,29 +183,31 @@ export function SetupScoreboardTemplatesSection({
       )}
 
       <div className="rounded-xl border border-zinc-800 p-3 space-y-3">
-        <div className="text-xs font-medium">Huidige instellingen opslaan als layout</div>
+        <div className="text-xs font-medium">{t("setup.templatesSaveCurrent")}</div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-[180px] flex-1">
-            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Naam</Label>
+            <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+              {t("setup.name")}
+            </Label>
             <Input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="bv. Thuiswedstrijd"
+              placeholder={t("setup.templatesNamePlaceholder")}
               className="mt-1"
             />
           </div>
           <div className="min-w-[180px] flex-1">
             <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              Label (optioneel)
+              {t("setup.templatesLabelOptional")}
             </Label>
             <Input
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
-              placeholder="bv. Jupiler Pro League"
+              placeholder={t("setup.templatesLabelPlaceholder")}
               className="mt-1"
             />
           </div>
-          <Button onClick={() => void saveCurrentAsTemplate()}>Opslaan als layout</Button>
+          <Button onClick={() => void saveCurrentAsTemplate()}>{t("setup.templatesSaveAs")}</Button>
         </div>
       </div>
     </section>
@@ -217,25 +220,25 @@ export function SetupScoreboardTemplatesSection({
  * bedoeld om vorm en verhouding te herkennen vóór je toepast.
  */
 function TemplatePreview({ themeJson }: { themeJson: string }) {
-  const t: ResolvedScoreboardTheme = useMemo(() => mergeScoreboardTheme(themeJson), [themeJson]);
+  const theme: ResolvedScoreboardTheme = useMemo(() => mergeScoreboardTheme(themeJson), [themeJson]);
 
   const CANVAS_W = 1920;
   const CANVAS_H = 1080;
-  const leftPct = (t.leftBarWidthPx / CANVAS_W) * 100;
-  const bottomPct = (t.bottomBarHeightPx / CANVAS_H) * 100;
-  const frame = `linear-gradient(180deg, ${t.frameColorTop}, ${t.frameColorMid}, ${t.frameColorBot})`;
+  const leftPct = (theme.leftBarWidthPx / CANVAS_W) * 100;
+  const bottomPct = (theme.bottomBarHeightPx / CANVAS_H) * 100;
+  const frame = `linear-gradient(180deg, ${theme.frameColorTop}, ${theme.frameColorMid}, ${theme.frameColorBot})`;
 
   return (
     <div
       className="relative w-full overflow-hidden rounded-lg border border-zinc-800"
-      style={{ aspectRatio: "16 / 9", background: t.contentAreaBg }}
+      style={{ aspectRatio: "16 / 9", background: theme.contentAreaBg }}
     >
       {/* Linkse L-balk */}
       <div
         className="absolute left-0 top-0 bottom-0 flex flex-col items-center justify-around py-[6%]"
         style={{ width: `${leftPct}%`, background: frame }}
       >
-        {t.leftColumnOrder.map((seg) => (
+        {theme.leftColumnOrder.map((seg) => (
           <div
             key={seg}
             className="rounded-sm bg-white/85"
@@ -243,8 +246,8 @@ function TemplatePreview({ themeJson }: { themeJson: string }) {
               width: "58%",
               height:
                 seg === "timer"
-                  ? `${Math.max(6, (t.leftTimerPx / CANVAS_H) * 100 * 1.6)}%`
-                  : `${Math.max(6, (t.leftScorePx / CANVAS_H) * 100 * 1.2)}%`,
+                  ? `${Math.max(6, (theme.leftTimerPx / CANVAS_H) * 100 * 1.6)}%`
+                  : `${Math.max(6, (theme.leftScorePx / CANVAS_H) * 100 * 1.2)}%`,
             }}
           />
         ))}
@@ -263,7 +266,7 @@ function TemplatePreview({ themeJson }: { themeJson: string }) {
       >
         <div
           className="rounded bg-white/10"
-          style={{ width: "46%", height: `${Math.max(14, (t.fullScorePx / CANVAS_H) * 100)}%` }}
+          style={{ width: "46%", height: `${Math.max(14, (theme.fullScorePx / CANVAS_H) * 100)}%` }}
         />
       </div>
     </div>

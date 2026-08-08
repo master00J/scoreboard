@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useTranslation } from "react-i18next";
 import { useDisplayStore } from "@/lib/store";
+import { tMatchStatus } from "@/lib/i18n/t-phase";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
 import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 import type { Match, Playlist, PlaylistSlot, Sponsor, SponsorSection } from "@/lib/types";
@@ -36,7 +38,11 @@ import {
   sponsorHalftimeShowsPanel,
   sponsorRotationBesideScoreboard,
 } from "@/lib/sponsor-display-helpers";
-import { sponsorScheduleTime, type SponsorScheduleClock } from "@/lib/sponsor-schedule-clock";
+import {
+  createSponsorScheduleClock,
+  sponsorScheduleTime,
+  type SponsorScheduleClock,
+} from "@/lib/sponsor-schedule-clock";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 
 export type SponsorPhaseHudModel =
@@ -50,6 +56,13 @@ export type SponsorPhaseHudModel =
       sponsorClipProgress: number | null;
       nextSlotEtaSec: number | null;
       clipRemainingSec: number | null;
+      /**
+       * Prematch met aftrap: seconden tot het sponsor-venster opent (kickoff − H).
+       * HUD mag dan geen misleidende “volgende sponsor over 1 s” tonen op t=0 van de slotmap.
+       */
+      prematchWindowOpensInSec?: number | null;
+      /** Prematch-rooster klaar (aftrap bereikt of tijdlijn uit). */
+      prematchTimelineComplete?: boolean;
     };
 
 const EMPTY_PLAYLISTS: Record<PlaylistSlot, Playlist | null> = {
@@ -61,6 +74,8 @@ const EMPTY_PLAYLISTS: Record<PlaylistSlot, Playlist | null> = {
 };
 
 export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
+  // Niet `t` noemen: dit bestand gebruikt `t` al als schedule-clock (seconden).
+  const { t: tUi } = useTranslation();
   const state = useDisplayStore((s) => s.state);
   const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
   const mode = state?.mode ?? "IDLE";
@@ -246,34 +261,10 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     startedAtSlotIdx?: number;
   } | null>(null);
   const prematchOriginRef = useRef<number | null>(null);
-  const sponsorScheduleClockRef = useRef<SponsorScheduleClock>({
-    key: "",
-    adjustedT: 0,
-    lastRawT: 0,
-    initialized: false,
-    wasFrozen: false,
-  });
-  const halftimeScheduleClockRef = useRef<SponsorScheduleClock>({
-    key: "",
-    adjustedT: 0,
-    lastRawT: 0,
-    initialized: false,
-    wasFrozen: false,
-  });
-  const postmatchScheduleClockRef = useRef<SponsorScheduleClock>({
-    key: "",
-    adjustedT: 0,
-    lastRawT: 0,
-    initialized: false,
-    wasFrozen: false,
-  });
-  const prematchScheduleClockRef = useRef<SponsorScheduleClock>({
-    key: "",
-    adjustedT: 0,
-    lastRawT: 0,
-    initialized: false,
-    wasFrozen: false,
-  });
+  const sponsorScheduleClockRef = useRef<SponsorScheduleClock>(createSponsorScheduleClock());
+  const halftimeScheduleClockRef = useRef<SponsorScheduleClock>(createSponsorScheduleClock());
+  const postmatchScheduleClockRef = useRef<SponsorScheduleClock>(createSponsorScheduleClock());
+  const prematchScheduleClockRef = useRef<SponsorScheduleClock>(createSponsorScheduleClock());
 
   useEffect(() => {
     sponsorPhaseHangRef.current = null;
@@ -284,10 +275,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     prematchScheduleClockRef.current.initialized = false;
   }, [match?.id]);
 
+  const matchSponsorRotationWasActiveRef = useRef(false);
+
   useEffect(() => {
     sponsorPhaseHangRef.current = null;
     sponsorScheduleClockRef.current.initialized = false;
     halftimeScheduleClockRef.current.initialized = false;
+    matchSponsorRotationWasActiveRef.current = false;
   }, [match?.status, sponsorBesideConfigured, liveAutoHalftime]);
 
   useEffect(() => {
@@ -304,27 +298,44 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     }
   }, [prematchSpreadActive]);
 
+  const matchTimerRunning = state?.timerRunning ?? false;
+
   const sponsorDistView = useMemo(() => {
     const now = wallNowMs;
 
     if (sponsorBesideConfigured && match) {
+      /** Zelfde regels als display: pauze/reset + sync bij late inschakeling. */
+      const matchClockFrozen = !matchTimerRunning;
+      const rotationActive = mode === "SPONSOR_ROTATION";
+      const scheduleFrozen = !rotationActive || sponsorInterrupted || matchClockFrozen;
+      const hangFrozen = sponsorInterrupted || matchClockFrozen;
+
       const tLive = halfWindowElapsed(elapsed, match.status, match.halfDurationSec);
-      if (mode === "SPONSOR_ROTATION") {
+      if (rotationActive) {
         tInterruptFrozen.current = tLive;
+        if (!matchSponsorRotationWasActiveRef.current) {
+          sponsorScheduleClockRef.current.initialized = false;
+          sponsorPhaseHangRef.current = null;
+        }
       }
+      matchSponsorRotationWasActiveRef.current = rotationActive;
+
       const t = sponsorScheduleTime(
         sponsorScheduleClockRef,
         `${match.id}:${match.status}:match`,
-        mode === "SPONSOR_ROTATION" ? tLive : tInterruptFrozen.current,
-        mode !== "SPONSOR_ROTATION" || sponsorInterrupted,
+        rotationActive ? tLive : tInterruptFrozen.current,
+        scheduleFrozen,
         Math.max(60, match.halfDurationSec),
       );
+      if (sponsorScheduleClockRef.current.hardReset) {
+        sponsorPhaseHangRef.current = null;
+      }
       const v = lookupSponsorAtSecond(sponsorSlotMapMatch, t);
       const section = sectionForStatus(match.status);
       return resolveSponsorSpreadPhase(v, sponsors, section, match.status, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapMatch,
         slotT: t,
-        interrupted: sponsorInterrupted,
+        interrupted: hangFrozen,
       });
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
@@ -346,6 +357,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         sponsorInterrupted,
         H,
       );
+      if (halftimeScheduleClockRef.current.hardReset) {
+        sponsorPhaseHangRef.current = null;
+      }
       const v = lookupSponsorAtSecond(sponsorSlotMapHalftime, t);
       return resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapHalftime,
@@ -366,6 +380,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     sponsorSlotMapHalftime,
     phaseTick,
     sponsorInterrupted,
+    matchTimerRunning,
     wallNowMs,
   ]);
 
@@ -393,6 +408,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       sponsorInterrupted,
       H,
     );
+    if (prematchScheduleClockRef.current.hardReset) {
+      prematchPhaseHangRef.current = null;
+    }
     const v = lookupSponsorAtSecond(sponsorSlotMapPrematch, t);
     return resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
       slotMap: sponsorSlotMapPrematch,
@@ -423,6 +441,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       sponsorInterrupted,
       H,
     );
+    if (postmatchScheduleClockRef.current.hardReset) {
+      postmatchPhaseHangRef.current = null;
+    }
     const v = lookupSponsorAtSecond(sponsorSlotMapPostmatch, t);
     return resolveSponsorSpreadPhase(v, sponsors, "postmatch", undefined, now, postmatchPhaseHangRef, {
       slotMap: sponsorSlotMapPostmatch,
@@ -451,7 +472,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     ) {
       return {
         kind: "playlist_only" as const,
-        label: "Speelhelft: sponsorronde draait op playlist (geen budget-rooster om te tonen).",
+        label: tUi("sponsors.playlistMatchHalf"),
       };
     }
 
@@ -463,7 +484,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     ) {
       return {
         kind: "playlist_only" as const,
-        label: "Rust: sponsorronde draait op playlist (geen budget-rooster om te tonen).",
+        label: tUi("sponsors.playlistHalftime"),
       };
     }
 
@@ -513,24 +534,18 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
       if (ledgerMatchesSegment && match) {
         const acLive = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger!, now);
-        const ac = sponsorLedger!.activeClip;
-        if (ac) {
-          if (!acLive) {
-            effectivePhase = "scoreboard";
-            effectiveSponsorId = null;
-          } else {
-            /**
-             * Actieve clip op het scherm (display → ledger). Overschrijft het slot-rooster
-             * zolang de clip loopt; budget-check hieronder kan alsnog naar scorebord als
-             * het schermquotum op is (zelfde bron als "Sponsors live · gemeten op scherm").
-             */
-            effectivePhase = "sponsor";
-            effectiveSponsorId = ac.sponsorId;
-          }
-        } else {
-          effectivePhase = "scoreboard";
-          effectiveSponsorId = null;
-          hangRef.current = null;
+        if (acLive) {
+          /**
+           * Actieve clip op het scherm (display → ledger). Bevestigt de sponsor-fase,
+           * maar mag een geplande start niet annuleren als de ledger nog leeg is
+           * (anders wist de HUD de hang en bleef “volgende sponsor over 1 s” hangen).
+           */
+          effectivePhase = "sponsor";
+          effectiveSponsorId = acLive.sponsorId;
+        } else if (sponsorLedger!.activeClip && !acLive) {
+          /** Verlopen activeClip: terug naar rooster/hang i.p.v. “Bezig” te blijven. */
+          effectivePhase = dist.phase;
+          effectiveSponsorId = dist.sponsorFilterId;
         }
       }
       if (!cycleBudgetForever && effectivePhase === "sponsor" && effectiveSponsorId) {
@@ -633,6 +648,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         sponsorClipProgress,
         nextSlotEtaSec,
         clipRemainingSec,
+        prematchWindowOpensInSec: null,
+        prematchTimelineComplete: false,
       };
     }
 
@@ -640,14 +657,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       const tLive = halfWindowElapsed(elapsed, match.status, match.halfDurationSec);
       const t = mode === "SPONSOR_ROTATION" ? tLive : tInterruptFrozen.current;
       const section = sectionForStatus(match.status);
-      const label =
-        match.status === "FIRST_HALF"
-          ? "1e helft"
-          : match.status === "SECOND_HALF"
-            ? "2e helft"
-            : "Verlenging";
       return rosterFrom(
-        label,
+        tMatchStatus(tUi, match.status),
         section,
         match.status,
         sponsorTelemetrySegmentKey(match.id, match.status, section),
@@ -669,7 +680,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       const t = tUnbounded % H;
       const tNextEta = Math.min(tUnbounded, Math.max(0, H - 1e-6));
       return rosterFrom(
-        "Rust",
+        tUi("phases.HALF_TIME"),
         "halftime",
         undefined,
         sponsorTelemetrySegmentKey(match.id, match.status, "halftime"),
@@ -687,7 +698,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         postmatchEpochRef.current != null ? (now - postmatchEpochRef.current) / 1000 : 0;
       const t = Math.min(tUnbounded, Math.max(0, H - 1e-6));
       return rosterFrom(
-        "Na wedstrijd",
+        tUi("phases.POST_MATCH"),
         "postmatch",
         undefined,
         sponsorTelemetrySegmentKey(match.id, match.status, "postmatch"),
@@ -710,19 +721,51 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         prematchOriginRef.current,
       );
       const H = timing.timelineLenSec;
+      if (timing.beforeWindow && timing.usesKickoffAnchor && match?.kickoffAt) {
+        const koMs = new Date(match.kickoffAt).getTime();
+        const opensInSec = Math.max(0, (koMs - H * 1000 - now) / 1000);
+        return {
+          kind: "roster" as const,
+          contextLabel: tUi("phases.PREMATCH"),
+          phase: "scoreboard",
+          sponsorName: null,
+          sponsorClipProgress: null,
+          nextSlotEtaSec: null,
+          clipRemainingSec: null,
+          prematchWindowOpensInSec: opensInSec,
+          prematchTimelineComplete: false,
+        };
+      }
+      if (timing.timelineComplete || !timing.rosterRunning) {
+        return {
+          kind: "roster" as const,
+          contextLabel: tUi("phases.PREMATCH"),
+          phase: "scoreboard",
+          sponsorName: null,
+          sponsorClipProgress: null,
+          nextSlotEtaSec: null,
+          clipRemainingSec: null,
+          prematchWindowOpensInSec: null,
+          prematchTimelineComplete: true,
+        };
+      }
       const t = timing.elapsedSec;
-      const tNextEta = timing.timelineComplete ? H - 1 : Math.min(t, Math.max(0, H - 1e-6));
-      return rosterFrom(
-        "Voor wedstrijd",
-        "prematch",
-        undefined,
-        match ? sponsorTelemetrySegmentKey(match.id, match.status, "prematch") : null,
-        prematchDistView,
-        sponsorSlotMapPrematch,
-        t,
-        prematchPhaseHangRef,
-        tNextEta,
-      );
+      const tNextEta = Math.min(t, Math.max(0, H - 1e-6));
+      return {
+        ...rosterFrom(
+          tUi("phases.PREMATCH"),
+          "prematch",
+          undefined,
+          match ? sponsorTelemetrySegmentKey(match.id, match.status, "prematch") : null,
+          prematchDistView,
+          sponsorSlotMapPrematch,
+          t,
+          prematchPhaseHangRef,
+          tNextEta,
+        ),
+        prematchWindowOpensInSec: null,
+        prematchTimelineComplete: false,
+      };
     }
 
     return { kind: "inactive" as const };
@@ -747,5 +790,6 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     cycleBudgetForever,
     phaseTick,
     wallNowMs,
+    tUi,
   ]);
 }

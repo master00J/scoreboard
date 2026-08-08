@@ -8,6 +8,7 @@ import * as licenseSvc from "./license-service";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
 import { getAppResourceMetrics, getMemoryBreakdownForBootLog } from "./resource-metrics";
+import { menuLabel, normalizeMenuLocale } from "./menu-i18n";
 
 /**
  * Portable Windows-build (electron-builder): `userData` naar een map naast de .exe
@@ -168,6 +169,8 @@ if (process.env.STADIUM_DISABLE_GPU_COMPOSITING === "1") {
 
 let controlWindow: BrowserWindow | null = null;
 let displayWindow: BrowserWindow | null = null;
+/** True na bevestigde afsluiting of fatale fout — slaat de quit-waarschuwing over. */
+let allowQuitWithoutConfirm = false;
 
 /** Laatste gemelde stadion-afspeelcontext (IPC van display-renderer). */
 let lastDisplayPlaybackSummary = "—";
@@ -354,7 +357,11 @@ async function loadRuntime() {
     getControlWindow: () => controlWindow,
     getDisplayWindow: () => displayWindow,
     log: bootLog,
+    onUiLocaleChanged: () => {
+      void buildMenu();
+    },
   });
+  await buildMenu();
   mobileBridge = await startMobileBridge({
     runtime: {
       apiRequest: (req) => runtime!.apiRequest(req),
@@ -607,6 +614,11 @@ function createWindows() {
   if (IS_DEV && process.env.OPEN_DEVTOOLS_ON_START === "1") {
     controlWindow.webContents.openDevTools({ mode: "detach" });
   }
+  controlWindow.on("close", (e) => {
+    if (allowQuitWithoutConfirm) return;
+    e.preventDefault();
+    app.quit();
+  });
   controlWindow.on("closed", () => {
     controlWindow = null;
   });
@@ -663,7 +675,7 @@ function createWindows() {
     displayWindow = null;
   });
 
-  buildMenu();
+  void buildMenu();
 }
 
 function psSingleQuoteEscape(p: string): string {
@@ -740,95 +752,104 @@ async function runVenueBackupExport(parent: BrowserWindow | null): Promise<{
   }
 }
 
-function buildMenu() {
+async function buildMenu() {
   const uploadsDir = desktopContext?.uploadsDir ?? path.join(app.getPath("userData"), "uploads");
+  let locale = normalizeMenuLocale("nl");
+  try {
+    if (runtime?.getUiLocale) {
+      locale = normalizeMenuLocale(await runtime.getUiLocale());
+    }
+  } catch {
+    /* keep nl */
+  }
+  const m = (key: Parameters<typeof menuLabel>[1]) => menuLabel(locale, key);
   const menu = Menu.buildFromTemplate([
     {
-      label: "Bestand",
+      label: m("file"),
       submenu: [
         {
-          label: "Exporteer venue-backup (ZIP)…",
+          label: m("exportVenueBackup"),
           click: async () => {
             const r = await runVenueBackupExport(controlWindow);
             if (r.canceled) return;
             if (!r.ok) {
               await dialog.showMessageBox({
                 type: "error",
-                title: "Venue-backup",
-                message: "Exporteren mislukt.",
-                detail: r.error ?? "Onbekende fout",
+                title: m("backupTitle"),
+                message: m("backupFailed"),
+                detail: r.error ?? m("unknownError"),
               });
               return;
             }
             await dialog.showMessageBox({
               type: "info",
-              title: "Venue-backup",
-              message: "Backup opgeslagen.",
+              title: m("backupTitle"),
+              message: m("backupSaved"),
               detail: r.filePath ?? "",
             });
           },
         },
         { type: "separator" },
         {
-          label: "Verberg display-venster",
+          label: m("hideDisplay"),
           click: () => displayWindow?.hide(),
         },
         {
-          label: "Toon display-venster",
+          label: m("showDisplay"),
           click: () => {
             displayWindow?.show();
             displayWindow?.focus();
           },
         },
         {
-          label: "Display fullscreen aan/uit",
+          label: m("toggleFullscreen"),
           accelerator: "F11",
           click: () => displayWindow?.setFullScreen(!displayWindow?.isFullScreen()),
         },
         { type: "separator" },
         {
-          label: "Open log-map (foutopsporing)",
+          label: m("openLogs"),
           click: () => shell.openPath(app.getPath("userData")),
         },
         {
-          label: "Open uploads-map",
+          label: m("openUploads"),
           click: () => shell.openPath(uploadsDir),
         },
         { type: "separator" },
-        { role: "quit", label: "Afsluiten" },
+        { role: "quit", label: m("quit") },
       ],
     },
     {
-      label: "Weergave",
+      label: m("view"),
       submenu: [
-        { role: "reload", label: "Herladen (actief venster)" },
+        { role: "reload", label: m("reload") },
         {
-          label: "Herlaad bedieningspaneel",
+          label: m("reloadControl"),
           click: () => {
             const w = controlWindow;
             if (w && !w.isDestroyed()) w.webContents.reloadIgnoringCache();
           },
         },
         {
-          label: "Herlaad stadionbeeld",
+          label: m("reloadDisplay"),
           click: () => {
             const w = displayWindow;
             if (w && !w.isDestroyed()) w.webContents.reloadIgnoringCache();
           },
         },
         { type: "separator" },
-        { role: "toggleDevTools", label: "DevTools (control)" },
+        { role: "toggleDevTools", label: m("devtoolsControl") },
         {
-          label: "DevTools (display)",
+          label: m("devtoolsDisplay"),
           click: () => displayWindow?.webContents.openDevTools(),
         },
       ],
     },
     {
-      label: "Help",
+      label: m("help"),
       submenu: [
         {
-          label: "Licenties en open source…",
+          label: m("licenses"),
           click: () => {
             void openLegalBundleFolder();
           },
@@ -1310,8 +1331,35 @@ function registerIpc() {
   });
 }
 
+async function confirmAppQuit(parent: BrowserWindow | null): Promise<boolean> {
+  let locale = normalizeMenuLocale("nl");
+  try {
+    if (runtime?.getUiLocale) {
+      locale = normalizeMenuLocale(await runtime.getUiLocale());
+    }
+  } catch {
+    /* keep nl */
+  }
+  const m = (key: Parameters<typeof menuLabel>[1]) => menuLabel(locale, key);
+  const opts = {
+    type: "warning" as const,
+    buttons: [m("quitConfirmCancel"), m("quitConfirmOk")],
+    defaultId: 0,
+    cancelId: 0,
+    title: m("quitConfirmTitle"),
+    message: m("quitConfirmMessage"),
+    noLink: true,
+  };
+  const result =
+    parent && !parent.isDestroyed()
+      ? await dialog.showMessageBox(parent, opts)
+      : await dialog.showMessageBox(opts);
+  return result.response === 1;
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  allowQuitWithoutConfirm = true;
   app.quit();
 } else {
   app.on("second-instance", () => {
@@ -1399,6 +1447,7 @@ if (!gotLock) {
         "Stadium Scoreboard — opstartfout",
         `De desktop-app kon niet initialiseren.\n\n${message}\n\nLogbestand:\n${bootLogPath()}`,
       );
+      allowQuitWithoutConfirm = true;
       app.quit();
     }
   });
@@ -1408,7 +1457,17 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-app.on("before-quit", () => {
+app.on("before-quit", (e) => {
+  if (!allowQuitWithoutConfirm) {
+    e.preventDefault();
+    void (async () => {
+      const ok = await confirmAppQuit(controlWindow);
+      if (!ok) return;
+      allowQuitWithoutConfirm = true;
+      app.quit();
+    })();
+    return;
+  }
   closeSplashWindow();
   if (mobileBridge) {
     void mobileBridge.stop();

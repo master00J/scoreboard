@@ -1,40 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label, Select } from "@/components/ui/form";
+import { Label } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
 import type { AppSettings } from "@/lib/types";
-
-const PRESETS: Array<{
-  label: string;
-  width: number;
-  height: number;
-  hint?: string;
-}> = [
-  { label: "Full HD 1920×1080 (16:9)", width: 1920, height: 1080 },
-  { label: "4K UHD 3840×2160 (16:9)", width: 3840, height: 2160 },
-  { label: "1280×720 (HD ready)", width: 1280, height: 720 },
-  {
-    label: "Brede LED-strip 1920×360",
-    width: 1920,
-    height: 360,
-    hint: "klassiek panoramic LED-banner",
-  },
-  {
-    label: "Vierkante cube 1024×1024",
-    width: 1024,
-    height: 1024,
-    hint: "centervlag of cube-LED",
-  },
-  {
-    label: "Stadion-LED 2304×1296",
-    width: 2304,
-    height: 1296,
-    hint: "Daktronics-achtige LED-wall",
-  },
-];
 
 export function SetupDisplayCanvasSection({
   settings,
@@ -43,12 +15,40 @@ export function SetupDisplayCanvasSection({
   settings: AppSettings | null;
   reloadSettings: () => void;
 }) {
+  const { t } = useTranslation();
   const [width, setWidth] = useState<string>("1920");
   const [height, setHeight] = useState<string>("1080");
   const [mode, setMode] = useState<"cover" | "contain" | "exact">("cover");
   const [safeZoneVisible, setSafeZoneVisible] = useState(false);
   const [safeZoneMarginPx, setSafeZoneMarginPx] = useState<string>("40");
   const [saving, setSaving] = useState(false);
+
+  const presets = useMemo(
+    () => [
+      { label: t("setup.canvasPresetFhd"), width: 1920, height: 1080 },
+      { label: t("setup.canvasPreset4k"), width: 3840, height: 2160 },
+      { label: t("setup.canvasPresetHd"), width: 1280, height: 720 },
+      {
+        label: t("setup.canvasPresetWide"),
+        width: 1920,
+        height: 360,
+        hint: t("setup.canvasPresetWideHint"),
+      },
+      {
+        label: t("setup.canvasPresetCube"),
+        width: 1024,
+        height: 1024,
+        hint: t("setup.canvasPresetCubeHint"),
+      },
+      {
+        label: t("setup.canvasPresetStadium"),
+        width: 2304,
+        height: 1296,
+        hint: t("setup.canvasPresetStadiumHint"),
+      },
+    ],
+    [t],
+  );
 
   useEffect(() => {
     if (!settings) return;
@@ -71,7 +71,7 @@ export function SetupDisplayCanvasSection({
       reloadSettings();
     } catch (err) {
       toast({
-        title: "Kon LED-canvas niet opslaan",
+        title: t("setup.canvasSaveFailed"),
         description: err instanceof Error ? err.message : String(err),
         variant: "error",
       });
@@ -85,8 +85,8 @@ export function SetupDisplayCanvasSection({
     const h = Number(height);
     if (!Number.isFinite(w) || w < 320 || !Number.isFinite(h) || h < 240) {
       toast({
-        title: "Ongeldige afmetingen",
-        description: "Minimum 320×240. Pas waarden aan en probeer opnieuw.",
+        title: t("setup.canvasInvalidDims"),
+        description: t("setup.canvasInvalidDimsDesc"),
         variant: "error",
       });
       return;
@@ -127,19 +127,16 @@ export function SetupDisplayCanvasSection({
   return (
     <section className="bg-card border border-border rounded-xl p-6 space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">LED / Display canvas</h2>
+        <h2 className="text-lg font-semibold">{t("setup.canvasTitle")}</h2>
         <p className="text-xs text-muted-foreground leading-snug mt-1">
-          Stel de logische resolutie van je stadiondisplay in. Voor pixel-perfect
-          output naar een LED-wall: zet de afmetingen exact gelijk aan je LED-paneel
-          en kies <strong>Pixel-perfect (1:1)</strong>. ArenaCue past dan geen browser-scaling
-          toe, wat blur en video-stretching voorkomt.
+          {t("setup.canvasBody")}
         </p>
       </div>
 
       <div>
-        <Label className="text-xs">Snelle keuzes</Label>
+        <Label className="text-xs">{t("setup.canvasPresets")}</Label>
         <div className="mt-1 flex flex-wrap gap-2">
-          {PRESETS.map((p) => (
+          {presets.map((p) => (
             <Button
               key={p.label}
               size="sm"
@@ -159,7 +156,7 @@ export function SetupDisplayCanvasSection({
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
-          <Label>Breedte (px)</Label>
+          <Label>{t("setup.canvasWidth")}</Label>
           <Input
             type="number"
             min={320}
@@ -168,7 +165,7 @@ export function SetupDisplayCanvasSection({
           />
         </div>
         <div>
-          <Label>Hoogte (px)</Label>
+          <Label>{t("setup.canvasHeight")}</Label>
           <Input
             type="number"
             min={240}
@@ -178,7 +175,7 @@ export function SetupDisplayCanvasSection({
         </div>
         <div className="flex items-end">
           <div className="text-xs text-muted-foreground">
-            Aspect ratio:{" "}
+            {t("setup.canvasAspect")}{" "}
             <span className="font-mono text-foreground">{aspect}</span>
           </div>
         </div>
@@ -186,29 +183,29 @@ export function SetupDisplayCanvasSection({
 
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => void applyDimensions()} disabled={saving}>
-          Pas afmetingen toe
+          {t("setup.canvasApplyDims")}
         </Button>
       </div>
 
       <div className="border-t border-border pt-4">
-        <Label className="text-xs">Scaling-modus</Label>
+        <Label className="text-xs">{t("setup.canvasScaling")}</Label>
         <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
           <ScalingOption
             active={mode === "cover"}
-            title="Cover (vult, kan croppen)"
-            desc="Vult het venster volledig. Bij afwijkende aspect kan een randje wegvallen. Standaard."
+            title={t("setup.canvasCover")}
+            desc={t("setup.canvasCoverDesc")}
             onClick={() => void applyMode("cover")}
           />
           <ScalingOption
             active={mode === "contain"}
-            title="Contain (alles zichtbaar)"
-            desc="Volledige inhoud zichtbaar. Mogelijk zwarte rand bij afwijkende aspect. Veilig voor sponsorinhoud."
+            title={t("setup.canvasContain")}
+            desc={t("setup.canvasContainDesc")}
             onClick={() => void applyMode("contain")}
           />
           <ScalingOption
             active={mode === "exact"}
-            title="Pixel-perfect (1:1)"
-            desc="Geen browser-scaling. Logische resolutie = fysieke resolutie. Vereist exacte LED-afmeting."
+            title={t("setup.canvasExact")}
+            desc={t("setup.canvasExactDesc")}
             onClick={() => void applyMode("exact")}
           />
         </div>
@@ -217,11 +214,9 @@ export function SetupDisplayCanvasSection({
       <div className="border-t border-border pt-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <div className="text-sm font-medium">Safe zone overlay</div>
+            <div className="text-sm font-medium">{t("setup.canvasSafeZone")}</div>
             <p className="text-[11px] text-muted-foreground">
-              Toont een groen kader op het stadiondisplay als hulplijn voor LED-cabinets
-              waarvan de randen door de behuizing wegvallen. Schakel uit voor de
-              wedstrijd.
+              {t("setup.canvasSafeZoneHelp")}
             </p>
           </div>
           <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
@@ -230,13 +225,13 @@ export function SetupDisplayCanvasSection({
               checked={safeZoneVisible}
               onChange={(e) => void applySafeZone({ visible: e.target.checked })}
             />
-            <span>Aan</span>
+            <span>{t("common.on")}</span>
           </label>
         </div>
         {safeZoneVisible && (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <Label>Marge (px)</Label>
+              <Label>{t("setup.canvasMargin")}</Label>
               <Input
                 type="number"
                 min={0}

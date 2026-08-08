@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronDown, GripVertical } from "lucide-react";
 import { cn } from "@/lib/utils";
 import DisplayPage from "@/app/display/page";
@@ -17,7 +18,6 @@ import {
   resolveHydratedMatchTabLayout,
   sanitizeMatchTabLayout,
   saveMatchTabLayout,
-  MATCH_TAB_PANEL_LABELS,
   type MatchTabLayoutState,
   type MatchTabPanelId,
 } from "@/lib/control-match-layout";
@@ -126,8 +126,9 @@ function LayoutPanelWrapper({
   setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const collapsed = !!layout.collapsed[id];
-  const title = MATCH_TAB_PANEL_LABELS[id];
+  const title = t(`panels.${id}`);
 
   const onDragStart = (e: DragEvent) => {
     e.dataTransfer.setData("application/x-stadium-panel", id);
@@ -202,7 +203,7 @@ function LayoutPanelWrapper({
           className="p-1 rounded hover:bg-muted shrink-0 text-foreground"
           onClick={toggle}
           aria-expanded={!collapsed}
-          aria-label={collapsed ? "Uitklappen" : "Inklappen"}
+          aria-label={collapsed ? t("shell.expand") : t("shell.collapse")}
         >
           <ChevronDown className={cn("size-4 transition-transform", collapsed && "-rotate-90")} />
         </button>
@@ -219,18 +220,22 @@ function LivePreviewPanel({
   embedInControl?: boolean;
   active?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-secondary/50">
-        <div className="text-xs uppercase tracking-widest text-muted-foreground">Live preview</div>
+    <div className="overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex items-center justify-between border-b border-border bg-secondary/50 px-4 py-2">
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">
+          {t("shell.livePreview")}
+        </div>
         <div className="text-xs text-muted-foreground">1920 × 1080</div>
       </div>
+      {/* Volle kolombreedte (16:9); kolom scrollt als de preview hoog wordt */}
       <div className="relative aspect-video w-full bg-black">
         {active ? (
           <DisplayPage embedInControl={embedInControl} />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-sm text-white/45">
-            Preview gepauzeerd buiten het Match-tabblad
+            {t("shell.previewPaused")}
           </div>
         )}
       </div>
@@ -253,9 +258,9 @@ function Column({
 }) {
   const ids = order.filter((id) => panels[id] != null);
   return (
-    <div className="flex flex-col gap-2 min-w-0">
+    <div className="flex min-h-0 min-w-0 flex-col gap-2 lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
       <ColumnTopDropZone column={column} setLayout={setLayout} />
-      <div className="flex flex-col gap-3 min-w-0">
+      <div className="flex min-w-0 flex-col gap-3 pb-2">
         {ids.map((id) => (
           <LayoutPanelWrapper key={id} id={id} column={column} layout={layout} setLayout={setLayout}>
             {panels[id]}
@@ -330,25 +335,24 @@ export function MatchTabGrid({
     };
   }, [layout, hydrated]);
 
+  const { t } = useTranslation();
   const resetLayout = () => setLayout(DEFAULT_MATCH_TAB_LAYOUT);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground max-w-xl">
-          Versleep een blok aan het grip-icoon. Boven in elke kolom is een smalle strook om een blok
-          helemaal bovenaan te zetten (ook vanuit een andere kolom). Het pijltje klapt een sectie in
-          of uit.
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+        <p className="max-w-xl text-[11px] text-muted-foreground">
+          {t("shell.layoutHint")}
         </p>
         <button
           type="button"
           onClick={resetLayout}
-          className="text-xs text-muted-foreground underline hover:text-foreground shrink-0"
+          className="shrink-0 text-xs text-muted-foreground underline hover:text-foreground"
         >
-          Standaard lay-out
+          {t("shell.resetLayout")}
         </button>
       </div>
-      <div className="grid gap-3 grid-cols-1 lg:grid-cols-[minmax(320px,26vw)_minmax(0,1fr)_minmax(320px,26vw)]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-[minmax(280px,26vw)_minmax(0,1fr)_minmax(280px,26vw)] lg:overflow-hidden">
         <Column
           column="left"
           order={layout.orderLeft}

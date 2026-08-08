@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import { isFullMatch } from "@/lib/is-full-match";
+import { tMatchStatus } from "@/lib/i18n/t-phase";
 
 /**
  * Shows a banner if on initial load we find a match in the middle of play
@@ -12,6 +14,7 @@ import { isFullMatch } from "@/lib/is-full-match";
  * If Resume: keeps state as-is. If Start fresh: resets timer to 0 and sets status PREMATCH.
  */
 export function CrashRecoveryBanner() {
+  const { t } = useTranslation();
   const state = useDisplayStore((s) => s.state);
   const [match, setMatch] = useState<{
     id: string;
@@ -44,9 +47,11 @@ export function CrashRecoveryBanner() {
   return (
     <div className="bg-amber-500/15 border border-amber-500/40 rounded-xl p-4 flex items-center justify-between gap-4 mb-4">
       <div>
-        <div className="font-semibold text-amber-400">Match in progress detected</div>
+        <div className="font-semibold text-amber-400">{t("crash.title")}</div>
         <div className="text-xs text-muted-foreground">
-          {match.homeTeam.name} vs {match.awayTeam.name} · {match.homeScore}–{match.awayScore} · {match.status}
+          {t("crash.body")}{" "}
+          {match.homeTeam.name} vs {match.awayTeam.name} · {match.homeScore}–{match.awayScore} ·{" "}
+          {tMatchStatus(t, match.status)}
         </div>
       </div>
       <div className="flex gap-2">
@@ -55,7 +60,7 @@ export function CrashRecoveryBanner() {
           size="sm"
           onClick={() => setDismissed(true)}
         >
-          Resume live
+          {t("crash.resume")}
         </Button>
         <Button
           size="sm"
@@ -65,7 +70,7 @@ export function CrashRecoveryBanner() {
             setDismissed(true);
           }}
         >
-          Start fresh
+          {t("crash.startFresh")}
         </Button>
       </div>
     </div>

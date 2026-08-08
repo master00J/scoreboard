@@ -251,10 +251,16 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("operator");
   const [menuOpen, setMenuOpen] = useState(false);
   const [goalPickerSide, setGoalPickerSide] = useState(null);
+  const [injuryDraft, setInjuryDraft] = useState("0");
 
   const canCall = useMemo(() => baseUrl.trim().length > 0 && sessionToken.trim().length > 0, [baseUrl, sessionToken]);
   const canMutate = role === "operator";
   const isCloud = connectionMode === "cloud";
+
+  useEffect(() => {
+    const minutes = Math.max(0, Number(snapshot?.addedTimeMinutes ?? 0));
+    setInjuryDraft(String(minutes));
+  }, [snapshot?.addedTimeMinutes]);
 
   function cloudPath(path) {
     return path.startsWith("/api/") ? path : `/api${path}`;
@@ -1332,17 +1338,30 @@ export default function App() {
               <Text style={styles.buttonText}>−1 min klok</Text>
             </Pressable>
           </View>
-          <Text style={styles.subLabel}>Extra tijd (min)</Text>
-          <View style={styles.chipsRow}>
-            {[0, 1, 2, 3, 4, 5].map((minutes) => (
-              <Pressable
-                key={minutes}
-                style={styles.chip}
-                onPress={() => sendCommand({ type: "timer:setAddedTime", minutes })}
-              >
-                <Text style={styles.chipText}>{minutes}</Text>
-              </Pressable>
-            ))}
+          <Text style={styles.subLabel}>Blessuretijd (min)</Text>
+          <View style={styles.row}>
+            <TextInput
+              style={[styles.input, { flex: 1 }]}
+              keyboardType="number-pad"
+              value={injuryDraft}
+              onChangeText={setInjuryDraft}
+              onBlur={() => {
+                const parsed = Number.parseInt(String(injuryDraft).trim(), 10);
+                const minutes = Number.isFinite(parsed) ? Math.max(0, Math.min(30, parsed)) : 0;
+                setInjuryDraft(String(minutes));
+                void sendCommand({ type: "timer:setAddedTime", minutes });
+              }}
+              placeholder="0"
+            />
+            <Pressable
+              style={styles.buttonSecondary}
+              onPress={() => {
+                setInjuryDraft("0");
+                void sendCommand({ type: "timer:setAddedTime", minutes: 0 });
+              }}
+            >
+              <Text style={styles.buttonText}>Uit</Text>
+            </Pressable>
           </View>
         </View>
 

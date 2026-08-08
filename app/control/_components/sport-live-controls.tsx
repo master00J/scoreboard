@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
@@ -8,6 +9,7 @@ import { getSportProfile, sportPeriodLabel } from "@/lib/sports";
 import type { Match } from "@/lib/types";
 
 export function SportLiveControls({ match }: { match: Match }) {
+  const { t } = useTranslation();
   const state = useDisplayStore((store) => store.state);
   const shotClock = useLiveShotClockSeconds();
   const profile = getSportProfile(match.sport);
@@ -18,7 +20,7 @@ export function SportLiveControls({ match }: { match: Match }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            {profile.label} · spelregels
+            {t("matchLive.footballRules").replace(/^[^·]*·\s*/, `${profile.label} · `)}
           </div>
           <div className="mt-1 text-sm font-semibold">
             {sportPeriodLabel(match.sport, match.currentPeriod)}
@@ -40,21 +42,21 @@ export function SportLiveControls({ match }: { match: Match }) {
             variant="secondary"
             onClick={() => void sendCommand({ type: "match:setStatus", status: "HALF_TIME" })}
           >
-            Pauze
+            {t("common.pause")}
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={() => void sendCommand({ type: "match:setStatus", status: "FULL_TIME" })}
           >
-            Einde
+            {t("phases.FULL_TIME")}
           </Button>
         </div>
       </div>
 
       {timeoutLimit > 0 && (
         <StatRow
-          label={`${profile.timeoutLabel} gebruikt · max. ${timeoutLimit}`}
+          label={t("matchLive.timeoutsUsed", { label: profile.timeoutLabel, n: timeoutLimit })}
           home={match.homeTimeouts}
           away={match.awayTimeouts}
           onAdjust={(side, delta) =>
@@ -67,7 +69,10 @@ export function SportLiveControls({ match }: { match: Match }) {
         <StatRow
           label={
             profile.statLimit
-              ? `${profile.statLabel} · bonus/limiet vanaf ${profile.statLimit + 1}`
+              ? t("matchLive.statLimit", {
+                  label: profile.statLabel,
+                  n: profile.statLimit + 1,
+                })
               : profile.statLabel
           }
           home={match.homeFouls}
@@ -80,7 +85,7 @@ export function SportLiveControls({ match }: { match: Match }) {
 
       {profile.hasSets && (
         <StatRow
-          label="Gewonnen sets"
+          label={t("matchLive.wonSets")}
           home={match.homeSets}
           away={match.awaySets}
           onAdjust={(side, delta) =>
@@ -93,7 +98,7 @@ export function SportLiveControls({ match }: { match: Match }) {
         <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-[1fr_auto] sm:items-center">
           <div>
             <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              Shotclock
+              {t("matchLive.shotClock")}
             </div>
             <div
               className="mt-1 text-5xl font-black tabular-nums"
@@ -111,7 +116,7 @@ export function SportLiveControls({ match }: { match: Match }) {
                 })
               }
             >
-              {state?.shotClockRunning ? "Pauze" : "Start"}
+              {state?.shotClockRunning ? t("common.pause") : t("common.start")}
             </Button>
             {profile.shotClockPresets.map((seconds) => (
               <Button
@@ -119,7 +124,7 @@ export function SportLiveControls({ match }: { match: Match }) {
                 variant="outline"
                 onClick={() => void sendCommand({ type: "shotclock:reset", seconds })}
               >
-                Reset {seconds}
+                {t("common.reset")} {seconds}
               </Button>
             ))}
           </div>
@@ -140,13 +145,14 @@ function StatRow({
   away: number;
   onAdjust: (side: "home" | "away", delta: number) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-[1fr_auto_auto] sm:items-center">
       <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
         {label}
       </div>
-      <Counter label="Thuis" value={home} onAdjust={(delta) => onAdjust("home", delta)} />
-      <Counter label="Uit" value={away} onAdjust={(delta) => onAdjust("away", delta)} />
+      <Counter label={t("common.home")} value={home} onAdjust={(delta) => onAdjust("home", delta)} />
+      <Counter label={t("common.away")} value={away} onAdjust={(delta) => onAdjust("away", delta)} />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { isElectron } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
 
@@ -50,6 +51,7 @@ function compareSemver(a: string, b: string): number {
 }
 
 export function UpdateNudgeBanner() {
+  const { t } = useTranslation();
   const [state, setState] = useState<
     | { kind: "idle" }
     | { kind: "update"; current: string; release: ReleaseInfo }
@@ -132,7 +134,7 @@ export function UpdateNudgeBanner() {
   }
 
   const { release, current } = state;
-  const title = release.title?.trim() || `Update beschikbaar (${release.version})`;
+  const title = release.title?.trim() || `${t("update.available")} (${release.version})`;
 
   return (
     <div
@@ -142,9 +144,8 @@ export function UpdateNudgeBanner() {
       <div className="min-w-0 flex-1">
         <p className="text-sm font-semibold text-amber-100">{title}</p>
         <p className="text-xs text-amber-200/90">
-          Je gebruikt versie <span className="font-mono">{current}</span>. De nieuwste versie is{" "}
-          <span className="font-mono">{release.version}</span>.
-          {release.body ? ` ${release.body}` : " Download de nieuwste build en vervang je bestand."}
+          {t("update.body", { current, latest: release.version })}
+          {release.body ? ` ${release.body}` : ` ${t("update.bodyFallback")}`}
         </p>
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">
@@ -157,7 +158,7 @@ export function UpdateNudgeBanner() {
             setState({ kind: "hidden" });
           }}
         >
-          Later
+          {t("update.later")}
         </Button>
         <Button
           type="button"
@@ -166,7 +167,7 @@ export function UpdateNudgeBanner() {
             void window.electronAPI?.openExternalUrl(release.downloadUrl);
           }}
         >
-          Download-update
+          {t("update.download")}
         </Button>
       </div>
     </div>

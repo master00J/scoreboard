@@ -205,5 +205,5 @@ export const MATCH_TAB_PANEL_LABELS: Record<MatchTabPanelId, string> = {
   preview: "Live preview",
   "match-live": "Wedstrijd live",
   "event-log": "Logboek",
-  "match-info": "Matchstatus",
+  "match-info": "Wedstrijd",
 };

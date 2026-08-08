@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/form";
 import { useDisplayStore } from "@/lib/store";
@@ -17,6 +18,7 @@ type UnifiedCaptureSource = DesktopCaptureSourceInfo & {
 const AUDIO_STORAGE_KEY = "arenacue_external_capture_audio_v1";
 
 export function ExternalCapturePanel() {
+  const { t } = useTranslation();
   const state = useDisplayStore((s) => s.state);
   const sourceId = state?.externalCaptureSourceId ?? null;
   const toDisplay = state?.externalCaptureToDisplay ?? false;
@@ -48,7 +50,7 @@ export function ExternalCapturePanel() {
 
   const refreshSources = useCallback(async () => {
     if (!isElectron || !window.electronAPI?.getDesktopCaptureSources) {
-      setError("Alleen in de desktop-app (Electron).");
+      setError(t("external.electronOnly"));
       return;
     }
     setLoadingSources(true);
@@ -74,7 +76,7 @@ export function ExternalCapturePanel() {
     } finally {
       setLoadingSources(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!sourceId) setPreviewOn(false);
@@ -87,25 +89,22 @@ export function ExternalCapturePanel() {
     <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-3">
       <div>
         <div className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
-          Extern beeld (SDI / HDMI / capture-kaart / webcam)
+          {t("external.title")}
         </div>
         <p className="text-[11px] text-muted-foreground leading-snug">
-          Voor pro <strong>HDMI/SDI capture-kaarten</strong> (Magewell, Elgato, Blackmagic): kies de
-          kaart onder <em>Camera&apos;s &amp; video-invoer</em>. ArenaCue probeert automatisch
-          1920×1080@30 op te halen. Je kan ook een <strong>scherm/venster</strong> kiezen voor vMix,
-          OBS of andere SDI-software op deze PC. Preview hier, daarna fullscreen op het scorebord.
+          {t("external.help")}
         </p>
       </div>
 
       {!isElectron && (
-        <div className="text-xs text-amber-600/90">Niet beschikbaar in de browser-build.</div>
+        <div className="text-xs text-amber-600/90">{t("external.browserUnavailable")}</div>
       )}
 
       {error && <div className="text-xs text-destructive">{error}</div>}
 
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" onClick={() => void refreshSources()} disabled={loadingSources}>
-          {loadingSources ? "Laden…" : "Bronnen vernieuwen"}
+          {loadingSources ? t("common.loading") : t("external.pickSource")}
         </Button>
         <Button
           size="sm"
@@ -116,12 +115,12 @@ export function ExternalCapturePanel() {
             setPreviewOn(false);
           }}
         >
-          Wis bron
+          {t("common.clear")}
         </Button>
       </div>
 
       <div>
-        <Label className="text-xs">Bron</Label>
+        <Label className="text-xs">{t("external.pickSource")}</Label>
         <select
           className="mt-1 w-full rounded-md border border-input bg-background px-2 py-2 text-sm"
           value={sourceId ?? ""}
@@ -133,9 +132,9 @@ export function ExternalCapturePanel() {
             });
           }}
         >
-          <option value="">— kies —</option>
+          <option value="">— {t("external.pickSource")} —</option>
           {desktopSources.length > 0 && (
-            <optgroup label="Schermen & vensters">
+            <optgroup label={t("external.groupDesktop")}>
               {desktopSources.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -144,7 +143,7 @@ export function ExternalCapturePanel() {
             </optgroup>
           )}
           {cameraSources.length > 0 && (
-            <optgroup label={"Camera's & video-invoer"}>
+            <optgroup label={t("external.groupCamera")}>
               {cameraSources.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -155,12 +154,12 @@ export function ExternalCapturePanel() {
         </select>
         {sources.length === 0 && !loadingSources && isElectron && (
           <p className="text-[10px] text-muted-foreground mt-1">
-            Nog geen bronnen geladen — druk op <strong>Bronnen vernieuwen</strong>.
+            {t("external.noSources")}
           </p>
         )}
         {cameraSources.length === 0 && desktopSources.length > 0 && !loadingSources && (
           <p className="text-[10px] text-muted-foreground mt-1">
-            Geen camera&apos;s gevonden (of geen toestemming). Controleer privacy-instellingen voor camera.
+            {t("external.noCameras")}
           </p>
         )}
       </div>
@@ -172,7 +171,7 @@ export function ExternalCapturePanel() {
           disabled={!sourceId}
           onClick={() => setPreviewOn((v) => !v)}
         >
-          {previewOn ? "Preview uit" : "Preview aan"}
+          {previewOn ? t("external.previewOff") : t("external.previewOn")}
         </Button>
         <Button
           size="sm"
@@ -185,7 +184,7 @@ export function ExternalCapturePanel() {
             })
           }
         >
-          {toDisplay ? "Stop op scorebord" : "Fullscreen op scorebord"}
+          {toDisplay ? t("external.stop") : t("external.start")}
         </Button>
         <label className="ml-auto flex items-center gap-2 text-[11px] text-foreground/80 cursor-pointer select-none">
           <input
@@ -195,9 +194,9 @@ export function ExternalCapturePanel() {
             onChange={(e) => setAudioPersisted(e.target.checked)}
           />
           <span>
-            Audio doorzetten
+            {t("external.audioPassthrough")}
             <span className="block text-muted-foreground text-[10px]">
-              voor capture-kaart met geluid (vMix/zendwagen)
+              {t("external.audioPassthroughHint")}
             </span>
           </span>
         </label>
@@ -215,7 +214,7 @@ export function ExternalCapturePanel() {
 
       {toDisplay && (
         <div className="text-[11px] text-primary">
-          Live op het display-venster (boven het scorebord). BLACKOUT schakelt dit uit.
+          {t("external.liveOnDisplay")}
         </div>
       )}
     </div>

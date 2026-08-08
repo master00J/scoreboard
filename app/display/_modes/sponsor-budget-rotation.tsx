@@ -674,6 +674,11 @@ export function SponsorBudgetRotation({
     [advanceAfterSlide, cycleId, slideTick],
   );
 
+  const advanceAfterSlideRef = useRef(advanceAfterSlide);
+  advanceAfterSlideRef.current = advanceAfterSlide;
+  const finishClipOnceRef = useRef(finishClipOnce);
+  finishClipOnceRef.current = finishClipOnce;
+
   function stableClipSessionId(segmentKey: string, plan: Plan) {
     const key = `${playbackTelemetry?.matchId ?? "match"}-${segmentKey}-${cycleId}-${slideTick}-${plan.sponsorId}-${plan.mediaId}`;
     if (clipSessionRef.current?.key !== key) {
@@ -731,77 +736,105 @@ export function SponsorBudgetRotation({
     }
   }, [activeSponsors.length, current, pickNext, cycleId, followMode, isPlaybackOwner, videoFaultPauseUntilMs, sponsorSwitchReleaseUntilMs]);
 
+  /**
+   * Afbeelding-timer: alleen herstarten bij een nieuwe clip / pauze — niet bij elke
+   * callback-identity of video-metadata tick (die resette de timeout en hield stills vast).
+   */
   useEffect(() => {
     if (followMode) return;
     if (!isPlaybackOwner) return;
     if (paused) return;
-    if (!current || activeSponsors.length === 0) return;
+    if (!current || current.item.type === "VIDEO") return;
+    if (activeSponsors.length === 0) return;
 
-    if (current.item.type === "VIDEO") {
-      const catalogSec = Math.max(0.5, current.playSec);
-      const browserSec =
-        videoProgressDurationMs > 0 ? videoProgressDurationMs / 1000 : 0;
-      /**
-       * Sommige MP4's melden een container-duur die veel langer is dan de echte spot
-       * (of dan de catalogus). Dan bleef `maybeFireEarlyEnd` wachten op currentTime
-       * richting uren, en werd de fallback-timer tot 15 min gezet — voelt als vastlopen.
-       */
-      const durationBasisSec =
-        browserSec > 0 && browserSec <= Math.max(600, catalogSec * 5 + 120)
-          ? browserSec
-          : catalogSec;
-      const expectedMs = Math.max(5_000, durationBasisSec * 1000);
-      const fallbackMs = Math.min(
-        900_000,
-        Math.max(8_000, expectedMs + 20_000),
-      );
-      videoCommitTimerRef.current = setTimeout(() => {
-        videoCommitTimerRef.current = null;
-        finishClipOnce(
-          current,
-          capBilledSecondsForSponsorBudget(current.item, current.playSec, durationBasisSec),
-        );
-      }, Math.max(1_500, durationBasisSec * 1000));
-      videoFallbackTimerRef.current = setTimeout(() => {
-        videoFallbackTimerRef.current = null;
-        const progressed = playbackProgressMsRef.current / 1000;
-        const sec = Math.max(
-          catalogSec,
-          progressed > 0.25 ? progressed : durationBasisSec,
-        );
-        finishClipOnce(
-          current,
-          capBilledSecondsForSponsorBudget(current.item, current.playSec, sec),
-        );
-      }, fallbackMs);
-      return () => {
-        if (videoCommitTimerRef.current != null) {
-          clearTimeout(videoCommitTimerRef.current);
-          videoCommitTimerRef.current = null;
-        }
-        if (videoFallbackTimerRef.current != null) {
-          clearTimeout(videoFallbackTimerRef.current);
-          videoFallbackTimerRef.current = null;
-        }
-      };
-    }
-
-    const ms = Math.max(1500, current.playSec * 1000);
-    const id = setTimeout(() => {
-      advanceAfterSlide(
-        current.sponsorId,
-        current.mediaIndex,
-        capBilledSecondsForSponsorBudget(current.item, current.playSec, current.playSec),
-        current.item.type,
+    const plan = current;
+    const ms = Math.max(1500, plan.playSec * 1000);
+    const id = window.setTimeout(() => {
+      advanceAfterSlideRef.current(
+        plan.sponsorId,
+        plan.mediaIndex,
+        capBilledSecondsForSponsorBudget(plan.item, plan.playSec, plan.playSec),
+        plan.item.type,
       );
     }, ms);
-    return () => clearTimeout(id);
+    return () => window.clearTimeout(id);
   }, [
-    current,
-    activeSponsors.length,
+    current?.sponsorId,
+    current?.mediaId,
+    current?.mediaIndex,
+    current?.playSec,
+    current?.item.type,
+    slideTick,
     cycleId,
-    advanceAfterSlide,
-    finishClipOnce,
+    activeSponsors.length,
+    followMode,
+    isPlaybackOwner,
+    paused,
+  ]);
+
+  useEffect(() => {
+    if (followMode) return;
+    if (!isPlaybackOwner) return;
+    if (paused) return;
+    if (!current || current.item.type !== "VIDEO") return;
+    if (activeSponsors.length === 0) return;
+
+    const plan = current;
+    const catalogSec = Math.max(0.5, plan.playSec);
+    const browserSec =
+      videoProgressDurationMs > 0 ? videoProgressDurationMs / 1000 : 0;
+    /**
+     * Sommige MP4's melden een container-duur die veel langer is dan de echte spot
+     * (of dan de catalogus). Dan bleef `maybeFireEarlyEnd` wachten op currentTime
+     * richting uren, en werd de fallback-timer tot 15 min gezet — voelt als vastlopen.
+     */
+    const durationBasisSec =
+      browserSec > 0 && browserSec <= Math.max(600, catalogSec * 5 + 120)
+        ? browserSec
+        : catalogSec;
+    const expectedMs = Math.max(5_000, durationBasisSec * 1000);
+    const fallbackMs = Math.min(
+      900_000,
+      Math.max(8_000, expectedMs + 20_000),
+    );
+    videoCommitTimerRef.current = setTimeout(() => {
+      videoCommitTimerRef.current = null;
+      finishClipOnceRef.current(
+        plan,
+        capBilledSecondsForSponsorBudget(plan.item, plan.playSec, durationBasisSec),
+      );
+    }, Math.max(1_500, durationBasisSec * 1000));
+    videoFallbackTimerRef.current = setTimeout(() => {
+      videoFallbackTimerRef.current = null;
+      const progressed = playbackProgressMsRef.current / 1000;
+      const sec = Math.max(
+        catalogSec,
+        progressed > 0.25 ? progressed : durationBasisSec,
+      );
+      finishClipOnceRef.current(
+        plan,
+        capBilledSecondsForSponsorBudget(plan.item, plan.playSec, sec),
+      );
+    }, fallbackMs);
+    return () => {
+      if (videoCommitTimerRef.current != null) {
+        clearTimeout(videoCommitTimerRef.current);
+        videoCommitTimerRef.current = null;
+      }
+      if (videoFallbackTimerRef.current != null) {
+        clearTimeout(videoFallbackTimerRef.current);
+        videoFallbackTimerRef.current = null;
+      }
+    };
+  }, [
+    current?.sponsorId,
+    current?.mediaId,
+    current?.mediaIndex,
+    current?.playSec,
+    current?.item.type,
+    slideTick,
+    cycleId,
+    activeSponsors.length,
     followMode,
     isPlaybackOwner,
     paused,

@@ -9,7 +9,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ToastViewport, toast } from "@/components/ui/toast";
 import { TimerPanel } from "./_components/timer-panel";
 import { MatchLivePanel } from "./_components/match-live-panel";
-import { SetupPanel } from "./_components/setup-panel";
+import { SetupPanel, MatchDialog } from "./_components/setup-panel";
 import { MediaPanel } from "./_components/media-panel";
 import { ProofOfPlayPanel } from "./_components/proof-of-play-panel";
 import { DisplayControlPanel, EventLog } from "./_components/display-control-panel";
@@ -21,8 +21,7 @@ import { CrashRecoveryBanner } from "./_components/crash-recovery";
 import { SponsorPhaseHud } from "./_components/sponsor-phase-hud";
 import { UpdateNudgeBanner } from "./_components/update-nudge-banner";
 import { LicenseActivationGate } from "./_components/license-activation-gate";
-import type { Match } from "@/lib/types";
-import type { MatchStatusT } from "@/lib/validation/commands";
+import type { AppSettings, Match, Team } from "@/lib/types";
 import type { MobileBridgeInfo } from "@/lib/desktop-bridge";
 import { isFullMatch } from "@/lib/is-full-match";
 import { exportMatch, focusDisplayWindow } from "@/lib/electron";
@@ -30,17 +29,24 @@ import { Button } from "@/components/ui/button";
 import { MatchTabGrid, LivePreviewPanel } from "./_components/match-tab-grid";
 import { AppResourceMeter } from "./_components/app-resource-meter";
 import { MobileBridgeMenu } from "./_components/mobile-bridge-menu";
+import { useLicenseFeatures } from "@/lib/use-license-features";
+import { tMatchStatus } from "@/lib/i18n/t-phase";
 
 export default function ControlPage() {
   const { t } = useTranslation();
   useSocketSync();
   const connected = useDisplayStore((s) => s.connected);
   const state = useDisplayStore((s) => s.state);
+  const { isFeatureAllowed } = useLicenseFeatures();
   const [mobileBridge, setMobileBridge] = useState<MobileBridgeInfo | null>(null);
   const [activeTab, setActiveTab] = useState("match");
+  const [newMatchOpen, setNewMatchOpen] = useState(false);
   const { data: match, reload: reloadMatch } = useApi<Match>(
     state?.matchId ? `/api/matches/${state.matchId}` : null,
   );
+  const { data: teams } = useApi<Team[]>("/api/teams");
+  const { data: settings } = useApi<AppSettings>("/api/settings");
+  const homeTeam = (teams ?? []).find((team) => team.id === settings?.homeTeamId) ?? null;
 
   useEffect(() => {
     reloadMatch();
@@ -70,15 +76,18 @@ export default function ControlPage() {
 
   return (
     <LicenseActivationGate>
-      <main className="min-h-screen w-full max-w-none px-4 py-6 sm:px-6">
+      <main
+        data-control-shell
+        className="flex h-dvh w-full max-w-none flex-col overflow-hidden px-4 py-4 sm:px-6"
+      >
       <ToastViewport />
 
       <UpdateNudgeBanner />
 
-      <header className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-3xl font-bold">{t("shell.title")}</h1>
-          <p className="text-sm text-muted-foreground">
+      <header className="mb-4 flex shrink-0 items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold sm:text-3xl">{t("shell.title")}</h1>
+          <p className="truncate text-sm text-muted-foreground">
             {!state?.matchId
               ? t("shell.noActiveMatch")
               : isFullMatch(match)
@@ -86,7 +95,7 @@ export default function ControlPage() {
                 : t("shell.matchLoading")}
           </p>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">
           <AppResourceMeter />
           <MobileBridgeMenu info={mobileBridge} />
           <span className="flex items-center gap-2 text-xs">
@@ -110,17 +119,72 @@ export default function ControlPage() {
         </div>
       </header>
 
-      <CrashRecoveryBanner />
+      <div className="shrink-0">
+        <CrashRecoveryBanner />
+      </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          <TabsTrigger value="match">{t("shell.tabMatch")}</TabsTrigger>
-          <TabsTrigger value="setup">{t("shell.tabSetup")}</TabsTrigger>
-          <TabsTrigger value="media">{t("shell.tabMedia")}</TabsTrigger>
-          <TabsTrigger value="reports">{t("shell.tabReports")}</TabsTrigger>
-        </TabsList>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <TabsList>
+            <TabsTrigger value="match">{t("shell.tabMatch")}</TabsTrigger>
+            <TabsTrigger value="setup">{t("shell.tabSetup")}</TabsTrigger>
+            <TabsTrigger value="media">{t("shell.tabMedia")}</TabsTrigger>
+            <TabsTrigger value="reports">{t("shell.tabReports")}</TabsTrigger>
+          </TabsList>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-10 border-primary/40 bg-primary/10 text-foreground hover:bg-primary/20"
+            onClick={() => setNewMatchOpen(true)}
+          >
+            {t("shell.startNewMatch")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-10 border-destructive/40 text-foreground hover:bg-destructive/15"
+            disabled={!state?.matchId || !isFullMatch(match) || !!match.closedAt}
+            onClick={() => {
+              if (!isFullMatch(match) || match.closedAt) {
+                toast({ title: t("shell.stopMatchNone"), variant: "error" });
+                return;
+              }
+              if (
+                !confirm(
+                  t("shell.stopMatchConfirm", {
+                    home: match.homeTeam.name,
+                    away: match.awayTeam.name,
+                  }),
+                )
+              ) {
+                return;
+              }
+              void (async () => {
+                const res = await fetch(`/api/matches/${match.id}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ closedAt: new Date().toISOString() }),
+                });
+                if (!res.ok) {
+                  toast({
+                    title: t("shell.stopMatchFailed"),
+                    description: await res.text(),
+                    variant: "error",
+                  });
+                  return;
+                }
+                await reloadMatch();
+                toast({ title: t("shell.stopMatchDone"), variant: "success" });
+              })();
+            }}
+          >
+            {t("shell.stopMatch")}
+          </Button>
+        </div>
 
-        <TabsContent value="match" forceMount>
+        <TabsContent value="match" forceMount className="min-h-0 overflow-hidden">
           <MatchTabGrid
             panels={{
               timer: <TimerPanel />,
@@ -135,82 +199,103 @@ export default function ControlPage() {
               preview: <LivePreviewPanel embedInControl active={activeTab === "match"} />,
               "match-live": <MatchLivePanel />,
               "event-log": <EventLog match={isFullMatch(match) ? match : null} />,
-              "match-info": <MatchInfoPanel match={isFullMatch(match) ? match : null} />,
+              "match-info": <MatchInfoCard match={isFullMatch(match) ? match : null} />,
             }}
           />
         </TabsContent>
 
-        <TabsContent value="setup" forceMount>
+        <TabsContent value="setup" forceMount className="min-h-0 overflow-y-auto">
           <SetupPanel />
         </TabsContent>
 
-        <TabsContent value="media" forceMount>
+        <TabsContent value="media" forceMount className="min-h-0 overflow-y-auto">
           <MediaPanel />
         </TabsContent>
 
-        <TabsContent value="reports">
+        <TabsContent value="reports" className="min-h-0 overflow-y-auto">
           <ProofOfPlayPanel />
         </TabsContent>
       </Tabs>
+
+      {newMatchOpen && teams && (
+        <MatchDialog
+          quickStart
+          teams={teams}
+          homeTeam={homeTeam}
+          onClose={() => setNewMatchOpen(false)}
+          onSaved={(created, start) => {
+            void (async () => {
+              setNewMatchOpen(false);
+              if (!created?.id) return;
+              if (!start?.activate) {
+                setActiveTab("setup");
+                toast({ title: t("shell.newMatchCreatedOnly"), variant: "success" });
+                return;
+              }
+              const sponsorsOk =
+                !!start.sponsorRotation && isFeatureAllowed("automatic_sponsor_rotation");
+              await sendCommand({ type: "match:setActive", matchId: created.id });
+              await sendCommand({ type: "match:setStatus", status: "PREMATCH" });
+              await sendCommand({
+                type: "display:setMode",
+                mode: sponsorsOk ? "SPONSOR_ROTATION" : "MATCH",
+              });
+              setActiveTab("match");
+              toast({
+                title: sponsorsOk
+                  ? t("shell.newMatchStartedWithSponsors")
+                  : t("shell.newMatchStarted"),
+                variant: "success",
+              });
+            })();
+          }}
+        />
+      )}
     </main>
     </LicenseActivationGate>
   );
 }
 
-function MatchInfoPanel({ match }: { match: Match | null }) {
+function MatchInfoCard({ match }: { match: Match | null }) {
+  const { t } = useTranslation();
   if (!match) {
     return (
-      <div className="bg-card border border-border rounded-xl p-6 text-sm text-muted-foreground">
-        Activate a match on the <strong>Setup</strong> tab to begin.
+      <div className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">
+        {t("shell.activateMatchHint")}
       </div>
     );
   }
-  const statuses: MatchStatusT[] = [
-    "SETUP",
-    "PREMATCH",
-    "FIRST_HALF",
-    "HALF_TIME",
-    "SECOND_HALF",
-    "EXTRA_TIME",
-    "FULL_TIME",
-    "POST_MATCH",
-  ];
   return (
-    <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-6">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">
-        Match status
+        {t("shell.matchInfoTitle")}
       </div>
-      <div className="grid grid-cols-2 gap-1">
-        {statuses.map((s) => (
-          <Button
-            key={s}
-            size="sm"
-            variant={match.status === s ? "default" : "outline"}
-            onClick={() => sendCommand({ type: "match:setStatus", status: s })}
-          >
-            {s.replace("_", " ")}
-          </Button>
-        ))}
-      </div>
-      <div className="text-xs text-muted-foreground pt-2 border-t border-border">
+      <p className="text-sm text-foreground">
+        {match.homeTeam.name} vs {match.awayTeam.name}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        {t("shell.matchInfoPhaseHint")}{" "}
+        <span className="font-mono text-foreground">{tMatchStatus(t, match.status)}</span>
+      </p>
+      <div className="border-t border-border pt-2 text-xs text-muted-foreground">
         Match ID: <span className="font-mono">{match.id.slice(0, 8)}</span>
         <br />
         Created: {new Date(match.createdAt).toLocaleString()}
       </div>
-      <div className="flex gap-2 pt-2 border-t border-border">
+      <div className="flex gap-2 border-t border-border pt-2">
         <button
           type="button"
           onClick={() => void exportMatch(match.id, "json")}
-          className="inline-flex flex-1 items-center justify-center h-9 px-3 rounded-lg border border-input text-sm hover:bg-secondary"
+          className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-input px-3 text-sm hover:bg-secondary"
         >
-          Export JSON
+          {t("shell.exportJson")}
         </button>
         <button
           type="button"
           onClick={() => void exportMatch(match.id, "html")}
-          className="inline-flex flex-1 items-center justify-center h-9 px-3 rounded-lg border border-input text-sm hover:bg-secondary"
+          className="inline-flex h-9 flex-1 items-center justify-center rounded-lg border border-input px-3 text-sm hover:bg-secondary"
         >
-          Printable HTML
+          {t("shell.exportHtml")}
         </button>
       </div>
     </div>

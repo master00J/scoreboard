@@ -638,18 +638,15 @@ export function resolveSponsorSpreadPhase(
   }
 
   /**
-   * Pauze-bescherming: als de wedstrijdklok niet beweegt blijft de slotmap dezelfde sponsor
-   * teruggeven. Net-gestopt-hang + zelfde slot-index + zelfde sponsor-id ⇒ geen nieuwe hang
-   * starten (anders flitst de progressbar naar 0). Pas her-trigger toelaten als de slot-index
-   * effectief verandert (klok loopt weer).
+   * Hang net verlopen: altijd minstens één scorebord-tick vóór een nieuwe vertoning.
+   * Zonder die null-filter blijft `sponsorIdFilter` soms dezelfde sponsor-id (geen unmount),
+   * waardoor `completedScheduledSponsorSlotRef` in SponsorBudgetRotation gezet blijft en
+   * de volgende clip nooit meer start — HUD-timer loopt wél door, beeld blijft stil/zwart.
+   *
+   * Pauze-bescherming zit hierin: zelfde slot-index + zelfde sponsor ⇒ ook scorebord
+   * (geen nieuwe hang tot de klok echt verder tikt).
    */
-  if (
-    hang &&
-    raw.phase === "sponsor" &&
-    raw.sponsorId === hang.sponsorId &&
-    slotIdx !== undefined &&
-    hang.startedAtSlotIdx === slotIdx
-  ) {
+  if (hang && nowMs >= hang.untilMs) {
     hangRef.current = null;
     return { phase: "scoreboard", sponsorFilterId: null };
   }

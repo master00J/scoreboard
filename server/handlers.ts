@@ -30,6 +30,10 @@ async function getState() {
   if (!s) {
     return prisma.displayState.create({ data: { id: 1, mode: "IDLE" } });
   }
+  // Veilige modus is verwijderd; oude DB-vlag altijd uitzetten.
+  if (s.safeMode) {
+    return prisma.displayState.update({ where: { id: 1 }, data: { safeMode: false } });
+  }
   return s;
 }
 
@@ -740,7 +744,8 @@ export async function handleCommand(cmd: Command) {
       return { ok: true };
     }
     case "display:setSafeMode": {
-      await updateState({ safeMode: cmd.enabled });
+      // Feature verwijderd — altijd uit (compat voor oude clients).
+      await updateState({ safeMode: false });
       return { ok: true };
     }
     case "display:requestSnapshot": {

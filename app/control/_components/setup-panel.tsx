@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
@@ -15,6 +15,7 @@ import { isElectron, selectFilesViaDialog, selectFolderViaDialog, exportVenueBac
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
 import { normalizeUiLocale, type UiLocale } from "@/lib/i18n";
+import { tMatchStatus } from "@/lib/i18n/t-phase";
 import { SetupScoreboardTemplatesSection } from "./setup-scoreboard-templates";
 import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
 import { SetupDisplayCanvasSection } from "./setup-display-canvas";
@@ -25,23 +26,6 @@ type VisualField = "goalVideoPath" | "subImagePath" | "lineupVideoPath";
 
 export function SetupPanel() {
   const { t, i18n } = useTranslation();
-  const visualLabels = useMemo(
-    (): Record<VisualField, { title: string; extensions: string[] }> => ({
-      goalVideoPath: {
-        title: t("setup.goalVideos"),
-        extensions: ["mp4", "webm", "mov", "m4v"],
-      },
-      subImagePath: {
-        title: t("setup.subImages"),
-        extensions: ["png", "jpg", "jpeg", "webp"],
-      },
-      lineupVideoPath: {
-        title: t("setup.lineupVideos"),
-        extensions: ["mp4", "webm", "mov", "m4v"],
-      },
-    }),
-    [t],
-  );
   const { data: teams, reload: reloadTeams } = useApi<Team[]>("/api/teams");
   const { data: matches, reload: reloadMatches } = useApi<Match[]>("/api/matches");
   const { data: settings, reload: reloadSettings } = useApi<AppSettings>("/api/settings");
@@ -91,7 +75,7 @@ export function SetupPanel() {
   async function pickGoalIntroVideo() {
     const paths = await selectFilesViaDialog({
       title: t("setup.goalIntroPick"),
-      filters: [{ name: "Video", extensions: ["mp4", "webm", "mov", "m4v"] }],
+      filters: [{ name: t("setup.filterVideo"), extensions: ["mp4", "webm", "mov", "m4v"] }],
     });
     if (paths.length === 0) return;
     const res = await fetch("/api/settings", {
@@ -231,15 +215,14 @@ export function SetupPanel() {
               <div className="rounded-lg border border-border p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <div className="font-semibold">Algemene GOAL-video</div>
+                    <div className="font-semibold">{t("setup.goalIntroTitle")}</div>
                     <div className="text-xs text-muted-foreground">
-                      Gaat voor op de GOAL-playlist in Media. Daarna kies je de scorer; bij een
-                      persoonlijke clip (media of geïmporteerde goal-video) volgt die viering.
+                      {t("setup.goalIntroBody")}
                     </div>
                   </div>
                   {settings?.goalIntroVideoPath && (
                     <Button variant="ghost" size="sm" onClick={clearGoalIntroVideo}>
-                      Wis
+                      {t("setup.clear")}
                     </Button>
                   )}
                 </div>
@@ -257,20 +240,20 @@ export function SetupPanel() {
                   </div>
                 ) : (
                   <div className="mt-3 text-xs text-muted-foreground italic">
-                    Nog geen video ingesteld.
+                    {t("setup.noVideoSet")}
                   </div>
                 )}
                 <Button size="sm" variant="outline" className="mt-3" onClick={pickGoalIntroVideo}>
-                  {settings?.goalIntroVideoPath ? "Video vervangen…" : "Video kiezen…"}
+                  {settings?.goalIntroVideoPath ? t("setup.replaceVideo") : t("setup.chooseVideo")}
                 </Button>
                 <div className="mt-4 border-t border-border pt-3">
-                  <div className="font-semibold text-sm">GOAL +1 gedrag</div>
+                  <div className="font-semibold text-sm">{t("setup.goalPlusBehavior")}</div>
                   <div className="mt-1 text-xs text-muted-foreground">
-                    Kies per ploeg of de goal-knop een visual start of enkel de score verhoogt.
+                    {t("setup.goalPlusBehaviorBody")}
                   </div>
                   <div className="mt-3 grid gap-2">
                     <label className="flex items-center justify-between gap-3 rounded-md border border-border p-2 text-xs">
-                      <span>Thuisploeg: visual tonen bij goal</span>
+                      <span>{t("setup.goalVisualHome")}</span>
                       <input
                         type="checkbox"
                         checked={settings?.goalVisualHomeEnabled ?? true}
@@ -278,7 +261,7 @@ export function SetupPanel() {
                       />
                     </label>
                     <label className="flex items-center justify-between gap-3 rounded-md border border-border p-2 text-xs">
-                      <span>Uitploeg: visual tonen bij goal</span>
+                      <span>{t("setup.goalVisualAway")}</span>
                       <input
                         type="checkbox"
                         checked={settings?.goalVisualAwayEnabled ?? false}
@@ -290,19 +273,19 @@ export function SetupPanel() {
               </div>
 
               <div className="rounded-lg border border-border p-4">
-                <div className="font-semibold mb-1">Spelers-visuals uit map importeren</div>
+                <div className="font-semibold mb-1">{t("setup.importVisualsTitle")}</div>
                 <div className="text-xs text-muted-foreground mb-3">
-                  Kies een map met bestanden, wijs ze handmatig aan de juiste thuisspeler toe.
+                  {t("setup.importVisualsBody")}
                 </div>
                 <div className="flex flex-col gap-2">
                   <Button size="sm" variant="outline" onClick={() => setVisualsField("goalVideoPath")}>
-                    Goal-viering video's…
+                    {t("setup.goalVideos")}…
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setVisualsField("subImagePath")}>
-                    Wissel-afbeeldingen…
+                    {t("setup.subImages")}…
                   </Button>
                   <Button size="sm" variant="outline" onClick={() => setVisualsField("lineupVideoPath")}>
-                    Opstelling-video&apos;s (spelerintro)…
+                    {t("setup.lineupVideos")}…
                   </Button>
                 </div>
                 <HomeVisualsSummary team={homeTeam} />
@@ -311,19 +294,18 @@ export function SetupPanel() {
           </>
         ) : (
           <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-            Kies hieronder bij een team <strong>Set home</strong> om je vaste thuisploeg vast te leggen.
+            {t("setup.setHomeHint", { action: t("setup.setHome") })}
           </div>
         )}
       </section>
 
       <section className="bg-card border border-border rounded-xl p-6">
-        <h2 className="text-lg font-semibold mb-1">Leeg scherm (IDLE / prematch)</h2>
+        <h2 className="text-lg font-semibold mb-1">{t("setup.idleTitle")}</h2>
         <p className="text-sm text-muted-foreground mb-4 max-w-2xl">
-          Zonder items in de playlist toont het stadionscherm optioneel een vaste clip of afbeelding;
-          anders het logo van je vaste thuisploeg. Zonder thuisploeg zie je een korte melding.
+          {t("setup.idleBody")}
         </p>
         <div className="max-w-xl space-y-2">
-          <Label htmlFor="idle-fallback-media">Standaardmedia (optioneel)</Label>
+          <Label htmlFor="idle-fallback-media">{t("setup.idleFallbackLabel")}</Label>
           <Select
             id="idle-fallback-media"
             value={settings?.idleFallbackMediaId ?? ""}
@@ -331,12 +313,12 @@ export function SetupPanel() {
               void setIdleFallbackMedia(e.target.value === "" ? null : e.target.value)
             }
           >
-            <option value="">— Alleen thuislogo (indien ingesteld) —</option>
+            <option value="">{t("setup.idleFallbackNone")}</option>
             {(idleFallbackPickMedia ?? [])
               .filter((m) => !m.hideFromLibrary && m.active)
               .map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.title} ({m.type === "VIDEO" ? "video" : "afbeelding"})
+                  {m.title} ({m.type === "VIDEO" ? t("setup.mediaTypeVideo") : t("setup.mediaTypeImage")})
                 </option>
               ))}
           </Select>
@@ -349,20 +331,18 @@ export function SetupPanel() {
       <SetupDisplayCanvasSection settings={settings ?? null} reloadSettings={reloadSettings} />
 
       <section className="bg-card border border-border rounded-xl p-6">
-        <h2 className="text-lg font-semibold mb-3">Pre-match check</h2>
+        <h2 className="text-lg font-semibold mb-3">{t("setup.prematchCheck")}</h2>
         <AssetHealthCheck />
       </section>
 
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Matches</h2>
-          <Button onClick={() => setMatchDialog(true)}>New match</Button>
+          <h2 className="text-lg font-semibold">{t("setup.matches")}</h2>
+          <Button onClick={() => setMatchDialog(true)}>{t("setup.newMatch")}</Button>
         </div>
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground max-w-3xl">
-            Sluit een wedstrijd af na afloop: het display wordt losgekoppeld en je kunt geen live
-            commando&apos;s meer op die wedstrijd sturen. Alle sponsor-play logs blijven aan deze
-            match hangen — filter in Rapporten op wedstrijd voor proof-of-play per wedstrijd.
+            {t("setup.matchesHelp")}
           </p>
           {(matches ?? []).map((m) => (
             <div
@@ -373,23 +353,23 @@ export function SetupPanel() {
             >
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="font-semibold">{m.homeTeam.name}</div>
-                <div className="text-muted-foreground text-sm">vs</div>
+                <div className="text-muted-foreground text-sm">{t("common.vs")}</div>
                 <div className="font-semibold">{m.awayTeam.name}</div>
                 <span className="rounded border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide">
                   {getSportProfile(m.sport).label}
                 </span>
                 {m.closedAt ? (
                   <span className="text-[10px] uppercase tracking-wide rounded px-2 py-0.5 bg-muted text-muted-foreground border border-border">
-                    Afgesloten
+                    {t("setup.matchClosed")}
                   </span>
                 ) : null}
                 <div className="text-xs text-muted-foreground ml-2">
-                  {m.homeScore} – {m.awayScore} · {m.status}
+                  {m.homeScore} – {m.awayScore} · {tMatchStatus(t, m.status)}
                   {m.kickoffAt ? (
                     <>
                       {" "}
-                      · aftrap{" "}
-                      {new Date(m.kickoffAt).toLocaleString("nl-NL", {
+                      · {t("setup.kickoff").toLowerCase()}{" "}
+                      {new Date(m.kickoffAt).toLocaleString(i18n.language, {
                         day: "2-digit",
                         month: "2-digit",
                         hour: "2-digit",
@@ -397,12 +377,12 @@ export function SetupPanel() {
                       })}
                     </>
                   ) : null}
-                  {m.matchSponsorMediaId ? " · matchsponsor" : ""}
+                  {m.matchSponsorMediaId ? ` · ${t("common.matchSponsorTag")}` : ""}
                   {m.closedAt ? (
                     <>
                       {" "}
-                      · gesloten{" "}
-                      {new Date(m.closedAt).toLocaleString("nl-NL", {
+                      · {t("setup.matchClosed").toLowerCase()}{" "}
+                      {new Date(m.closedAt).toLocaleString(i18n.language, {
                         day: "2-digit",
                         month: "2-digit",
                         year: "numeric",
@@ -415,15 +395,15 @@ export function SetupPanel() {
               </div>
               <div className="flex gap-2 flex-wrap justify-end">
                 <Button size="sm" variant="outline" onClick={() => setScheduleMatch(m)}>
-                  Aftrap
+                  {t("setup.kickoff")}
                 </Button>
                 {state?.matchId === m.id ? (
                   <Button variant="secondary" disabled size="sm">
-                    Actief
+                    {t("common.active")}
                   </Button>
                 ) : m.closedAt ? (
-                  <Button variant="secondary" disabled size="sm" title="Afgesloten wedstrijd kan niet actief worden">
-                    Activeren
+                  <Button variant="secondary" disabled size="sm" title={t("setup.activateClosedTitle")}>
+                    {t("setup.activate")}
                   </Button>
                 ) : (
                   <Button
@@ -432,7 +412,7 @@ export function SetupPanel() {
                       sendCommand({ type: "match:setActive", matchId: m.id })
                     }
                   >
-                    Activeren
+                    {t("setup.activate")}
                   </Button>
                 )}
                 {!m.closedAt ? (
@@ -442,9 +422,10 @@ export function SetupPanel() {
                     onClick={async () => {
                       if (
                         !confirm(
-                          `Wedstrijd "${m.homeTeam.name} vs ${m.awayTeam.name}" afsluiten?\n\n` +
-                            "Het display wordt losgekoppeld van deze wedstrijd (indien actief). " +
-                            "Sponsor-play logs blijven bewaard voor rapportage per wedstrijd.",
+                          t("setup.closeMatchConfirm", {
+                            home: m.homeTeam.name,
+                            away: m.awayTeam.name,
+                          }),
                         )
                       ) {
                         return;
@@ -456,17 +437,17 @@ export function SetupPanel() {
                       });
                       if (!res.ok) {
                         toast({
-                          title: "Afsluiten mislukt",
+                          title: t("setup.closeMatchFailed"),
                           description: await res.text(),
                           variant: "error",
                         });
                         return;
                       }
-                      toast({ title: "Wedstrijd afgesloten", variant: "success" });
+                      toast({ title: t("setup.matchClosed"), variant: "success" });
                       reloadMatches();
                     }}
                   >
-                    Afsluiten
+                    {t("setup.closeMatch")}
                   </Button>
                 ) : (
                   <Button
@@ -475,7 +456,10 @@ export function SetupPanel() {
                     onClick={async () => {
                       if (
                         !confirm(
-                          `Wedstrijd "${m.homeTeam.name} vs ${m.awayTeam.name}" opnieuw openen voor live bediening?`,
+                          t("setup.reopenMatchConfirm", {
+                            home: m.homeTeam.name,
+                            away: m.awayTeam.name,
+                          }),
                         )
                       ) {
                         return;
@@ -487,43 +471,43 @@ export function SetupPanel() {
                       });
                       if (!res.ok) {
                         toast({
-                          title: "Heropenen mislukt",
+                          title: t("setup.reopenMatchFailed"),
                           description: await res.text(),
                           variant: "error",
                         });
                         return;
                       }
-                      toast({ title: "Wedstrijd heropend", variant: "success" });
+                      toast({ title: t("setup.matchReopened"), variant: "success" });
                       reloadMatches();
                     }}
                   >
-                    Heropenen
+                    {t("setup.reopen")}
                   </Button>
                 )}
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={async () => {
-                    if (!confirm("Delete this match?")) return;
+                    if (!confirm(t("setup.deleteMatchConfirm"))) return;
                     await fetch(`/api/matches/${m.id}`, { method: "DELETE" });
                     reloadMatches();
                   }}
                 >
-                  Delete
+                  {t("common.delete")}
                 </Button>
               </div>
             </div>
           ))}
           {matches?.length === 0 && (
-            <div className="text-sm text-muted-foreground">No matches yet.</div>
+            <div className="text-sm text-muted-foreground">{t("setup.noMatchesYet")}</div>
           )}
         </div>
       </section>
 
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Teams & Players</h2>
-          <Button onClick={() => setTeamDialogTeam("new")}>New team</Button>
+          <h2 className="text-lg font-semibold">{t("setup.teamsPlayers")}</h2>
+          <Button onClick={() => setTeamDialogTeam("new")}>{t("setup.newTeam")}</Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {(teams ?? []).map((team) => (
@@ -635,6 +619,7 @@ function TeamCard({
   onSetHome: () => void;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-lg border border-border">
       <div
@@ -659,26 +644,22 @@ function TeamCard({
           <div>
             <div className="font-semibold">{team.name}</div>
             <div className="text-xs text-muted-foreground">
-              {team.shortName} · {team.players?.length ?? 0} players
+              {team.shortName} · {t("common.playersCount", { count: team.players?.length ?? 0 })}
             </div>
           </div>
         </div>
         <div className="flex gap-1">
           <Button size="sm" variant={isHome ? "secondary" : "ghost"} onClick={onSetHome}>
-            {isHome ? "Home team" : "Set home"}
+            {isHome ? t("setup.homeTeamBadge") : t("setup.setHome")}
           </Button>
           <Button size="sm" variant="ghost" onClick={onEdit}>
-            Edit
+            {t("common.edit")}
           </Button>
           <Button
             size="sm"
             variant="ghost"
             onClick={async () => {
-              if (
-                !confirm(
-                  "Team en alle spelers verwijderen? Wedstrijden waarin dit team speelt worden ook verwijderd.",
-                )
-              ) {
+              if (!confirm(t("setup.deleteTeamConfirm"))) {
                 return;
               }
               try {
@@ -686,7 +667,7 @@ function TeamCard({
                 const body = await res.json().catch(() => ({}));
                 if (!res.ok) {
                   toast({
-                    title: "Team verwijderen mislukt",
+                    title: t("setup.deleteTeamFailed"),
                     description:
                       typeof body?.error === "string"
                         ? body.error
@@ -695,18 +676,18 @@ function TeamCard({
                   });
                   return;
                 }
-                toast({ title: "Team verwijderd", variant: "success" });
+                toast({ title: t("setup.teamDeleted"), variant: "success" });
                 onChanged();
               } catch (e) {
                 toast({
-                  title: "Team verwijderen mislukt",
+                  title: t("setup.deleteTeamFailed"),
                   description: e instanceof Error ? e.message : String(e),
                   variant: "error",
                 });
               }
             }}
           >
-            Delete
+            {t("common.delete")}
           </Button>
         </div>
       </div>
@@ -718,7 +699,7 @@ function TeamCard({
                 key={p.id}
                 onClick={() => onEditPlayer(p)}
                 className="flex items-center gap-2 rounded border border-border p-2 text-left text-xs hover:bg-secondary"
-                title="Foto en doelpuntenvideo instellen"
+                title={t("setup.playerVisualsHint")}
               >
                 <span className="font-black w-6 text-right">#{p.number}</span>
                 <span className="truncate">
@@ -729,7 +710,7 @@ function TeamCard({
           </div>
         ) : (
           <div className="text-xs text-muted-foreground italic">
-            Nog geen spelers.
+            {t("setup.noPlayersYet")}
           </div>
         )}
         <Button
@@ -738,7 +719,7 @@ function TeamCard({
           className="w-full mt-2"
           onClick={onEditRoster}
         >
-          Spelers bewerken
+          {t("setup.editPlayers")}
         </Button>
       </div>
     </div>
@@ -754,6 +735,7 @@ function TeamDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const [name, setName] = useState(team?.name ?? "");
   const [shortName, setShortName] = useState(team?.shortName ?? "");
   const [primaryColor, setPrimaryColor] = useState(team?.primaryColor ?? "#2563eb");
@@ -771,7 +753,7 @@ function TeamDialog({
     const trimmedShort = shortName.trim();
     if (!trimmedName || !trimmedShort) {
       toast({
-        title: "Vul naam en korte naam in",
+        title: t("setup.fillNameAndShort"),
         variant: "error",
       });
       setSaving(false);
@@ -802,21 +784,21 @@ function TeamDialog({
         const errorText = await res.text();
         console.warn("[team-save] failed", errorText);
         toast({
-          title: "Team opslaan mislukt",
-          description: `${res.status}: ${errorText || "geen detail"}`,
+          title: t("setup.teamSaveFailed"),
+          description: `${res.status}: ${errorText || t("setup.noDetail")}`,
           variant: "error",
         });
         return;
       }
       toast({
-        title: team ? "Team bijgewerkt" : "Team aangemaakt",
+        title: team ? t("setup.teamUpdated") : t("setup.teamCreated"),
         variant: "success",
       });
       onSaved();
     } catch (err) {
       console.error("[team-save] exception", err);
       toast({
-        title: "Team opslaan mislukt (onverwachte fout)",
+        title: t("setup.teamSaveFailedUnexpected"),
         description: err instanceof Error ? err.message : String(err),
         variant: "error",
       });
@@ -836,15 +818,15 @@ function TeamDialog({
     fd.append("file", file);
     const r = await fetch("/api/upload", { method: "POST", body: fd });
     setUploading(false);
-    if (!r.ok) { toast({ title: "Upload failed", variant: "error" }); return; }
+    if (!r.ok) { toast({ title: t("setup.uploadFailed"), variant: "error" }); return; }
     const data = await r.json();
     setLogoPath(data.path);
   }
 
   async function onLogoElectron() {
     const paths = await selectFilesViaDialog({
-      title: "Selecteer teamlogo",
-      filters: [{ name: "Afbeelding", extensions: ["png", "jpg", "jpeg", "webp", "svg"] }],
+      title: t("setup.selectTeamLogo"),
+      filters: [{ name: t("setup.filterImage"), extensions: ["png", "jpg", "jpeg", "webp", "svg"] }],
     });
     if (paths[0]) setLogoPath(paths[0]);
   }
@@ -853,15 +835,15 @@ function TeamDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{team ? "Edit team" : "New team"}</DialogTitle>
+          <DialogTitle>{team ? t("common.edit") : t("setup.newTeam")}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
           <div>
-            <Label>Name</Label>
+            <Label>{t("setup.name")}</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <Label>Short name (max 5)</Label>
+            <Label>{t("setup.shortName")}</Label>
             <Input
               value={shortName}
               maxLength={5}
@@ -870,7 +852,7 @@ function TeamDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>Primary color</Label>
+              <Label>{t("setup.primaryColor")}</Label>
               <div className="flex gap-2">
                 <Input
                   value={primaryColor}
@@ -885,7 +867,7 @@ function TeamDialog({
               </div>
             </div>
             <div>
-              <Label>Secondary color</Label>
+              <Label>{t("setup.secondaryColor")}</Label>
               <div className="flex gap-2">
                 <Input
                   value={secondaryColor}
@@ -901,7 +883,7 @@ function TeamDialog({
             </div>
           </div>
           <div>
-            <Label>Logo</Label>
+            <Label>{t("setup.logo")}</Label>
             <div className="flex items-center gap-3 flex-wrap">
               {logoPath && (
                 <img
@@ -912,7 +894,7 @@ function TeamDialog({
               )}
               {isElectron ? (
                 <Button variant="outline" size="sm" onClick={onLogoElectron}>
-                  Kies bestand…
+                  {t("common.chooseFile")}
                 </Button>
               ) : (
                 <Input
@@ -921,10 +903,10 @@ function TeamDialog({
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) onLogo(f); }}
                 />
               )}
-              {uploading && <span className="text-xs">Uploading...</span>}
+              {uploading && <span className="text-xs">{t("common.loading")}</span>}
               {logoPath && (
                 <Button variant="ghost" size="sm" onClick={() => setLogoPath(null)}>
-                  Verwijder
+                  {t("common.remove")}
                 </Button>
               )}
             </div>
@@ -932,10 +914,10 @@ function TeamDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={save} disabled={saving}>
-            {saving ? "Opslaan…" : "Save"}
+            {saving ? t("common.loading") : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -954,6 +936,7 @@ function PlayerDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const [number, setNumber] = useState(String(player?.number ?? ""));
   const [firstName, setFirstName] = useState(player?.firstName ?? "");
   const [lastName, setLastName] = useState(player?.lastName ?? "");
@@ -994,7 +977,7 @@ function PlayerDialog({
         });
     if (!res.ok) {
       toast({
-        title: "Failed to save player",
+        title: t("setup.playerSaveFailed"),
         description: await res.text(),
         variant: "error",
       });
@@ -1029,23 +1012,23 @@ function PlayerDialog({
 
   async function onPhotoElectron() {
     const paths = await selectFilesViaDialog({
-      title: "Selecteer spelerfoto",
-      filters: [{ name: "Afbeelding", extensions: ["png", "jpg", "jpeg", "webp"] }],
+      title: t("setup.selectPlayerPhoto"),
+      filters: [{ name: t("setup.filterImage"), extensions: ["png", "jpg", "jpeg", "webp"] }],
     });
     if (paths[0]) setPhotoPath(paths[0]);
   }
 
   async function onLineupVideoElectron() {
     const paths = await selectFilesViaDialog({
-      title: "Selecteer opstelling-/lineup-video",
-      filters: [{ name: "Video", extensions: ["mp4", "webm", "mov", "m4v"] }],
+      title: t("setup.selectLineupVideo"),
+      filters: [{ name: t("setup.filterVideo"), extensions: ["mp4", "webm", "mov", "m4v"] }],
     });
     if (paths[0]) setLineupVideoPath(paths[0]);
   }
 
   async function del() {
     if (!player) return;
-    if (!confirm("Delete player?")) return;
+    if (!confirm(t("setup.deletePlayerConfirm"))) return;
     await fetch(`/api/players/${player.id}`, { method: "DELETE" });
     onSaved();
   }
@@ -1055,13 +1038,13 @@ function PlayerDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>
-            {player ? "Edit player" : "New player"} · {team.name}
+            {player ? t("setup.editPlayer") : t("setup.newPlayer")} · {team.name}
           </DialogTitle>
         </DialogHeader>
         <div className="grid gap-4">
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <Label>Number</Label>
+              <Label>{t("setup.number")}</Label>
               <Input
                 type="number"
                 value={number}
@@ -1069,7 +1052,7 @@ function PlayerDialog({
               />
             </div>
             <div>
-              <Label>Position</Label>
+              <Label>{t("setup.position")}</Label>
               <Select value={position} onChange={(e) => setPosition(e.target.value)}>
                 <option value="GK">GK</option>
                 <option value="DEF">DEF</option>
@@ -1081,19 +1064,20 @@ function PlayerDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>First name</Label>
+              <Label>{t("setup.firstName")}</Label>
               <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} />
             </div>
             <div>
-              <Label>Last name</Label>
+              <Label>{t("setup.lastName")}</Label>
               <Input value={lastName} onChange={(e) => setLastName(e.target.value)} />
             </div>
           </div>
           <div>
-            <Label>Foto</Label>
+            <Label>{t("setup.photo")}</Label>
             <div className="text-[11px] text-muted-foreground mb-1">
-              Gebruikt in het <strong className="text-foreground/90">grafische spelerintro-sjabloon</strong> (als er{" "}
-              <em>geen</em> lineup-video is ingesteld).
+              {t("setup.photoHelpBefore")}{" "}
+              <strong className="text-foreground/90">{t("setup.photoHelpStrong")}</strong>{" "}
+              {t("setup.photoHelpAfter")}
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               {photoPath && (
@@ -1105,7 +1089,7 @@ function PlayerDialog({
               )}
               {isElectron ? (
                 <Button variant="outline" size="sm" onClick={onPhotoElectron}>
-                  Kies bestand…
+                  {t("common.chooseFile")}
                 </Button>
               ) : (
                 <Input
@@ -1114,20 +1098,18 @@ function PlayerDialog({
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) onPhoto(f); }}
                 />
               )}
-              {uploading && <span className="text-xs">Uploading...</span>}
+              {uploading && <span className="text-xs">{t("common.loading")}</span>}
               {photoPath && (
                 <Button variant="ghost" size="sm" onClick={() => setPhotoPath(null)}>
-                  Verwijder
+                  {t("common.remove")}
                 </Button>
               )}
             </div>
           </div>
           <div>
-            <Label>Lineup-video (custom opstelling)</Label>
+            <Label>{t("setup.lineupVideo")}</Label>
             <div className="text-[11px] text-muted-foreground mb-1">
-              Fullscreen video tijdens <strong className="text-foreground/90">Spelerintro</strong> op het scherm. Gaat
-              vóór het vaste sjabloon met foto/tekst. Zelfde bestanden kun je ook via Setup → map-import “Opstelling
-              video’s…” koppelen.
+              {t("setup.lineupVideoHelp")}
             </div>
             <div className="flex flex-col gap-2">
               {lineupVideoPath ? (
@@ -1138,12 +1120,12 @@ function PlayerDialog({
                   className="w-full max-w-md rounded bg-black aspect-video"
                 />
               ) : (
-                <div className="text-xs text-muted-foreground italic">Nog geen lineup-video.</div>
+                <div className="text-xs text-muted-foreground italic">{t("setup.noLineupVideo")}</div>
               )}
               <div className="flex flex-wrap items-center gap-2">
                 {isElectron ? (
                   <Button variant="outline" size="sm" type="button" onClick={() => void onLineupVideoElectron()}>
-                    Video kiezen…
+                    {t("setup.chooseVideo")}
                   </Button>
                 ) : (
                   <Input
@@ -1158,28 +1140,27 @@ function PlayerDialog({
                 )}
                 {lineupVideoPath && (
                   <Button variant="ghost" size="sm" type="button" onClick={() => setLineupVideoPath(null)}>
-                    Verwijder
+                    {t("common.remove")}
                   </Button>
                 )}
               </div>
               {!isElectron && (
                 <div className="text-[10px] text-muted-foreground">
-                  In de browser: upload een videobestand; in de desktop-app kun je direct een pad kiezen.
+                  {t("setup.lineupBrowserHint")}
                 </div>
               )}
             </div>
           </div>
           <div>
-            <Label>Goal celebration video</Label>
+            <Label>{t("setup.goalCelebrationVideo")}</Label>
             <div className="text-[11px] text-muted-foreground mb-1">
-              Played fullscreen after this player is confirmed as the scorer.
-              Upload videos in the Media tab first.
+              {t("setup.goalCelebrationHelp")}
             </div>
             <Select
               value={goalMediaId ?? ""}
               onChange={(e) => setGoalMediaId(e.target.value || null)}
             >
-              <option value="">— No personal video (text banner) —</option>
+              <option value="">{t("setup.noPersonalVideo")}</option>
               {videoMedia.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.title} · {m.durationSec}s
@@ -1201,13 +1182,13 @@ function PlayerDialog({
         <DialogFooter>
           {player && (
             <Button variant="destructive" onClick={del} className="mr-auto">
-              Delete
+              {t("common.delete")}
             </Button>
           )}
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
-          <Button onClick={save}>Save</Button>
+          <Button onClick={save}>{t("common.save")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1241,6 +1222,7 @@ function RosterDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const initialRows: RosterRow[] = (team.players ?? [])
     .slice()
     .sort((a, b) => a.number - b.number)
@@ -1301,8 +1283,10 @@ function RosterDialog({
       for (const row of cleaned) {
         if (!row.number) {
           toast({
-            title: "Rugnummer ontbreekt",
-            description: `Vul een nummer in voor ${row.firstName || row.lastName || "speler"}`,
+            title: t("setup.rosterMissingNumber"),
+            description: t("setup.rosterMissingNumberDesc", {
+              name: row.firstName || row.lastName || t("setup.rosterPlayerFallback"),
+            }),
             variant: "error",
           });
           return;
@@ -1310,14 +1294,14 @@ function RosterDialog({
         const num = Number(row.number);
         if (!Number.isFinite(num) || num < 0 || num > 999) {
           toast({
-            title: `Ongeldig rugnummer: "${row.number}"`,
+            title: t("setup.rosterInvalidNumber", { number: row.number }),
             variant: "error",
           });
           return;
         }
         if (!row.firstName && !row.lastName) {
           toast({
-            title: `Naam ontbreekt bij #${row.number}`,
+            title: t("setup.rosterMissingName", { number: row.number }),
             variant: "error",
           });
           return;
@@ -1329,7 +1313,7 @@ function RosterDialog({
         const num = Number(row.number);
         if (numberSet.has(num)) {
           toast({
-            title: `Rugnummer ${num} komt meer dan één keer voor`,
+            title: t("setup.rosterDuplicateNumber", { number: num }),
             variant: "error",
           });
           return;
@@ -1349,7 +1333,7 @@ function RosterDialog({
           const res = await fetch(`/api/players/${id}`, { method: "DELETE" });
           if (!res.ok) {
             toast({
-              title: "Speler verwijderen mislukt",
+              title: t("setup.playerDeleteFailed"),
               description: await res.text(),
               variant: "error",
             });
@@ -1377,7 +1361,7 @@ function RosterDialog({
             });
         if (!res.ok) {
           toast({
-            title: `Speler opslaan mislukt (#${row.number})`,
+            title: t("setup.playerSaveFailedNumber", { number: row.number }),
             description: await res.text(),
             variant: "error",
           });
@@ -1385,12 +1369,12 @@ function RosterDialog({
         }
       }
 
-      toast({ title: "Spelers opgeslagen", variant: "success" });
+      toast({ title: t("setup.playersSaved"), variant: "success" });
       onSaved();
     } catch (err) {
       console.error("[roster-save] exception", err);
       toast({
-        title: "Spelers opslaan mislukt",
+        title: t("setup.playersSaveFailed"),
         description: err instanceof Error ? err.message : String(err),
         variant: "error",
       });
@@ -1403,18 +1387,17 @@ function RosterDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent size="lg">
         <DialogHeader>
-          <DialogTitle>Spelers · {team.name}</DialogTitle>
+          <DialogTitle>{t("setup.rosterTitle", { team: team.name })}</DialogTitle>
         </DialogHeader>
 
         <div className="text-xs text-muted-foreground mb-3">
-          Vul de hele lijst onder elkaar in. Lege rijen worden genegeerd. Een
-          extra lege rij verschijnt automatisch zodra je begint te typen.
+          {t("setup.rosterHelp")}
         </div>
 
         <div className="grid grid-cols-[80px_1fr_1fr_40px] gap-2 text-xs font-semibold text-muted-foreground px-1 mb-1">
           <div>#</div>
-          <div>Voornaam</div>
-          <div>Achternaam</div>
+          <div>{t("setup.firstName")}</div>
+          <div>{t("setup.lastName")}</div>
           <div></div>
         </div>
 
@@ -1434,18 +1417,18 @@ function RosterDialog({
               <Input
                 value={row.firstName}
                 onChange={(e) => updateRow(row.rowId, { firstName: e.target.value })}
-                placeholder="Voornaam"
+                placeholder={t("setup.firstName")}
               />
               <Input
                 value={row.lastName}
                 onChange={(e) => updateRow(row.rowId, { lastName: e.target.value })}
-                placeholder="Achternaam"
+                placeholder={t("setup.lastName")}
               />
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => removeRow(row.rowId)}
-                title="Rij verwijderen"
+                title={t("setup.removeRow")}
               >
                 ×
               </Button>
@@ -1459,16 +1442,16 @@ function RosterDialog({
             variant="outline"
             onClick={() => setRows((current) => [...current, makeEmptyRow()])}
           >
-            + Extra rij
+            {t("setup.extraRow")}
           </Button>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={save} disabled={saving}>
-            {saving ? "Opslaan…" : "Opslaan"}
+            {saving ? t("common.saving") : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1477,6 +1460,7 @@ function RosterDialog({
 }
 
 function HomeVisualsSummary({ team }: { team: Team }) {
+  const { t } = useTranslation();
   const players = team.players ?? [];
   const counts = {
     goal: players.filter((p) => !!p.goalVideoPath).length,
@@ -1486,9 +1470,9 @@ function HomeVisualsSummary({ team }: { team: Team }) {
   const total = players.length;
   return (
     <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] text-muted-foreground">
-      <div>Goal: {counts.goal}/{total}</div>
-      <div>Wissel: {counts.sub}/{total}</div>
-      <div>Opstelling: {counts.lineup}/{total}</div>
+      <div>{t("setup.visualsGoal", { count: counts.goal, total })}</div>
+      <div>{t("setup.visualsSub", { count: counts.sub, total })}</div>
+      <div>{t("setup.visualsLineup", { count: counts.lineup, total })}</div>
     </div>
   );
 }
@@ -1504,7 +1488,22 @@ function BulkVisualsDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const meta = visualLabels[field];
+  const { t } = useTranslation();
+  const fieldMetaByKey: Record<VisualField, { title: string; extensions: string[] }> = {
+    goalVideoPath: {
+      title: t("setup.goalVideos"),
+      extensions: ["mp4", "webm", "mov", "m4v"],
+    },
+    subImagePath: {
+      title: t("setup.subImages"),
+      extensions: ["png", "jpg", "jpeg", "webp"],
+    },
+    lineupVideoPath: {
+      title: t("setup.lineupVideos"),
+      extensions: ["mp4", "webm", "mov", "m4v"],
+    },
+  };
+  const meta = fieldMetaByKey[field];
   const players = (team.players ?? []).slice().sort((a, b) => a.number - b.number);
 
   const [files, setFiles] = useState<Array<{ name: string; path: string }>>([]);
@@ -1524,11 +1523,11 @@ function BulkVisualsDialog({
 
   async function pickFolder() {
     if (!isElectron) {
-      toast({ title: "Alleen beschikbaar in de desktop-app", variant: "error" });
+      toast({ title: t("setup.desktopOnly"), variant: "error" });
       return;
     }
     const result = await selectFolderViaDialog({
-      title: `Kies map met ${meta.title.toLowerCase()}`,
+      title: t("setup.chooseFolderWith", { title: meta.title.toLowerCase() }),
       extensions: meta.extensions,
     });
     if (!result.folderPath) return;
@@ -1539,7 +1538,7 @@ function BulkVisualsDialog({
   function assignToPlayer(playerId: string) {
     if (!selectedFile) {
       toast({
-        title: "Selecteer eerst een bestand links",
+        title: t("setup.selectFileFirst"),
         variant: "warning",
       });
       return;
@@ -1581,17 +1580,17 @@ function BulkVisualsDialog({
       });
       if (!res.ok) {
         toast({
-          title: "Opslaan mislukt",
+          title: t("setup.saveFailed"),
           description: await res.text(),
           variant: "error",
         });
         return;
       }
-      toast({ title: `${meta.title} opgeslagen`, variant: "success" });
+      toast({ title: t("setup.savedWithTitle", { title: meta.title }), variant: "success" });
       onSaved();
     } catch (err) {
       toast({
-        title: "Opslaan mislukt",
+        title: t("setup.saveFailed"),
         description: err instanceof Error ? err.message : String(err),
         variant: "error",
       });
@@ -1612,25 +1611,27 @@ function BulkVisualsDialog({
         <div className="flex items-center justify-between gap-3 mb-3">
           <div className="text-xs text-muted-foreground truncate">
             {folderPath ? (
-              <>Map: <span className="font-mono">{folderPath}</span> · {files.length} bestand(en)</>
+              <span className="font-mono">
+                {t("setup.folderLabel", { path: folderPath, count: files.length })}
+              </span>
             ) : (
-              <>Nog geen map gekozen.</>
+              <>{t("setup.noFolderYet")}</>
             )}
           </div>
           <Button size="sm" variant="outline" onClick={pickFolder}>
-            {folderPath ? "Andere map kiezen…" : "Map kiezen…"}
+            {folderPath ? t("setup.chooseOtherFolder") : t("setup.chooseFolder")}
           </Button>
         </div>
 
         <div className="grid grid-cols-2 gap-4 max-h-[60vh]">
           <div className="flex flex-col rounded-lg border border-border overflow-hidden">
             <div className="px-3 py-2 bg-secondary/40 text-xs font-semibold uppercase tracking-wide">
-              Bestanden
+              {t("setup.files")}
             </div>
             <div className="flex-1 overflow-auto">
               {files.length === 0 ? (
                 <div className="p-4 text-xs text-muted-foreground italic">
-                  Kies hierboven een map om de inhoud te tonen.
+                  {t("setup.chooseFolderHint")}
                 </div>
               ) : (
                 <ul className="divide-y divide-border">
@@ -1649,7 +1650,7 @@ function BulkVisualsDialog({
                           <span className="flex-1 truncate">{file.name}</span>
                           {isAssigned && (
                             <span className="text-[10px] rounded bg-green-500/20 text-green-400 px-1.5 py-0.5">
-                              toegewezen
+                              {t("setup.assigned")}
                             </span>
                           )}
                         </button>
@@ -1663,17 +1664,17 @@ function BulkVisualsDialog({
 
           <div className="flex flex-col rounded-lg border border-border overflow-hidden">
             <div className="px-3 py-2 bg-secondary/40 text-xs font-semibold uppercase tracking-wide flex items-center justify-between">
-              <span>Spelers</span>
+              <span>{t("setup.players")}</span>
               {selectedFile && (
                 <span className="text-[10px] font-normal text-muted-foreground">
-                  Klik een speler om toe te wijzen
+                  {t("setup.clickPlayerToAssign")}
                 </span>
               )}
             </div>
             <div className="flex-1 overflow-auto">
               {players.length === 0 ? (
                 <div className="p-4 text-xs text-muted-foreground italic">
-                  Geen spelers in deze ploeg.
+                  {t("setup.noPlayersInTeam")}
                 </div>
               ) : (
                 <ul className="divide-y divide-border">
@@ -1707,7 +1708,7 @@ function BulkVisualsDialog({
                             type="button"
                             onClick={() => clearPlayer(p.id)}
                             className="text-muted-foreground hover:text-foreground text-xs"
-                            title="Koppeling wissen"
+                            title={t("setup.clearAssignment")}
                           >
                             ×
                           </button>
@@ -1750,10 +1751,10 @@ function BulkVisualsDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={save} disabled={saving}>
-            {saving ? "Opslaan…" : "Opslaan"}
+            {saving ? t("common.saving") : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1787,17 +1788,28 @@ function isoToDatetimeLocalValue(iso: string | null | undefined): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function MatchDialog({
+export type MatchDialogStartOptions = {
+  /** Wedstrijd meteen actief zetten (PREMATCH). */
+  activate: boolean;
+  /** Na activeren modus SPONSOR_ROTATION (anders MATCH). */
+  sponsorRotation: boolean;
+};
+
+export function MatchDialog({
   teams,
   homeTeam,
   onClose,
   onSaved,
+  quickStart = false,
 }: {
   teams: Team[];
   homeTeam: Team | null;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (match?: Match, start?: MatchDialogStartOptions) => void;
+  /** Quick menu: zelfde schedule-velden als Setup + opties om direct te starten. */
+  quickStart?: boolean;
 }) {
+  const { t } = useTranslation();
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [sport, setSport] = useState<SportType>("FOOTBALL");
   const sportProfile = getSportProfile(sport);
@@ -1812,6 +1824,9 @@ function MatchDialog({
   const [uploading, setUploading] = useState(false);
   const [kickoffLocal, setKickoffLocal] = useState("");
   const [matchSponsorMediaId, setMatchSponsorMediaId] = useState("");
+  const [prematchWindowMin, setPrematchWindowMin] = useState("");
+  const [activateAfterCreate, setActivateAfterCreate] = useState(true);
+  const [startSponsorRotation, setStartSponsorRotation] = useState(true);
   const { data: mediaForMatch } = useApi<MediaItem[]>("/api/media");
 
   async function onAwayLogo(file?: File, localPath?: string) {
@@ -1826,7 +1841,7 @@ function MatchDialog({
     const res = await fetch("/api/upload", { method: "POST", body: fd });
     setUploading(false);
     if (!res.ok) {
-      toast({ title: "Upload failed", variant: "error" });
+      toast({ title: t("setup.uploadFailed"), variant: "error" });
       return;
     }
     const data = await res.json();
@@ -1835,21 +1850,21 @@ function MatchDialog({
 
   async function onAwayLogoElectron() {
     const paths = await selectFilesViaDialog({
-      title: "Selecteer away team-logo",
-      filters: [{ name: "Afbeelding", extensions: ["png", "jpg", "jpeg", "webp", "svg"] }],
+      title: t("setup.selectAwayLogo"),
+      filters: [{ name: t("setup.filterImage"), extensions: ["png", "jpg", "jpeg", "webp", "svg"] }],
     });
     if (paths[0]) setAwayLogoPath(paths[0]);
   }
 
   async function ensureAwayTeamId() {
     if (!homeTeam) {
-      toast({ title: "Stel eerst een vast home team in", variant: "error" });
+      toast({ title: t("setup.setHomeFirst"), variant: "error" });
       return null;
     }
 
     if (mode === "existing") {
       if (!awayId || awayId === homeTeam.id) {
-        toast({ title: "Kies een ander away team", variant: "error" });
+        toast({ title: t("setup.chooseOtherAway"), variant: "error" });
         return null;
       }
       return awayId;
@@ -1857,12 +1872,12 @@ function MatchDialog({
 
     const name = awayName.trim();
     if (!name) {
-      toast({ title: "Vul een away teamnaam in", variant: "error" });
+      toast({ title: t("setup.fillAwayName"), variant: "error" });
       return null;
     }
     const shortName = (awayShortName.trim() || shortNameFromName(name)).slice(0, 5);
     if (!shortName) {
-      toast({ title: "Away team short name ontbreekt", variant: "error" });
+      toast({ title: t("setup.awayShortMissing"), variant: "error" });
       return null;
     }
 
@@ -1878,7 +1893,7 @@ function MatchDialog({
       }),
     });
     if (!teamRes.ok) {
-      toast({ title: "Away team aanmaken mislukt", variant: "error" });
+      toast({ title: t("setup.createAwayFailed"), variant: "error" });
       return null;
     }
     const created = (await teamRes.json()) as Team;
@@ -1887,12 +1902,22 @@ function MatchDialog({
 
   async function save() {
     if (!homeTeam) {
-      toast({ title: "Stel eerst een vast home team in", variant: "error" });
+      toast({ title: t("setup.setHomeFirst"), variant: "error" });
       return;
     }
 
     const resolvedAwayId = await ensureAwayTeamId();
     if (!resolvedAwayId) return;
+
+    const prematchSec = parsePrematchWindowMinToSec(prematchWindowMin);
+    if (prematchSec === "invalid") {
+      toast({
+        title: t("setup.scheduleInvalidPrematch"),
+        description: t("setup.scheduleInvalidPrematchDesc"),
+        variant: "error",
+      });
+      return;
+    }
 
     const payload: Record<string, unknown> = {
       homeTeamId: homeTeam.id,
@@ -1901,6 +1926,7 @@ function MatchDialog({
       periodDurationSec: sportProfile.defaultPeriodDurationSec,
       kickoffAt: kickoffLocal.trim() ? localDatetimeToIso(kickoffLocal) : null,
       matchSponsorMediaId: matchSponsorMediaId.trim() ? matchSponsorMediaId : null,
+      prematchSpreadWindowSec: prematchSec,
     };
 
     const res = await fetch("/api/matches", {
@@ -1909,22 +1935,31 @@ function MatchDialog({
       body: JSON.stringify(payload),
     });
     if (!res.ok) {
-      toast({ title: "Wedstrijd aanmaken mislukt", variant: "error" });
+      toast({ title: t("setup.createMatchFailed"), variant: "error" });
       return;
     }
-    onSaved();
+    const created = (await res.json()) as Match;
+    onSaved(
+      created,
+      quickStart
+        ? {
+            activate: activateAfterCreate,
+            sponsorRotation: activateAfterCreate && startSponsorRotation,
+          }
+        : undefined,
+    );
   }
 
   const selectableAwayTeams = teams.filter((team) => team.id !== homeTeam?.id);
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent size={quickStart ? "lg" : "md"}>
         <DialogHeader>
-          <DialogTitle>New match</DialogTitle>
+          <DialogTitle>{quickStart ? t("shell.startNewMatch") : t("setup.newMatch")}</DialogTitle>
         </DialogHeader>
         <div className="rounded-lg border border-border p-3">
-          <Label>Sport</Label>
+          <Label>{t("setup.sport")}</Label>
           <Select
             value={sport}
             onChange={(event) => setSport(event.target.value as SportType)}
@@ -1939,23 +1974,23 @@ function MatchDialog({
           <p className="mt-2 text-xs text-muted-foreground">
             {sportProfile.periodCount} × {sportProfile.periodLabel.toLowerCase()}
             {sportProfile.timerMode === "NONE"
-              ? " · zonder wedstrijdklok"
-              : ` · ${Math.round(sportProfile.defaultPeriodDurationSec / 60)} minuten · ${
-                  sportProfile.timerMode === "COUNT_DOWN" ? "aftellend" : "optellend"
+              ? ` · ${t("setup.noClock")}`
+              : ` · ${Math.round(sportProfile.defaultPeriodDurationSec / 60)} ${t("common.minutes")} · ${
+                  sportProfile.timerMode === "COUNT_DOWN" ? t("setup.countDown") : t("setup.countUp")
                 }`}
             {sportProfile.shotClockPresets.length > 0
-              ? ` · shotclock ${sportProfile.shotClockPresets.join("/")}`
+              ? ` · ${t("setup.shotclock", { presets: sportProfile.shotClockPresets.join("/") })}`
               : ""}
           </p>
         </div>
         {!homeTeam ? (
           <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-            Stel eerst in de Setup-tab een vast home team in.
+            {t("setup.setHomeFirst")}
           </div>
         ) : (
           <div className="grid gap-4">
             <div>
-              <Label>Home team</Label>
+              <Label>{t("setup.homeTeam")}</Label>
               <div className="mt-2 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
                 {homeTeam.logoPath ? (
                   <img
@@ -1982,7 +2017,7 @@ function MatchDialog({
             </div>
 
             <div>
-              <Label>Away team</Label>
+              <Label>{t("setup.awayTeam")}</Label>
               <div className="mt-2 flex gap-2">
                 <Button
                   type="button"
@@ -1990,7 +2025,7 @@ function MatchDialog({
                   variant={mode === "existing" ? "default" : "outline"}
                   onClick={() => setMode("existing")}
                 >
-                  Kies bestaand team
+                  {t("setup.chooseExisting")}
                 </Button>
                 <Button
                   type="button"
@@ -1998,16 +2033,16 @@ function MatchDialog({
                   variant={mode === "new" ? "default" : "outline"}
                   onClick={() => setMode("new")}
                 >
-                  Nieuw away team
+                  {t("setup.newAwayTeam")}
                 </Button>
               </div>
             </div>
 
             {mode === "existing" ? (
               <div>
-                <Label>Selecteer away team</Label>
+                <Label>{t("setup.selectAway")}</Label>
                 <Select value={awayId} onChange={(e) => setAwayId(e.target.value)}>
-                  <option value="">Kies team…</option>
+                  <option value="">{t("setup.chooseTeam")}</option>
                   {selectableAwayTeams.map((team) => (
                     <option key={team.id} value={team.id}>
                       {team.name}
@@ -2018,7 +2053,7 @@ function MatchDialog({
             ) : (
               <div className="grid gap-3">
                 <div>
-                  <Label>Away teamnaam</Label>
+                  <Label>{t("setup.awayTeam")}</Label>
                   <Input
                     value={awayName}
                     onChange={(e) => {
@@ -2028,11 +2063,11 @@ function MatchDialog({
                         setAwayShortName(shortNameFromName(nextName));
                       }
                     }}
-                    placeholder="Bijv. Ajax"
+                    placeholder={t("setup.awayNamePlaceholder")}
                   />
                 </div>
                 <div>
-                  <Label>Korte naam</Label>
+                  <Label>{t("setup.shortName")}</Label>
                   <Input
                     value={awayShortName}
                     maxLength={5}
@@ -2042,7 +2077,7 @@ function MatchDialog({
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <Label>Primary color</Label>
+                    <Label>{t("setup.primaryColor")}</Label>
                     <div className="flex gap-2">
                       <Input
                         value={awayPrimaryColor}
@@ -2057,7 +2092,7 @@ function MatchDialog({
                     </div>
                   </div>
                   <div>
-                    <Label>Secondary color</Label>
+                    <Label>{t("setup.secondaryColor")}</Label>
                     <div className="flex gap-2">
                       <Input
                         value={awaySecondaryColor}
@@ -2073,7 +2108,7 @@ function MatchDialog({
                   </div>
                 </div>
                 <div>
-                  <Label>Logo</Label>
+                  <Label>{t("setup.logo")}</Label>
                   <div className="flex items-center gap-3 flex-wrap">
                     {awayLogoPath && (
                       <img
@@ -2084,7 +2119,7 @@ function MatchDialog({
                     )}
                     {isElectron ? (
                       <Button variant="outline" size="sm" onClick={onAwayLogoElectron}>
-                        Kies bestand…
+                        {t("common.chooseFile")}
                       </Button>
                     ) : (
                       <Input
@@ -2096,10 +2131,10 @@ function MatchDialog({
                         }}
                       />
                     )}
-                    {uploading && <span className="text-xs">Uploading...</span>}
+                    {uploading && <span className="text-xs">{t("common.loading")}</span>}
                     {awayLogoPath && (
                       <Button variant="ghost" size="sm" onClick={() => setAwayLogoPath(null)}>
-                        Verwijder
+                        {t("common.remove")}
                       </Button>
                     )}
                   </div>
@@ -2108,9 +2143,9 @@ function MatchDialog({
             )}
 
             <div className="rounded-lg border border-border p-3 space-y-3">
-              <div className="text-sm font-semibold">Aftrap & matchsponsor (optioneel)</div>
+              <div className="text-sm font-semibold">{t("setup.scheduleTitle")}</div>
               <div>
-                <Label>Geplande aftrap</Label>
+                <Label>{t("setup.plannedKickoff")}</Label>
                 <Input
                   type="datetime-local"
                   value={kickoffLocal}
@@ -2118,19 +2153,35 @@ function MatchDialog({
                   className="mt-1"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  Met matchsponsor: automatisch fullscreen vanaf{" "}
-                  {PREMATCH_MATCH_SPONSOR_LEAD_MS / 60_000} min voor deze tijd tot de aftrap (alleen
-                  SETUP/PREMATCH).
+                  {t("setup.matchSponsorLeadHelp", {
+                    minutes: PREMATCH_MATCH_SPONSOR_LEAD_MS / 60_000,
+                  })}
                 </p>
               </div>
               <div>
-                <Label>Matchsponsor-media</Label>
+                <Label>{t("setup.prematchWindowLabel")}</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={1440}
+                  step={1}
+                  placeholder={t("setup.prematchWindowPlaceholder")}
+                  value={prematchWindowMin}
+                  onChange={(e) => setPrematchWindowMin(e.target.value)}
+                  className="mt-1 max-w-xs"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {t("setup.prematchWindowHelp")}
+                </p>
+              </div>
+              <div>
+                <Label>{t("setup.matchSponsorMedia")}</Label>
                 <Select
                   value={matchSponsorMediaId}
                   onChange={(e) => setMatchSponsorMediaId(e.target.value)}
                   className="mt-1"
                 >
-                  <option value="">— geen —</option>
+                  <option value="">{t("setup.noSponsor")}</option>
                   {(mediaForMatch ?? [])
                     .filter((it) => it.active && !it.hideFromLibrary)
                     .map((it) => (
@@ -2141,14 +2192,56 @@ function MatchDialog({
                 </Select>
               </div>
             </div>
+
+            {quickStart && (
+              <div className="rounded-lg border border-border p-3 space-y-3">
+                <div className="text-sm font-semibold">{t("setup.quickStartOptions")}</div>
+                <label className="flex items-start gap-2 text-sm cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={activateAfterCreate}
+                    onChange={(e) => {
+                      setActivateAfterCreate(e.target.checked);
+                      if (!e.target.checked) setStartSponsorRotation(false);
+                    }}
+                  />
+                  <span>
+                    <span className="font-medium">{t("setup.quickStartActivate")}</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      {t("setup.quickStartActivateHelp")}
+                    </span>
+                  </span>
+                </label>
+                <label
+                  className={`flex items-start gap-2 text-sm ${
+                    activateAfterCreate ? "cursor-pointer" : "opacity-50 cursor-not-allowed"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={startSponsorRotation}
+                    disabled={!activateAfterCreate}
+                    onChange={(e) => setStartSponsorRotation(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-medium">{t("setup.quickStartSponsors")}</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">
+                      {t("setup.quickStartSponsorsHelp")}
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
           </div>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={save} disabled={!homeTeam}>
-            Create
+            {quickStart ? t("shell.startNewMatch") : t("common.create")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -2182,6 +2275,7 @@ function MatchScheduleDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const { data: mediaList } = useApi<MediaItem[]>("/api/media");
   const [kickoffLocal, setKickoffLocal] = useState(() => isoToDatetimeLocalValue(match.kickoffAt));
   const [sponsorId, setSponsorId] = useState(match.matchSponsorMediaId ?? "");
@@ -2202,8 +2296,8 @@ function MatchScheduleDialog({
       const prematchSec = parsePrematchWindowMinToSec(prematchWindowMin);
       if (prematchSec === "invalid") {
         toast({
-          title: "Ongeldige prematch-duur",
-          description: "Vul een niet-negatief geheel getal minuten in, of laat leeg voor automatisch.",
+          title: t("setup.scheduleInvalidPrematch"),
+          description: t("setup.scheduleInvalidPrematchDesc"),
           variant: "error",
         });
         return;
@@ -2218,10 +2312,10 @@ function MatchScheduleDialog({
         }),
       });
       if (!res.ok) {
-        toast({ title: "Opslaan mislukt", description: await res.text(), variant: "error" });
+        toast({ title: t("setup.saveFailed"), description: await res.text(), variant: "error" });
         return;
       }
-      toast({ title: "Opgeslagen", variant: "success" });
+      toast({ title: t("setup.saved"), variant: "success" });
       onSaved();
     } finally {
       setSaving(false);
@@ -2232,15 +2326,15 @@ function MatchScheduleDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Aftrap, prematch-rooster & matchsponsor</DialogTitle>
+          <DialogTitle>{t("setup.scheduleTitle")}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          {match.homeTeam.name} <span className="text-muted-foreground/80">vs</span>{" "}
-          {match.awayTeam.name}
+          {match.homeTeam.name}{" "}
+          <span className="text-muted-foreground/80">{t("common.vs")}</span> {match.awayTeam.name}
         </p>
         <div className="grid gap-3 pt-2">
           <div>
-            <Label>Geplande aftrap</Label>
+            <Label>{t("setup.plannedKickoff")}</Label>
             <Input
               type="datetime-local"
               value={kickoffLocal}
@@ -2248,35 +2342,31 @@ function MatchScheduleDialog({
               className="mt-1"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Leeg = geen geplande tijd. Met sponsor: vanaf {PREMATCH_MATCH_SPONSOR_LEAD_MS / 60_000}{" "}
-              min ervoor tot deze tijd automatisch op het display (SETUP/PREMATCH).
+              {t("setup.scheduleKickoffEmptyHelp", {
+                minutes: PREMATCH_MATCH_SPONSOR_LEAD_MS / 60_000,
+              })}
             </p>
           </div>
           <div>
-            <Label>Prematch: start sponsoring vóór aftrap (minuten)</Label>
+            <Label>{t("setup.prematchWindowLabel")}</Label>
             <Input
               type="number"
               min={0}
               max={1440}
               step={1}
-              placeholder="Leeg = automatisch (som «voor»-seconden)"
+              placeholder={t("setup.prematchWindowPlaceholder")}
               value={prematchWindowMin}
               onChange={(e) => setPrematchWindowMin(e.target.value)}
               className="mt-1 max-w-xs"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Met een <strong>geplande aftrap</strong> start het sponsorrooster automatisch{" "}
-              <strong>zoveel minuten vóór aftrap</strong> en eindigt op aftrap. De ingevulde
-              sponsorseconden «Voor wedstrijd» (bv. 2 min) worden <strong>gespreid</strong> over dat
-              venster — niet allemaal achter elkaar. Vul bv. <strong>30</strong> voor een halfuur
-              prematch-spread; laat leeg om de som van de sponsor-budgetten als venster te gebruiken.
-              Zonder aftrap: spread start wanneer je sponsorrotatie inschakelt (PREMATCH).
+              {t("setup.prematchWindowHelp")}
             </p>
           </div>
           <div>
-            <Label>Matchsponsor-media</Label>
+            <Label>{t("setup.matchSponsorMedia")}</Label>
             <Select value={sponsorId} onChange={(e) => setSponsorId(e.target.value)} className="mt-1">
-              <option value="">— geen —</option>
+              <option value="">{t("setup.noSponsor")}</option>
               {(mediaList ?? [])
                 .filter((it) => it.active && !it.hideFromLibrary)
                 .map((it) => (
@@ -2289,10 +2379,10 @@ function MatchScheduleDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={saving}>
-            Sluiten
+            {t("common.close")}
           </Button>
           <Button onClick={() => void save()} disabled={saving}>
-            {saving ? "Opslaan…" : "Opslaan"}
+            {saving ? t("common.saving") : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

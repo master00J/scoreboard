@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { AppSettings } from "@/lib/types";
 import {
   mergeScoreboardTheme,
@@ -12,12 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
-
-const SEG_LABELS: Record<LeftStripSegment, string> = {
-  home: "Thuis (logo + score)",
-  timer: "Klok + periode",
-  away: "Uit (logo + score)",
-};
 
 function swapOrder(order: LeftStripSegment[], i: number, seg: LeftStripSegment): LeftStripSegment[] {
   const o = [...order];
@@ -36,6 +31,7 @@ export function SetupScoreboardThemeSection({
   settings: AppSettings | null | undefined;
   reloadSettings: () => void;
 }) {
+  const { t } = useTranslation();
   const resolved = useMemo(
     () => mergeScoreboardTheme(settings?.scoreboardThemeJson ?? null),
     [settings?.scoreboardThemeJson],
@@ -43,6 +39,12 @@ export function SetupScoreboardThemeSection({
   const [draft, setDraft] = useState<ResolvedScoreboardTheme>(resolved);
 
   const [repeatSponsorBudgetCycles, setRepeatSponsorBudgetCycles] = useState(false);
+
+  const segLabels: Record<LeftStripSegment, string> = {
+    home: t("setup.themeSegHome"),
+    timer: t("setup.themeSegTimer"),
+    away: t("setup.themeSegAway"),
+  };
 
   useEffect(() => {
     setDraft(resolved);
@@ -67,10 +69,10 @@ export function SetupScoreboardThemeSection({
       }),
     });
     if (!res.ok) {
-      toast({ title: "Thema opslaan mislukt", variant: "error" });
+      toast({ title: t("setup.themeSaveFailed"), variant: "error" });
       return;
     }
-    toast({ title: "Scorebord-thema opgeslagen", variant: "success" });
+    toast({ title: t("setup.themeSaved"), variant: "success" });
     reloadSettings();
   }
 
@@ -81,10 +83,10 @@ export function SetupScoreboardThemeSection({
       body: JSON.stringify({ scoreboardThemeJson: null }),
     });
     if (!res.ok) {
-      toast({ title: "Reset mislukt", variant: "error" });
+      toast({ title: t("setup.themeResetFailed"), variant: "error" });
       return;
     }
-    toast({ title: "Standaardthema hersteld", variant: "success" });
+    toast({ title: t("setup.themeResetOk"), variant: "success" });
     reloadSettings();
   }
 
@@ -139,43 +141,42 @@ export function SetupScoreboardThemeSection({
     <section className="bg-card border border-border rounded-xl p-6">
       <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
         <div>
-          <h2 className="text-lg font-semibold">Scorebord lay-out &amp; thema</h2>
+          <h2 className="text-lg font-semibold">{t("setup.themeTitle")}</h2>
           <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
-            Pas het L-scorebord (naast sponsors), het fullscreen scorebord en kleuren aan. Waarden worden
-            bij opslaan gevalideerd en begrensd. Het stadionscherm laadt dit automatisch na opslaan.
+            {t("setup.themeBody")}
           </p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => void resetDefault()}>
-            Standaard
+            {t("setup.themeDefault")}
           </Button>
           <Button size="sm" onClick={() => void save()}>
-            Opslaan
+            {t("common.save")}
           </Button>
         </div>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4 rounded-lg border border-border p-4">
-          <div className="font-semibold text-sm">Frame &amp; raster</div>
+          <div className="font-semibold text-sm">{t("setup.themeFrameGrid")}</div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>Linker kolom breedte (px)</Label>
+              <Label>{t("setup.themeLeftBarWidth")}</Label>
               {num("leftBarWidthPx")}
             </div>
             <div>
-              <Label>Onderbalk hoogte (px)</Label>
+              <Label>{t("setup.themeBottomBarHeight")}</Label>
               {num("bottomBarHeightPx")}
             </div>
           </div>
           <div className="grid gap-3 sm:grid-cols-3">
-            {color("Frame kleur (boven)", "frameColorTop")}
-            {color("Frame kleur (midden)", "frameColorMid")}
-            {color("Frame kleur (onder)", "frameColorBot")}
+            {color(t("setup.themeFrameTop"), "frameColorTop")}
+            {color(t("setup.themeFrameMid"), "frameColorMid")}
+            {color(t("setup.themeFrameBot"), "frameColorBot")}
           </div>
-          {color("Achtergrond contentvlak", "contentAreaBg")}
+          {color(t("setup.themeContentBg"), "contentAreaBg")}
           <div>
-            <Label>Lettertype (CSS font-family)</Label>
+            <Label>{t("setup.themeFontFamily")}</Label>
             <Input
               className="mt-1 font-mono text-sm"
               value={draft.fontFamily}
@@ -183,8 +184,8 @@ export function SetupScoreboardThemeSection({
             />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            {timerColor("Klok: actief (kleur)", "timerRunningColor")}
-            {timerColor("Klok: pauze (kleur)", "timerPausedColor")}
+            {timerColor(t("setup.themeTimerRunning"), "timerRunningColor")}
+            {timerColor(t("setup.themeTimerPaused"), "timerPausedColor")}
           </div>
           <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
             <input
@@ -194,21 +195,20 @@ export function SetupScoreboardThemeSection({
               onChange={(e) => setRepeatSponsorBudgetCycles(e.target.checked)}
             />
             <span className="text-sm leading-snug">
-              <span className="font-medium text-foreground">Sponsor-budget opnieuw starten na volledige ronde</span>
+              <span className="font-medium text-foreground">{t("setup.themeSponsorRepeat")}</span>
               <span className="block text-muted-foreground mt-1">
-                Als alle sponsors hun geplande tijd gehaald hebben, begint de rotatie opnieuw tot de fase wisselt.
-                Uitzetten (standaard): daarna scorebord tenzij je alleen een playlist met twee clips gebruikt voor een eindeloze loop.
+                {t("setup.themeSponsorRepeatHelp")}
               </span>
             </span>
           </label>
         </div>
 
         <div className="space-y-4 rounded-lg border border-border p-4">
-          <div className="font-semibold text-sm">Volgorde linkerkolom</div>
+          <div className="font-semibold text-sm">{t("setup.themeLeftOrder")}</div>
           <div className="grid gap-3 sm:grid-cols-3">
             {[0, 1, 2].map((i) => (
               <div key={i}>
-                <Label>Positie {i + 1}</Label>
+                <Label>{t("setup.themePosition", { n: i + 1 })}</Label>
                 <Select
                   className="mt-1"
                   value={draft.leftColumnOrder[i] ?? "home"}
@@ -220,9 +220,9 @@ export function SetupScoreboardThemeSection({
                     }));
                   }}
                 >
-                  {(Object.keys(SEG_LABELS) as LeftStripSegment[]).map((k) => (
+                  {(Object.keys(segLabels) as LeftStripSegment[]).map((k) => (
                     <option key={k} value={k}>
-                      {SEG_LABELS[k]}
+                      {segLabels[k]}
                     </option>
                   ))}
                 </Select>
@@ -230,69 +230,69 @@ export function SetupScoreboardThemeSection({
             ))}
           </div>
 
-          <div className="font-semibold text-sm pt-2">Maten L-scorebord</div>
+          <div className="font-semibold text-sm pt-2">{t("setup.themeLSizes")}</div>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>Logo (px)</Label>
+              <Label>{t("setup.themeLogoPx")}</Label>
               {num("leftLogoPx")}
             </div>
             <div>
-              <Label>Score (px)</Label>
+              <Label>{t("setup.themeScorePx")}</Label>
               {num("leftScorePx")}
             </div>
             <div>
-              <Label>Klok (px)</Label>
+              <Label>{t("setup.themeTimerPx")}</Label>
               {num("leftTimerPx")}
             </div>
             <div>
-              <Label>Periode tekst (px)</Label>
+              <Label>{t("setup.themePeriodPx")}</Label>
               {num("leftPeriodPx")}
             </div>
             <div className="sm:col-span-2">
-              <Label>Klok-blok hoogte (px)</Label>
+              <Label>{t("setup.themeTimerBlockH")}</Label>
               {num("leftTimerBlockHeightPx")}
             </div>
           </div>
 
-          <div className="font-semibold text-sm pt-2">Fullscreen scorebord</div>
+          <div className="font-semibold text-sm pt-2">{t("setup.themeFullTitle")}</div>
           <p className="text-xs text-muted-foreground">
-            Typografie hierboven (lettertype en klokkleuren) geldt ook voor het volledige scherm.
+            {t("setup.themeFullHint")}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div>
-              <Label>Logo (px)</Label>
+              <Label>{t("setup.themeLogoPx")}</Label>
               {num("fullLogoPx")}
             </div>
             <div>
-              <Label>Score (px)</Label>
+              <Label>{t("setup.themeScorePx")}</Label>
               {num("fullScorePx")}
             </div>
             <div>
-              <Label>Klok (px)</Label>
+              <Label>{t("setup.themeTimerPx")}</Label>
               {num("fullTimerPx")}
             </div>
             <div>
-              <Label>Periode (px)</Label>
+              <Label>{t("setup.themeFullPeriodPx")}</Label>
               {num("fullPeriodPx")}
             </div>
             <div>
-              <Label>Middenkolom breedte (px)</Label>
+              <Label>{t("setup.themeFullCenterW")}</Label>
               {num("fullCenterWidthPx")}
             </div>
             <div>
-              <Label>Zij-padding teams (px)</Label>
+              <Label>{t("setup.themeFullSidePad")}</Label>
               {num("fullSidePaddingPx")}
             </div>
             <div>
-              <Label>Ruimte logo ↔ score (px)</Label>
+              <Label>{t("setup.themeFullTeamGap")}</Label>
               {num("fullTeamStackGapPx")}
             </div>
             <div>
-              <Label>Ruimte middenblok (px)</Label>
+              <Label>{t("setup.themeFullCenterGap")}</Label>
               {num("fullCenterStackGapPx")}
             </div>
             <div className="sm:col-span-2">
-              <Label>Teamkleur op achtergrond (hex alpha, 00–ff)</Label>
+              <Label>{t("setup.themeFullAlpha")}</Label>
               <Input
                 className="mt-1 font-mono text-sm uppercase max-w-[8rem]"
                 maxLength={2}
@@ -304,11 +304,11 @@ export function SetupScoreboardThemeSection({
                 }}
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Hoger = sterkere gloed in clubkleuren langs de randen. Ongeldige waarden worden bij opslaan naar standaard gezet.
+                {t("setup.themeFullAlphaHelp")}
               </p>
             </div>
             <div>
-              <Label>Clubnaam (px)</Label>
+              <Label>{t("setup.themeTeamNamePx")}</Label>
               {num("fullTeamNamePx")}
             </div>
           </div>
@@ -321,7 +321,7 @@ export function SetupScoreboardThemeSection({
                 onChange={(e) => setDraft((d) => ({ ...d, fullShowPeriod: e.target.checked }))}
               />
               <span className="text-sm leading-snug">
-                <span className="font-medium text-foreground">Periode tonen</span>
+                <span className="font-medium text-foreground">{t("setup.themeShowPeriod")}</span>
               </span>
             </label>
             <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
@@ -332,7 +332,7 @@ export function SetupScoreboardThemeSection({
                 onChange={(e) => setDraft((d) => ({ ...d, fullShowAddedTime: e.target.checked }))}
               />
               <span className="text-sm leading-snug">
-                <span className="font-medium text-foreground">Extratijd (+min) tonen</span>
+                <span className="font-medium text-foreground">{t("setup.themeShowAdded")}</span>
               </span>
             </label>
             <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
@@ -343,9 +343,9 @@ export function SetupScoreboardThemeSection({
                 onChange={(e) => setDraft((d) => ({ ...d, fullShowTeamNames: e.target.checked }))}
               />
               <span className="text-sm leading-snug">
-                <span className="font-medium text-foreground">Clubnaam tonen (korte naam)</span>
+                <span className="font-medium text-foreground">{t("setup.themeShowTeamNames")}</span>
                 <span className="block text-muted-foreground mt-1">
-                  Tussen logo en score; gebruikt het veld “korte naam” van de club waar mogelijk.
+                  {t("setup.themeShowTeamNamesHelp")}
                 </span>
               </span>
             </label>
@@ -357,7 +357,7 @@ export function SetupScoreboardThemeSection({
                 onChange={(e) => setDraft((d) => ({ ...d, fullTeamNameUppercase: e.target.checked }))}
               />
               <span className="text-sm leading-snug">
-                <span className="font-medium text-foreground">Clubnaam in hoofdletters</span>
+                <span className="font-medium text-foreground">{t("setup.themeTeamNameUpper")}</span>
               </span>
             </label>
           </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import type { MutableRefObject } from "react";
+import { useTranslation } from "react-i18next";
 import { useApi } from "@/lib/use-api";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
 import { useWallClockMs } from "@/lib/use-wall-clock-tick";
@@ -21,6 +22,7 @@ import {
 } from "@/lib/sponsor-live-roster";
 import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
 import { prematchRosterClockSec } from "@/lib/prematch-spread-timing";
+import { tMatchStatus } from "@/lib/i18n/t-phase";
 
 function formatClock(sec: number): string {
   const t = Math.max(0, Math.round(Number(sec) || 0));
@@ -40,34 +42,12 @@ function segmentHighlightForMatch(
   return "none";
 }
 
-function phaseDescription(status: string | undefined): string {
-  switch (status) {
-    case "SETUP":
-      return "Setup";
-    case "PREMATCH":
-      return "Voor wedstrijd";
-    case "FIRST_HALF":
-      return "1e helft";
-    case "HALF_TIME":
-      return "Rust";
-    case "SECOND_HALF":
-      return "2e helft";
-    case "EXTRA_TIME":
-      return "Verlenging";
-    case "FULL_TIME":
-      return "Einde (speeltijd)";
-    case "POST_MATCH":
-      return "Na de wedstrijd";
-    default:
-      return status ?? "—";
-  }
-}
-
 function sponsorHasActiveMedia(s: Sponsor): boolean {
   return (s.media ?? []).some((m) => m.active);
 }
 
 export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null }) {
+  const { t } = useTranslation();
   const displayStateUpdatedAt = useDisplayStore((s) => s.state?.updatedAt);
   const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
   const sponsors = sponsorsRaw ?? [];
@@ -192,7 +172,7 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
             slotsUsedForCarry = Math.round(
               sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, telemetryNowMs),
             );
-            labelOut = `${raw.label} · gemeten op scherm`;
+            labelOut = t("sponsors.measuredOnScreen", { label: raw.label });
             /** Los van rooster-carry: anders blijft `consumedFloor` van het slotrooster boven telemetry hangen. */
             carryKey = `${raw.carryKey}|ledger`;
           }
@@ -224,38 +204,40 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
     return hit ? "bg-primary/15 font-medium text-foreground" : "text-muted-foreground";
   }
 
+  const segmentLabel =
+    section === "prematch"
+      ? t("phases.prematch")
+      : section === "halftime"
+        ? t("phases.halftime")
+        : t("phases.matchHalf");
+
   return (
     <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Sponsors live
+            {t("sponsors.liveTitle")}
           </h2>
           {activeMatch ? (
             <p className="text-xs text-muted-foreground mt-1">
-              Wedstrijdfase:{" "}
-              <span className="text-foreground font-medium">{phaseDescription(activeMatch.status)}</span>
-              {" · "}segment rooster:{" "}
+              {t("sponsors.matchPhase")}:{" "}
               <span className="text-foreground font-medium">
-                {section === "prematch"
-                  ? "voor wedstrijd"
-                  : section === "halftime"
-                    ? "rust"
-                    : "speelhelft"}
+                {tMatchStatus(t, activeMatch.status)}
               </span>
+              {" · "}
+              {t("sponsors.segmentSchedule")}:{" "}
+              <span className="text-foreground font-medium">{segmentLabel}</span>
             </p>
           ) : (
-            <p className="text-xs text-muted-foreground mt-1">Geen actieve wedstrijd — alleen budgets.</p>
+            <p className="text-xs text-muted-foreground mt-1">{t("sponsors.noMatchBudgets")}</p>
           )}
         </div>
       </div>
 
       <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] leading-snug">
-        <span className="font-medium text-foreground">Actieve loops nu: </span>
+        <span className="font-medium text-foreground">{t("sponsors.activeLoops")}: </span>
         {activeInLoop.length === 0 ? (
-          <span className="text-muted-foreground">
-            geen (geen sponsor met budget + media in dit segment, of fase zonder rooster).
-          </span>
+          <span className="text-muted-foreground">{t("sponsors.noActiveLoops")}</span>
         ) : (
           <span className="text-foreground">{activeNames}</span>
         )}
@@ -265,19 +247,19 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
         <table className="w-full text-[11px] border-collapse min-w-[520px]">
           <thead>
             <tr className="border-b border-border text-left text-muted-foreground">
-              <th className="py-2 pr-2 font-medium">Sponsor</th>
-              <th className={`py-2 px-1 font-medium ${cellClass("prematch")}`}>Voor</th>
-              <th className={`py-2 px-1 font-medium ${cellClass("h1")}`}>1e</th>
-              <th className={`py-2 px-1 font-medium ${cellClass("h2")}`}>2e</th>
-              <th className={`py-2 px-1 font-medium ${cellClass("halftime")}`}>Rust</th>
-              <th className="py-2 pl-2 font-medium text-foreground">Nu (rest / budget)</th>
+              <th className="py-2 pr-2 font-medium">{t("sponsors.colSponsor")}</th>
+              <th className={`py-2 px-1 font-medium ${cellClass("prematch")}`}>{t("phases.voor")}</th>
+              <th className={`py-2 px-1 font-medium ${cellClass("h1")}`}>{t("phases.h1")}</th>
+              <th className={`py-2 px-1 font-medium ${cellClass("h2")}`}>{t("phases.h2")}</th>
+              <th className={`py-2 px-1 font-medium ${cellClass("halftime")}`}>{t("phases.rust")}</th>
+              <th className="py-2 pl-2 font-medium text-foreground">{t("sponsors.colNow")}</th>
             </tr>
           </thead>
           <tbody>
             {sortedWithMedia.length === 0 && (
               <tr>
                 <td colSpan={6} className="py-3 text-muted-foreground italic">
-                  Geen sponsors met gekoppelde actieve media. Zie Media → Sponsors.
+                  {t("sponsors.noMedia")}
                 </td>
               </tr>
             )}
@@ -291,7 +273,9 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
                   <td className="py-2 pr-2 font-medium truncate max-w-[140px]" title={sponsor.name}>
                     {sponsor.name}
                     {!sponsor.active && (
-                      <span className="block text-[10px] font-normal text-muted-foreground">(uit)</span>
+                      <span className="block text-[10px] font-normal text-muted-foreground">
+                        {t("sponsors.off")}
+                      </span>
                     )}
                   </td>
                   <td className={`py-2 px-1 tabular-nums ${cellClass("prematch")}`}>
@@ -310,7 +294,7 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
                         </span>
                         <span className="text-muted-foreground"> / {formatClock(live.budget)}</span>
                         <span className="block text-[10px] text-muted-foreground truncate">
-                          {live.label} · schermtijd verbruikt {formatClock(live.consumed)}
+                          {live.label} · {t("sponsors.screenUsed")} {formatClock(live.consumed)}
                         </span>
                       </>
                     ) : (
@@ -325,11 +309,7 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
       </div>
 
       <p className="text-[10px] text-muted-foreground leading-snug">
-        Voor = voor wedstrijd; 1e/2e = speelhelft-budget; Rust = pauze. De gemarkeerde kolom hoort bij de huidige
-        fase. <strong className="text-foreground/90">Nu</strong> toont rest / budget (afgerond op seconden). Zolang het
-        stadionscherm verbonden is, komt verbruik uit <strong>werkelijke afgespeelde clips</strong> (label “gemeten op
-        scherm”); anders uit het rooster als schatting. Rostertijd voor die schatting loopt alleen tijdens{" "}
-        <strong>scorebord + sponsors</strong>, niet bij “alleen scorebord” of andere interrupt-modi.
+        {t("sponsors.nuHint")}
       </p>
     </div>
   );
