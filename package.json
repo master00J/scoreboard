@@ -27,10 +27,10 @@
     "soak:sponsor-transition": "node scripts/sponsor-transition-soak.mjs",
     "soak:sponsor-interrupt": "node scripts/sponsor-interruption-soak.mjs",
     "e2e:full-match": "node scripts/full-match-e2e.mjs",
-    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder",
-    "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win",
-    "electron:build:mac": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --mac",
-    "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir"
+    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --publish never",
+    "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win --publish never",
+    "electron:build:mac": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --mac --publish never",
+    "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir --publish never"
   },
   "build": {
     "forceCodeSigning": false,
@@ -39,6 +39,7 @@
     "copyright": "Copyright (c) Sound & Vision",
     "icon": "build/icon.ico",
     "afterPack": "./scripts/after-pack-win-metadata.mjs",
+    "publish": null,
     "directories": {
       "output": "dist"
     },

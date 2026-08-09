@@ -54,13 +54,16 @@ Als `APP_RELEASE_VERSION` op Vercel hoger is dan de versie in de lokale `.exe`, 
 
 Release-stappen:
 
-1. Verhoog `version` in `package.json` voordat je `npm run build` draait, bv. `0.1.1`.
-2. Upload `dist/Stadium-Scoreboard.exe` naar Supabase Storage.
-3. Zet op Vercel minstens:
+1. Verhoog `version` in `package.json` voordat je bouwt, bv. `0.1.1`.
+2. Windows: `npm run electron:build:win` → upload `dist/Stadium-Scoreboard.exe` naar Supabase Storage.
+3. macOS: GitHub Actions **Build macOS** → download `Stadium-Scoreboard-<versie>-arm64.dmg` → upload als canonieke `Stadium-Scoreboard-arm64.dmg` (zie `docs/MAC_BUILD.md`).
+4. Zet op Vercel minstens:
    - `APP_RELEASE_VERSION=0.1.1`
    - `DOWNLOAD_STADIUM_EXE_REDIRECT_URL=<publieke Supabase-URL>`
-4. Redeploy de website op Vercel.
-5. Als automatische update-mails actief zijn, verstuurt de Vercel Cron-route daarna één mail naar actieve licentiehouders voor deze versie.
+   - `NEXT_PUBLIC_PORTAL_MAC_DOWNLOAD_URL=/downloads/Stadium-Scoreboard-arm64.dmg`
+   - `DOWNLOAD_STADIUM_MAC_DMG_REDIRECT_URL=<publieke Supabase-URL van de DMG>` (of `PORTABLE_MAC_DMG_FETCH_URL` bij prebuild)
+5. Redeploy de website op Vercel.
+6. Als automatische update-mails actief zijn, verstuurt de Vercel Cron-route daarna één mail naar actieve licentiehouders voor deze versie.
 
 Optioneel kun je `APP_RELEASE_DOWNLOAD_URL` zetten als de updatebanner een andere URL moet gebruiken dan de download-redirect. Zonder die override gebruikt `/api/app/release` automatisch `NEXT_PUBLIC_PORTAL_DOWNLOAD_URL`, daarna `DOWNLOAD_STADIUM_EXE_REDIRECT_URL`, en anders de standaard `/downloads/Stadium-Scoreboard.exe` URL.
 
@@ -74,7 +77,7 @@ verstuurd voor unieke actieve licentiehouders (`owner_email`) en per versie maar
 
 Richtlijn voor clubs en operators: typisch **4–6 uur** continue gebruik met **timer, regie en video** (sponsorrotatie, clips). Zie de publieke pagina **[arenacue.be/vereisten](https://arenacue.be/vereisten)** voor minimale vs. aanbevolen hardware (Windows 64-bit, RAM, SSD, GPU/drivers, tweede scherm). Kort samengevat:
 
-- **Minimum:** Windows 10/11 64-bit, **8 GB RAM**, quad-core CPU, **SSD**, GPU met hardware videodecode, drivers up-to-date; bediening min. 1920×1080 + videouitgang voor het stadionscherm.
+- **Minimum:** Windows 10/11 64-bit of macOS 12+ (Apple Silicon aanbevolen), **8 GB RAM**, quad-core CPU, **SSD**, GPU met hardware videodecode, drivers up-to-date; bediening min. 1920×1080 + videouitgang voor het stadionscherm.
 - **Aanbevolen voor zware video:** **16 GB RAM**, 6+ cores of recente mid-range CPU, dedicated GPU of sterke iGPU, NVMe SSD, wedstrijddag zonder energiebesparing/achtergrondstress.
 
 Test altijd op de **werkelijke wedstrijd-PC** vóór de eerste live inzet.
