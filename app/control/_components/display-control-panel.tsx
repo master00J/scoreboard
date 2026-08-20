@@ -236,7 +236,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           <Button
             size="lg"
             variant={primaryLive ? "default" : "outline"}
-            className="h-auto min-h-[3rem] py-3 whitespace-normal text-center leading-snug"
+            className="h-auto min-h-[4.75rem] flex-col items-center justify-center gap-1 px-3 py-3 whitespace-normal text-center leading-snug"
             disabled={!automaticSponsorsAllowed}
             title={
               automaticSponsorsAllowed
@@ -245,21 +245,19 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             }
             onClick={() => void backToLiveProgram()}
           >
-            {t("display.boardPlusSponsors")}
-            {livePlay && (
-              <span className="block text-[10px] font-normal opacity-80 mt-1">
-                {t("display.boardPlusSponsorsHint")}
-              </span>
-            )}
+            <span className="text-pretty">{t("display.boardPlusSponsors")}</span>
+            <span className="text-[10px] font-normal leading-snug opacity-80">
+              {t("display.boardPlusSponsorsHint")}
+            </span>
           </Button>
           <Button
             size="lg"
             variant={onlyBoard ? "default" : "outline"}
-            className="h-auto min-h-[3rem] py-3 whitespace-normal text-center leading-snug"
+            className="h-auto min-h-[4.75rem] flex-col items-center justify-center gap-1 px-3 py-3 whitespace-normal text-center leading-snug"
             onClick={() => void sendCommand({ type: "display:setMode", mode: "MATCH" })}
           >
-            {t("display.boardOnly")}
-            <span className="block text-[10px] font-normal opacity-80 mt-1">
+            <span className="text-pretty">{t("display.boardOnly")}</span>
+            <span className="text-[10px] font-normal leading-snug opacity-80">
               {t("display.boardOnlyHint")}
             </span>
           </Button>

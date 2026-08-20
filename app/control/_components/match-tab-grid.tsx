@@ -101,8 +101,8 @@ function ColumnTopDropZone({
   return (
     <div
       className={cn(
-        "shrink-0 min-h-[18px] rounded-md border border-dashed transition-colors",
-        active ? "border-primary/50 bg-primary/15" : "border-transparent bg-muted/20",
+        "shrink-0 min-h-2 rounded-md border border-dashed transition-colors",
+        active ? "border-primary/50 bg-primary/15" : "border-transparent",
       )}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -258,7 +258,7 @@ function Column({
 }) {
   const ids = order.filter((id) => panels[id] != null);
   return (
-    <div className="flex min-h-0 min-w-0 flex-col gap-2 lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
+    <div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-x-hidden lg:overflow-y-auto lg:overscroll-contain lg:pr-1">
       <ColumnTopDropZone column={column} setLayout={setLayout} />
       <div className="flex min-w-0 flex-col gap-3 pb-2">
         {ids.map((id) => (
@@ -352,7 +352,7 @@ export function MatchTabGrid({
           {t("shell.resetLayout")}
         </button>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 overflow-y-auto lg:grid-cols-[minmax(280px,26vw)_minmax(0,1fr)_minmax(280px,26vw)] lg:overflow-hidden">
+      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-4 overflow-y-auto lg:grid-cols-[minmax(260px,0.9fr)_minmax(320px,1.25fr)_minmax(260px,0.9fr)] lg:overflow-hidden">
         <Column
           column="left"
           order={layout.orderLeft}

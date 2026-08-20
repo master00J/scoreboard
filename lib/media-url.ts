@@ -12,8 +12,10 @@ export function mediaUrl(storedPath: string | null | undefined): string {
   if (!storedPath) return "";
   if (typeof window !== "undefined" && window.electronAPI) {
     if (storedPath.startsWith("/uploads/")) {
+      const uploadsDir = window.electronAPI.context.uploadsDir;
+      if (!uploadsDir) return storedPath;
       const fileName = storedPath.replace(/^\/uploads\//, "");
-      return toFileUrl(`${window.electronAPI.context.uploadsDir}\\${fileName}`);
+      return toFileUrl(`${uploadsDir}\\${fileName}`);
     }
     return toFileUrl(storedPath);
   }

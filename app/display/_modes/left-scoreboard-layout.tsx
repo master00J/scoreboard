@@ -9,6 +9,7 @@ import {
   frameGradientCss,
   mergeScoreboardTheme,
 } from "@/lib/scoreboard-theme";
+import { DisplayMediaStage } from "@/components/display-media-stage";
 import { TeamLogo } from "./scoreboard-strip";
 import { getSportProfile, type SportProfile } from "@/lib/sports";
 
@@ -50,7 +51,7 @@ export function LeftScoreboardLayout({
     >
       <div
         className="absolute left-0 top-0 z-0"
-        style={{ width: barW, height: 1080, background: grad }}
+        style={{ width: barW, height: "100%", background: grad }}
       />
       <div
         className="absolute bottom-0 z-0"
@@ -59,7 +60,7 @@ export function LeftScoreboardLayout({
 
       <div
         className="absolute z-20 flex flex-col"
-        style={{ left: 0, top: 0, width: barW, height: 1080 - barH }}
+        style={{ left: 0, top: 0, width: barW, height: `calc(100% - ${barH}px)` }}
       >
         {theme.leftColumnOrder.map((seg, i) => (
           <Fragment key={`${seg}-${i}`}>
@@ -115,7 +116,7 @@ export function LeftScoreboardLayout({
           background: theme.contentAreaBg,
         }}
       >
-        {children}
+        <DisplayMediaStage>{children}</DisplayMediaStage>
       </div>
     </div>
   );
@@ -152,16 +153,30 @@ function TeamBlock({
 }) {
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-3 py-4">
-      <TeamLogo team={team} size={theme.leftLogoPx} />
+      {theme.showLogos ? <TeamLogo team={team} size={theme.leftLogoPx} /> : null}
+      {theme.fullShowTeamNames ? (
+        <div
+          className={`max-w-full px-2 text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
+          style={{
+            fontSize: Math.max(12, theme.leftPeriodPx + 4),
+            color: theme.teamNameColor,
+          }}
+        >
+          <span className="line-clamp-2">{team.shortName || team.name}</span>
+        </div>
+      ) : null}
+      {theme.showScores ? (
       <div
-        className="font-black tabular-nums leading-none text-white"
+        className="font-black tabular-nums leading-none"
         style={{
           fontSize: theme.leftScorePx,
+          color: theme.scoreColor,
           textShadow: "0 4px 20px rgba(0,0,0,0.4)",
         }}
       >
         {score}
       </div>
+      ) : null}
       {(profile.timeoutLimitForPeriod(1) > 0 || profile.statLabel || profile.hasSets) && (
         <div className="flex flex-wrap justify-center gap-2 px-2 text-center text-[13px] font-bold uppercase tracking-wide text-white/65">
           {profile.hasSets && <span>Sets {sets}</span>}
@@ -196,13 +211,16 @@ function TimerBlock({
       className="flex shrink-0 flex-col items-center justify-center"
       style={{ height: theme.leftTimerBlockHeightPx }}
     >
+      {theme.fullShowPeriod ? (
       <div
         className="uppercase leading-none tracking-[0.25em] text-white/70"
         style={{ fontSize: theme.leftPeriodPx }}
       >
         {period}
       </div>
+      ) : null}
       <div className="mt-2 flex items-end justify-center gap-3">
+        {theme.showClock ? (
         <StableClockText
           value={formatTime(elapsed)}
           className="font-black leading-none text-white"
@@ -213,7 +231,8 @@ function TimerBlock({
             color: accent,
           }}
         />
-        {addedTime > 0 && (
+        ) : null}
+        {theme.showClock && theme.fullShowAddedTime && addedTime > 0 && (
           <div
             className="mb-1 rounded px-3 py-1 font-black tabular-nums text-white"
             style={{

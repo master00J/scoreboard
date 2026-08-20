@@ -186,9 +186,14 @@ export function SetupPanel() {
             <div className="text-sm text-muted-foreground">{t("setup.homeTeamBody")}</div>
           </div>
           {homeTeam && (
-            <Button variant="outline" size="sm" onClick={() => void setHomeTeam(null)}>
-              {t("setup.clearHomeTeam")}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => setTeamDialogTeam(homeTeam)}>
+                {t("common.edit")}
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => void setHomeTeam(null)}>
+                {t("setup.clearHomeTeam")}
+              </Button>
+            </div>
           )}
         </div>
 
@@ -207,7 +212,9 @@ export function SetupPanel() {
               )}
               <div>
                 <div className="font-semibold text-lg">{homeTeam.name}</div>
-                <div className="text-sm text-muted-foreground">{homeTeam.shortName}</div>
+                <div className="text-sm text-muted-foreground">
+                  {homeTeam.shortName} · {t("common.playersCount", { count: homeTeam.players?.length ?? 0 })}
+                </div>
               </div>
             </div>
 
@@ -291,10 +298,77 @@ export function SetupPanel() {
                 <HomeVisualsSummary team={homeTeam} />
               </div>
             </div>
+
+            <div className="mt-6 rounded-lg border border-border p-4">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold">{t("setup.homeTeamPlayersTitle")}</div>
+                  <div className="text-xs text-muted-foreground">{t("setup.homeTeamPlayersHelp")}</div>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => setRosterDialogTeam(homeTeam)}>
+                  {t("setup.editPlayers")}
+                </Button>
+              </div>
+              {(homeTeam.players ?? []).length > 0 ? (
+                <div className="grid grid-cols-2 gap-1 max-h-80 overflow-auto sm:grid-cols-3">
+                  {(homeTeam.players ?? []).map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => setPlayerDialog({ team: homeTeam, player: p })}
+                      className="flex items-center gap-2 rounded border border-border p-2 text-left text-xs hover:bg-secondary"
+                      title={t("setup.playerVisualsHint")}
+                    >
+                      <span className="w-6 text-right font-black">#{p.number}</span>
+                      <span className="truncate">
+                        {p.firstName} {p.lastName}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-xs italic text-muted-foreground">{t("setup.noPlayersYet")}</div>
+              )}
+            </div>
           </>
         ) : (
-          <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
-            {t("setup.setHomeHint", { action: t("setup.setHome") })}
+          <div className="rounded-lg border border-dashed border-border p-4">
+            <div className="mb-3 text-sm font-medium">{t("setup.homeTeamPick")}</div>
+            {(teams ?? []).length > 0 ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(teams ?? []).map((team) => (
+                  <button
+                    key={team.id}
+                    type="button"
+                    onClick={() => void setHomeTeam(team.id)}
+                    className="flex items-center gap-3 rounded-lg border border-border p-3 text-left hover:bg-secondary"
+                  >
+                    {team.logoPath ? (
+                      <img src={mediaUrl(team.logoPath)} alt="" className="h-10 w-10 rounded object-contain" />
+                    ) : (
+                      <div
+                        className="flex h-10 w-10 items-center justify-center rounded text-sm font-bold"
+                        style={{ background: team.primaryColor }}
+                      >
+                        {team.shortName.slice(0, 2)}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold">{team.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {t("common.playersCount", { count: team.players?.length ?? 0 })}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="text-sm text-muted-foreground">{t("setup.setHomeHint")}</div>
+                <Button size="sm" onClick={() => setTeamDialogTeam("new")}>
+                  {t("setup.newTeam")}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </section>
@@ -326,7 +400,12 @@ export function SetupPanel() {
       </section>
 
       <SetupScoreboardTemplatesSection settings={settings} reloadSettings={reloadSettings} />
-      <SetupScoreboardThemeSection settings={settings} reloadSettings={reloadSettings} />
+      <SetupScoreboardThemeSection
+        settings={settings}
+        reloadSettings={reloadSettings}
+        homeTeam={homeTeam}
+        awayTeam={(teams ?? []).find((team) => team.id !== homeTeam?.id) ?? null}
+      />
 
       <SetupDisplayCanvasSection settings={settings ?? null} reloadSettings={reloadSettings} />
 
@@ -505,26 +584,31 @@ export function SetupPanel() {
       </section>
 
       <section className="bg-card border border-border rounded-xl p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">{t("setup.teamsPlayers")}</h2>
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-semibold">{t("setup.otherTeamsTitle")}</h2>
+            <div className="text-sm text-muted-foreground">{t("setup.otherTeamsBody")}</div>
+          </div>
           <Button onClick={() => setTeamDialogTeam("new")}>{t("setup.newTeam")}</Button>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {(teams ?? []).map((team) => (
-            <TeamCard
-              key={team.id}
-              team={team}
-              isHome={team.id === settings?.homeTeamId}
-              onEdit={() => setTeamDialogTeam(team)}
-              onEditRoster={() => setRosterDialogTeam(team)}
-              onEditPlayer={(player) => setPlayerDialog({ team, player })}
-              onSetHome={() => void setHomeTeam(team.id)}
-              onChanged={() => {
-                reloadTeams();
-                reloadSettings();
-              }}
-            />
-          ))}
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {(teams ?? [])
+            .filter((team) => team.id !== settings?.homeTeamId)
+            .map((team) => (
+              <TeamCard
+                key={team.id}
+                team={team}
+                isHome={false}
+                onEdit={() => setTeamDialogTeam(team)}
+                onEditRoster={() => setRosterDialogTeam(team)}
+                onEditPlayer={(player) => setPlayerDialog({ team, player })}
+                onSetHome={() => void setHomeTeam(team.id)}
+                onChanged={() => {
+                  reloadTeams();
+                  reloadSettings();
+                }}
+              />
+            ))}
         </div>
       </section>
 
@@ -1603,13 +1687,13 @@ function BulkVisualsDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent size="xl">
-        <DialogHeader>
+      <DialogContent size="xl" className="flex max-h-[90vh] flex-col overflow-hidden">
+        <DialogHeader className="shrink-0">
           <DialogTitle>{meta.title} · {team.name}</DialogTitle>
         </DialogHeader>
 
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="text-xs text-muted-foreground truncate">
+        <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
+          <div className="truncate text-xs text-muted-foreground">
             {folderPath ? (
               <span className="font-mono">
                 {t("setup.folderLabel", { path: folderPath, count: files.length })}
@@ -1623,8 +1707,8 @@ function BulkVisualsDialog({
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 max-h-[60vh]">
-          <div className="flex flex-col rounded-lg border border-border overflow-hidden">
+        <div className="grid min-h-0 flex-1 grid-cols-2 gap-4">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border">
             <div className="px-3 py-2 bg-secondary/40 text-xs font-semibold uppercase tracking-wide">
               {t("setup.files")}
             </div>
@@ -1662,8 +1746,8 @@ function BulkVisualsDialog({
             </div>
           </div>
 
-          <div className="flex flex-col rounded-lg border border-border overflow-hidden">
-            <div className="px-3 py-2 bg-secondary/40 text-xs font-semibold uppercase tracking-wide flex items-center justify-between">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border">
+            <div className="flex items-center justify-between bg-secondary/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide">
               <span>{t("setup.players")}</span>
               {selectedFile && (
                 <span className="text-[10px] font-normal text-muted-foreground">
@@ -1723,7 +1807,7 @@ function BulkVisualsDialog({
         </div>
 
         {selectedFile && (
-          <div className="mt-3 rounded-lg border border-border p-3 flex gap-3 items-center">
+          <div className="mt-3 flex shrink-0 items-center gap-3 rounded-lg border border-border p-3">
             {isVideo ? (
               <video
                 src={mediaUrl(selectedFile)}
@@ -1742,18 +1826,27 @@ function BulkVisualsDialog({
               <div className="font-semibold truncate">
                 {selectedFile.split(/[\\/]/).pop()}
               </div>
-              <div className="text-muted-foreground break-all max-h-16 overflow-y-auto leading-snug">
+              <div className="max-h-16 overflow-y-auto break-all leading-snug text-muted-foreground">
                 {selectedFile}
               </div>
             </div>
           </div>
         )}
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={saving}>
+        <DialogFooter className="relative z-10 mt-4 shrink-0 border-t border-border bg-card pt-4">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={saving}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onClose();
+            }}
+          >
             {t("common.cancel")}
           </Button>
-          <Button onClick={save} disabled={saving}>
+          <Button type="button" onClick={() => void save()} disabled={saving}>
             {saving ? t("common.saving") : t("common.save")}
           </Button>
         </DialogFooter>

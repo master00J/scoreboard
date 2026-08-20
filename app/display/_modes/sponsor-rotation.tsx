@@ -2,6 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import type { Playlist, PlaylistItemFull } from "@/lib/types";
@@ -81,40 +82,42 @@ function FallbackMediaSlide({
 
   if (objectFit === "contain") {
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black">
-        {media.type === "VIDEO" ? (
-          <video
-            ref={videoRef}
-            key={src}
-            src={src}
-            autoPlay
-            loop
-            muted={!(media.playAudio ?? false)}
-            playsInline
-            preload="metadata"
-            className="max-h-full max-w-full"
-            style={{ objectFit: "contain", objectPosition: "center" }}
-            onLoadedMetadata={(e) => logDiag("loaded_metadata", e.currentTarget)}
-            onStalled={(e) => logDiag("stalled", e.currentTarget)}
-            onWaiting={(e) => logDiag("waiting", e.currentTarget)}
-            onSuspend={(e) => logDiag("suspend", e.currentTarget)}
-            onError={(e) => logDiag("error", e.currentTarget)}
-          />
-        ) : (
-          <img
-            src={src}
-            alt={media.title}
-            decoding="async"
-            className="max-h-full max-w-full"
-            style={{ objectFit: "contain", objectPosition: "center" }}
-          />
-        )}
-      </div>
+      <DisplayMediaStage>
+        <div className="absolute inset-0 flex items-center justify-center bg-black">
+          {media.type === "VIDEO" ? (
+            <video
+              ref={videoRef}
+              key={src}
+              src={src}
+              autoPlay
+              loop
+              muted={!(media.playAudio ?? false)}
+              playsInline
+              preload="metadata"
+              className="max-h-full max-w-full"
+              style={{ objectFit: "contain", objectPosition: "center" }}
+              onLoadedMetadata={(e) => logDiag("loaded_metadata", e.currentTarget)}
+              onStalled={(e) => logDiag("stalled", e.currentTarget)}
+              onWaiting={(e) => logDiag("waiting", e.currentTarget)}
+              onSuspend={(e) => logDiag("suspend", e.currentTarget)}
+              onError={(e) => logDiag("error", e.currentTarget)}
+            />
+          ) : (
+            <img
+              src={src}
+              alt={media.title}
+              decoding="async"
+              className="max-h-full max-w-full"
+              style={{ objectFit: "contain", objectPosition: "center" }}
+            />
+          )}
+        </div>
+      </DisplayMediaStage>
     );
   }
   if (media.type === "VIDEO") {
     return (
-      <div className="absolute inset-0 overflow-hidden bg-black">
+      <DisplayMediaStage>
         <video
           ref={videoRef}
           key={src}
@@ -131,13 +134,13 @@ function FallbackMediaSlide({
           onSuspend={(e) => logDiag("suspend", e.currentTarget)}
           onError={(e) => logDiag("error", e.currentTarget)}
         />
-      </div>
+      </DisplayMediaStage>
     );
   }
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black">
+    <DisplayMediaStage>
       <img src={src} alt={media.title} decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
-    </div>
+    </DisplayMediaStage>
   );
 }
 
@@ -382,39 +385,41 @@ function MediaRenderer({
 
   if (objectFit === "contain") {
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black">
-        {item.media.type === "VIDEO" ? (
-          <video
-            ref={videoRef}
-            key={src}
-            src={src}
-            autoPlay
-            muted={!(item.media.playAudio ?? false)}
-            playsInline
-            preload="metadata"
-            className="max-h-full max-w-full"
-            style={{ objectFit: "contain", objectPosition: "center" }}
-            onLoadedMetadata={(e) => logDiag("loaded_metadata", e.currentTarget)}
-            onStalled={(e) => logDiag("stalled", e.currentTarget)}
-            onWaiting={(e) => logDiag("waiting", e.currentTarget)}
-            onSuspend={(e) => logDiag("suspend", e.currentTarget)}
-            onError={(e) => logDiag("error", e.currentTarget)}
-          />
-        ) : (
-          <img
-            src={src}
-            alt={item.media.title}
-            decoding="async"
-            className="max-h-full max-w-full"
-            style={{ objectFit: "contain", objectPosition: "center" }}
-          />
-        )}
-      </div>
+      <DisplayMediaStage>
+        <div className="absolute inset-0 flex items-center justify-center bg-black">
+          {item.media.type === "VIDEO" ? (
+            <video
+              ref={videoRef}
+              key={src}
+              src={src}
+              autoPlay
+              muted={!(item.media.playAudio ?? false)}
+              playsInline
+              preload="metadata"
+              className="max-h-full max-w-full"
+              style={{ objectFit: "contain", objectPosition: "center" }}
+              onLoadedMetadata={(e) => logDiag("loaded_metadata", e.currentTarget)}
+              onStalled={(e) => logDiag("stalled", e.currentTarget)}
+              onWaiting={(e) => logDiag("waiting", e.currentTarget)}
+              onSuspend={(e) => logDiag("suspend", e.currentTarget)}
+              onError={(e) => logDiag("error", e.currentTarget)}
+            />
+          ) : (
+            <img
+              src={src}
+              alt={item.media.title}
+              decoding="async"
+              className="max-h-full max-w-full"
+              style={{ objectFit: "contain", objectPosition: "center" }}
+            />
+          )}
+        </div>
+      </DisplayMediaStage>
     );
   }
   if (item.media.type === "VIDEO") {
     return (
-      <div className="absolute inset-0 overflow-hidden bg-black">
+      <DisplayMediaStage>
         <video
           ref={videoRef}
           key={src}
@@ -430,12 +435,12 @@ function MediaRenderer({
           onSuspend={(e) => logDiag("suspend", e.currentTarget)}
           onError={(e) => logDiag("error", e.currentTarget)}
         />
-      </div>
+      </DisplayMediaStage>
     );
   }
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black">
+    <DisplayMediaStage>
       <img src={src} alt={item.media.title} decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
-    </div>
+    </DisplayMediaStage>
   );
 }

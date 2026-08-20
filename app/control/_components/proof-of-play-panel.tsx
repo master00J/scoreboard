@@ -5,10 +5,19 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
+import { toast } from "@/components/ui/toast";
 import { useApi } from "@/lib/use-api";
-import { isElectron } from "@/lib/electron";
+import { isElectron, selectFilesViaDialog } from "@/lib/electron";
+import { mediaUrl } from "@/lib/media-url";
 import { useLicenseFeatures } from "@/lib/use-license-features";
-import type { Match, Sponsor } from "@/lib/types";
+import type { AppSettings, Match, Sponsor, Team } from "@/lib/types";
+import {
+  brandFromHomeTeam,
+  contrastingTextHex,
+  parseProofOfPlayBrand,
+  serializeProofOfPlayBrand,
+  type ProofOfPlayBrand,
+} from "@/lib/proof-of-play-brand";
 import {
   buildProofOfPlayPdf,
   buildProofOfPlayXlsx,
@@ -31,8 +40,14 @@ export function ProofOfPlayPanel() {
 
   const { data: matches } = useApi<Match[]>("/api/matches");
   const { data: sponsors } = useApi<Sponsor[]>("/api/sponsors");
+  const { data: settings, reload: reloadSettings } = useApi<AppSettings>("/api/settings");
+  const { data: teams } = useApi<Team[]>("/api/teams");
   const { isFeatureAllowed, planLabel } = useLicenseFeatures();
   const exportAllowed = isFeatureAllowed("proof_of_play_export");
+  const [brand, setBrand] = useState<ProofOfPlayBrand>(() => parseProofOfPlayBrand(null));
+  const [savingBrand, setSavingBrand] = useState(false);
+  const [logoBusy, setLogoBusy] = useState(false);
+  const brandHydrated = useRef(false);
 
   const SEGMENT_OPTIONS = useMemo(
     () => [
@@ -58,6 +73,110 @@ export function ProofOfPlayPanel() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const exportBusyRef = useRef(false);
+
+  useEffect(() => {
+    if (brandHydrated.current || !settings) return;
+    brandHydrated.current = true;
+    setBrand(parseProofOfPlayBrand(settings.proofOfPlayBrandJson));
+  }, [settings]);
+
+  const homeTeam = useMemo(() => {
+    if (settings?.homeTeamId && teams?.length) {
+      return teams.find((team) => team.id === settings.homeTeamId) ?? null;
+    }
+    if (settings?.homeTeamBranding) {
+      return {
+        name: settings.homeTeamBranding.name,
+        logoPath: settings.homeTeamBranding.logoPath,
+        primaryColor: settings.homeTeamBranding.primaryColor ?? "#2563eb",
+        secondaryColor: settings.homeTeamBranding.secondaryColor ?? "#ffffff",
+      };
+    }
+    return null;
+  }, [settings, teams]);
+
+  const patchBrand = useCallback((partial: Partial<ProofOfPlayBrand>) => {
+    setBrand((prev) => {
+      const next = { ...prev, ...partial };
+      if (partial.accentHex && !partial.headerTextHex && /^#[0-9a-fA-F]{6}$/.test(partial.accentHex)) {
+        next.headerTextHex = contrastingTextHex(partial.accentHex);
+      }
+      return next;
+    });
+  }, []);
+
+  const persistBrand = useCallback(async (next: ProofOfPlayBrand) => {
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ proofOfPlayBrandJson: serializeProofOfPlayBrand(next) }),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || t("reports.brandSaveFailed"));
+    }
+    reloadSettings();
+  }, [reloadSettings, t]);
+
+  async function applyHomeTeamBrand() {
+    if (!homeTeam) return;
+    let next = brandFromHomeTeam(homeTeam);
+    if (next.logoPath) {
+      const dataUrl = await storedLogoToDataUrl(next.logoPath);
+      next = { ...next, logoDataUrl: dataUrl };
+    }
+    setBrand(next);
+  }
+
+  async function onBrandLogo(file?: File, localPath?: string) {
+    setLogoBusy(true);
+    try {
+      if (localPath) {
+        const dataUrl = await storedLogoToDataUrl(localPath);
+        patchBrand({ logoPath: localPath, logoDataUrl: dataUrl });
+        return;
+      }
+      if (!file) return;
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch("/api/upload", { method: "POST", body: fd });
+      if (!r.ok) {
+        toast({ title: t("reports.logoFailed"), variant: "error" });
+        return;
+      }
+      const data = (await r.json()) as { path?: string };
+      const path = data.path ?? null;
+      const dataUrl = await fileToPngDataUrl(file);
+      patchBrand({ logoPath: path, logoDataUrl: dataUrl });
+    } finally {
+      setLogoBusy(false);
+    }
+  }
+
+  async function onBrandLogoElectron() {
+    const paths = await selectFilesViaDialog({
+      title: t("setup.selectTeamLogo"),
+      filters: [{ name: t("setup.filterImage"), extensions: ["png", "jpg", "jpeg", "webp"] }],
+    });
+    if (paths[0]) await onBrandLogo(undefined, paths[0]);
+  }
+
+  async function saveBrand() {
+    if (savingBrand) return;
+    setSavingBrand(true);
+    try {
+      await persistBrand(brand);
+      toast({ title: t("reports.brandSaved"), variant: "success" });
+    } catch (e) {
+      toast({
+        title: t("reports.brandSaveFailed"),
+        description: e instanceof Error ? e.message : String(e),
+        variant: "error",
+      });
+    } finally {
+      setSavingBrand(false);
+    }
+  }
 
   const queryString = useMemo(() => {
     const p = new URLSearchParams();
@@ -164,10 +283,21 @@ export function ProofOfPlayPanel() {
           totalExpectedSec,
           avgFulfillmentPercent: avgFulfillment,
         };
+        const resolvedBrand = parseProofOfPlayBrand(JSON.stringify(brand));
+        if (format === "pdf") {
+          try {
+            await persistBrand(resolvedBrand);
+          } catch {
+            /* export mag doorgaan als bewaren faalt */
+          }
+        }
         const bytes =
           format === "xlsx"
             ? await buildProofOfPlayXlsx(exportRows, exportSummary, meta, exportLabels, dateLocale)
-            : buildProofOfPlayPdf(exportRows, exportSummary, meta, exportLabels, dateLocale);
+            : buildProofOfPlayPdf(exportRows, exportSummary, meta, exportLabels, dateLocale, {
+                brand: resolvedBrand,
+                logoDataUrl: resolvedBrand.logoDataUrl,
+              });
         const stamp = new Date().toISOString().slice(0, 10);
         const ext = format === "xlsx" ? "xlsx" : "pdf";
         const fileName = `proof-of-play-${stamp}.${ext}`;
@@ -192,7 +322,7 @@ export function ProofOfPlayPanel() {
         setExporting(false);
       }
     },
-    [queryString, filterLabel, exportAllowed, t, exportLabels, dateLocale],
+    [queryString, filterLabel, exportAllowed, t, exportLabels, dateLocale, brand, persistBrand],
   );
 
   const totalPlays = rows.length;
@@ -273,6 +403,134 @@ export function ProofOfPlayPanel() {
             <Input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </div>
         </div>
+
+        <section className="mt-5 rounded-lg border border-border bg-secondary/20 p-4 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">{t("reports.brandTitle")}</h3>
+            <p className="text-xs text-muted-foreground">{t("reports.brandIntro")}</p>
+          </div>
+          <div
+            className="flex items-center gap-3 rounded-md px-3 py-2 min-h-[52px]"
+            style={{ background: brand.accentHex, color: brand.headerTextHex }}
+          >
+            {(brand.logoPath || brand.logoDataUrl) && (
+              <img
+                src={brand.logoDataUrl || mediaUrl(brand.logoPath)}
+                alt=""
+                className="h-10 w-10 rounded bg-white/90 object-contain p-0.5"
+              />
+            )}
+            <div className="min-w-0">
+              <div className="text-[10px] uppercase tracking-widest opacity-80">
+                {t("reports.brandPreview")}
+              </div>
+              <div className="text-sm font-semibold truncate">
+                {brand.reportTitle.trim() || t("reports.export.title")}
+              </div>
+              {brand.clubName && (
+                <div className="text-xs truncate opacity-90">{brand.clubName}</div>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div>
+              <Label>{t("reports.clubName")}</Label>
+              <Input
+                value={brand.clubName}
+                placeholder={t("reports.clubNamePlaceholder")}
+                onChange={(e) => patchBrand({ clubName: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label>{t("reports.reportTitle")}</Label>
+              <Input
+                value={brand.reportTitle}
+                placeholder={t("reports.reportTitlePlaceholder")}
+                onChange={(e) => patchBrand({ reportTitle: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label>{t("reports.footer")}</Label>
+              <Input
+                value={brand.footer}
+                placeholder={t("reports.footerPlaceholder")}
+                onChange={(e) => patchBrand({ footer: e.target.value })}
+              />
+            </div>
+            <div>
+              <Label>{t("reports.accentColor")}</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={brand.accentHex}
+                  onChange={(e) => patchBrand({ accentHex: e.target.value })}
+                />
+                <input
+                  type="color"
+                  value={colorInputValue(brand.accentHex, "#2563eb")}
+                  onChange={(e) => patchBrand({ accentHex: e.target.value })}
+                  className="w-12 h-10 rounded border"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>{t("reports.headerTextColor")}</Label>
+              <div className="flex gap-2">
+                <Input
+                  value={brand.headerTextHex}
+                  onChange={(e) => patchBrand({ headerTextHex: e.target.value })}
+                />
+                <input
+                  type="color"
+                  value={colorInputValue(brand.headerTextHex, "#ffffff")}
+                  onChange={(e) => patchBrand({ headerTextHex: e.target.value })}
+                  className="w-12 h-10 rounded border"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>{t("setup.logo")}</Label>
+              <div className="flex items-center gap-2 flex-wrap">
+                {isElectron ? (
+                  <Button variant="outline" size="sm" onClick={() => void onBrandLogoElectron()}>
+                    {t("common.chooseFile")}
+                  </Button>
+                ) : (
+                  <Input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void onBrandLogo(f);
+                    }}
+                  />
+                )}
+                {logoBusy && <span className="text-xs">{t("common.loading")}</span>}
+                {(brand.logoPath || brand.logoDataUrl) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => patchBrand({ logoPath: null, logoDataUrl: null })}
+                  >
+                    {t("common.remove")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={!homeTeam}
+              onClick={() => void applyHomeTeamBrand()}
+            >
+              {t("reports.useHomeTeam")}
+            </Button>
+            <Button size="sm" disabled={savingBrand} onClick={() => void saveBrand()}>
+              {savingBrand ? t("common.saving") : t("reports.saveBrand")}
+            </Button>
+          </div>
+        </section>
 
         <div className="mt-4 flex flex-wrap gap-2 items-center">
           <Button
@@ -415,6 +673,64 @@ export function ProofOfPlayPanel() {
       </section>
     </div>
   );
+}
+
+async function storedLogoToDataUrl(storedPath: string | null): Promise<string | null> {
+  if (!storedPath) return null;
+  try {
+    const res = await fetch(`/api/proof-of-play-logo?path=${encodeURIComponent(storedPath)}`);
+    if (res.ok) {
+      const data = (await res.json()) as { dataUrl?: string };
+      if (data.dataUrl?.startsWith("data:image/")) {
+        return (await imageSrcToPngDataUrl(data.dataUrl)) ?? data.dataUrl;
+      }
+    }
+  } catch {
+    /* canvas-fallback hieronder */
+  }
+  return imageSrcToPngDataUrl(mediaUrl(storedPath));
+}
+
+function colorInputValue(hex: string, fallback: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(hex.trim()) ? hex.trim() : fallback;
+}
+
+async function imageSrcToPngDataUrl(src: string): Promise<string | null> {
+  if (!src) return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 256;
+      const w = img.naturalWidth || 1;
+      const h = img.naturalHeight || 1;
+      const scale = Math.min(1, max / Math.max(w, h));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        resolve(null);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      try {
+        resolve(canvas.toDataURL("image/png"));
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+async function fileToPngDataUrl(file: File): Promise<string | null> {
+  const local = URL.createObjectURL(file);
+  try {
+    return await imageSrcToPngDataUrl(local);
+  } finally {
+    URL.revokeObjectURL(local);
+  }
 }
 
 function Stat({

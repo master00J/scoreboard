@@ -159,6 +159,7 @@ export const BUILT_IN_TEMPLATES: BuiltIn[] = [
     name: "LED-strip",
     label: "Lage onderbalk voor smalle schermen",
     theme: {
+      layoutMode: "bottom-strip",
       leftBarWidthPx: 200,
       bottomBarHeightPx: 140,
       stripHeightPx: 140,

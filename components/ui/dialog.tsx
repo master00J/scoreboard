@@ -117,6 +117,13 @@ export function DialogFooter({
   className?: string;
 }) {
   return (
-    <div className={cn("flex justify-end gap-2 mt-6", className)}>{children}</div>
+    <div
+      className={cn(
+        "relative z-10 mt-6 flex shrink-0 flex-wrap items-center justify-end gap-2",
+        className,
+      )}
+    >
+      {children}
+    </div>
   );
 }

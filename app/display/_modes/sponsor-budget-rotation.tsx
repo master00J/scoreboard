@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type SyntheticEvent,
 } from "react";
+import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import type { MediaItem, Sponsor, SponsorSection } from "@/lib/types";
 import type { DisplayMediaDiagnosticPayload } from "@/lib/desktop-bridge";
@@ -1625,48 +1626,54 @@ function MediaRenderer({
   };
 
   if (item.type === "VIDEO" && !renderVideo) {
-    return <VideoPreviewPlaceholder title={item.title} />;
+    return (
+      <DisplayMediaStage>
+        <VideoPreviewPlaceholder title={item.title} />
+      </DisplayMediaStage>
+    );
   }
 
   if (objectFit === "contain") {
     return (
-      <div className="absolute inset-0 flex items-center justify-center bg-black">
-        {item.type === "VIDEO" ? (
-        <video
-          key={`${item.id}-${src}`}
-          {...videoProps}
-          preload="metadata"
-          className="max-h-full max-w-full"
-            style={{ objectFit: "contain", objectPosition: "center" }}
-          />
-        ) : (
-          <img
-            src={src}
-            alt={item.title}
-            decoding="async"
-            className="max-h-full max-w-full"
-            style={{ objectFit: "contain", objectPosition: "center" }}
-          />
-        )}
-      </div>
+      <DisplayMediaStage>
+        <div className="absolute inset-0 flex items-center justify-center bg-black">
+          {item.type === "VIDEO" ? (
+            <video
+              key={`${item.id}-${src}`}
+              {...videoProps}
+              preload="metadata"
+              className="max-h-full max-w-full"
+              style={{ objectFit: "contain", objectPosition: "center" }}
+            />
+          ) : (
+            <img
+              src={src}
+              alt={item.title}
+              decoding="async"
+              className="max-h-full max-w-full"
+              style={{ objectFit: "contain", objectPosition: "center" }}
+            />
+          )}
+        </div>
+      </DisplayMediaStage>
     );
   }
   if (item.type === "VIDEO") {
     return (
-      <div className="absolute inset-0 overflow-hidden bg-black">
+      <DisplayMediaStage>
         <video
           key={`${item.id}-${src}`}
           {...videoProps}
           preload="metadata"
           style={DISPLAY_COVER_MEDIA_STYLE}
         />
-      </div>
+      </DisplayMediaStage>
     );
   }
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black">
+    <DisplayMediaStage>
       <img src={src} alt={item.title} decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
-    </div>
+    </DisplayMediaStage>
   );
 }
 

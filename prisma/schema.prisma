@@ -240,6 +240,8 @@ model AppSettings {
   liveCycleLegacyImported  Int     @default(0)
   /// JSON ScoreboardTheme — kleuren, lettertype, afmetingen, volgorde blokken scorebord.
   scoreboardThemeJson      String?
+  /// JSON ProofOfPlayBrand — clublogo, kleuren en titel voor PDF-export.
+  proofOfPlayBrandJson     String?
   /// Logische canvas-breedte voor LED-output (default 1920). Pas aan voor exotische LED-formaten.
   displayCanvasWidth       Int     @default(1920)
   displayCanvasHeight      Int     @default(1080)

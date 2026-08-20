@@ -17,6 +17,7 @@
     "postinstall": "prisma generate",
     "electron:dev": "node scripts/electron-dev.mjs",
     "renderer:build": "node scripts/build-renderer.mjs",
+    "renderer:web-demo": "node scripts/build-web-demo.mjs",
     "electron:compile": "tsc -p electron/tsconfig.json",
     "legal:desktop": "node scripts/assemble-desktop-legal-bundle.mjs",
     "test": "vitest run",

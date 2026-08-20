@@ -98,6 +98,40 @@ function TeamSide({
   profile: SportProfile;
   theme: ResolvedScoreboardTheme;
 }) {
+  const nameEl = theme.fullShowTeamNames ? (
+        <div
+          className={`max-w-full px-2 text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
+          style={{
+            fontSize: theme.fullTeamNamePx,
+            color: theme.teamNameColor,
+            textShadow: "0 4px 24px rgba(0,0,0,0.45)",
+          }}
+        >
+          <span className="line-clamp-3">{team.shortName || team.name}</span>
+        </div>
+      ) : null;
+  const logoEl = theme.showLogos ? <TeamLogo team={team} size={theme.fullLogoPx} /> : null;
+  const scoreEl = theme.showScores ? (
+        <div
+          className="font-black tabular-nums leading-none"
+          style={{
+            fontSize: theme.fullScorePx,
+            color: theme.scoreColor,
+            textShadow: "0 8px 40px rgba(0,0,0,0.55)",
+          }}
+        >
+          {score}
+        </div>
+      ) : null;
+  const stack =
+    theme.fullTeamStackOrder === "name-logo-score"
+      ? [nameEl, logoEl, scoreEl]
+      : theme.fullTeamStackOrder === "logo-score-name"
+        ? [logoEl, scoreEl, nameEl]
+        : theme.fullTeamStackOrder === "score-name-logo"
+          ? [scoreEl, nameEl, logoEl]
+          : [logoEl, nameEl, scoreEl];
+
   return (
     <div
       className="flex flex-1 flex-col items-center justify-center z-10 min-w-0"
@@ -107,27 +141,7 @@ function TeamSide({
         paddingRight: theme.fullSidePaddingPx,
       }}
     >
-      <TeamLogo team={team} size={theme.fullLogoPx} />
-      {theme.fullShowTeamNames && (
-        <div
-          className={`max-w-full px-2 text-center font-bold leading-tight text-white/88 ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
-          style={{
-            fontSize: theme.fullTeamNamePx,
-            textShadow: "0 4px 24px rgba(0,0,0,0.45)",
-          }}
-        >
-          <span className="line-clamp-3">{team.shortName || team.name}</span>
-        </div>
-      )}
-      <div
-        className="font-black tabular-nums leading-none text-white"
-        style={{
-          fontSize: theme.fullScorePx,
-          textShadow: "0 8px 40px rgba(0,0,0,0.55)",
-        }}
-      >
-        {score}
-      </div>
+      {stack}
       {(profile.timeoutLimitForPeriod(1) > 0 || profile.statLabel || profile.hasSets) && (
         <div className="flex flex-wrap items-center justify-center gap-3 text-center text-xl font-bold uppercase tracking-wider text-white/65">
           {profile.hasSets && <span>Sets {sets}</span>}
@@ -174,6 +188,7 @@ function CenterBlock({
         </div>
       )}
       <div className="flex items-end justify-center gap-4">
+        {theme.showClock && (
         <StableClockText
           value={formatTime(elapsed)}
           className="font-black leading-none text-white"
@@ -184,7 +199,8 @@ function CenterBlock({
             color: accent,
           }}
         />
-        {theme.fullShowAddedTime && addedTime > 0 && (
+        )}
+        {theme.showClock && theme.fullShowAddedTime && addedTime > 0 && (
           <div
             className="mb-1 rounded-md px-4 py-2 font-black tabular-nums"
             style={{

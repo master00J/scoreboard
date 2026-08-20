@@ -5,6 +5,7 @@ import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
 } from "./_components/preview-slide-progress";
+import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import { AnimatePresence, motion } from "framer-motion";
@@ -27,6 +28,9 @@ import type {
 } from "@/lib/types";
 import {
   mergeScoreboardTheme,
+  scoreboardUsesCustom,
+  scoreboardUsesLeftFrame,
+  scoreboardUsesStrip,
   sponsorRepeatBudgetCyclesFromThemeJson,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
@@ -72,6 +76,8 @@ import {
   type SponsorLedgerPayload,
 } from "@/lib/sponsor-telemetry";
 import { LeftScoreboardLayout } from "./_modes/left-scoreboard-layout";
+import { CustomScoreboardLayout } from "./_modes/custom-scoreboard-layout";
+import { StripScoreboardLayout } from "./_modes/scoreboard-strip";
 import { MatchScoreboardFull } from "./_modes/match-scoreboard-full";
 import { GoalMode } from "./_modes/goal";
 import { SubstitutionMode } from "./_modes/substitution";
@@ -323,6 +329,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const section = sectionForStatus(match.status);
     return ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger);
   }, [embedInControl, elapsed, match, sponsorLedger]);
+  /** Zonder lopend display-venster (browserdemo) speelt de preview zelf af i.p.v. zwart te blijven. */
+  const previewFollowsLiveDisplay = Boolean(embedInControl && previewFollowClip);
 
   const [prematchClock, setPrematchClock] = useState(0);
   useEffect(() => {
@@ -845,7 +853,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const sponsorClipBesideLiveBoard =
     !!match && sponsorRotationBesideScoreboard(match.status);
 
-  const useLeftLayout =
+  const autoLeftLayout =
     !!match &&
     !liveAutoBeside &&
     !liveAutoHalftime &&
@@ -853,6 +861,34 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       (LEFT_PANEL_INTERRUPT_MODES.has(mode)) ||
       (mode === "SPONSOR_ROTATION" && sponsorBesideShowsPanel(match, sponsors, playlists)) ||
       (mode === "SPONSOR" && sponsorClipBesideLiveBoard));
+  const exclusiveFullscreenModes = new Set([
+    "TEAM_INTRO",
+    "PLAYER_INTRO",
+    "HALFTIME",
+    "FULLTIME",
+    "SUBSTITUTION",
+    "BLACKOUT",
+    "IDLE",
+  ]);
+  const useCustomLayout =
+    scoreboardUsesCustom(scoreboardTheme) && !!match && !exclusiveFullscreenModes.has(mode);
+  const useStripLayout =
+    !useCustomLayout &&
+    scoreboardUsesStrip(scoreboardTheme) &&
+    !!match &&
+    !exclusiveFullscreenModes.has(mode);
+  const useLeftLayout =
+    !useCustomLayout &&
+    !useStripLayout &&
+    !!match &&
+    !exclusiveFullscreenModes.has(mode) &&
+    scoreboardUsesLeftFrame(scoreboardTheme, autoLeftLayout);
+  const ScoreFrame = useCustomLayout
+    ? CustomScoreboardLayout
+    : useStripLayout
+      ? StripScoreboardLayout
+      : LeftScoreboardLayout;
+  const showScoreFrame = useLeftLayout || useStripLayout || useCustomLayout;
 
   const previewForcesSponsorBeside =
     embedInControl &&
@@ -884,7 +920,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           matchStatus={match.status}
           sponsorIdFilter={sponsorBudgetSponsorFilter}
           playbackTelemetry={sponsorPlaybackTelemetry}
-          followPlayback={embedInControl}
+          followPlayback={previewFollowsLiveDisplay}
           followClip={previewFollowClip}
           showPreviewProgress={embedInControl}
           renderVideo
@@ -917,6 +953,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsors,
     playlists,
     embedInControl,
+    previewFollowsLiveDisplay,
     previewFollowClip,
     sponsorPlaybackTelemetry,
     sponsorBudgetFallbackScoreboard,
@@ -955,7 +992,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             matchStatus={match.status}
             sponsorIdFilter={sponsorBudgetSponsorFilter}
             playbackTelemetry={sponsorPlaybackTelemetry}
-            followPlayback={embedInControl}
+            followPlayback={previewFollowsLiveDisplay}
             followClip={previewFollowClip}
             showPreviewProgress={embedInControl}
             renderVideo
@@ -1015,7 +1052,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             matchStatus={match.status}
             sponsorIdFilter={sponsorBudgetSponsorFilter}
             playbackTelemetry={sponsorPlaybackTelemetry}
-            followPlayback={embedInControl}
+            followPlayback={previewFollowsLiveDisplay}
             followClip={previewFollowClip}
             showPreviewProgress={embedInControl}
             renderVideo
@@ -1097,6 +1134,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     period,
     addedTimeMinutes,
     sponsorPlaybackTelemetry,
+    previewFollowsLiveDisplay,
     previewFollowClip,
     scoreboardTheme,
     sponsorBudgetFallbackScoreboard,
@@ -1132,7 +1170,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   section="prematch"
                   sponsorIdFilter={prematchDistView.sponsorFilterId ?? undefined}
                   playbackTelemetry={sponsorPlaybackTelemetry}
-                  followPlayback={embedInControl}
+                  followPlayback={previewFollowsLiveDisplay}
                   followClip={previewFollowClip}
                   showPreviewProgress={embedInControl}
                   renderVideo
@@ -1188,7 +1226,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               sponsors={sponsors}
               showPreviewProgress={embedInControl}
               playbackTelemetry={sponsorPlaybackTelemetry}
-              followPlayback={embedInControl}
+              followPlayback={previewFollowsLiveDisplay}
               followClip={previewFollowClip}
               prematchSpread={prematchSpreadActive ? prematchDistView : null}
               postmatchSpread={postmatchSpreadActive ? postmatchDistView : null}
@@ -1223,7 +1261,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           match &&
           (shouldShowFullScreenMatchBoard(match, mode, sponsors, playlists) ||
             (liveAutoBeside && sponsorDistView.phase === "scoreboard" && !previewForcesSponsorBeside)) &&
-          !(liveAutoHalftime && sponsorDistView.phase === "scoreboard") && (
+          !(liveAutoHalftime && sponsorDistView.phase === "scoreboard") &&
+          !showScoreFrame && (
             <MatchScoreboardFull
               key="match-board-full"
               match={match}
@@ -1252,7 +1291,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 section="halftime"
                 sponsorIdFilter={sponsorDistView.sponsorFilterId}
                 playbackTelemetry={sponsorPlaybackTelemetry}
-                followPlayback={embedInControl}
+                followPlayback={previewFollowsLiveDisplay}
                 followClip={previewFollowClip}
                 showPreviewProgress={embedInControl}
                 renderVideo
@@ -1387,7 +1426,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
       {activeScheduledCue && mode !== "BLACKOUT" && match && sponsorRotationBesideScoreboard(match.status) && (
         <div className="absolute inset-0 z-[88]">
-          <LeftScoreboardLayout
+          <ScoreFrame
             match={match}
             elapsed={scoreboardClock}
             shotClock={shotClock}
@@ -1402,7 +1441,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               showPreviewProgress={embedInControl}
               onVideoEnded={() => dismissActiveScheduledCue()}
             />
-          </LeftScoreboardLayout>
+          </ScoreFrame>
         </div>
       )}
 
@@ -1453,7 +1492,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           }
           aria-hidden={!showLiveSponsorBeside}
         >
-          <LeftScoreboardLayout
+          <ScoreFrame
             match={match}
             elapsed={scoreboardClock}
             shotClock={shotClock}
@@ -1474,13 +1513,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 {liveSponsorBesideContent}
               </motion.div>
             </AnimatePresence>
-          </LeftScoreboardLayout>
+          </ScoreFrame>
         </div>
       )}
 
-      {/* Active-match modes: wrap content in the left-scoreboard layout */}
-      {useLeftLayout && match && (
-        <LeftScoreboardLayout
+      {/* Active-match modes: wrap content in the left-scoreboard / strip layout */}
+      {showScoreFrame && match && !keepLiveSponsorBesideMounted && (
+        <ScoreFrame
           match={match}
           elapsed={scoreboardClock}
           shotClock={shotClock}
@@ -1490,7 +1529,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           theme={scoreboardTheme}
         >
           <AnimatePresence mode="wait">{activeContent}</AnimatePresence>
-        </LeftScoreboardLayout>
+        </ScoreFrame>
       )}
 
       {state?.externalCaptureToDisplay &&
@@ -1803,6 +1842,7 @@ function SingleMediaMode({
 
   return (
     <div className="absolute inset-0 overflow-hidden bg-black contain-layout contain-paint">
+      <DisplayMediaStage>
       {media.type === "VIDEO" ? (
         <video
           ref={videoRef}
@@ -1837,6 +1877,7 @@ function SingleMediaMode({
       ) : (
         <img src={mediaUrl(media.path)} alt="" decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
       )}
+      </DisplayMediaStage>
       {wallClockBar}
       {showPreviewProgress &&
         !previewProgressWallClock &&

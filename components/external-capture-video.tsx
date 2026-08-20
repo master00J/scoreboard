@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { getCaptureStream } from "@/lib/get-desktop-capture-stream";
+import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 
 /** Live capture: desktop/venster (desktopCapturer-id) of webcam (`camera:deviceId`). */
@@ -44,13 +45,15 @@ export function ExternalCaptureVideo({
   }, [sourceId, audio, preferHighRes]);
 
   return (
-    <video
-      ref={videoRef}
-      muted={!audio}
-      playsInline
-      autoPlay
-      className={className}
-      style={DISPLAY_COVER_MEDIA_STYLE}
-    />
+    <DisplayMediaStage>
+      <video
+        ref={videoRef}
+        muted={!audio}
+        playsInline
+        autoPlay
+        className={className}
+        style={DISPLAY_COVER_MEDIA_STYLE}
+      />
+    </DisplayMediaStage>
   );
 }

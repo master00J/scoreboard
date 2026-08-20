@@ -2,17 +2,34 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { AppSettings } from "@/lib/types";
+import type { AppSettings, Team } from "@/lib/types";
 import {
+  SCOREBOARD_LAYOUT_MODES,
+  TEAM_STACK_ORDERS,
   mergeScoreboardTheme,
   sponsorRepeatBudgetCyclesFromThemeJson,
   type LeftStripSegment,
   type ResolvedScoreboardTheme,
+  type TeamStackOrder,
 } from "@/lib/scoreboard-theme";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
+import { ScoreboardThemePreview } from "./setup-scoreboard-preview";
+import { SetupScoreboardPlacer } from "./setup-scoreboard-placer";
+
+const FONT_PRESETS = [
+  {
+    id: "system",
+    value:
+      'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  },
+  { id: "inter", value: 'Inter, ui-sans-serif, system-ui, sans-serif' },
+  { id: "impact", value: 'Impact, "Arial Black", sans-serif' },
+  { id: "condensed", value: '"Roboto Condensed", "Arial Narrow", Arial, sans-serif' },
+  { id: "mono", value: 'ui-monospace, "Cascadia Mono", Consolas, monospace' },
+] as const;
 
 function swapOrder(order: LeftStripSegment[], i: number, seg: LeftStripSegment): LeftStripSegment[] {
   const o = [...order];
@@ -27,9 +44,13 @@ function swapOrder(order: LeftStripSegment[], i: number, seg: LeftStripSegment):
 export function SetupScoreboardThemeSection({
   settings,
   reloadSettings,
+  homeTeam,
+  awayTeam,
 }: {
   settings: AppSettings | null | undefined;
   reloadSettings: () => void;
+  homeTeam?: Team | null;
+  awayTeam?: Team | null;
 }) {
   const { t } = useTranslation();
   const resolved = useMemo(
@@ -57,7 +78,10 @@ export function SetupScoreboardThemeSection({
   }, [settings?.scoreboardThemeJson]);
 
   async function save() {
-    const themePayload: Record<string, unknown> = { ...draft };
+    const themePayload: Record<string, unknown> = {
+      ...draft,
+      layoutMode: draft.layoutMode === "auto" ? "custom" : draft.layoutMode,
+    };
     if (repeatSponsorBudgetCycles) {
       themePayload.sponsorRepeatBudgetCycles = true;
     }
@@ -103,7 +127,10 @@ export function SetupScoreboardThemeSection({
     />
   );
 
-  const color = (label: string, key: "frameColorTop" | "frameColorMid" | "frameColorBot" | "contentAreaBg") => (
+  const color = (
+    label: string,
+    key: "frameColorTop" | "frameColorMid" | "frameColorBot" | "contentAreaBg" | "scoreColor" | "teamNameColor",
+  ) => (
     <div>
       <Label>{label}</Label>
       <div className="mt-1 flex gap-2 items-center">
@@ -156,6 +183,87 @@ export function SetupScoreboardThemeSection({
         </div>
       </div>
 
+      <div className="mb-6 space-y-3 rounded-lg border border-border p-4">
+        <div className="font-semibold text-sm">{t("setup.themePlacerTitle")}</div>
+        <SetupScoreboardPlacer
+          slots={draft.slots}
+          onChange={(slots) => setDraft((d) => ({ ...d, slots, layoutMode: "custom" }))}
+        />
+      </div>
+
+      <div className="mb-6">
+        <div className="mb-2 font-semibold text-sm">{t("setup.themePreviewTitle")}</div>
+        <ScoreboardThemePreview
+          theme={{ ...draft, layoutMode: draft.layoutMode === "auto" ? "custom" : draft.layoutMode }}
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+        />
+      </div>
+
+      <div className="mb-6 space-y-3 rounded-lg border border-border p-4">
+        <div className="font-semibold text-sm">{t("setup.themeVisible")}</div>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {(
+            [
+              ["showLogos", "themeShowLogos"],
+              ["showScores", "themeShowScores"],
+              ["showClock", "themeShowClock"],
+              ["fullShowPeriod", "themeShowPeriod"],
+              ["fullShowAddedTime", "themeShowAdded"],
+              ["fullShowTeamNames", "themeShowTeamNames"],
+            ] as const
+          ).map(([key, labelKey]) => (
+            <label key={key} className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
+                checked={draft[key]}
+                onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.checked }))}
+              />
+              <span className="text-sm font-medium">{t(`setup.${labelKey}`)}</span>
+            </label>
+          ))}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 pt-2">
+          {color(t("setup.themeScoreColor"), "scoreColor")}
+          {color(t("setup.themeTeamNameColor"), "teamNameColor")}
+        </div>
+        <div>
+          <Label>{t("setup.themeStackOrder")}</Label>
+          <Select
+            className="mt-1"
+            value={draft.fullTeamStackOrder}
+            onChange={(e) =>
+              setDraft((d) => ({ ...d, fullTeamStackOrder: e.target.value as TeamStackOrder }))
+            }
+          >
+            {TEAM_STACK_ORDERS.map((order) => (
+              <option key={order} value={order}>
+                {t(`setup.themeStack_${order}`)}
+              </option>
+            ))}
+          </Select>
+        </div>
+      </div>
+
+      <details className="rounded-lg border border-border p-4">
+        <summary className="cursor-pointer font-semibold text-sm">{t("setup.themeAdvanced")}</summary>
+        <div className="mt-4 mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {SCOREBOARD_LAYOUT_MODES.map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              onClick={() => setDraft((d) => ({ ...d, layoutMode: mode }))}
+              className={`rounded-lg border px-3 py-3 text-left text-sm transition-colors ${
+                draft.layoutMode === mode
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border hover:bg-muted/40"
+              }`}
+            >
+              <div className="font-semibold">{t(`setup.themeLayout_${mode}`)}</div>
+            </button>
+          ))}
+        </div>
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-4 rounded-lg border border-border p-4">
           <div className="font-semibold text-sm">{t("setup.themeFrameGrid")}</div>
@@ -176,7 +284,23 @@ export function SetupScoreboardThemeSection({
           </div>
           {color(t("setup.themeContentBg"), "contentAreaBg")}
           <div>
-            <Label>{t("setup.themeFontFamily")}</Label>
+            <Label>{t("setup.themeFontPreset")}</Label>
+            <Select
+              className="mt-1"
+              value={FONT_PRESETS.find((p) => p.value === draft.fontFamily)?.id ?? "custom"}
+              onChange={(e) => {
+                const preset = FONT_PRESETS.find((p) => p.id === e.target.value);
+                if (preset) setDraft((d) => ({ ...d, fontFamily: preset.value }));
+              }}
+            >
+              {FONT_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {t(`setup.themeFont_${p.id}`)}
+                </option>
+              ))}
+              <option value="custom">{t("setup.themeFont_custom")}</option>
+            </Select>
+            <Label className="mt-3">{t("setup.themeFontFamily")}</Label>
             <Input
               className="mt-1 font-mono text-sm"
               value={draft.fontFamily}
@@ -312,57 +436,39 @@ export function SetupScoreboardThemeSection({
               {num("fullTeamNamePx")}
             </div>
           </div>
-          <div className="grid gap-2 pt-1">
-            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
-                checked={draft.fullShowPeriod}
-                onChange={(e) => setDraft((d) => ({ ...d, fullShowPeriod: e.target.checked }))}
-              />
-              <span className="text-sm leading-snug">
-                <span className="font-medium text-foreground">{t("setup.themeShowPeriod")}</span>
-              </span>
-            </label>
-            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
-                checked={draft.fullShowAddedTime}
-                onChange={(e) => setDraft((d) => ({ ...d, fullShowAddedTime: e.target.checked }))}
-              />
-              <span className="text-sm leading-snug">
-                <span className="font-medium text-foreground">{t("setup.themeShowAdded")}</span>
-              </span>
-            </label>
-            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
-                checked={draft.fullShowTeamNames}
-                onChange={(e) => setDraft((d) => ({ ...d, fullShowTeamNames: e.target.checked }))}
-              />
-              <span className="text-sm leading-snug">
-                <span className="font-medium text-foreground">{t("setup.themeShowTeamNames")}</span>
-                <span className="block text-muted-foreground mt-1">
-                  {t("setup.themeShowTeamNamesHelp")}
-                </span>
-              </span>
-            </label>
-            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
-              <input
-                type="checkbox"
-                className="mt-1 h-4 w-4 shrink-0 rounded border-border"
-                checked={draft.fullTeamNameUppercase}
-                onChange={(e) => setDraft((d) => ({ ...d, fullTeamNameUppercase: e.target.checked }))}
-              />
-              <span className="text-sm leading-snug">
-                <span className="font-medium text-foreground">{t("setup.themeTeamNameUpper")}</span>
-              </span>
-            </label>
+          <div className="font-semibold text-sm pt-2">{t("setup.themeStripTitle")}</div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <Label>{t("setup.themeStripHeight")}</Label>
+              {num("stripHeightPx")}
+            </div>
+            <div>
+              <Label>{t("setup.themeLogoPx")}</Label>
+              {num("stripLogoPx")}
+            </div>
+            <div>
+              <Label>{t("setup.themeScorePx")}</Label>
+              {num("stripScorePx")}
+            </div>
+            <div>
+              <Label>{t("setup.themeTimerPx")}</Label>
+              {num("stripTimerPx")}
+            </div>
           </div>
+          <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border p-3">
+            <input
+              type="checkbox"
+              className="mt-1 h-4 w-4 shrink-0 rounded border-border"
+              checked={draft.fullTeamNameUppercase}
+              onChange={(e) => setDraft((d) => ({ ...d, fullTeamNameUppercase: e.target.checked }))}
+            />
+            <span className="text-sm leading-snug">
+              <span className="font-medium text-foreground">{t("setup.themeTeamNameUpper")}</span>
+            </span>
+          </label>
         </div>
       </div>
+      </details>
     </section>
   );
 }

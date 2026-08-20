@@ -1,4 +1,6 @@
 import type { BrowserWindow } from "electron";
+import fs from "fs";
+import path from "path";
 import { prisma } from "../lib/prisma";
 import {
   computeElapsedSeconds,
@@ -403,6 +405,7 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("AppSettings", "secondHalfSponsorSec", "INTEGER NOT NULL DEFAULT 15");
   await addColumnIfMissing("AppSettings", "liveCycleLegacyImported", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("AppSettings", "scoreboardThemeJson", "TEXT");
+  await addColumnIfMissing("AppSettings", "proofOfPlayBrandJson", "TEXT");
   await addColumnIfMissing("AppSettings", "displayCanvasWidth", "INTEGER NOT NULL DEFAULT 1920");
   await addColumnIfMissing("AppSettings", "displayCanvasHeight", "INTEGER NOT NULL DEFAULT 1080");
   await addColumnIfMissing("AppSettings", "displayScalingMode", `TEXT NOT NULL DEFAULT 'cover'`);
@@ -628,6 +631,7 @@ type AppSettingsRow = {
   secondHalfScoreboardSec?: number | null;
   secondHalfSponsorSec?: number | null;
   scoreboardThemeJson?: string | null;
+  proofOfPlayBrandJson?: string | null;
   displayCanvasWidth?: number | null;
   displayCanvasHeight?: number | null;
   displayScalingMode?: string | null;
@@ -674,6 +678,7 @@ async function getAppSettings(): Promise<{
   goalVisualHomeEnabled: boolean;
   goalVisualAwayEnabled: boolean;
   scoreboardThemeJson: string | null;
+  proofOfPlayBrandJson: string | null;
   displayCanvasWidth: number;
   displayCanvasHeight: number;
   displayScalingMode: "cover" | "contain" | "exact";
@@ -688,7 +693,7 @@ async function getAppSettings(): Promise<{
       "firstHalfScoreboardSec", "firstHalfSponsorSec",
       "halftimeScoreboardSec", "halftimeSponsorSec",
       "secondHalfScoreboardSec", "secondHalfSponsorSec",
-      "scoreboardThemeJson",
+      "scoreboardThemeJson", "proofOfPlayBrandJson",
       "displayCanvasWidth", "displayCanvasHeight",
       "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx",
       "uiLocale"
@@ -706,6 +711,7 @@ async function getAppSettings(): Promise<{
       goalVisualHomeEnabled: row.goalVisualHomeEnabled == null ? true : Boolean(row.goalVisualHomeEnabled),
       goalVisualAwayEnabled: row.goalVisualAwayEnabled == null ? false : Boolean(row.goalVisualAwayEnabled),
       scoreboardThemeJson: row.scoreboardThemeJson ?? null,
+      proofOfPlayBrandJson: row.proofOfPlayBrandJson ?? null,
       firstHalfScoreboardSec: row.firstHalfScoreboardSec ?? defaults.firstHalfScoreboardSec,
       firstHalfSponsorSec: row.firstHalfSponsorSec ?? defaults.firstHalfSponsorSec,
       halftimeScoreboardSec: row.halftimeScoreboardSec ?? defaults.halftimeScoreboardSec,
@@ -732,6 +738,7 @@ async function getAppSettings(): Promise<{
     goalVisualHomeEnabled: true,
     goalVisualAwayEnabled: false,
     scoreboardThemeJson: null,
+    proofOfPlayBrandJson: null,
     displayCanvasWidth: 1920,
     displayCanvasHeight: 1080,
     displayScalingMode: "cover",
@@ -799,13 +806,25 @@ async function buildSettingsApiJson() {
       };
     }
   }
-  let homeTeamBranding: { name: string; logoPath: string | null } | null = null;
+  let homeTeamBranding: {
+    name: string;
+    logoPath: string | null;
+    primaryColor: string;
+    secondaryColor: string;
+  } | null = null;
   if (s.homeTeamId) {
     const t = await prisma.team.findUnique({
       where: { id: s.homeTeamId },
-      select: { name: true, logoPath: true },
+      select: { name: true, logoPath: true, primaryColor: true, secondaryColor: true },
     });
-    if (t) homeTeamBranding = { name: t.name, logoPath: t.logoPath };
+    if (t) {
+      homeTeamBranding = {
+        name: t.name,
+        logoPath: t.logoPath,
+        primaryColor: t.primaryColor,
+        secondaryColor: t.secondaryColor,
+      };
+    }
   }
   return {
     homeTeamId: s.homeTeamId,
@@ -819,6 +838,7 @@ async function buildSettingsApiJson() {
     secondHalfScoreboardSec: s.secondHalfScoreboardSec,
     secondHalfSponsorSec: s.secondHalfSponsorSec,
     scoreboardThemeJson: s.scoreboardThemeJson,
+    proofOfPlayBrandJson: s.proofOfPlayBrandJson,
     displayCanvasWidth: s.displayCanvasWidth,
     displayCanvasHeight: s.displayCanvasHeight,
     displayScalingMode: s.displayScalingMode,
@@ -925,6 +945,13 @@ async function setLiveCyclePhasing(next: LiveCycleStored) {
 async function setScoreboardThemeJson(json: string | null) {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "scoreboardThemeJson" = ? WHERE "id" = 1`,
+    json,
+  );
+}
+
+async function setProofOfPlayBrandJson(json: string | null) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "proofOfPlayBrandJson" = ? WHERE "id" = 1`,
     json,
   );
 }
@@ -1219,6 +1246,37 @@ async function handleSponsorPlaysCsv(
   return text(200, csv, "text/csv; charset=utf-8");
 }
 
+function readLocalImageAsDataUrl(rawPath: string | null): string | null {
+  if (!rawPath?.trim()) return null;
+  const stored = rawPath.trim();
+  const ext = path.extname(stored).toLowerCase();
+  const mime =
+    ext === ".png"
+      ? "image/png"
+      : ext === ".jpg" || ext === ".jpeg"
+        ? "image/jpeg"
+        : ext === ".webp"
+          ? "image/webp"
+          : ext === ".gif"
+            ? "image/gif"
+            : null;
+  if (!mime) return null;
+  let resolved = stored;
+  if (stored.startsWith("/uploads/")) {
+    const uploadsDir = process.env.STADIUM_UPLOADS_DIR;
+    if (!uploadsDir) return null;
+    resolved = path.join(uploadsDir, stored.replace(/^\/uploads\//, ""));
+  }
+  if (!path.isAbsolute(resolved)) return null;
+  try {
+    const buf = fs.readFileSync(resolved);
+    if (buf.length < 8 || buf.length > 4_000_000) return null;
+    return `data:${mime};base64,${buf.toString("base64")}`;
+  } catch {
+    return null;
+  }
+}
+
 function json(status: number, value: unknown): DesktopApiResponse {
   return {
     status,
@@ -1352,6 +1410,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           secondHalfScoreboardSec?: number;
           secondHalfSponsorSec?: number;
           scoreboardThemeJson?: string | null;
+          proofOfPlayBrandJson?: string | null;
           displayCanvasWidth?: number;
           displayCanvasHeight?: number;
           displayScalingMode?: "cover" | "contain" | "exact";
@@ -1395,6 +1454,12 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       if ("scoreboardThemeJson" in body) {
         const raw = body.scoreboardThemeJson;
         await setScoreboardThemeJson(
+          raw === null || raw === undefined ? null : String(raw),
+        );
+      }
+      if ("proofOfPlayBrandJson" in body) {
+        const raw = body.proofOfPlayBrandJson;
+        await setProofOfPlayBrandJson(
           raw === null || raw === undefined ? null : String(raw),
         );
       }
@@ -2135,6 +2200,14 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
 
     if (pathname === "/api/localfile") {
       return json(501, { error: "Desktop build gebruikt directe bestands-URL's, geen proxy route." });
+    }
+
+    if (pathname === "/api/proof-of-play-logo" && method === "GET") {
+      const dataUrl = readLocalImageAsDataUrl(searchParams.get("path"));
+      if (!dataUrl) {
+        return json(404, { error: "Logo niet gevonden" });
+      }
+      return json(200, { dataUrl });
     }
 
     if (pathname === "/api/sponsor-plays" && method === "GET") {

@@ -2,6 +2,90 @@
 
 export type LeftStripSegment = "home" | "timer" | "away";
 
+export type ScoreboardLayoutMode = "auto" | "custom" | "left-l" | "full" | "bottom-strip";
+
+export type LayoutSlotId = "home" | "away" | "clock" | "sponsor";
+
+/** Positie op het LED-canvas, in procent (0–100). Onafhankelijk van resolutie. */
+export type LayoutSlot = { x: number; y: number; w: number; h: number };
+
+export type ScoreboardSlots = Record<LayoutSlotId, LayoutSlot>;
+
+export const LAYOUT_SLOT_IDS: LayoutSlotId[] = ["home", "away", "clock", "sponsor"];
+
+/**
+ * Op een 16:9-LED-canvas is een vak 16:9 wanneer breedte% === hoogte%.
+ * Grootste 16:9-rechthoek die in `area` past, gecentreerd.
+ */
+export function largestSixteenByNineSlot(area: LayoutSlot): LayoutSlot {
+  const side = Math.min(area.w, area.h);
+  return {
+    x: area.x + (area.w - side) / 2,
+    y: area.y + (area.h - side) / 2,
+    w: side,
+    h: side,
+  };
+}
+
+export function slotIsSixteenByNine(slot: LayoutSlot): boolean {
+  return slot.w === slot.h;
+}
+
+export const DEFAULT_SLOTS: ScoreboardSlots = {
+  home: { x: 2, y: 6, w: 18, h: 42 },
+  clock: { x: 38, y: 4, w: 24, h: 20 },
+  away: { x: 80, y: 6, w: 18, h: 42 },
+  sponsor: { x: 22, y: 26, w: 56, h: 56 },
+};
+
+export const SLOT_PRESETS: { id: string; slots: ScoreboardSlots }[] = [
+  { id: "overlay", slots: DEFAULT_SLOTS },
+  {
+    id: "leftBar",
+    slots: {
+      home: { x: 0, y: 0, w: 16, h: 36 },
+      clock: { x: 0, y: 36, w: 16, h: 22 },
+      away: { x: 0, y: 58, w: 16, h: 42 },
+      sponsor: largestSixteenByNineSlot({ x: 16, y: 0, w: 84, h: 100 }),
+    },
+  },
+  {
+    id: "topBar",
+    slots: {
+      home: { x: 0, y: 0, w: 28, h: 18 },
+      clock: { x: 38, y: 0, w: 24, h: 18 },
+      away: { x: 72, y: 0, w: 28, h: 18 },
+      sponsor: largestSixteenByNineSlot({ x: 0, y: 18, w: 100, h: 82 }),
+    },
+  },
+  {
+    id: "bottomBar",
+    slots: {
+      sponsor: largestSixteenByNineSlot({ x: 0, y: 0, w: 100, h: 78 }),
+      home: { x: 0, y: 78, w: 28, h: 22 },
+      clock: { x: 38, y: 78, w: 24, h: 22 },
+      away: { x: 72, y: 78, w: 28, h: 22 },
+    },
+  },
+];
+
+export type TeamStackOrder = "logo-name-score" | "name-logo-score" | "logo-score-name" | "score-name-logo";
+
+export const SCOREBOARD_LAYOUT_MODES: ScoreboardLayoutMode[] = [
+  "custom",
+  "auto",
+  "left-l",
+  "full",
+  "bottom-strip",
+];
+
+export const TEAM_STACK_ORDERS: TeamStackOrder[] = [
+  "logo-name-score",
+  "name-logo-score",
+  "logo-score-name",
+  "score-name-logo",
+];
+
 export type ScoreboardTheme = {
   /** Breedte linkse L-balk (px) */
   leftBarWidthPx?: number;
@@ -43,6 +127,17 @@ export type ScoreboardTheme = {
   fullShowTeamNames?: boolean;
   fullTeamNamePx?: number;
   fullTeamNameUppercase?: boolean;
+  /** Welk frame het stadionscherm gebruikt. auto = L naast sponsors, anders fullscreen. */
+  layoutMode?: ScoreboardLayoutMode;
+  /** Volgorde logo / naam / score op het fullscreen-scorebord. */
+  fullTeamStackOrder?: TeamStackOrder;
+  showLogos?: boolean;
+  showScores?: boolean;
+  showClock?: boolean;
+  scoreColor?: string;
+  teamNameColor?: string;
+  /** Vrije plaatsing van thuis, uit, klok en sponsors (procenten). */
+  slots?: ScoreboardSlots;
   /** Onderstrip (indien later gebruikt) */
   stripHeightPx?: number;
   stripLogoPx?: number;
@@ -88,6 +183,14 @@ export type ResolvedScoreboardTheme = Required<
     | "fullShowTeamNames"
     | "fullTeamNamePx"
     | "fullTeamNameUppercase"
+    | "layoutMode"
+    | "fullTeamStackOrder"
+    | "showLogos"
+    | "showScores"
+    | "showClock"
+    | "scoreColor"
+    | "teamNameColor"
+    | "slots"
     | "stripHeightPx"
     | "stripLogoPx"
     | "stripScorePx"
@@ -129,6 +232,14 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
   fullShowTeamNames: false,
   fullTeamNamePx: 28,
   fullTeamNameUppercase: true,
+  layoutMode: "auto",
+  fullTeamStackOrder: "logo-name-score",
+  showLogos: true,
+  showScores: true,
+  showClock: true,
+  scoreColor: "#ffffff",
+  teamNameColor: "rgba(255,255,255,0.88)",
+  slots: normalizeSlots(DEFAULT_SLOTS),
   stripHeightPx: 180,
   stripLogoPx: 120,
   stripScorePx: 120,
@@ -145,6 +256,58 @@ function clamp(n: number, lo: number, hi: number): number {
 function normalizeTeamRadialAlphaHex(raw: string | undefined, fallback: string): string {
   if (raw && /^[0-9a-fA-F]{2}$/.test(raw.trim())) return raw.trim().toLowerCase();
   return fallback;
+}
+
+function normalizeLayoutMode(raw: unknown): ScoreboardLayoutMode {
+  if (raw === "left-l" || raw === "full" || raw === "bottom-strip" || raw === "auto" || raw === "custom") {
+    return raw;
+  }
+  return "auto";
+}
+
+function clampPct(n: number, lo: number, hi: number): number {
+  return Math.round(Math.min(hi, Math.max(lo, n)));
+}
+
+export function normalizeSlot(raw: Partial<LayoutSlot> | undefined, fallback: LayoutSlot): LayoutSlot {
+  const w = clampPct(raw?.w ?? fallback.w, 8, 100);
+  const h = clampPct(raw?.h ?? fallback.h, 8, 100);
+  return {
+    x: clampPct(raw?.x ?? fallback.x, 0, 100 - w),
+    y: clampPct(raw?.y ?? fallback.y, 0, 100 - h),
+    w,
+    h,
+  };
+}
+
+export function normalizeSlots(raw: Partial<ScoreboardSlots> | undefined): ScoreboardSlots {
+  return {
+    home: normalizeSlot(raw?.home, DEFAULT_SLOTS.home),
+    away: normalizeSlot(raw?.away, DEFAULT_SLOTS.away),
+    clock: normalizeSlot(raw?.clock, DEFAULT_SLOTS.clock),
+    sponsor: normalizeSlot(raw?.sponsor, DEFAULT_SLOTS.sponsor),
+  };
+}
+
+export function slotStyle(slot: LayoutSlot): { left: string; top: string; width: string; height: string } {
+  return {
+    left: `${slot.x}%`,
+    top: `${slot.y}%`,
+    width: `${slot.w}%`,
+    height: `${slot.h}%`,
+  };
+}
+
+function normalizeTeamStackOrder(raw: unknown): TeamStackOrder {
+  if (
+    raw === "logo-name-score" ||
+    raw === "name-logo-score" ||
+    raw === "logo-score-name" ||
+    raw === "score-name-logo"
+  ) {
+    return raw;
+  }
+  return "logo-name-score";
 }
 
 function normalizeOrder(order: unknown): LeftStripSegment[] {
@@ -239,6 +402,14 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
       72,
     ),
     fullTeamNameUppercase: patch.fullTeamNameUppercase !== false,
+    layoutMode: normalizeLayoutMode(patch.layoutMode),
+    fullTeamStackOrder: normalizeTeamStackOrder(patch.fullTeamStackOrder),
+    showLogos: patch.showLogos !== false,
+    showScores: patch.showScores !== false,
+    showClock: patch.showClock !== false,
+    scoreColor: patch.scoreColor?.trim() || DEFAULT_SCOREBOARD_THEME.scoreColor,
+    teamNameColor: patch.teamNameColor?.trim() || DEFAULT_SCOREBOARD_THEME.teamNameColor,
+    slots: normalizeSlots(patch.slots),
     stripHeightPx: clamp(Math.round(patch.stripHeightPx ?? DEFAULT_SCOREBOARD_THEME.stripHeightPx), 120, 280),
     stripLogoPx: clamp(Math.round(patch.stripLogoPx ?? DEFAULT_SCOREBOARD_THEME.stripLogoPx), 64, 200),
     stripScorePx: clamp(Math.round(patch.stripScorePx ?? DEFAULT_SCOREBOARD_THEME.stripScorePx), 48, 200),
@@ -256,4 +427,22 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
 
 export function frameGradientCss(t: ResolvedScoreboardTheme): string {
   return `linear-gradient(180deg, ${t.frameColorTop} 0%, ${t.frameColorMid} 55%, ${t.frameColorBot} 100%)`;
+}
+
+/** L-frame: geforceerd, of automatisch naast sponsors/interrupts. */
+export function scoreboardUsesLeftFrame(
+  theme: Pick<ResolvedScoreboardTheme, "layoutMode">,
+  autoLeft: boolean,
+): boolean {
+  if (theme.layoutMode === "custom" || theme.layoutMode === "bottom-strip") return false;
+  if (theme.layoutMode === "left-l") return true;
+  return autoLeft;
+}
+
+export function scoreboardUsesStrip(theme: Pick<ResolvedScoreboardTheme, "layoutMode">): boolean {
+  return theme.layoutMode === "bottom-strip";
+}
+
+export function scoreboardUsesCustom(theme: Pick<ResolvedScoreboardTheme, "layoutMode">): boolean {
+  return theme.layoutMode === "custom";
 }

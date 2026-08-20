@@ -49,18 +49,20 @@ export function TimerPanel() {
   }
 
   return (
-    <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-4">
+    <div className="@container min-w-0 overflow-hidden bg-card border border-border rounded-xl p-4 sm:p-5 flex flex-col gap-4">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">
         {profile.label} · {t("timer.title")}
       </div>
       {hasClock ? (
-        <StableClockText
-          value={formatTime(displaySeconds)}
-          className="mx-auto text-center text-[96px] font-black leading-none"
-          style={{ color: running ? "#22c55e" : "#f59e0b" }}
-        />
+        <div className="flex w-full justify-center px-2">
+          <StableClockText
+            value={formatTime(displaySeconds)}
+            className="max-w-full text-center font-black leading-none text-[clamp(2rem,18cqi,4.5rem)]"
+            style={{ color: running ? "#22c55e" : "#f59e0b" }}
+          />
+        </div>
       ) : (
-        <div className="text-center text-[96px] font-black leading-none text-muted-foreground">
+        <div className="px-2 text-center font-black leading-none text-muted-foreground text-[clamp(2rem,18cqi,4.5rem)]">
           {t("timer.noClock")}
         </div>
       )}

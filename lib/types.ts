@@ -15,7 +15,12 @@ export type AppSettings = {
   /** Alleen op GET /api/settings: resolved item voor display/setup (actief). */
   idleFallbackMedia?: MediaItem | null;
   /** Alleen op GET /api/settings: naam + logo van vast thuis team. */
-  homeTeamBranding?: { name: string; logoPath: string | null } | null;
+  homeTeamBranding?: {
+    name: string;
+    logoPath: string | null;
+    primaryColor?: string;
+    secondaryColor?: string;
+  } | null;
   goalIntroVideoPath: string | null;
   /** GOAL +1 gedrag: true = score + visual, false = alleen score. */
   goalVisualHomeEnabled?: boolean;
@@ -29,6 +34,8 @@ export type AppSettings = {
   secondHalfSponsorSec: number;
   /** JSON-string; zie lib/scoreboard-theme.ts */
   scoreboardThemeJson?: string | null;
+  /** JSON-string; zie lib/proof-of-play-brand.ts */
+  proofOfPlayBrandJson?: string | null;
   /** Logisch canvas voor stadiondisplay (default 1920×1080). Pas aan voor exotische LED-formaten. */
   displayCanvasWidth?: number;
   displayCanvasHeight?: number;
