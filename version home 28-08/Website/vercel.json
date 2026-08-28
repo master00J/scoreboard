@@ -1,0 +1,12 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/app-release-notify",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/seo-post",
+      "schedule": "10 * * * 4"
+    }
+  ]
+}

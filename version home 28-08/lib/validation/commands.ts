@@ -1,0 +1,145 @@
+import { z } from "zod";
+
+export const DisplayMode = z.enum([
+  "IDLE",
+  "TEAM_INTRO",
+  "PLAYER_INTRO",
+  "MATCH",
+  "SPONSOR_ROTATION",
+  "GOAL",
+  "GOAL_INTRO_VIDEO",
+  "GOAL_PLAYER_VIDEO",
+  "SUBSTITUTION",
+  "CARD",
+  "HALFTIME",
+  "FULLTIME",
+  "SPONSOR",
+  "BLACKOUT",
+  "CUSTOM",
+]);
+export type DisplayModeT = z.infer<typeof DisplayMode>;
+
+export const MatchStatus = z.enum([
+  "SETUP",
+  "PREMATCH",
+  "FIRST_HALF",
+  "HALF_TIME",
+  "SECOND_HALF",
+  "EXTRA_TIME",
+  "FULL_TIME",
+  "POST_MATCH",
+]);
+export type MatchStatusT = z.infer<typeof MatchStatus>;
+
+export const CommandSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("timer:start") }),
+  z.object({ type: z.literal("timer:pause") }),
+  z.object({ type: z.literal("timer:adjust"), deltaSec: z.number().int() }),
+  z.object({ type: z.literal("timer:set"), seconds: z.number().int().nonnegative() }),
+  z.object({
+    type: z.literal("timer:preset"),
+    preset: z.enum(["FIRST_HALF", "SECOND_HALF", "ET1", "ET2"]),
+  }),
+  z.object({
+    type: z.literal("timer:setAddedTime"),
+    minutes: z.number().int().min(0).max(30),
+  }),
+  z.object({ type: z.literal("shotclock:start") }),
+  z.object({ type: z.literal("shotclock:pause") }),
+  z.object({
+    type: z.literal("shotclock:reset"),
+    seconds: z.number().int().min(1).max(99).optional(),
+  }),
+  z.object({
+    type: z.literal("shotclock:set"),
+    seconds: z.number().int().min(0).max(99),
+  }),
+  z.object({ type: z.literal("match:setActive"), matchId: z.string().nullable() }),
+  z.object({ type: z.literal("match:setStatus"), status: MatchStatus }),
+  z.object({
+    type: z.literal("sport:setPeriod"),
+    period: z.number().int().min(1).max(9),
+  }),
+  z.object({
+    type: z.literal("sport:statAdjust"),
+    stat: z.enum(["timeout", "foul", "set"]),
+    side: z.enum(["home", "away"]),
+    delta: z.number().int().min(-10).max(10),
+  }),
+  z.object({
+    type: z.literal("score:set"),
+    homeScore: z.number().int().nonnegative(),
+    awayScore: z.number().int().nonnegative(),
+  }),
+  z.object({
+    type: z.literal("score:adjust"),
+    side: z.enum(["home", "away"]),
+    delta: z.number().int(),
+  }),
+  z.object({
+    type: z.literal("goal:prepare"),
+    side: z.enum(["home", "away"]),
+  }),
+  z.object({ type: z.literal("goal:cancel") }),
+  z.object({
+    type: z.literal("goal:trigger"),
+    side: z.enum(["home", "away"]),
+    scorerId: z.string().optional(),
+    assistId: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("sub:trigger"),
+    teamId: z.string(),
+    playerOutId: z.string(),
+    playerInId: z.string(),
+  }),
+  z.object({
+    type: z.literal("sub:triggerBatch"),
+    substitutions: z
+      .array(
+        z.object({
+          teamId: z.string(),
+          playerOutId: z.string(),
+          playerInId: z.string(),
+        }),
+      )
+      .min(1),
+  }),
+  z.object({ type: z.literal("sub:queueAdvance") }),
+  z.object({
+    type: z.literal("card:trigger"),
+    teamId: z.string(),
+    playerId: z.string(),
+    color: z.enum(["YELLOW", "RED"]),
+  }),
+  z.object({
+    type: z.literal("display:setMode"),
+    mode: DisplayMode,
+    meta: z
+      .object({
+        activePlayerId: z.string().nullable().optional(),
+        activeMediaId: z.string().nullable().optional(),
+        note: z.string().nullable().optional(),
+      })
+      .optional(),
+  }),
+  z.object({ type: z.literal("display:blackout") }),
+  z.object({
+    type: z.literal("display:setExternalCapture"),
+    sourceId: z.string().nullable(),
+  }),
+  z.object({
+    type: z.literal("display:setExternalCaptureToDisplay"),
+    enabled: z.boolean(),
+  }),
+  z.object({ type: z.literal("display:requestSnapshot") }),
+  z.object({
+    type: z.literal("display:setSafeMode"),
+    enabled: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("event:undo"),
+    eventId: z.string(),
+  }),
+]);
+export type Command = z.infer<typeof CommandSchema>;

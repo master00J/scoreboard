@@ -1,0 +1,35 @@
+node_modules/
+build/
+.next/
+out/
+dist/
+dist-*/
+server-dist/
+electron-dist/
+renderer-dist/
+web-demo-dist/
+dev-user-data/
+dev-launch.log
+data/*.db
+data/*.db-journal
+prisma-push-temp.db
+prisma/prisma-push-temp.db
+soak-results/
+prisma/prisma/
+public/uploads/*
+!public/uploads/.gitkeep
+logs/*.log
+*.log
+.env
+.env.local
+.env.production
+*.tsbuildinfo
+MobileApp/.expo/
+
+# Gegenereerde desktop-licenties (npm run legal:desktop vóór build)
+legal-dist/
+
+# Apart project (eigen Git-repo): github.com/master00J/ledboarding
+ledboarding/
+!Website/app/api/ledboarding/
+!Website/app/api/ledboarding/**

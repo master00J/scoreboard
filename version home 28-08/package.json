@@ -1,0 +1,187 @@
+{
+  "name": "stadium-scoreboard",
+  "version": "0.1.13",
+  "description": "Desktop scorebord- en sponsorweergave voor stadions (Electron + Next).",
+  "author": "ArenaCue",
+  "private": true,
+  "overrides": {
+    "caniuse-lite": "1.0.30001792"
+  },
+  "main": "electron-dist/electron/main.js",
+  "scripts": {
+    "dev": "npm run electron:dev",
+    "build": "npm run electron:build",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "postinstall": "prisma generate",
+    "electron:dev": "node scripts/electron-dev.mjs",
+    "renderer:build": "node scripts/build-renderer.mjs",
+    "renderer:web-demo": "node scripts/build-web-demo.mjs",
+    "electron:compile": "tsc -p electron/tsconfig.json",
+    "legal:desktop": "node scripts/assemble-desktop-legal-bundle.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "release:checksums": "node scripts/write-release-checksums.mjs",
+    "soak:test": "node scripts/soak-test.mjs",
+    "soak:sponsor": "node scripts/sponsor-rotation-soak.mjs",
+    "soak:sponsor-transition": "node scripts/sponsor-transition-soak.mjs",
+    "soak:sponsor-interrupt": "node scripts/sponsor-interruption-soak.mjs",
+    "e2e:full-match": "node scripts/full-match-e2e.mjs",
+    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --publish never",
+    "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win --publish never",
+    "electron:build:mac": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --mac --publish never",
+    "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir --publish never"
+  },
+  "build": {
+    "forceCodeSigning": false,
+    "appId": "com.stadium.scoreboard",
+    "productName": "Stadium Scoreboard",
+    "copyright": "Copyright (c) Sound & Vision",
+    "icon": "build/icon.ico",
+    "afterPack": "./scripts/after-pack-win-metadata.mjs",
+    "publish": null,
+    "directories": {
+      "output": "dist"
+    },
+    "portable": {
+      "artifactName": "Stadium-Scoreboard.${ext}"
+    },
+    "mac": {
+      "category": "public.app-category.sports",
+      "icon": "build/icon.icns",
+      "identity": null,
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "resources/mac/entitlements.mac.plist",
+      "entitlementsInherit": "resources/mac/entitlements.mac.plist",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Stadium-Scoreboard-${version}-${arch}.${ext}"
+    },
+    "dmg": {
+      "title": "Stadium Scoreboard ${version}"
+    },
+    "win": {
+      "sign": null,
+      "signAndEditExecutable": false,
+      "signDlls": false,
+      "verifyUpdateCodeSignature": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "nl-NL",
+        "en-US",
+        "fr-FR"
+      ],
+      "language": "1043"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/.prisma/**/*"
+    ],
+    "files": [
+      "electron-dist/**/*",
+      "renderer-dist/**/*",
+      "public/**/*",
+      "prisma/**/*",
+      "node_modules/**/*",
+      {
+        "from": "node_modules/.prisma",
+        "to": "node_modules/.prisma",
+        "filter": [
+          "**/*"
+        ]
+      },
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "legal-dist",
+        "to": "legal",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
+    "@prisma/client": "^5.22.0",
+    "@radix-ui/react-dialog": "^1.1.2",
+    "@radix-ui/react-dropdown-menu": "^2.1.2",
+    "@radix-ui/react-label": "^2.1.0",
+    "@radix-ui/react-select": "^2.1.2",
+    "@radix-ui/react-slot": "^1.1.0",
+    "@radix-ui/react-tabs": "^1.1.1",
+    "@radix-ui/react-toast": "^1.2.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
+    "framer-motion": "^11.18.2",
+    "i18next": "^26.3.6",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.7",
+    "lucide-react": "^0.477.0",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-hook-form": "^7.75.0",
+    "react-i18next": "^17.0.11",
+    "tailwind-merge": "^2.6.1",
+    "tailwindcss-animate": "^1.0.7",
+    "zod": "^3.25.0",
+    "zustand": "^5.0.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "autoprefixer": "^10.4.21",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "esbuild": "^0.27.0",
+    "eslint": "^9.39.0",
+    "png2icons": "^2.0.1",
+    "postcss": "^8.5.14",
+    "prisma": "^5.22.0",
+    "rcedit": "^5.0.2",
+    "sharp": "^0.34.5",
+    "tailwindcss": "^3.4.19",
+    "to-ico": "^1.1.5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,292 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider      = "prisma-client-js"
+  // `darwin` is de macOS x64-target; `darwin-x64` bestaat niet en liet `prisma generate` falen.
+  binaryTargets = ["native", "darwin-arm64", "darwin", "windows"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Team {
+  id             String   @id @default(cuid())
+  name           String
+  shortName      String
+  logoPath       String?
+  primaryColor   String
+  secondaryColor String
+  players        Player[]
+  homeMatches    Match[]  @relation("HomeTeam")
+  awayMatches    Match[]  @relation("AwayTeam")
+}
+
+model Player {
+  id              String  @id @default(cuid())
+  teamId          String
+  team            Team    @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  number          Int
+  firstName       String
+  lastName        String
+  position        String?
+  photoPath       String?
+  isCoach         Boolean @default(false)
+  goalMediaId     String?
+  goalVideoPath   String?
+  subImagePath    String?
+  lineupVideoPath String?
+}
+
+model Match {
+  id              String       @id @default(cuid())
+  homeTeamId      String
+  awayTeamId      String
+  homeTeam        Team         @relation("HomeTeam", fields: [homeTeamId], references: [id])
+  awayTeam        Team         @relation("AwayTeam", fields: [awayTeamId], references: [id])
+  kickoffAt       DateTime?
+  /// Optioneel: vaste matchsponsor — automatisch fullscreen vanaf 5 min voor kickoffAt tot aftrap (SETUP/PREMATCH).
+  matchSponsorMediaId String?
+  matchSponsorMedia   MediaItem? @relation("MatchSponsorMedia", fields: [matchSponsorMediaId], references: [id], onDelete: SetNull)
+  halfDurationSec Int          @default(2700)
+  halfBreakSec    Int          @default(900)
+  /// Sportprofiel bepaalt periodes, klokrichting en beschikbare live-statistieken.
+  sport           String       @default("FOOTBALL")
+  /// Actieve helft, quarter of set. Bestaande voetbalmatches starten in periode 1.
+  currentPeriod   Int          @default(1)
+  /// Duur van één actieve periode. Voor volleybal 0 omdat er geen wedstrijdklok is.
+  periodDurationSec Int        @default(2700)
+  /// Sportspecifieke live-tellers. Time-outs en fouten/straffen gelden voor de actieve regels-sectie.
+  homeTimeouts    Int          @default(0)
+  awayTimeouts    Int          @default(0)
+  homeFouls       Int          @default(0)
+  awayFouls       Int          @default(0)
+  /// Alleen zichtbaar bij sporten met sets (momenteel volleybal).
+  homeSets        Int          @default(0)
+  awaySets        Int          @default(0)
+  /// Lengte (s) van het herhalende prematch-sponsorrooster op het scherm. 0 = automatisch (≈ som van sponsor-«voor»-budgetten, min. 60s).
+  prematchSpreadWindowSec Int @default(0)
+  status          String       @default("SETUP")
+  homeScore       Int          @default(0)
+  awayScore       Int          @default(0)
+  /// JSON string[] — spelers op het veld (thuis); bij leeg/null vult server default 11.
+  homeFieldPlayerIdsJson String?
+  /// JSON string[] — spelers op het veld (uit).
+  awayFieldPlayerIdsJson String?
+  events          MatchEvent[]
+  sponsorPlays    SponsorPlayLog[]
+  createdAt       DateTime     @default(now())
+  /// Afsluiten: rapportage blijft per matchId in SponsorPlayLog; geen live-operatie meer op deze wedstrijd.
+  closedAt        DateTime?
+}
+
+model MatchEvent {
+  id          String   @id @default(cuid())
+  matchId     String
+  match       Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  type        String
+  minute      Int
+  addedTime   Int      @default(0)
+  teamId      String?
+  playerInId  String?
+  playerOutId String?
+  note        String?
+  createdAt   DateTime @default(now())
+}
+
+model MediaItem {
+  id          String         @id @default(cuid())
+  type        String
+  path        String
+  title       String
+  /// Korte operatornaam op de live snelknop; null gebruikt de gewone mediatitel.
+  quickButtonLabel String?
+  durationSec Int
+  sponsorName String?
+  sponsorId   String?
+  sponsor     Sponsor?       @relation(fields: [sponsorId], references: [id], onDelete: SetNull)
+  active      Boolean        @default(true)
+  /// VIDEO: op het display-geluid aan (indien het bestand audio bevat).
+  playAudio   Boolean        @default(false)
+  /// JSON array met sponsor-fases waarvoor dit media-item mag draaien. Null/leeg = alle fases.
+  sponsorPhaseTagsJson String?
+  /// True = technisch item (bv. auto-aangemaakt voor speler goalVideoPath); niet tonen in Media-bibliotheek.
+  hideFromLibrary Boolean @default(false)
+  createdAt   DateTime       @default(now())
+  playlistItems PlaylistItem[]
+  matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
+  /// Optioneel standaardbeeld op het display wanneer IDLE/PREMATCH-playlist leeg is.
+  appSettingsIdleFallback AppSettings? @relation("IdleFallbackMedia")
+  scheduledCues ScheduledMediaCue[]
+  playLogs    SponsorPlayLog[]
+}
+
+model ScheduledMediaCue {
+  id          String    @id @default(cuid())
+  mediaId     String
+  media       MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  matchStatus String
+  triggerSec  Int
+  enabled     Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+}
+
+/// Opgeslagen scorebord-layout die je kunt toepassen zonder JSON te bewerken.
+/// `themeJson` bevat alleen visuele thema-keys — geen afspeelgedrag.
+model ScoreboardTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  /// Vrij label, bv. "Jupiler Pro League" of "Beker".
+  label     String?
+  themeJson String
+  /// Meegeleverd voorbeeld: mag niet verwijderd worden, wel gedupliceerd.
+  isBuiltIn Boolean  @default(false)
+  sortIndex Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Sponsor {
+  id                String      @id @default(cuid())
+  name              String
+  active            Boolean     @default(true)
+  prematchSeconds   Int         @default(0)
+  matchSeconds      Int         @default(0)
+  matchFirstHalfSeconds   Int  @default(0)
+  matchSecondHalfSeconds  Int  @default(0)
+  halftimeSeconds   Int         @default(0)
+  /// Schermtijd na de wedstrijd (full time / post match).
+  postmatchSeconds  Int         @default(0)
+  imageDefaultSec   Int         @default(10)
+  /// Optioneel: eigen seconden vol scorebord vs. sponsorbeeld (leeg = standaard uit Setup).
+  firstHalfScoreboardSec   Int?
+  firstHalfSponsorSec      Int?
+  halftimeScoreboardSec    Int?
+  halftimeSponsorSec       Int?
+  secondHalfScoreboardSec  Int?
+  secondHalfSponsorSec     Int?
+  /// JSON-array van MediaItem-id's: afspeelvolgorde tijdens sponsorrotatie (operator).
+  sponsorPlaybackOrderJson String?
+  /// JSON-object mediaId → aantal volledige weergaven per doorloop unieke clips (default 1).
+  sponsorPlaybackRepeatsJson String?
+  createdAt         DateTime    @default(now())
+  media             MediaItem[]
+  playLogs          SponsorPlayLog[]
+}
+
+model Playlist {
+  id    String         @id @default(cuid())
+  name  String
+  slot  String         @unique
+  items PlaylistItem[]
+}
+
+model PlaylistItem {
+  id                  String    @id @default(cuid())
+  playlistId          String
+  playlist            Playlist  @relation(fields: [playlistId], references: [id], onDelete: Cascade)
+  mediaId             String
+  media               MediaItem @relation(fields: [mediaId], references: [id])
+  order               Int
+  durationOverrideSec Int?
+}
+
+model DisplayState {
+  id                 Int       @id @default(1)
+  mode               String    @default("IDLE")
+  matchId            String?
+  activePlayerId     String?
+  activeSubOutId     String?
+  activeSubInId      String?
+  activeGoalScorerId String?
+  activeMediaId      String?
+  /// JSON-array { teamId, playerOutId, playerInId }[] — volgende wissels na de huidige.
+  substitutionQueueJson String @default("[]")
+  timerRunning       Boolean   @default(false)
+  timerStartedAt     DateTime?
+  timerBaseSec       Int       @default(0)
+  /// Onafhankelijke shotclock; alleen getoond voor sportprofielen die dit ondersteunen.
+  shotClockRunning   Boolean   @default(false)
+  shotClockStartedAt DateTime?
+  /// Resterende seconden op het moment van starten/pauzeren.
+  shotClockBaseSec   Int       @default(24)
+  /// Actuele blessuretijd in minuten voor live scorebord-overlay (+1, +2, ...).
+  addedTimeMinutes   Int       @default(0)
+  externalCaptureSourceId  String?
+  externalCaptureToDisplay Boolean @default(false)
+  /// Veilige modus: forceert pure scoreboard, overrulet alle media/overlays voor noodgevallen tijdens live wedstrijd.
+  safeMode                 Boolean @default(false)
+  /// Modus om naar terug te keren na BLACKOUT (toggle).
+  blackoutResumeMode String?
+  updatedAt          DateTime  @updatedAt
+}
+
+model AppSettings {
+  id                       Int     @id @default(1)
+  homeTeamId               String?
+  goalIntroVideoPath       String?
+  /// GOAL +1 gedrag: thuis standaard visual, uit standaard enkel score.
+  goalVisualHomeEnabled    Boolean @default(true)
+  goalVisualAwayEnabled    Boolean @default(false)
+  /// Oud; alleen nog aanwezig in bestaande SQLite DB, migratie in electron/runtime.
+  matchLiveScoreboardSec   Int     @default(45)
+  matchLiveSponsorSec      Int     @default(15)
+  firstHalfScoreboardSec   Int     @default(45)
+  firstHalfSponsorSec      Int     @default(15)
+  halftimeScoreboardSec    Int     @default(30)
+  halftimeSponsorSec       Int     @default(15)
+  secondHalfScoreboardSec  Int     @default(45)
+  secondHalfSponsorSec     Int     @default(15)
+  liveCycleLegacyImported  Int     @default(0)
+  /// JSON ScoreboardTheme — kleuren, lettertype, afmetingen, volgorde blokken scorebord.
+  scoreboardThemeJson      String?
+  /// JSON ProofOfPlayBrand — clublogo, kleuren en titel voor PDF-export.
+  proofOfPlayBrandJson     String?
+  /// Logische canvas-breedte voor LED-output (default 1920). Pas aan voor exotische LED-formaten.
+  displayCanvasWidth       Int     @default(1920)
+  displayCanvasHeight      Int     @default(1080)
+  /// Scaling-modus voor het stadiondisplay: 'cover' (vult, kan croppen), 'contain' (volledig zichtbaar, zwarte rand), 'exact' (geen scaling, pixel-perfect 1:1).
+  displayScalingMode       String  @default("cover")
+  /// Toon safe-zone overlay (alleen tijdens setup) als hulplijn voor LED-canvas.
+  displaySafeZoneVisible   Boolean @default(false)
+  /// Safe-zone marges in pixels van het logische canvas.
+  displaySafeZoneMarginPx  Int     @default(40)
+  /// Standaard fullscreen-media (afbeelding of video) wanneer er nog geen playlist-items zijn (IDLE / lege prematch).
+  idleFallbackMediaId String? @unique
+  idleFallbackMedia   MediaItem? @relation("IdleFallbackMedia", fields: [idleFallbackMediaId], references: [id], onDelete: SetNull)
+  /// Interfacetaal voor de control UI: nl | en | fr.
+  uiLocale            String  @default("nl")
+}
+
+/// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.
+/// Voor rapportering naar adverteerders en facturatie.
+model SponsorPlayLog {
+  id             String   @id @default(cuid())
+  matchId        String?
+  match          Match?   @relation(fields: [matchId], references: [id], onDelete: SetNull)
+  sponsorId      String?
+  sponsor        Sponsor? @relation(fields: [sponsorId], references: [id], onDelete: SetNull)
+  mediaId        String?
+  media          MediaItem? @relation(fields: [mediaId], references: [id], onDelete: SetNull)
+  /// Snapshot van de naam/titel zodat rapporten leesbaar blijven na verwijdering.
+  sponsorName    String
+  mediaTitle     String
+  /// Match-fase op moment van afspelen: prematch / match / halftime / postmatch.
+  segmentKey     String
+  matchStatus    String?
+  /// Verwachte clipduur (uit media-instellingen).
+  expectedSec    Int
+  /// Werkelijke afgespeelde tijd in seconden (afgekapt op werkelijke duur door interrupts).
+  actualSec      Int
+  /// Begin- en eindtijdstempel voor audit-trail.
+  startedAt      DateTime
+  endedAt        DateTime @default(now())
+  /// Unieke sessie-id voor deduplicatie.
+  clipSessionId  String   @unique
+
+  @@index([matchId])
+  @@index([sponsorId])
+  @@index([endedAt])
+}
