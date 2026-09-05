@@ -1,9 +1,11 @@
 import path from "node:path";
 import { rcedit } from "rcedit";
+import { signFileWithAzure } from "./azure-trusted-sign.mjs";
 
 /**
  * Zet CompanyName / copyright / icon op de Windows .exe zonder winCodeSign
  * (signAndEditExecutable blijft false i.v.m. symlink-rechten op Windows).
+ * Azure Artifact Signing gebeurt hierna, als credentials aanwezig zijn.
  */
 export default async function afterPack(context) {
   if (context.electronPlatformName !== "win32") return;
@@ -28,4 +30,5 @@ export default async function afterPack(context) {
   });
 
   console.log(`[afterPack] Windows-metadata gezet (uitgever: ArenaCue): ${exePath}`);
+  await signFileWithAzure(exePath);
 }

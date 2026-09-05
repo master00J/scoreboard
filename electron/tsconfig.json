@@ -14,8 +14,11 @@
   "include": [
     "../electron/**/*.ts",
     "../lib/desktop-bridge.ts",
+    "../lib/livestream.ts",
+    "../lib/stream-deck.ts",
     "../lib/sponsor-telemetry.ts",
     "../lib/prisma.ts",
+    "../lib/media-playback-compat.ts",
     "../lib/timer.ts",
     "../lib/validation/**/*.ts",
     "../server/handlers.ts"

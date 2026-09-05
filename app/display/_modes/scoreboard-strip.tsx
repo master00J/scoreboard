@@ -20,6 +20,7 @@ export function ScoreboardStrip({
   addedTime = 0,
   period,
   theme: themeProp,
+  placement = "bottom",
 }: {
   match: Match;
   elapsed: number;
@@ -27,22 +28,24 @@ export function ScoreboardStrip({
   addedTime?: number;
   period?: string;
   theme?: ResolvedScoreboardTheme;
+  placement?: "top" | "bottom";
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
+  const offscreen = placement === "top" ? -theme.stripHeightPx : theme.stripHeightPx;
   return (
     <motion.div
-      key="scoreboard-strip"
-      initial={{ y: theme.stripHeightPx, opacity: 0 }}
+      key={`scoreboard-strip-${placement}`}
+      initial={{ y: offscreen, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      exit={{ y: theme.stripHeightPx, opacity: 0 }}
+      exit={{ y: offscreen, opacity: 0 }}
       transition={{ duration: 0.45, ease: "easeOut" }}
-      className="absolute left-0 right-0 bottom-0"
+      className={placement === "top" ? "absolute left-0 right-0 top-0" : "absolute left-0 right-0 bottom-0"}
       style={{ height: theme.stripHeightPx, fontFamily: theme.fontFamily }}
     >
       <div className="absolute inset-0" style={{ background: frameGradientCss(theme) }} />
       <div
-        className="absolute inset-x-0 top-0 h-[6px]"
+        className={placement === "top" ? "absolute inset-x-0 bottom-0 h-[6px]" : "absolute inset-x-0 top-0 h-[6px]"}
         style={{
           background: `linear-gradient(90deg, ${match.homeTeam.primaryColor} 0%, ${match.homeTeam.primaryColor} 50%, ${match.awayTeam.primaryColor} 50%, ${match.awayTeam.primaryColor} 100%)`,
         }}
@@ -145,14 +148,8 @@ export function StripScoreboardLayout({
   return (
     <div className="absolute inset-0" style={{ fontFamily: theme.fontFamily }}>
       <div
-        className="absolute overflow-hidden"
-        style={{
-          left: 0,
-          right: 0,
-          top: 0,
-          bottom: theme.stripHeightPx,
-          background: theme.contentAreaBg,
-        }}
+        className="absolute inset-0 overflow-hidden"
+        style={{ background: theme.contentAreaBg }}
       >
         <DisplayMediaStage>{children}</DisplayMediaStage>
       </div>

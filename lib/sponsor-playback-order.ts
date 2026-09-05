@@ -1,4 +1,4 @@
-import type { MediaItem } from "@/lib/types";
+import type { MediaItem } from "./types";
 
 const REPEAT_MIN = 1;
 const REPEAT_MAX = 20;

@@ -1,10 +1,13 @@
 import { computeElapsedSeconds, computeShotClockSeconds, pauseShotClockAt, runFrom, runShotClockFrom, stopAt } from "@/lib/timer";
 import { getSportProfile, lifecycleStatusForPeriod, normalizeSport, resetStatsForNewPeriod, resetTimeoutsForNewPeriod } from "@/lib/sports";
+import { uiLocaleFromSearch } from "@/lib/i18n/locales";
+import { DEFAULT_LIVESTREAM_SETTINGS, DEFAULT_LIVESTREAM_STATUS, mergeLivestreamSettings } from "@/lib/livestream";
 import { CommandSchema, type Command } from "@/lib/validation/commands";
 import type { CommandAck, DesktopApiRequest, DesktopApiResponse, ElectronBridge, SerializedDisplayState, TickPayload } from "@/lib/desktop-bridge";
 
 const CHANNEL = "arenacue-web-scoreboard";
 const STORAGE_KEY = "arenacue_web_scoreboard_v4";
+let webLivestreamSettings = { ...DEFAULT_LIVESTREAM_SETTINGS };
 
 function id(prefix = "c") {
   return `${prefix}${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
@@ -146,6 +149,7 @@ function seed(): Store {
         active: true,
         playAudio: false,
         hideFromLibrary: false,
+        quickLaunch: false,
         createdAt,
       },
       {
@@ -159,6 +163,7 @@ function seed(): Store {
         active: true,
         playAudio: false,
         hideFromLibrary: false,
+        quickLaunch: false,
         createdAt,
       },
     ],
@@ -213,6 +218,8 @@ function seed(): Store {
       externalCaptureToDisplay: false,
       safeMode: false,
       blackoutResumeMode: null,
+      postMatchStartedAt: null,
+      preMatchStartedAt: null,
       updatedAt: nowIso(),
     },
     sponsorPlays: [],
@@ -233,6 +240,15 @@ function loadStore(): Store {
 
 let store = loadStore();
 
+function queryUiLocale() {
+  return uiLocaleFromSearch(window.location.search);
+}
+
+const forcedLocale = queryUiLocale();
+if (forcedLocale && store.settings?.uiLocale !== forcedLocale) {
+  store.settings = { ...store.settings, uiLocale: forcedLocale };
+}
+
 function persist() {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
@@ -240,6 +256,8 @@ function persist() {
     /* ignore */
   }
 }
+
+if (forcedLocale) persist();
 
 const stateListeners = new Set<(state: SerializedDisplayState) => void>();
 const tickListeners = new Set<(tick: TickPayload) => void>();
@@ -255,6 +273,8 @@ function serializeDisplay(): SerializedDisplayState {
     ...d,
     timerStartedAt: asIso(d.timerStartedAt),
     shotClockStartedAt: asIso(d.shotClockStartedAt),
+    postMatchStartedAt: asIso(d.postMatchStartedAt),
+    preMatchStartedAt: asIso(d.preMatchStartedAt),
     updatedAt: asIso(d.updatedAt) ?? nowIso(),
   };
 }
@@ -286,7 +306,8 @@ function matchById(matchId: string) {
 }
 
 function settingsJson() {
-  const s = store.settings;
+  const forced = queryUiLocale();
+  const s = forced ? { ...store.settings, uiLocale: forced } : store.settings;
   const home = s.homeTeamId ? store.teams.find((t) => t.id === s.homeTeamId) : null;
   return {
     ...s,
@@ -323,7 +344,7 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   const pathname = url.pathname;
   const body = parseBody(req);
 
-  if (pathname === "/api/app/release") return json(200, { version: "0.1.13", notes: "" });
+  if (pathname === "/api/app/release") return json(200, { version: "0.1.14", notes: "" });
   if (pathname === "/api/settings" && method === "GET") return json(200, settingsJson());
   if (pathname === "/api/settings" && method === "PATCH") {
     store.settings = { ...store.settings, ...body };
@@ -476,7 +497,7 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
 
   if (pathname === "/api/media" && method === "GET") return json(200, store.media.filter((m) => !m.hideFromLibrary));
   if (pathname === "/api/media" && method === "POST") {
-    const item = { id: id("md"), active: true, playAudio: false, hideFromLibrary: false, createdAt: nowIso(), durationSec: 10, ...body };
+    const item = { id: id("md"), active: true, playAudio: false, hideFromLibrary: false, quickLaunch: false, createdAt: nowIso(), durationSec: 10, ...body };
     store.media.push(item);
     touchDisplay();
     return json(200, item);
@@ -508,10 +529,21 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   }
   if (pathname === "/api/scheduled-media-cues" && method === "GET") return json(200, store.cues);
   if (pathname === "/api/scheduled-media-cues" && method === "POST") {
-    const cue = { id: id("cue"), enabled: true, createdAt: nowIso(), ...body };
+    const cue = { id: id("cue"), enabled: true, loop: false, createdAt: nowIso(), ...body };
     store.cues.push(cue);
     persist();
     return json(200, cue);
+  }
+  const scheduledCueId = pathname.match(/^\/api\/scheduled-media-cues\/([^/]+)$/)?.[1];
+  if (scheduledCueId && method === "PATCH") {
+    store.cues = store.cues.map((c) => (c.id === scheduledCueId ? { ...c, ...body } : c));
+    persist();
+    return json(200, { ok: true });
+  }
+  if (scheduledCueId && method === "DELETE") {
+    store.cues = store.cues.filter((c) => c.id !== scheduledCueId);
+    persist();
+    return json(200, { ok: true });
   }
   if (pathname === "/api/scoreboard-templates" && method === "GET") return json(200, store.templates);
   if (pathname === "/api/scoreboard-templates" && method === "POST") {
@@ -617,6 +649,14 @@ function handleCommand(raw: Command): CommandAck {
         updateMatch({ status: cmd.status });
         if (cmd.status === "HALF_TIME" || cmd.status === "FULL_TIME" || cmd.status === "POST_MATCH") {
           Object.assign(display, stopAt(computeElapsedSeconds(display)));
+        }
+        {
+          const isPostMatch = cmd.status === "FULL_TIME" || cmd.status === "POST_MATCH";
+          const isPrematch = cmd.status === "SETUP" || cmd.status === "PREMATCH";
+          Object.assign(display, {
+            postMatchStartedAt: isPostMatch ? (display.postMatchStartedAt ?? nowIso()) : null,
+            preMatchStartedAt: isPrematch ? (display.preMatchStartedAt ?? nowIso()) : null,
+          });
         }
         break;
       case "sport:setPeriod": {
@@ -841,7 +881,7 @@ export function installWebDemoBridge() {
     reportSponsorClipEnd: async () => ({ ok: true }),
     reportSponsorClipProgress: async () => ({ ok: true }),
     getSponsorLedgerSnapshot: async () => null,
-    getAppVersion: async () => "0.1.13-web",
+    getAppVersion: async () => "0.1.14-web",
     openExternalUrl: async (url) => {
       window.open(url, "_blank", "noopener,noreferrer");
       return { ok: true };
@@ -859,6 +899,7 @@ export function installWebDemoBridge() {
       },
     }),
     licenseActivate: async () => ({ ok: true, organizationLabel: "ArenaCue web demo", status: "already_activated" }),
+    getStreamDeckInfo: async () => null,
     getMobileBridgeInfo: async () => ({
       enabled: false,
       port: null,
@@ -882,6 +923,32 @@ export function installWebDemoBridge() {
     persistMatchTabLayout: (value) => window.localStorage.setItem("arenacue_match_tab_layout", value),
     reportDisplayPlaybackContext: () => undefined,
     reportDisplayMediaDiagnostic: () => undefined,
+    getLivestreamSettings: async () => ({ ...webLivestreamSettings }),
+    saveLivestreamSettings: async (partial) => {
+      webLivestreamSettings = mergeLivestreamSettings({ ...webLivestreamSettings, ...partial });
+      return webLivestreamSettings;
+    },
+    getLivestreamStatus: async () => ({ ...DEFAULT_LIVESTREAM_STATUS }),
+    startLivestream: async () => ({
+      ...DEFAULT_LIVESTREAM_STATUS,
+      error: "Alleen in de desktop-app",
+    }),
+    stopLivestream: async () => ({ ...DEFAULT_LIVESTREAM_STATUS }),
+    startLivestreamRecord: async () => ({
+      ...DEFAULT_LIVESTREAM_STATUS,
+      error: "Alleen in de desktop-app",
+    }),
+    stopLivestreamRecord: async () => ({ ...DEFAULT_LIVESTREAM_STATUS }),
+    listLivestreamCameras: async () => [],
+    listLivestreamAudioDevices: async () => [],
+    listLivestreamAudioOutputs: async () => [],
+    openLivestreamBrowserInteract: async () => ({ ok: false, error: "Alleen in de desktop-app" }),
+    onLivestreamStatus: () => () => undefined,
+    onLivestreamSettings: () => () => undefined,
+    onLivestreamPreview: () => () => undefined,
+    onLivestreamAudioMeters: () => () => undefined,
+    onLivestreamReadyRequest: () => () => undefined,
+    reportStreamProgramReady: () => undefined,
   };
 
   window.electronAPI = bridge;

@@ -1,6 +1,6 @@
 {
   "name": "stadium-scoreboard",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Desktop scorebord- en sponsorweergave voor stadions (Electron + Next).",
   "author": "ArenaCue",
   "private": true,
@@ -15,7 +15,7 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "postinstall": "prisma generate",
-    "electron:dev": "node scripts/electron-dev.mjs",
+    "electron:dev": "node scripts/ensure-ffmpeg-win.mjs && node scripts/electron-dev.mjs",
     "renderer:build": "node scripts/build-renderer.mjs",
     "renderer:web-demo": "node scripts/build-web-demo.mjs",
     "electron:compile": "tsc -p electron/tsconfig.json",
@@ -29,9 +29,12 @@
     "soak:sponsor-interrupt": "node scripts/sponsor-interruption-soak.mjs",
     "e2e:full-match": "node scripts/full-match-e2e.mjs",
     "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --publish never",
-    "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win --publish never",
+    "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && node scripts/ensure-ffmpeg-win.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win --publish never",
+    "electron:verify-win-sign": "node scripts/verify-win-signature.mjs",
     "electron:build:mac": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --mac --publish never",
-    "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir --publish never"
+    "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir --publish never",
+    "livestream:ensure-ffmpeg": "node scripts/ensure-ffmpeg-win.mjs",
+    "electron:pack:livestream": "node scripts/ensure-ffmpeg-win.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win --dir --publish never -c.directories.output=dist-livestream-test"
   },
   "build": {
     "forceCodeSigning": false,
@@ -40,6 +43,7 @@
     "copyright": "Copyright (c) Sound & Vision",
     "icon": "build/icon.ico",
     "afterPack": "./scripts/after-pack-win-metadata.mjs",
+    "afterAllArtifactBuild": "./scripts/after-all-artifact-build.mjs",
     "publish": null,
     "directories": {
       "output": "dist"
@@ -102,7 +106,8 @@
       "installerLanguages": [
         "nl-NL",
         "en-US",
-        "fr-FR"
+        "fr-FR",
+        "it-IT"
       ],
       "language": "1043"
     },
@@ -131,6 +136,13 @@
         "to": "legal",
         "filter": [
           "**/*"
+        ]
+      },
+      {
+        "from": "vendor/ffmpeg",
+        "to": "ffmpeg",
+        "filter": [
+          "ffmpeg.exe"
         ]
       }
     ]

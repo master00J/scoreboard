@@ -31,12 +31,15 @@ import {
 import { handleCommand } from "../server/handlers";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
+import { isDisplayPlaybackRisk } from "../lib/media-playback-compat";
+import { inspectVideoForDisplay, prepareVideoForDisplay } from "./media-transcode";
 
 type RuntimeOptions = {
   getControlWindow: () => BrowserWindow | null;
   getDisplayWindow: () => BrowserWindow | null;
+  getStreamWindow: () => BrowserWindow | null;
   log: (line: string) => void;
-  onUiLocaleChanged?: (locale: "nl" | "en" | "fr") => void;
+  onUiLocaleChanged?: (locale: "nl" | "en" | "fr" | "it") => void;
 };
 
 let opts: RuntimeOptions | null = null;
@@ -48,8 +51,8 @@ function requireOpts() {
 }
 
 function windows() {
-  const { getControlWindow, getDisplayWindow } = requireOpts();
-  return [getControlWindow(), getDisplayWindow()].filter(
+  const { getControlWindow, getDisplayWindow, getStreamWindow } = requireOpts();
+  return [getControlWindow(), getDisplayWindow(), getStreamWindow()].filter(
     (win): win is BrowserWindow => !!win && !win.isDestroyed(),
   );
 }
@@ -359,6 +362,7 @@ async function ensureSqliteSchema() {
       "mediaId" TEXT NOT NULL,
       "matchStatus" TEXT NOT NULL,
       "triggerSec" INTEGER NOT NULL,
+      "endSec" INTEGER,
       "enabled" BOOLEAN NOT NULL DEFAULT true,
       "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "ScheduledMediaCue_mediaId_fkey"
@@ -389,6 +393,8 @@ async function ensureSqliteSchema() {
     await prisma.$executeRawUnsafe(sql);
   }
 
+  await addColumnIfMissing("ScheduledMediaCue", "endSec", "INTEGER");
+  await addColumnIfMissing("ScheduledMediaCue", "loop", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("Player", "goalVideoPath", "TEXT");
   await addColumnIfMissing("Player", "subImagePath", "TEXT");
   await addColumnIfMissing("Player", "lineupVideoPath", "TEXT");
@@ -449,6 +455,8 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("MediaItem", "playAudio", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("MediaItem", "sponsorPhaseTagsJson", "TEXT");
   await addColumnIfMissing("MediaItem", "hideFromLibrary", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("MediaItem", "playbackWarning", "TEXT");
+  await addColumnIfMissing("MediaItem", "quickLaunch", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("Match", "homeFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "awayFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "matchSponsorMediaId", "TEXT");
@@ -466,6 +474,8 @@ async function ensureSqliteSchema() {
   await addColumnIfMissing("DisplayState", "shotClockRunning", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "shotClockStartedAt", "DATETIME");
   await addColumnIfMissing("DisplayState", "shotClockBaseSec", "INTEGER NOT NULL DEFAULT 24");
+  await addColumnIfMissing("DisplayState", "postMatchStartedAt", "DATETIME");
+  await addColumnIfMissing("DisplayState", "preMatchStartedAt", "DATETIME");
   await addColumnIfMissing("Sponsor", "firstHalfScoreboardSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "firstHalfSponsorSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "halftimeScoreboardSec", "INTEGER");
@@ -526,6 +536,14 @@ async function migrateSponsorMatchHalfFromLegacy() {
   } catch {
     /* tabel/kolom ontbreekt op oudere kopie */
   }
+}
+
+function parseCueEndSec(raw: unknown, startSec: number): number | null {
+  if (raw == null || raw === "") return null;
+  const n = typeof raw === "number" ? raw : Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const end = Math.max(0, Math.round(n));
+  return end > startSec ? end : null;
 }
 
 async function addColumnIfMissing(
@@ -666,8 +684,8 @@ function clampLiveCyclePhasing(p: LiveCycleStored): LiveCycleStored {
   };
 }
 
-function normalizeUiLocale(raw: string | null | undefined): "nl" | "en" | "fr" {
-  return raw === "en" || raw === "fr" ? raw : "nl";
+function normalizeUiLocale(raw: string | null | undefined): "nl" | "en" | "fr" | "it" {
+  return raw === "en" || raw === "fr" || raw === "it" ? raw : "nl";
 }
 
 async function getAppSettings(): Promise<{
@@ -684,7 +702,7 @@ async function getAppSettings(): Promise<{
   displayScalingMode: "cover" | "contain" | "exact";
   displaySafeZoneVisible: boolean;
   displaySafeZoneMarginPx: number;
-  uiLocale: "nl" | "en" | "fr";
+  uiLocale: "nl" | "en" | "fr" | "it";
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
@@ -851,7 +869,7 @@ async function buildSettingsApiJson() {
   };
 }
 
-async function setUiLocale(locale: "nl" | "en" | "fr") {
+async function setUiLocale(locale: "nl" | "en" | "fr" | "it") {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "uiLocale" = ? WHERE "id" = 1`,
     locale,
@@ -863,7 +881,7 @@ async function setUiLocale(locale: "nl" | "en" | "fr") {
   }
 }
 
-export async function getUiLocale(): Promise<"nl" | "en" | "fr"> {
+export async function getUiLocale(): Promise<"nl" | "en" | "fr" | "it"> {
   const s = await getAppSettings();
   return normalizeUiLocale(s.uiLocale);
 }
@@ -1083,8 +1101,67 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   await repairOrphanDisplayMatchId();
   await resetAutoSponsorModeOnStartup();
   startTickLoop();
+  await prepareRiskyVideosInBackground();
   await broadcastDisplayState();
   broadcastSponsorLedger();
+}
+
+async function persistPreparedVideo(
+  item: { id: string; title: string; path: string; durationSec: number },
+): Promise<boolean> {
+  const prepared = await prepareVideoForDisplay(item.path);
+  if (!prepared.transcoded) {
+    if (prepared.reason === "ok" && item.path) {
+      await prisma.mediaItem.update({
+        where: { id: item.id },
+        data: { playbackWarning: null },
+      });
+    }
+    return false;
+  }
+  await prisma.mediaItem.update({
+    where: { id: item.id },
+    data: {
+      path: prepared.path,
+      durationSec: prepared.durationSec
+        ? Math.max(1, Math.round(prepared.durationSec))
+        : item.durationSec,
+      playbackWarning: null,
+    },
+  });
+  requireOpts().log(
+    `[media] omgezet voor display ${item.title} → ${path.basename(prepared.path)} (${prepared.reason})`,
+  );
+  return true;
+}
+
+async function prepareRiskyVideosInBackground() {
+  try {
+    const videos = await prisma.mediaItem.findMany({
+      where: { type: "VIDEO" },
+      select: { id: true, title: true, path: true, durationSec: true, playbackWarning: true },
+    });
+    let changed = 0;
+    for (const item of videos) {
+      const inspect = await inspectVideoForDisplay(item.path);
+      if (!isDisplayPlaybackRisk(inspect.reason)) {
+        if (item.playbackWarning) {
+          await prisma.mediaItem.update({
+            where: { id: item.id },
+            data: { playbackWarning: null },
+          });
+        }
+        continue;
+      }
+      if (await persistPreparedVideo(item)) changed += 1;
+    }
+    if (changed > 0) {
+      await touchState();
+      await broadcastDisplayState();
+    }
+  } catch (err) {
+    requireOpts().log(`[media] automatische omzetting mislukt: ${String(err)}`);
+  }
 }
 
 export function disposeDesktopRuntime() {
@@ -1417,7 +1494,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           displaySafeZoneVisible?: boolean;
           displaySafeZoneMarginPx?: number;
           idleFallbackMediaId?: string | null;
-          uiLocale?: "nl" | "en" | "fr";
+          uiLocale?: "nl" | "en" | "fr" | "it";
         }) ?? {};
       if ("uiLocale" in body && body.uiLocale) {
         await setUiLocale(normalizeUiLocale(body.uiLocale));
@@ -1980,8 +2057,10 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           mediaId: string;
           matchStatus: string;
           triggerSec: number;
+          endSec: number | null;
           enabled: boolean | number;
           createdAt: Date | string;
+          loop: boolean | number | null;
           mediaType: string;
           mediaPath: string;
           mediaTitle: string;
@@ -1995,7 +2074,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         }>
       >(
         `SELECT
-          c."id", c."mediaId", c."matchStatus", c."triggerSec", c."enabled", c."createdAt",
+          c."id", c."mediaId", c."matchStatus", c."triggerSec", c."endSec", c."enabled", c."loop", c."createdAt",
           m."type" AS "mediaType", m."path" AS "mediaPath", m."title" AS "mediaTitle",
           m."durationSec" AS "mediaDurationSec", m."sponsorName" AS "mediaSponsorName",
           m."sponsorId" AS "mediaSponsorId", m."active" AS "mediaActive",
@@ -2012,7 +2091,9 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           mediaId: c.mediaId,
           matchStatus: c.matchStatus,
           triggerSec: Number(c.triggerSec),
+          endSec: c.endSec == null ? null : Number(c.endSec),
           enabled: Boolean(c.enabled),
+          loop: Boolean(c.loop),
           createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
           media: {
             id: c.mediaId,
@@ -2036,22 +2117,31 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         mediaId?: string;
         matchStatus?: string;
         triggerSec?: number;
+        endSec?: number | null;
         enabled?: boolean;
+        loop?: boolean;
       }) ?? {};
       if (!body.mediaId || !body.matchStatus || !Number.isFinite(body.triggerSec)) {
         return json(400, { error: "Media, fase en tijdstip zijn verplicht." });
+      }
+      const startSec = Math.max(0, Math.round(body.triggerSec ?? 0));
+      const endSec = parseCueEndSec(body.endSec, startSec);
+      if (body.endSec != null && endSec == null) {
+        return json(400, { error: "Eindtijd moet na de starttijd liggen." });
       }
       const media = await prisma.mediaItem.findUnique({ where: { id: body.mediaId } });
       if (!media) return json(400, { error: "Media niet gevonden." });
       const id = `cue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await prisma.$executeRawUnsafe(
-        `INSERT INTO "ScheduledMediaCue" ("id", "mediaId", "matchStatus", "triggerSec", "enabled")
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO "ScheduledMediaCue" ("id", "mediaId", "matchStatus", "triggerSec", "endSec", "enabled", "loop")
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         id,
         body.mediaId,
         body.matchStatus,
-        Math.max(0, Math.round(body.triggerSec ?? 0)),
+        startSec,
+        endSec,
         body.enabled === false ? 0 : 1,
+        body.loop === true ? 1 : 0,
       );
       await touchState();
       await broadcastDisplayState();
@@ -2064,7 +2154,9 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         mediaId?: string;
         matchStatus?: string;
         triggerSec?: number;
+        endSec?: number | null;
         enabled?: boolean;
+        loop?: boolean;
       }) ?? {};
       const updates: string[] = [];
       const values: unknown[] = [];
@@ -2082,9 +2174,20 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         updates.push(`"triggerSec" = ?`);
         values.push(Math.max(0, Math.round(body.triggerSec ?? 0)));
       }
+      if (body.endSec === null) {
+        updates.push(`"endSec" = ?`);
+        values.push(null);
+      } else if (Number.isFinite(body.endSec)) {
+        updates.push(`"endSec" = ?`);
+        values.push(Math.max(0, Math.round(body.endSec as number)));
+      }
       if (typeof body.enabled === "boolean") {
         updates.push(`"enabled" = ?`);
         values.push(body.enabled ? 1 : 0);
+      }
+      if (typeof body.loop === "boolean") {
+        updates.push(`"loop" = ?`);
+        values.push(body.loop ? 1 : 0);
       }
       if (updates.length === 0) return json(400, { error: "Geen wijzigingen." });
       await prisma.$executeRawUnsafe(
@@ -2112,10 +2215,107 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
     }
 
     if (pathname === "/api/media" && method === "POST") {
-      const media = await prisma.mediaItem.create({ data: parseJsonBody(req) });
+      const body = parseJsonBody(req) as Record<string, unknown>;
+      let playbackInspect: Awaited<ReturnType<typeof inspectVideoForDisplay>> | null = null;
+      let playbackWarning: string | null = null;
+      if (body.type === "VIDEO" && typeof body.path === "string") {
+        playbackInspect = await inspectVideoForDisplay(body.path);
+        if (isDisplayPlaybackRisk(playbackInspect.reason)) {
+          playbackWarning = playbackInspect.reason;
+          const fpsBit = playbackInspect.fps ? ` ${playbackInspect.fps}fps` : "";
+          const codecBit = playbackInspect.codec ? ` ${playbackInspect.codec}` : "";
+          requireOpts().log(
+            `[media] afspeelrisico ${path.basename(body.path)} (${playbackInspect.reason}${fpsBit}${codecBit})`,
+          );
+        }
+      }
+      const media = await prisma.mediaItem.create({
+        data: { ...body, playbackWarning } as never,
+      });
+      if (playbackWarning && typeof body.path === "string") {
+        const preparedOk = await persistPreparedVideo({
+          id: media.id,
+          title: media.title,
+          path: media.path,
+          durationSec: media.durationSec,
+        });
+        if (preparedOk) {
+          const updated = await prisma.mediaItem.findUnique({ where: { id: media.id } });
+          await touchState();
+          await broadcastDisplayState();
+          return json(200, { ...(updated ?? media), playbackInspect, transcoded: true });
+        }
+      }
       await touchState();
       await broadcastDisplayState();
-      return json(200, media);
+      return json(200, { ...media, playbackInspect });
+    }
+
+    if (pathname === "/api/media/compat-report" && method === "GET") {
+      const videos = await prisma.mediaItem.findMany({ where: { type: "VIDEO" } });
+      const rows = [];
+      for (const item of videos) {
+        const inspect = await inspectVideoForDisplay(item.path);
+        const warning = isDisplayPlaybackRisk(inspect.reason) ? inspect.reason : null;
+        if (item.playbackWarning !== warning) {
+          await prisma.mediaItem.update({
+            where: { id: item.id },
+            data: { playbackWarning: warning },
+          });
+        }
+        rows.push({
+          id: item.id,
+          title: item.title,
+          reason: inspect.reason,
+          fps: inspect.fps ?? null,
+          codec: inspect.codec ?? null,
+        });
+      }
+      return json(200, rows);
+    }
+
+    const prepareId = pathname.match(/^\/api\/media\/([^/]+)\/prepare$/)?.[1];
+    if (prepareId && method === "POST") {
+      const item = await prisma.mediaItem.findUnique({ where: { id: prepareId } });
+      if (!item) return json(404, { error: "No media" });
+      if (item.type !== "VIDEO") {
+        return json(200, { ...item, transcoded: false });
+      }
+      const prepared = await prepareVideoForDisplay(item.path);
+      if (!prepared.transcoded) {
+        if (prepared.reason === "ok") {
+          if (item.playbackWarning) {
+            const media = await prisma.mediaItem.update({
+              where: { id: prepareId },
+              data: { playbackWarning: null },
+            });
+            await touchState();
+            await broadcastDisplayState();
+            return json(200, { ...media, transcoded: false });
+          }
+          return json(200, { ...item, transcoded: false });
+        }
+        return json(500, {
+          error: "prepare_failed",
+          reason: prepared.reason,
+        });
+      }
+      const media = await prisma.mediaItem.update({
+        where: { id: prepareId },
+        data: {
+          path: prepared.path,
+          durationSec: prepared.durationSec
+            ? Math.max(1, Math.round(prepared.durationSec))
+            : item.durationSec,
+          playbackWarning: null,
+        },
+      });
+      requireOpts().log(
+        `[media] omgezet voor display ${item.title} → ${path.basename(prepared.path)}`,
+      );
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, { ...media, transcoded: true, reason: prepared.reason });
     }
 
     const mediaId = pathname.match(/^\/api\/media\/([^/]+)$/)?.[1];

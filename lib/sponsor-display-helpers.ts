@@ -60,19 +60,54 @@ export function sponsorHalftimeShowsPanel(
   return pl?.items?.some((i) => i.media.active) ?? false;
 }
 
+const SCORE_FRAME_EXCLUSIVE_FULLSCREEN = new Set([
+  "TEAM_INTRO",
+  "PLAYER_INTRO",
+  "HALFTIME",
+  "FULLTIME",
+  "SUBSTITUTION",
+  "BLACKOUT",
+  "IDLE",
+  "GOAL_INTRO_VIDEO",
+  "GOAL_PLAYER_VIDEO",
+]);
+
+/**
+ * L-balk / strip / custom-frame alleen als er écht een paneel naast hoort.
+ * Anders ligt een leeg zwart gat over fullscreen sponsors of goal-video,
+ * en piept het full-scorebord-logo door de L-kolom (dubbel logo).
+ */
+export function scoreFrameAllowed(opts: {
+  mode: string;
+  matchStatus?: string;
+  previewForcesSponsorBeside?: boolean;
+}): boolean {
+  if (SCORE_FRAME_EXCLUSIVE_FULLSCREEN.has(opts.mode)) return false;
+  if (
+    opts.mode === "SPONSOR_ROTATION" &&
+    !sponsorRotationBesideScoreboard(opts.matchStatus) &&
+    !opts.previewForcesSponsorBeside
+  ) {
+    return false;
+  }
+  if (opts.mode === "SPONSOR" && !sponsorRotationBesideScoreboard(opts.matchStatus)) {
+    return false;
+  }
+  return true;
+}
+
 export function shouldShowFullScreenMatchBoard(
   match: Match,
   mode: string,
   sponsors: Sponsor[],
   playlists: Record<PlaylistSlot, Playlist | null>,
+  sponsorPhase?: "sponsor" | "scoreboard",
 ): boolean {
   if (mode === "MATCH") return true;
-  if (
-    mode === "SPONSOR_ROTATION" &&
-    sponsorRotationBesideScoreboard(match.status) &&
-    !sponsorBesideShowsPanel(match, sponsors, playlists)
-  ) {
-    return true;
+  if (mode === "SPONSOR_ROTATION" && sponsorRotationBesideScoreboard(match.status)) {
+    if (sponsorPhase === "scoreboard") return true;
+    if (sponsorPhase === "sponsor") return false;
+    if (!sponsorBesideShowsPanel(match, sponsors, playlists)) return true;
   }
   return false;
 }

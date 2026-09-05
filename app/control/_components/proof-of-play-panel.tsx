@@ -35,7 +35,13 @@ import {
 export function ProofOfPlayPanel() {
   const { t, i18n } = useTranslation();
   const dateLocale =
-    i18n.language === "fr" ? "fr-BE" : i18n.language === "en" ? "en-GB" : "nl-BE";
+    i18n.language === "it"
+      ? "it-IT"
+      : i18n.language === "fr"
+        ? "fr-BE"
+        : i18n.language === "en"
+          ? "en-GB"
+          : "nl-BE";
   const exportLabels = useMemo(() => proofOfPlayLabelsFromT(t), [t]);
 
   const { data: matches } = useApi<Match[]>("/api/matches");

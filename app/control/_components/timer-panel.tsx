@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { useApi } from "@/lib/use-api";
 import type { Match } from "@/lib/types";
 import { getSportProfile, sportClockSeconds, sportHasMainClock } from "@/lib/sports";
+import { tSportLabel, tSportPeriodName } from "@/lib/i18n/t-phase";
 
 export function TimerPanel() {
   const { t } = useTranslation();
@@ -51,7 +52,7 @@ export function TimerPanel() {
   return (
     <div className="@container min-w-0 overflow-hidden bg-card border border-border rounded-xl p-4 sm:p-5 flex flex-col gap-4">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">
-        {profile.label} · {t("timer.title")}
+        {tSportLabel(t, profile.id, profile.label)} · {t("timer.title")}
       </div>
       {hasClock ? (
         <div className="flex w-full justify-center px-2">
@@ -108,7 +109,7 @@ export function TimerPanel() {
               size="sm"
               onClick={() => sendCommand({ type: "sport:setPeriod", period })}
             >
-              {profile.periodLabel} {period}
+              {tSportPeriodName(t, match?.sport, period)}
             </Button>
           ))}
         </div>

@@ -12,3 +12,9 @@ export const DISPLAY_COVER_MEDIA_STYLE: CSSProperties = {
   objectFit: "cover",
   objectPosition: "center",
 };
+
+/** 16:9-spots (1920×1080) zonder crop — letterbox op zwart. */
+export const DISPLAY_CONTAIN_MEDIA_STYLE: CSSProperties = {
+  ...DISPLAY_COVER_MEDIA_STYLE,
+  objectFit: "contain",
+};

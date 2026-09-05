@@ -4,19 +4,67 @@ import type { DisplayState } from "@prisma/client";
  * Authoritative timer math.
  * Elapsed seconds = base + (running ? (now - startedAt) / 1000 : 0)
  */
+export function startedAtMs(value: Date | string | null | undefined): number | null {
+  if (value == null) return null;
+  const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
 export function computeElapsedSeconds(state: {
   timerRunning: boolean;
   timerStartedAt: Date | string | null;
   timerBaseSec: number;
 }, now: number = Date.now()): number {
-  if (!state.timerRunning || !state.timerStartedAt) {
+  const started = startedAtMs(state.timerStartedAt);
+  if (!state.timerRunning || started == null) {
     return Math.max(0, state.timerBaseSec);
   }
-  const started = state.timerStartedAt instanceof Date
-    ? state.timerStartedAt.getTime()
-    : new Date(state.timerStartedAt).getTime();
-  const diffSec = (now - started) / 1000;
+  // `now` kan achter `startedAt` lopen (stale UI-tick of DateTime-afronding).
+  // Nooit onder de stilgezette base zakken — anders flitst MM:SS 1s terug bij Start.
+  const diffSec = Math.max(0, now - started) / 1000;
   return Math.max(0, state.timerBaseSec + diffSec);
+}
+
+/** Control-UI + preview: DisplayState wint; tick alleen als er geen bruikbaar anker is. */
+export function resolveLiveElapsedSeconds(
+  state: {
+    timerRunning?: boolean;
+    timerStartedAt?: Date | string | null;
+    timerBaseSec?: number;
+  } | null,
+  tick: {
+    elapsed: number;
+    running: boolean;
+    startedAt: string | null;
+    baseSec: number;
+    serverNow: number;
+  } | null,
+  now: number = Date.now(),
+): number {
+  if (state) {
+    if (!state.timerRunning) {
+      return Math.max(0, Number(state.timerBaseSec ?? 0));
+    }
+    const started = startedAtMs(state.timerStartedAt);
+    if (started != null) {
+      const base = Math.max(0, Number(state.timerBaseSec ?? 0));
+      return base + Math.max(0, now - started) / 1000;
+    }
+  }
+  if (tick) {
+    if (!tick.running) {
+      return Math.max(0, Number.isFinite(tick.baseSec) ? tick.baseSec : tick.elapsed);
+    }
+    const started = startedAtMs(tick.startedAt);
+    if (started != null) {
+      const base = Math.max(0, Number(tick.baseSec ?? 0));
+      return base + Math.max(0, now - started) / 1000;
+    }
+    if (Number.isFinite(tick.elapsed) && Number.isFinite(tick.serverNow)) {
+      return Math.max(0, tick.elapsed + Math.max(0, now - tick.serverNow) / 1000);
+    }
+  }
+  return Math.max(0, Number(state?.timerBaseSec ?? 0));
 }
 
 /**
@@ -74,18 +122,26 @@ export function runShotClockFrom(seconds: number, now: Date = new Date()) {
 
 export type SerializedDisplayState = Omit<
   DisplayState,
-  "timerStartedAt" | "shotClockStartedAt" | "updatedAt"
+  "timerStartedAt" | "shotClockStartedAt" | "postMatchStartedAt" | "preMatchStartedAt" | "updatedAt"
 > & {
   timerStartedAt: string | null;
   shotClockStartedAt: string | null;
+  postMatchStartedAt: string | null;
+  preMatchStartedAt: string | null;
   updatedAt: string;
 };
 
 export function serializeDisplayState(s: DisplayState): SerializedDisplayState {
+  const row = s as DisplayState & {
+    postMatchStartedAt?: Date | null;
+    preMatchStartedAt?: Date | null;
+  };
   return {
     ...s,
     timerStartedAt: s.timerStartedAt ? s.timerStartedAt.toISOString() : null,
     shotClockStartedAt: s.shotClockStartedAt ? s.shotClockStartedAt.toISOString() : null,
+    postMatchStartedAt: row.postMatchStartedAt ? row.postMatchStartedAt.toISOString() : null,
+    preMatchStartedAt: row.preMatchStartedAt ? row.preMatchStartedAt.toISOString() : null,
     updatedAt: s.updatedAt.toISOString(),
   };
 }

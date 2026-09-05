@@ -112,6 +112,10 @@ model MediaItem {
   sponsorPhaseTagsJson String?
   /// True = technisch item (bv. auto-aangemaakt voor speler goalVideoPath); niet tonen in Media-bibliotheek.
   hideFromLibrary Boolean @default(false)
+  /// VIDEO: risico op het stadionscherm (high_fps, unsupported_codec, pixel_format). Null = ok of niet gecheckt.
+  playbackWarning String?
+  /// Toon als sneltoets op Display (waarschuwingen, manuele clips).
+  quickLaunch Boolean @default(false)
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
@@ -127,7 +131,10 @@ model ScheduledMediaCue {
   media       MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   matchStatus String
   triggerSec  Int
+  endSec      Int?
   enabled     Boolean   @default(true)
+  /// Rundown van deze fase herhaalt na de laatste clip.
+  loop        Boolean   @default(false)
   createdAt   DateTime  @default(now())
 }
 
@@ -218,6 +225,10 @@ model DisplayState {
   safeMode                 Boolean @default(false)
   /// Modus om naar terug te keren na BLACKOUT (toggle).
   blackoutResumeMode String?
+  /// Start van de post-match time-cue-klok (gedeeld door display + preview).
+  postMatchStartedAt DateTime?
+  /// Start van de prematch-rundown-klok (gedeeld door display + preview).
+  preMatchStartedAt DateTime?
   updatedAt          DateTime  @updatedAt
 }
 
@@ -254,7 +265,7 @@ model AppSettings {
   /// Standaard fullscreen-media (afbeelding of video) wanneer er nog geen playlist-items zijn (IDLE / lege prematch).
   idleFallbackMediaId String? @unique
   idleFallbackMedia   MediaItem? @relation("IdleFallbackMedia", fields: [idleFallbackMediaId], references: [id], onDelete: SetNull)
-  /// Interfacetaal voor de control UI: nl | en | fr.
+  /// Interfacetaal voor de control UI: nl | en | fr | it.
   uiLocale            String  @default("nl")
 }
 

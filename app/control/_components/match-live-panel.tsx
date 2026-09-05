@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
@@ -19,11 +19,11 @@ import { SportLiveControls } from "./sport-live-controls";
 export function MatchLivePanel() {
   const { t } = useTranslation();
   const state = useDisplayStore((s) => s.state);
+  const setGoalPickerSide = useDisplayStore((s) => s.setGoalPickerSide);
   const { data: match, reload } = useApi<Match>(
     state?.matchId ? `/api/matches/${state.matchId}` : null,
   );
   const { data: settings } = useApi<AppSettings>("/api/settings");
-  const [scoreModal, setScoreModal] = useState<null | "home" | "away">(null);
   const [subModal, setSubModal] = useState(false);
   const [lineupModal, setLineupModal] = useState(false);
   const [cardModal, setCardModal] = useState<null | "YELLOW" | "RED">(null);
@@ -48,7 +48,7 @@ export function MatchLivePanel() {
   async function handleScoreClick(side: "home" | "away", points: number) {
     const visualEnabled = side === "home" ? homeGoalVisualEnabled : awayGoalVisualEnabled;
     if (points === 1 && visualEnabled) {
-      setScoreModal(side);
+      setGoalPickerSide(side);
       return;
     }
     await sendCommand({ type: "score:adjust", side, delta: points });
@@ -119,13 +119,6 @@ export function MatchLivePanel() {
         </Button>
       </div>
 
-      {scoreModal && (
-        <ScorerPicker
-          match={match}
-          side={scoreModal}
-          onClose={() => setScoreModal(null)}
-        />
-      )}
       {subModal && (
         <SubPicker
           match={match}
@@ -220,38 +213,83 @@ function SideControl({
   );
 }
 
+export function GoalScorerOverlay({ match }: { match: Match | null }) {
+  const state = useDisplayStore((s) => s.state);
+  const side = useDisplayStore((s) => s.goalPickerSide);
+  const dismissed = useDisplayStore((s) => s.goalPickerDismissed);
+  const setGoalPickerSide = useDisplayStore((s) => s.setGoalPickerSide);
+
+  useEffect(() => {
+    if (
+      state?.mode === "GOAL_INTRO_VIDEO" &&
+      !state.activeGoalScorerId &&
+      !side &&
+      !dismissed
+    ) {
+      setGoalPickerSide("home");
+    }
+  }, [dismissed, setGoalPickerSide, side, state?.activeGoalScorerId, state?.mode]);
+
+  if (!side || !isFullMatch(match)) return null;
+  return (
+    <ScorerPicker
+      match={match}
+      side={side}
+      skipPrepare={state?.mode === "GOAL_INTRO_VIDEO"}
+      onClose={() => setGoalPickerSide(null)}
+    />
+  );
+}
+
 function ScorerPicker({
   match,
   side,
+  skipPrepare = false,
   onClose,
 }: {
   match: Match;
   side: "home" | "away";
+  skipPrepare?: boolean;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
   const team = side === "home" ? match.homeTeam : match.awayTeam;
   const players = team.players ?? [];
   const [scorerId, setScorerId] = useState<string | null>(null);
+  const preparedRef = useRef(skipPrepare);
+  const closingRef = useRef(false);
 
   // As soon as the picker opens we kick off the generic goal video on the
   // display, so the celebration starts immediately (before the operator
   // has even picked the scorer).
   useEffect(() => {
-    sendCommand({ type: "goal:prepare", side });
-  }, [side]);
+    if (skipPrepare || preparedRef.current) return;
+    preparedRef.current = true;
+    void sendCommand({ type: "goal:prepare", side });
+  }, [side, skipPrepare]);
 
   async function handleClose(confirmed: boolean) {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    onClose();
     if (!confirmed) {
-      // Operator bailed out — restore the display to sponsor rotation so
-      // we don't leave a stale goal intro running.
       await sendCommand({ type: "goal:cancel" });
     }
+  }
+
+  async function confirmGoal(nextScorerId?: string) {
+    if (closingRef.current) return;
+    closingRef.current = true;
     onClose();
+    await sendCommand({
+      type: "goal:trigger",
+      side,
+      ...(nextScorerId ? { scorerId: nextScorerId } : {}),
+    });
   }
 
   return (
-    <Dialog open onOpenChange={() => handleClose(false)}>
+    <Dialog open onOpenChange={() => void handleClose(false)}>
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>
@@ -293,28 +331,16 @@ function ScorerPicker({
           ))}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => handleClose(false)}>
+          <Button variant="outline" type="button" onClick={() => void handleClose(false)}>
             {t("common.cancel")}
           </Button>
-          <Button
-            variant="outline"
-            onClick={async () => {
-              await sendCommand({ type: "goal:trigger", side });
-              onClose();
-            }}
-          >
+          <Button variant="outline" type="button" onClick={() => void confirmGoal()}>
             {t("matchLive.skipScorer")}
           </Button>
           <Button
+            type="button"
             disabled={!scorerId}
-            onClick={async () => {
-              await sendCommand({
-                type: "goal:trigger",
-                side,
-                scorerId: scorerId!,
-              });
-              onClose();
-            }}
+            onClick={() => void confirmGoal(scorerId ?? undefined)}
           >
             {t("matchLive.confirmGoal")}
           </Button>

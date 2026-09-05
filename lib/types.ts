@@ -45,7 +45,7 @@ export type AppSettings = {
   displaySafeZoneVisible?: boolean;
   displaySafeZoneMarginPx?: number;
   /** Interfacetaal: nl | en | fr. */
-  uiLocale?: "nl" | "en" | "fr";
+  uiLocale?: "nl" | "en" | "fr" | "it";
 };
 
 export type Player = {
@@ -130,6 +130,10 @@ export type MediaItem = {
   sponsorPhaseTagsJson?: string | null;
   /** Technisch item (bv. auto voor speler goalVideoPath); verborgen in Media-bibliotheek. */
   hideFromLibrary?: boolean;
+  /** VIDEO: high_fps / unsupported_codec / pixel_format — risico op het stadionscherm. */
+  playbackWarning?: string | null;
+  /** Knop op Display voor manuele fullscreen (waarschuwingen e.d.). */
+  quickLaunch?: boolean;
   createdAt: string;
 };
 
@@ -141,7 +145,11 @@ export type ScheduledMediaCue = {
   matchStatus: string;
   /** Matchklok in seconden vanaf start van die fase. */
   triggerSec: number;
+  /** Optioneel: tot dit matchtijdstip zichtbaar (foto’s). Null = duur van het mediabestand. */
+  endSec?: number | null;
   enabled: boolean;
+  /** Hele rundown van deze fase herhaalt na de laatste clip. */
+  loop?: boolean;
   createdAt: string;
 };
 

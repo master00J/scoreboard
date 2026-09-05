@@ -1,7 +1,8 @@
 import path from "path";
 import { prisma } from "../lib/prisma";
+import type { CommandAck } from "../lib/desktop-bridge";
 import type { Command } from "../lib/validation/commands";
-import { isLivePlayingMatchStatus } from "../lib/live-cycle-settings";
+import { isLivePlayingMatchStatus, programmedDisplayMode } from "../lib/live-cycle-settings";
 import {
   computeElapsedSeconds,
   computeShotClockSeconds,
@@ -39,6 +40,25 @@ async function getState() {
 
 async function updateState(data: Parameters<typeof prisma.displayState.update>[0]["data"]) {
   return prisma.displayState.update({ where: { id: 1 }, data });
+}
+
+async function resolveGoalIntroMediaId(): Promise<string | null> {
+  const settingsRow = await prisma.appSettings.findUnique({ where: { id: 1 } });
+  const introPath = settingsRow?.goalIntroVideoPath ?? null;
+  if (introPath) {
+    const fromPath = await ensureMediaItemForVideoPath(introPath, "Goal intro");
+    if (fromPath) return fromPath;
+  }
+  const playlist = await prisma.playlist.findUnique({
+    where: { slot: "GOAL" },
+    include: {
+      items: {
+        orderBy: { order: "asc" },
+        include: { media: true },
+      },
+    },
+  });
+  return playlist?.items.find((item) => item.media.active)?.mediaId ?? null;
 }
 
 async function goalVisualEnabledForSide(side: "home" | "away"): Promise<boolean> {
@@ -203,11 +223,10 @@ async function defaultResumeModeAfterBlackout(matchId: string | null): Promise<s
     select: { status: true },
   });
   if (!m) return "IDLE";
-  if (isLivePlayingMatchStatus(m.status)) return "SPONSOR_ROTATION";
-  return "MATCH";
+  return programmedDisplayMode({ matchStatus: m.status });
 }
 
-export async function handleCommand(cmd: Command) {
+export async function handleCommand(cmd: Command): Promise<CommandAck> {
   switch (cmd.type) {
     case "timer:start": {
       const s = await getState();
@@ -359,11 +378,19 @@ export async function handleCommand(cmd: Command) {
           cmd.status === "HALF_TIME" ||
           cmd.status === "FULL_TIME" ||
           cmd.status === "POST_MATCH";
+        const isPostMatch = cmd.status === "FULL_TIME" || cmd.status === "POST_MATCH";
+        const isPrematch = cmd.status === "SETUP" || cmd.status === "PREMATCH";
         await updateState({
           mode: s.mode,
           addedTimeMinutes: 0,
           ...(pausesClock ? stopAt(computeElapsedSeconds(s)) : {}),
           ...(pausesClock ? pauseShotClockAt(computeShotClockSeconds(s)) : {}),
+          postMatchStartedAt: isPostMatch
+            ? ((s as { postMatchStartedAt?: Date | null }).postMatchStartedAt ?? new Date())
+            : null,
+          preMatchStartedAt: isPrematch
+            ? ((s as { preMatchStartedAt?: Date | null }).preMatchStartedAt ?? new Date())
+            : null,
         });
       }
       return { ok: true };
@@ -491,33 +518,14 @@ export async function handleCommand(cmd: Command) {
       const s = await getState();
       if (!s.matchId) throw new Error("No active match");
       if (!(await goalVisualEnabledForSide(cmd.side))) {
-        return { ok: true };
-      }
-      let activeMediaId: string | null = null;
-      const settingsRow = await prisma.appSettings.findUnique({ where: { id: 1 } });
-      const introPath = settingsRow?.goalIntroVideoPath ?? null;
-      if (introPath) {
-        activeMediaId = await ensureMediaItemForVideoPath(introPath, "Goal intro");
-      }
-      if (!activeMediaId) {
-        const playlist = await prisma.playlist.findUnique({
-          where: { slot: "GOAL" },
-          include: {
-            items: {
-              orderBy: { order: "asc" },
-              include: { media: true },
-            },
-          },
-        });
-        const firstActive = playlist?.items.find((i) => i.media.active);
-        activeMediaId = firstActive?.mediaId ?? null;
+        return { ok: true, result: { visual: false } };
       }
       await updateState({
         mode: "GOAL_INTRO_VIDEO",
-        activeMediaId,
+        activeMediaId: await resolveGoalIntroMediaId(),
         activeGoalScorerId: null,
       });
-      return { ok: true };
+      return { ok: true, result: { visual: true } };
     }
     case "goal:cancel": {
       await updateState({

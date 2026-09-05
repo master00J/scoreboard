@@ -60,10 +60,16 @@ async function main() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ArenaCue Scoreboard</title>
     <link rel="stylesheet" href="./assets/renderer.css" />
+    <script>
+      (function () {
+        var m = /(?:^|[?&])(?:lang|locale)=([a-z]{2})/.exec(location.search);
+        if (m) document.documentElement.lang = m[1];
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="./assets/renderer.js"></script>
+    <script type="module" src="./assets/renderer.js?v=locale"></script>
   </body>
 </html>
 `,

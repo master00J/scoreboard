@@ -49,6 +49,7 @@ const bridge: ElectronBridge = {
   licenseGetStatus: () => ipcRenderer.invoke("license:getStatus"),
   licenseActivate: (opts: { licenseKey: string }) => ipcRenderer.invoke("license:activate", opts),
   getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
+  getStreamDeckInfo: () => ipcRenderer.invoke("streamdeck:getInfo"),
   getAppResourceMetrics: () => ipcRenderer.invoke("app:getResourceMetrics"),
   exportVenueBackup: () => ipcRenderer.invoke("backup:exportVenue"),
   getMatchTabLayoutSnapshot: () =>
@@ -61,6 +62,25 @@ const bridge: ElectronBridge = {
   },
   reportDisplayMediaDiagnostic: (payload) => {
     ipcRenderer.send("display:mediaDiagnostic", payload);
+  },
+  getLivestreamSettings: () => ipcRenderer.invoke("livestream:getSettings"),
+  saveLivestreamSettings: (partial) => ipcRenderer.invoke("livestream:saveSettings", partial),
+  getLivestreamStatus: () => ipcRenderer.invoke("livestream:getStatus"),
+  startLivestream: () => ipcRenderer.invoke("livestream:start"),
+  stopLivestream: () => ipcRenderer.invoke("livestream:stop"),
+  startLivestreamRecord: () => ipcRenderer.invoke("livestream:startRecord"),
+  stopLivestreamRecord: () => ipcRenderer.invoke("livestream:stopRecord"),
+  listLivestreamCameras: () => ipcRenderer.invoke("livestream:listCameras"),
+  listLivestreamAudioDevices: () => ipcRenderer.invoke("livestream:listAudioDevices"),
+  listLivestreamAudioOutputs: () => ipcRenderer.invoke("livestream:listAudioOutputs"),
+  openLivestreamBrowserInteract: (url) => ipcRenderer.invoke("livestream:openBrowserInteract", url),
+  onLivestreamStatus: (listener) => subscribe("livestream:status", listener),
+  onLivestreamSettings: (listener) => subscribe("livestream:settings", listener),
+  onLivestreamPreview: (listener) => subscribe("livestream:preview", listener),
+  onLivestreamAudioMeters: (listener) => subscribe("livestream:audioMeters", listener),
+  onLivestreamReadyRequest: (listener) => subscribe("livestream:requestReady", listener),
+  reportStreamProgramReady: () => {
+    ipcRenderer.send("livestream:programReady");
   },
 };
 

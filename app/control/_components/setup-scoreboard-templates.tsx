@@ -7,11 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
 import type { AppSettings } from "@/lib/types";
-import { mergeScoreboardTheme, type ResolvedScoreboardTheme } from "@/lib/scoreboard-theme";
+import { mergeScoreboardTheme } from "@/lib/scoreboard-theme";
 import {
   extractVisualTheme,
+  templateMediaKind,
   type ScoreboardTemplate,
 } from "@/lib/scoreboard-templates";
+import { ScoreboardThemePreview } from "./setup-scoreboard-preview";
 
 /**
  * Layout-bibliotheek: kies een opgeslagen scorebord-layout of bewaar de huidige als
@@ -21,9 +23,11 @@ import {
 export function SetupScoreboardTemplatesSection({
   settings,
   reloadSettings,
+  onEditLayout,
 }: {
   settings: AppSettings | null | undefined;
   reloadSettings: () => void;
+  onEditLayout?: (themeJson: string) => void;
 }) {
   const { t } = useTranslation();
   const [templates, setTemplates] = useState<ScoreboardTemplate[]>([]);
@@ -31,6 +35,7 @@ export function SetupScoreboardTemplatesSection({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
   const [newLabel, setNewLabel] = useState("");
+  const [menuId, setMenuId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -51,9 +56,11 @@ export function SetupScoreboardTemplatesSection({
     () => JSON.stringify(extractVisualTheme(settings?.scoreboardThemeJson ?? null)),
     [settings?.scoreboardThemeJson],
   );
+  const customTemplates = useMemo(() => templates.filter((tpl) => !tpl.isBuiltIn), [templates]);
 
   async function applyTemplate(tpl: ScoreboardTemplate) {
     setBusyId(tpl.id);
+    setMenuId(null);
     try {
       const res = await fetch(`/api/scoreboard-templates/${tpl.id}/apply`, { method: "POST" });
       if (!res.ok) {
@@ -93,6 +100,7 @@ export function SetupScoreboardTemplatesSection({
   }
 
   async function duplicateTemplate(tpl: ScoreboardTemplate) {
+    setMenuId(null);
     const res = await fetch("/api/scoreboard-templates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -111,6 +119,7 @@ export function SetupScoreboardTemplatesSection({
   }
 
   async function deleteTemplate(tpl: ScoreboardTemplate) {
+    setMenuId(null);
     if (!confirm(t("setup.templatesDeleteConfirm", { name: tpl.name }))) return;
     const res = await fetch(`/api/scoreboard-templates/${tpl.id}`, { method: "DELETE" });
     if (!res.ok) {
@@ -125,56 +134,110 @@ export function SetupScoreboardTemplatesSection({
     <section className="space-y-4">
       <div>
         <h3 className="text-sm font-semibold">{t("setup.templatesTitle")}</h3>
-        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-          {t("setup.templatesBody")}
-        </p>
+        <p className="mt-1 text-xs text-muted-foreground leading-relaxed">{t("setup.templatesBody")}</p>
       </div>
 
       {loading ? (
         <p className="text-xs text-muted-foreground">{t("common.loading")}</p>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {templates.map((tpl) => {
+        <div className="grid gap-4 sm:grid-cols-2">
+          {customTemplates.length === 0 ? (
+            <p className="text-xs text-muted-foreground sm:col-span-2">{t("setup.templatesEmpty")}</p>
+          ) : null}
+          {customTemplates.map((tpl) => {
             const isCurrent = JSON.stringify(extractVisualTheme(tpl.themeJson)) === currentVisual;
+            const kind = templateMediaKind(tpl.themeJson);
+            const theme = mergeScoreboardTheme(tpl.themeJson);
             return (
               <div
                 key={tpl.id}
                 className={`rounded-xl border p-3 space-y-3 ${
-                  isCurrent ? "border-emerald-600/70 bg-emerald-950/20" : "border-zinc-800"
+                  isCurrent ? "border-emerald-500/80 bg-emerald-950/25" : "border-zinc-800"
                 }`}
               >
-                <TemplatePreview themeJson={tpl.themeJson} />
+                <div className="relative">
+                  {isCurrent ? (
+                    <span className="absolute left-2 top-2 z-10 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-black">
+                      {t("common.active")}
+                    </span>
+                  ) : null}
+                  <ScoreboardThemePreview theme={theme} />
+                </div>
 
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-sm font-medium truncate">{tpl.name}</div>
                     {tpl.label ? (
-                      <div className="text-[11px] text-muted-foreground truncate">{tpl.label}</div>
+                      <div className="text-[11px] text-muted-foreground leading-snug">{tpl.label}</div>
                     ) : null}
                   </div>
-                  {tpl.isBuiltIn ? (
-                    <span className="shrink-0 rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
-                      {t("setup.templatesBuiltIn")}
+                  <div className="flex shrink-0 flex-col items-end gap-1">
+                    <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300">
+                      {kind === "overlay" ? t("setup.templatesKindOverlay") : t("setup.templatesKindReserved")}
                     </span>
-                  ) : null}
+                    {tpl.isBuiltIn ? (
+                      <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                        {t("setup.templatesBuiltIn")}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="flex items-center gap-2">
                   <Button
                     size="sm"
+                    className="flex-1"
                     disabled={busyId === tpl.id || isCurrent}
                     onClick={() => void applyTemplate(tpl)}
                   >
                     {isCurrent ? t("common.active") : t("setup.templatesApply")}
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => void duplicateTemplate(tpl)}>
-                    {t("setup.templatesDuplicate")}
-                  </Button>
-                  {!tpl.isBuiltIn ? (
-                    <Button size="sm" variant="ghost" onClick={() => void deleteTemplate(tpl)}>
-                      {t("common.delete")}
+                  {onEditLayout ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        onEditLayout(tpl.themeJson);
+                        document.getElementById("scoreboard-layout-editor")?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "start",
+                        });
+                      }}
+                    >
+                      {t("setup.templatesEdit")}
                     </Button>
                   ) : null}
+                  <div className="relative">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      aria-expanded={menuId === tpl.id}
+                      aria-label={t("setup.templatesMore")}
+                      onClick={() => setMenuId((id) => (id === tpl.id ? null : tpl.id))}
+                    >
+                      ⋯
+                    </Button>
+                    {menuId === tpl.id ? (
+                      <div className="absolute right-0 z-20 mt-1 min-w-[10rem] rounded-lg border border-border bg-card p-1 shadow-lg">
+                        <button
+                          type="button"
+                          className="block w-full rounded-md px-3 py-1.5 text-left text-xs hover:bg-secondary"
+                          onClick={() => void duplicateTemplate(tpl)}
+                        >
+                          {t("setup.templatesDuplicate")}
+                        </button>
+                        {!tpl.isBuiltIn ? (
+                          <button
+                            type="button"
+                            className="block w-full rounded-md px-3 py-1.5 text-left text-xs text-red-400 hover:bg-secondary"
+                            onClick={() => void deleteTemplate(tpl)}
+                          >
+                            {t("common.delete")}
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
             );
@@ -211,64 +274,5 @@ export function SetupScoreboardTemplatesSection({
         </div>
       </div>
     </section>
-  );
-}
-
-/**
- * Miniatuur van de layout: dezelfde verhoudingen als het echte scorebord (L-balk links,
- * onderbalk, contentvlak), geschaald naar een 16:9 kaartje. Geen live wedstrijddata —
- * bedoeld om vorm en verhouding te herkennen vóór je toepast.
- */
-function TemplatePreview({ themeJson }: { themeJson: string }) {
-  const theme: ResolvedScoreboardTheme = useMemo(() => mergeScoreboardTheme(themeJson), [themeJson]);
-
-  const CANVAS_W = 1920;
-  const CANVAS_H = 1080;
-  const leftPct = (theme.leftBarWidthPx / CANVAS_W) * 100;
-  const bottomPct = (theme.bottomBarHeightPx / CANVAS_H) * 100;
-  const frame = `linear-gradient(180deg, ${theme.frameColorTop}, ${theme.frameColorMid}, ${theme.frameColorBot})`;
-
-  return (
-    <div
-      className="relative w-full overflow-hidden rounded-lg border border-zinc-800"
-      style={{ aspectRatio: "16 / 9", background: theme.contentAreaBg }}
-    >
-      {/* Linkse L-balk */}
-      <div
-        className="absolute left-0 top-0 bottom-0 flex flex-col items-center justify-around py-[6%]"
-        style={{ width: `${leftPct}%`, background: frame }}
-      >
-        {theme.leftColumnOrder.map((seg) => (
-          <div
-            key={seg}
-            className="rounded-sm bg-white/85"
-            style={{
-              width: "58%",
-              height:
-                seg === "timer"
-                  ? `${Math.max(6, (theme.leftTimerPx / CANVAS_H) * 100 * 1.6)}%`
-                  : `${Math.max(6, (theme.leftScorePx / CANVAS_H) * 100 * 1.2)}%`,
-            }}
-          />
-        ))}
-      </div>
-
-      {/* Onderbalk */}
-      <div
-        className="absolute bottom-0 right-0"
-        style={{ left: `${leftPct}%`, height: `${bottomPct}%`, background: frame }}
-      />
-
-      {/* Contentvlak-indicatie */}
-      <div
-        className="absolute flex items-center justify-center"
-        style={{ left: `${leftPct}%`, right: 0, top: 0, bottom: `${bottomPct}%` }}
-      >
-        <div
-          className="rounded bg-white/10"
-          style={{ width: "46%", height: `${Math.max(14, (theme.fullScorePx / CANVAS_H) * 100)}%` }}
-        />
-      </div>
-    </div>
   );
 }

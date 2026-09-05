@@ -43,6 +43,24 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
         </span>
       </div>
 
+      {model.phase === "sponsor" && (model.mediaTitle || model.mediaFileName) ? (
+        <div className="min-w-0 rounded-md border border-border/70 bg-secondary/40 px-3 py-2">
+          <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            {model.hasLiveClip ? t("sponsors.hudMedia") : t("sponsors.hudMediaPlanned")}
+          </div>
+          {model.mediaTitle ? (
+            <div className="truncate text-sm font-medium">{model.mediaTitle}</div>
+          ) : null}
+          {model.mediaFileName && model.mediaFileName !== model.mediaTitle ? (
+            <div className="truncate text-xs text-muted-foreground">{model.mediaFileName}</div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {model.phase === "sponsor" && !model.hasLiveClip && !model.mediaTitle && !model.mediaFileName ? (
+        <p className="text-xs text-amber-400/90 leading-relaxed">{t("sponsors.hudNoLiveClip")}</p>
+      ) : null}
+
       {model.phase === "sponsor" && model.sponsorClipProgress != null && (
         <div className="space-y-1">
           <div className="h-2 rounded-full bg-secondary overflow-hidden">

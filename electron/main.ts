@@ -6,9 +6,18 @@ import path from "path";
 import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
 import * as licenseSvc from "./license-service";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
+import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
 import { getAppResourceMetrics, getMemoryBreakdownForBootLog } from "./resource-metrics";
 import { menuLabel, normalizeMenuLocale } from "./menu-i18n";
+import {
+  createLivestreamController,
+  type BrowserSourceRequest,
+  type LivestreamController,
+  type MediaSourceRequest,
+  type StreamWindowRequest,
+} from "./livestream";
+import { sanitizeBrowserUrl, type LivestreamSettings } from "../lib/livestream";
 
 /**
  * Portable Windows-build (electron-builder): `userData` naar een map naast de .exe
@@ -169,6 +178,10 @@ if (process.env.STADIUM_DISABLE_GPU_COMPOSITING === "1") {
 
 let controlWindow: BrowserWindow | null = null;
 let displayWindow: BrowserWindow | null = null;
+let streamWindow: BrowserWindow | null = null;
+let browserSourceWindow: BrowserWindow | null = null;
+let browserInteractWindow: BrowserWindow | null = null;
+let mediaSourceWindow: BrowserWindow | null = null;
 /** True na bevestigde afsluiting of fatale fout — slaat de quit-waarschuwing over. */
 let allowQuitWithoutConfirm = false;
 
@@ -260,6 +273,8 @@ let runtime: typeof import("./runtime") | null = null;
 let desktopContext: ElectronBridge["context"] | null = null;
 let mobileBridge: MobileBridgeHandle | null = null;
 let cloudAgent: CloudAgentHandle | null = null;
+let livestream: LivestreamController | null = null;
+let streamDeck: StreamDeckHandle | null = null;
 let splashWindow: BrowserWindow | null = null;
 
 function bootLogPath(): string {
@@ -335,6 +350,12 @@ function configureDesktopContext() {
   env.NODE_ENV = IS_DEV ? "development" : "production";
   env.DATABASE_URL = prismaDatabaseUrl(path.join(dataDir, "stadium.db"));
   env.STADIUM_UPLOADS_DIR = uploadsDir;
+  env.STADIUM_APP_ROOT = root;
+  const ffmpegExe = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const bundledFfmpeg = path.join(root, "vendor", "ffmpeg", ffmpegExe);
+  if (!env.STADIUM_FFMPEG_PATH && fs.existsSync(bundledFfmpeg)) {
+    env.STADIUM_FFMPEG_PATH = bundledFfmpeg;
+  }
 
   bootLog(`appRoot=${root} packaged=${app.isPackaged}`);
   bootLog(
@@ -356,6 +377,7 @@ async function loadRuntime() {
   await runtime.initDesktopRuntime({
     getControlWindow: () => controlWindow,
     getDisplayWindow: () => displayWindow,
+    getStreamWindow: () => streamWindow,
     log: bootLog,
     onUiLocaleChanged: () => {
       void buildMenu();
@@ -381,10 +403,347 @@ async function loadRuntime() {
   });
 }
 
-function loadView(win: BrowserWindow, view: "control" | "display") {
+function loadView(
+  win: BrowserWindow,
+  view: "control" | "display" | "stream" | "media",
+  extra: Record<string, string> = {},
+) {
   return win.loadFile(rendererEntryPath(), {
-    query: { view },
+    query: { view, ...extra },
   });
+}
+
+let streamWindowOffscreen = false;
+
+function streamWindowIsOffscreen(win: BrowserWindow): boolean {
+  if (!streamWindowOffscreen) return false;
+  try {
+    const prefs = (win.webContents as Electron.WebContents & { getLastWebPreferences?: () => { offscreen?: boolean } }).getLastWebPreferences?.();
+    if (prefs) return Boolean(prefs.offscreen);
+  } catch {
+    /* oudere typings */
+  }
+  return streamWindowOffscreen;
+}
+
+async function destroyStreamWindow() {
+  streamWindowOffscreen = false;
+  if (!streamWindow || streamWindow.isDestroyed()) {
+    streamWindow = null;
+    return;
+  }
+  const win = streamWindow;
+  streamWindow = null;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, 1000);
+    win.once("closed", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+    win.destroy();
+  });
+}
+
+async function ensureStreamWindow(req: StreamWindowRequest): Promise<{ win: BrowserWindow; reloaded: boolean }> {
+  const cam = req.camera.trim();
+  const extra = { camera: cam, overlay: req.overlay ? "1" : "0" };
+  const applyFrameRate = (win: BrowserWindow) => {
+    try {
+      win.webContents.setFrameRate(req.fps);
+      if (typeof win.webContents.startPainting === "function" && !win.webContents.isPainting()) {
+        win.webContents.startPainting();
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  if (streamWindow && !streamWindow.isDestroyed()) {
+    if (!streamWindowIsOffscreen(streamWindow)) {
+      await destroyStreamWindow();
+    }
+  }
+
+  if (streamWindow && !streamWindow.isDestroyed()) {
+    const current = (() => {
+      try {
+        const url = new URL(streamWindow.webContents.getURL());
+        return `${url.searchParams.get("camera") ?? ""}|${url.searchParams.get("overlay") ?? ""}`;
+      } catch {
+        return "";
+      }
+    })();
+    const sizeChanged =
+      streamWindow.getContentSize()[0] !== req.width || streamWindow.getContentSize()[1] !== req.height;
+    if (sizeChanged) streamWindow.setContentSize(req.width, req.height);
+    applyFrameRate(streamWindow);
+    if (current === `${cam}|${extra.overlay}`) {
+      return { win: streamWindow, reloaded: false };
+    }
+    await loadView(streamWindow, "stream", extra);
+    applyFrameRate(streamWindow);
+    return { win: streamWindow, reloaded: true };
+  }
+
+  const preload = path.join(__dirname, "preload.js");
+  streamWindow = new BrowserWindow({
+    width: req.width,
+    height: req.height,
+    useContentSize: true,
+    title: "Stadium Scoreboard — Stream",
+    backgroundColor: "#000000",
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    paintWhenInitiallyHidden: true,
+    webPreferences: {
+      preload,
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+      offscreen: true,
+    },
+  });
+  streamWindowOffscreen = true;
+  streamWindow.on("closed", () => {
+    streamWindow = null;
+    streamWindowOffscreen = false;
+  });
+  await loadView(streamWindow, "stream", extra);
+  applyFrameRate(streamWindow);
+  return { win: streamWindow, reloaded: true };
+}
+
+function chromeUserAgent(): string {
+  return session.defaultSession
+    .getUserAgent()
+    .replace(/\s*Electron\/\S+/g, "")
+    .replace(/\s*stadium-scoreboard\/\S+/gi, "");
+}
+
+function applyBrowserSourceSession(): string {
+  const ua = chromeUserAgent();
+  session.fromPartition("persist:arenacue-browser").setUserAgent(ua);
+  return ua;
+}
+
+function destroyBrowserSourceWindow(): Promise<void> {
+  return new Promise((resolve) => {
+    const win = browserSourceWindow;
+    if (!win || win.isDestroyed()) {
+      browserSourceWindow = null;
+      resolve();
+      return;
+    }
+    win.once("closed", () => {
+      browserSourceWindow = null;
+      resolve();
+    });
+    win.destroy();
+  });
+}
+
+async function ensureBrowserSourceWindow(
+  req: BrowserSourceRequest,
+): Promise<{ win: BrowserWindow; reloaded: boolean }> {
+  const url = req.url.trim();
+  const ua = applyBrowserSourceSession();
+  const applyFrameRate = (win: BrowserWindow) => {
+    try {
+      win.webContents.setUserAgent(ua);
+      win.webContents.setAudioMuted(true);
+      win.webContents.setFrameRate(req.fps);
+      if (typeof win.webContents.startPainting === "function" && !win.webContents.isPainting()) {
+        win.webContents.startPainting();
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  if (browserSourceWindow && !browserSourceWindow.isDestroyed()) {
+    const sizeChanged =
+      browserSourceWindow.getContentSize()[0] !== req.width ||
+      browserSourceWindow.getContentSize()[1] !== req.height;
+    if (sizeChanged) browserSourceWindow.setContentSize(req.width, req.height);
+    applyFrameRate(browserSourceWindow);
+    const current = (() => {
+      try {
+        return browserSourceWindow.webContents.getURL();
+      } catch {
+        return "";
+      }
+    })();
+    if (current === url) return { win: browserSourceWindow, reloaded: false };
+    await browserSourceWindow.loadURL(url, { userAgent: ua });
+    applyFrameRate(browserSourceWindow);
+    return { win: browserSourceWindow, reloaded: true };
+  }
+
+  browserSourceWindow = new BrowserWindow({
+    width: req.width,
+    height: req.height,
+    useContentSize: true,
+    title: "ArenaCue — Browserbron",
+    backgroundColor: "#000000",
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    paintWhenInitiallyHidden: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+      offscreen: true,
+      webviewTag: false,
+      partition: "persist:arenacue-browser",
+      autoplayPolicy: "no-user-gesture-required",
+    },
+  });
+  browserSourceWindow.on("closed", () => {
+    browserSourceWindow = null;
+  });
+  applyFrameRate(browserSourceWindow);
+  await browserSourceWindow.loadURL(url, { userAgent: ua }).catch(() => undefined);
+  applyFrameRate(browserSourceWindow);
+  return { win: browserSourceWindow, reloaded: true };
+}
+
+async function openBrowserSourceInteract(rawUrl: string): Promise<{ ok: boolean; error?: string }> {
+  const url = sanitizeBrowserUrl(rawUrl);
+  if (!url) return { ok: false, error: "Vul een website-URL in" };
+  const ua = applyBrowserSourceSession();
+  if (browserInteractWindow && !browserInteractWindow.isDestroyed()) {
+    await browserInteractWindow.loadURL(url, { userAgent: ua }).catch(() => undefined);
+    browserInteractWindow.show();
+    browserInteractWindow.focus();
+    return { ok: true };
+  }
+  browserInteractWindow = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    title: "ArenaCue — Inloggen / interactie",
+    autoHideMenuBar: true,
+    backgroundColor: "#111111",
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      partition: "persist:arenacue-browser",
+      autoplayPolicy: "no-user-gesture-required",
+    },
+  });
+  browserInteractWindow.webContents.setUserAgent(ua);
+  browserInteractWindow.webContents.setWindowOpenHandler(() => ({
+    action: "allow",
+    overrideBrowserWindowOptions: {
+      width: 520,
+      height: 740,
+      autoHideMenuBar: true,
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        partition: "persist:arenacue-browser",
+      },
+    },
+  }));
+  browserInteractWindow.on("closed", () => {
+    browserInteractWindow = null;
+    if (browserSourceWindow && !browserSourceWindow.isDestroyed()) {
+      browserSourceWindow.reload();
+    }
+  });
+  await browserInteractWindow.loadURL(url, { userAgent: ua }).catch(() => undefined);
+  return { ok: true };
+}
+
+function destroyMediaSourceWindow(): Promise<void> {
+  return new Promise((resolve) => {
+    const win = mediaSourceWindow;
+    if (!win || win.isDestroyed()) {
+      mediaSourceWindow = null;
+      resolve();
+      return;
+    }
+    win.once("closed", () => {
+      mediaSourceWindow = null;
+      resolve();
+    });
+    win.destroy();
+  });
+}
+
+async function ensureMediaSourceWindow(
+  req: MediaSourceRequest,
+): Promise<{ win: BrowserWindow; reloaded: boolean }> {
+  const filePath = req.path.trim();
+  const extra = { path: filePath, loop: req.loop ? "1" : "0" };
+  const applyFrameRate = (win: BrowserWindow) => {
+    try {
+      win.webContents.setFrameRate(req.fps);
+      if (typeof win.webContents.startPainting === "function" && !win.webContents.isPainting()) {
+        win.webContents.startPainting();
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+
+  if (mediaSourceWindow && !mediaSourceWindow.isDestroyed()) {
+    const sizeChanged =
+      mediaSourceWindow.getContentSize()[0] !== req.width ||
+      mediaSourceWindow.getContentSize()[1] !== req.height;
+    if (sizeChanged) mediaSourceWindow.setContentSize(req.width, req.height);
+    applyFrameRate(mediaSourceWindow);
+    const current = (() => {
+      try {
+        return new URL(mediaSourceWindow.webContents.getURL());
+      } catch {
+        return null;
+      }
+    })();
+    if (
+      current?.searchParams.get("path") === filePath &&
+      current.searchParams.get("loop") === extra.loop
+    ) {
+      return { win: mediaSourceWindow, reloaded: false };
+    }
+    await loadView(mediaSourceWindow, "media", extra);
+    applyFrameRate(mediaSourceWindow);
+    return { win: mediaSourceWindow, reloaded: true };
+  }
+
+  mediaSourceWindow = new BrowserWindow({
+    width: req.width,
+    height: req.height,
+    useContentSize: true,
+    title: "ArenaCue — Media",
+    backgroundColor: "#000000",
+    frame: false,
+    show: false,
+    skipTaskbar: true,
+    paintWhenInitiallyHidden: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+      offscreen: true,
+      webSecurity: false,
+      webviewTag: false,
+      preload: path.join(__dirname, "preload.js"),
+      autoplayPolicy: "no-user-gesture-required",
+    },
+  });
+  mediaSourceWindow.on("closed", () => {
+    mediaSourceWindow = null;
+  });
+  mediaSourceWindow.webContents.setAudioMuted(true);
+  await loadView(mediaSourceWindow, "media", extra);
+  applyFrameRate(mediaSourceWindow);
+  return { win: mediaSourceWindow, reloaded: true };
 }
 
 /**
@@ -915,6 +1274,54 @@ function registerIpc() {
     }));
   });
 
+  if (!livestream) {
+    livestream = createLivestreamController({
+      getDisplayWindow: () => displayWindow,
+      getControlWindow: () => controlWindow,
+      ensureStreamWindow,
+      closeStreamWindow: destroyStreamWindow,
+      getStreamWindow: () => streamWindow,
+      ensureBrowserWindow: ensureBrowserSourceWindow,
+      closeBrowserWindow: destroyBrowserSourceWindow,
+      getBrowserWindow: () => browserSourceWindow,
+      ensureMediaWindow: ensureMediaSourceWindow,
+      closeMediaWindow: destroyMediaSourceWindow,
+      getMediaWindow: () => mediaSourceWindow,
+      userDataDir: () => app.getPath("userData"),
+      recordDir: () => path.join(app.getPath("videos"), "ArenaCue"),
+      appRoot,
+      resourcesPath: () => process.resourcesPath,
+      log: bootLog,
+    });
+  }
+  ipcMain.handle("livestream:getSettings", () => livestream!.getSettings());
+  ipcMain.handle("livestream:saveSettings", (_e, partial: Partial<LivestreamSettings>) =>
+    livestream!.saveSettings(partial ?? {}),
+  );
+  ipcMain.handle("livestream:getStatus", () => livestream!.getStatus());
+  ipcMain.handle("livestream:listCameras", () => livestream!.listCameras());
+  ipcMain.handle("livestream:listAudioDevices", () => livestream!.listAudioDevices());
+  ipcMain.handle("livestream:listAudioOutputs", () => livestream!.listAudioOutputs());
+  ipcMain.handle("livestream:start", () => livestream!.start());
+  ipcMain.handle("livestream:stop", () => livestream!.stop());
+  ipcMain.handle("livestream:startRecord", () => livestream!.startRecord());
+  ipcMain.handle("livestream:stopRecord", () => livestream!.stopRecord());
+  ipcMain.handle("livestream:openBrowserInteract", (_e, url: string) => openBrowserSourceInteract(url));
+  if (!streamDeck && livestream && runtime) {
+    streamDeck = startStreamDeck({
+      livestream,
+      runCommand: (command) => runtime!.runCommand(command as any),
+      getSnapshot: () => runtime!.getDisplaySnapshot(),
+      log: bootLog,
+    });
+  }
+  ipcMain.handle("streamdeck:getInfo", () => streamDeck?.info() ?? null);
+  ipcMain.on("livestream:programReady", (event) => {
+    if (streamWindow && !streamWindow.isDestroyed() && event.sender === streamWindow.webContents) {
+      livestream?.notifyProgramReady();
+    }
+  });
+
   ipcMain.on("app:getContext", (event) => {
     event.returnValue = desktopContext;
   });
@@ -1379,6 +1786,7 @@ if (!gotLock) {
         callback(false);
       }
     });
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
 
     createSplashWindow();
 
@@ -1476,6 +1884,17 @@ app.on("before-quit", (e) => {
   if (cloudAgent) {
     cloudAgent.stop();
     cloudAgent = null;
+  }
+  if (streamDeck) {
+    void streamDeck.stop();
+    streamDeck = null;
+  }
+  if (livestream) {
+    void livestream.stop();
+  }
+  if (streamWindow && !streamWindow.isDestroyed()) {
+    streamWindow.destroy();
+    streamWindow = null;
   }
   runtime?.disposeDesktopRuntime();
 });

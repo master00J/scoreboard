@@ -21,7 +21,7 @@ export function SubstitutionMode({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
-      className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950"
+      className="absolute inset-0 z-[20] flex flex-col items-center justify-center bg-slate-950"
     >
       <div
         className="uppercase tracking-[0.3em] text-white/40 mb-6 truncate px-10 text-center"

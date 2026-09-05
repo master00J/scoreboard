@@ -2,46 +2,21 @@
 
 import { useEffect, useState } from "react";
 import { useDisplayStore } from "@/lib/store";
-import { computeElapsedSeconds } from "@/lib/timer";
+import { resolveLiveElapsedSeconds } from "@/lib/timer";
 import { computeShotClockSeconds } from "@/lib/timer";
+import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 
 /**
- * Smooth local timer. Only reads authoritative `timerStartedAt` + `timerBaseSec`
- * from DisplayState and the local clock — no drift correction, no per-tick jumps.
- *
- * Server ticks are still received to keep `state` fresh but we don't use them
- * here; that was the source of visible stutter (every ~250ms a re-computed
- * value with a slightly different drift correction caused a tiny jump).
+ * Zelfde wedstrijdklok als het stadionscherm: DisplayState-anker, met `display:tick`
+ * als vangnet wanneer `timerRunning` aan staat maar `timerStartedAt` ontbreekt.
  */
 export function useLiveTimerSeconds(): number {
   const state = useDisplayStore((s) => s.state);
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    let raf = 0;
-    let lastUpdate = 0;
-    function loop() {
-      const t = performance.now();
-      // 5fps is plenty for an MM:SS display, cheap, and stutter-free.
-      if (t - lastUpdate >= 200) {
-        lastUpdate = t;
-        setNow(Date.now());
-      }
-      raf = requestAnimationFrame(loop);
-    }
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  if (!state) return 0;
-  return computeElapsedSeconds(
-    {
-      timerRunning: state.timerRunning,
-      timerStartedAt: state.timerStartedAt,
-      timerBaseSec: state.timerBaseSec,
-    },
-    now,
-  );
+  const tick = useDisplayStore((s) => s.tick);
+  useWallClockMs(200);
+  // Interval triggert alleen de re-render; `now` uit de hook kan tot 200ms achter
+  // `timerStartedAt` lopen en dan 1s terugflitsen (floor van 20.85 → 00:20).
+  return resolveLiveElapsedSeconds(state, tick, Date.now());
 }
 
 /** Vloeiende lokale countdown voor de onafhankelijke shotclock. */

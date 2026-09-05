@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useApi } from "@/lib/use-api";
-import type { Match, MediaItem, Playlist, PlaylistSlot, ScheduledMediaCue, Sponsor } from "@/lib/types";
+import type { Match, MediaItem, ScheduledMediaCue, Sponsor } from "@/lib/types";
 import { useDisplayStore } from "@/lib/store";
 import { effectiveMatchPlayRosterSeconds } from "@/lib/sponsor-roster-effective-timeline";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
@@ -40,8 +40,46 @@ import {
   parseSponsorPlaybackOrderJson,
   parseSponsorPlaybackRepeatsJson,
 } from "@/lib/sponsor-playback-order";
+import { isDisplayPlaybackRisk } from "@/lib/media-playback-compat";
+import { cueRundownPhaseKey, nextRundownWindow, restackRundownWindows } from "@/lib/scheduled-media-cue";
+import type { TFunction } from "i18next";
 
-const SCHEDULED_CUE_PHASES = ["FIRST_HALF", "SECOND_HALF", "EXTRA_TIME"] as const;
+type PlaybackInspect = {
+  reason?: string;
+  fps?: number;
+  codec?: string;
+};
+
+function playbackRiskDetail(t: TFunction, inspect: PlaybackInspect): string {
+  if (inspect.reason === "high_fps") {
+    return t("media.playbackWarnHighFps", { fps: Math.round(inspect.fps ?? 60) });
+  }
+  if (inspect.reason === "unsupported_codec") {
+    return t("media.playbackWarnCodec", { codec: inspect.codec || "?" });
+  }
+  return t("media.playbackWarnPixel");
+}
+
+function notifyPlaybackRisk(t: TFunction, inspect: PlaybackInspect | null | undefined, fileName: string) {
+  if (!inspect?.reason || !isDisplayPlaybackRisk(inspect.reason)) return;
+  toast({
+    title: t("media.playbackWarnTitle"),
+    description: `${fileName} — ${playbackRiskDetail(t, inspect)}`,
+    variant: "error",
+  });
+}
+
+async function prepareMediaPlayback(t: TFunction, mediaId: string): Promise<boolean> {
+  const res = await fetch(`/api/media/${mediaId}/prepare`, { method: "POST" });
+  if (!res.ok) {
+    toast({ title: t("media.playbackFixFailed"), variant: "error" });
+    return false;
+  }
+  toast({ title: t("media.playbackFixed"), description: t("media.playbackFixHint") });
+  return true;
+}
+
+const SCHEDULED_CUE_PHASES = ["PREMATCH", "FIRST_HALF", "SECOND_HALF", "EXTRA_TIME", "POST_MATCH"] as const;
 
 const MEDIA_PHASE_I18N: Record<string, string> = {
   prematch: "media.phasePrematch",
@@ -93,7 +131,6 @@ export function MediaPanel() {
   const sponsorBudgetsDriveLive = isLivePlayingMatchStatus(activeMatch?.status);
 
   const { data: mediaRaw, reload: reloadMedia } = useApi<MediaItem[]>("/api/media");
-  const { data: playlistsRaw, reload: reloadPlaylists } = useApi<Playlist[]>("/api/playlists");
   const { data: scheduledCuesRaw, reload: reloadScheduledCues } =
     useApi<ScheduledMediaCue[]>("/api/scheduled-media-cues");
   const [uploading, setUploading] = useState(false);
@@ -102,7 +139,6 @@ export function MediaPanel() {
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const media = mediaRaw ?? [];
-  const playlists = playlistsRaw ?? [];
   const scheduledCues = scheduledCuesRaw ?? [];
   const libraryMedia = useMemo(
     () => media.filter((m) => !m.hideFromLibrary),
@@ -157,7 +193,7 @@ export function MediaPanel() {
         return;
       }
     }
-    await fetch("/api/media", {
+    const res = await fetch("/api/media", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -167,6 +203,10 @@ export function MediaPanel() {
         durationSec: Math.round(durationSec),
       }),
     });
+    if (res.ok) {
+      const created = (await res.json()) as { playbackInspect?: PlaybackInspect };
+      notifyPlaybackRisk(t, created.playbackInspect, fileName);
+    }
   }
 
   /** Pick files via Electron's native dialog (no upload needed). */
@@ -251,9 +291,9 @@ export function MediaPanel() {
             </p>
           </div>
           <div className="rounded-lg border border-border bg-background/60 p-3">
-            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">3. {t("media.tabPlaylists")}</div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">3. {t("media.tabCues")}</div>
             <p className="mt-1 text-xs text-muted-foreground">
-              {t("media.stepPlaylistsHint")}
+              {t("media.stepCuesHint")}
             </p>
           </div>
         </div>
@@ -266,9 +306,6 @@ export function MediaPanel() {
           </TabsTrigger>
           <TabsTrigger value="library" className="min-w-36">
             {t("media.tabLibrary")}
-          </TabsTrigger>
-          <TabsTrigger value="playlists" className="min-w-36">
-            {t("media.tabPlaylists")}
           </TabsTrigger>
           <TabsTrigger value="scheduled" className="min-w-36">
             {t("media.tabCues")}
@@ -392,39 +429,6 @@ export function MediaPanel() {
       </section>
         </TabsContent>
 
-        <TabsContent value="playlists" className="mt-0">
-      <section className="bg-card border border-border rounded-xl p-6">
-        <div className="text-xs text-muted-foreground max-w-3xl space-y-1.5 mb-4">
-          <p>{t("media.playlistsHelp1")}</p>
-          <p>{t("media.playlistsHelp2")}</p>
-        </div>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">{t("media.tabPlaylists")}</h2>
-        </div>
-        <Tabs defaultValue="IDLE">
-          <TabsList>
-            {(["IDLE", "PREMATCH", "HALFTIME", "POSTMATCH", "GOAL"] as PlaylistSlot[]).map((slot) => (
-              <TabsTrigger key={slot} value={slot}>{slot}</TabsTrigger>
-            ))}
-          </TabsList>
-          {(["IDLE", "PREMATCH", "HALFTIME", "POSTMATCH", "GOAL"] as PlaylistSlot[]).map((slot) => (
-            <TabsContent key={slot} value={slot}>
-              {slot === "GOAL" && (
-                <div className="text-xs text-muted-foreground mb-2">
-                  {t("media.goalPlaylistHint")}
-                </div>
-              )}
-              <PlaylistEditor
-                slot={slot}
-                playlist={playlists.find((p) => p.slot === slot) ?? null}
-                media={libraryMedia}
-                onChange={reloadPlaylists}
-              />
-            </TabsContent>
-          ))}
-        </Tabs>
-      </section>
-        </TabsContent>
         <TabsContent value="scheduled" className="mt-0">
           <ScheduledCuesSection
             media={libraryMedia}
@@ -448,34 +452,124 @@ function ScheduledCuesSection({
 }) {
   const { t } = useTranslation();
   const activeMedia = media.filter((m) => m.active).sort((a, b) => a.title.localeCompare(b.title));
-  const [mediaId, setMediaId] = useState(activeMedia[0]?.id ?? "");
-  const [matchStatus, setMatchStatus] = useState<(typeof SCHEDULED_CUE_PHASES)[number]>("FIRST_HALF");
-  const [timeText, setTimeText] = useState("12:00");
+  const [pickedIds, setPickedIds] = useState<string[]>(activeMedia[0] ? [activeMedia[0].id] : []);
+  const [matchStatus, setMatchStatus] = useState<(typeof SCHEDULED_CUE_PHASES)[number]>("POST_MATCH");
+  const [startSec, setStartSec] = useState(0);
+  const [endSec, setEndSec] = useState(15);
   const [saving, setSaving] = useState(false);
+  const [loopRundown, setLoopRundown] = useState(false);
+  const [mediaQuery, setMediaQuery] = useState("");
 
   useEffect(() => {
-    if (!mediaId && activeMedia[0]) setMediaId(activeMedia[0].id);
-  }, [activeMedia, mediaId]);
+    if (pickedIds.length === 0 && activeMedia[0]) setPickedIds([activeMedia[0].id]);
+  }, [activeMedia, pickedIds.length]);
 
-  async function addCue() {
-    const triggerSec = parseClockInput(timeText);
-    if (!mediaId || triggerSec == null) {
-      toast({ title: t("media.cueInvalidInput"), variant: "error" });
-      return;
+  useEffect(() => {
+    const list = cues.filter((c) => cueRundownPhaseKey(c.matchStatus) === matchStatus);
+    setLoopRundown(list.some((c) => c.loop));
+  }, [cues, matchStatus]);
+
+  const filteredMedia = useMemo(() => {
+    const q = mediaQuery.trim().toLowerCase();
+    if (!q) return activeMedia;
+    return activeMedia.filter((m) => m.title.toLowerCase().includes(q));
+  }, [activeMedia, mediaQuery]);
+
+  const phaseCues = useMemo(() => {
+    const groups = new Map<string, ScheduledMediaCue[]>();
+    for (const key of SCHEDULED_CUE_PHASES) groups.set(key, []);
+    for (const cue of cues) {
+      const key = cueRundownPhaseKey(cue.matchStatus);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key)!.push(cue);
     }
-    setSaving(true);
+    for (const list of groups.values()) {
+      list.sort((a, b) => a.triggerSec - b.triggerSec || a.createdAt.localeCompare(b.createdAt));
+    }
+    return groups;
+  }, [cues]);
+
+  async function postCue(mediaId: string, triggerSec: number, end: number | null) {
     const res = await fetch("/api/scheduled-media-cues", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mediaId, matchStatus, triggerSec, enabled: true }),
+      body: JSON.stringify({
+        mediaId,
+        matchStatus,
+        triggerSec,
+        endSec: end != null && end > triggerSec ? end : null,
+        enabled: true,
+        loop: loopRundown,
+      }),
     });
+    return res.ok;
+  }
+
+  async function addAtTime() {
+    const mediaId = pickedIds[0];
+    const item = activeMedia.find((m) => m.id === mediaId) ?? null;
+    const triggerSec = Math.max(0, Math.round(startSec));
+    const end = Math.max(0, Math.round(endSec));
+    if (!mediaId) {
+      toast({ title: t("media.cueInvalidInput"), variant: "error" });
+      return;
+    }
+    if (item?.type === "IMAGE" && end <= triggerSec) {
+      toast({ title: t("media.cueInvalidRange"), variant: "error" });
+      return;
+    }
+    if (end > 0 && end <= triggerSec) {
+      toast({ title: t("media.cueInvalidRange"), variant: "error" });
+      return;
+    }
+    setSaving(true);
+    const ok = await postCue(mediaId, triggerSec, end > triggerSec ? end : null);
     setSaving(false);
-    if (!res.ok) {
+    if (!ok) {
       toast({ title: t("media.cueSaveFailed"), variant: "error" });
       return;
     }
     onChange();
-    toast({ title: t("media.cueAdded", { time: formatCueClock(triggerSec) }) });
+    toast({
+      title: t("media.cueAdded", {
+        time:
+          end > triggerSec
+            ? `${formatCueClock(triggerSec)} – ${formatCueClock(end)}`
+            : formatCueClock(triggerSec),
+      }),
+    });
+  }
+
+  async function appendRundown() {
+    const items = pickedIds
+      .map((id) => activeMedia.find((m) => m.id === id))
+      .filter((m): m is MediaItem => Boolean(m));
+    if (items.length === 0) {
+      toast({ title: t("media.cueInvalidInput"), variant: "error" });
+      return;
+    }
+    setSaving(true);
+    let existing = [...(phaseCues.get(matchStatus) ?? [])];
+    let ok = true;
+    for (const item of items) {
+      const window = nextRundownWindow(existing, item.durationSec);
+      ok = await postCue(item.id, window.triggerSec, window.endSec);
+      if (!ok) break;
+      existing.push({
+        ...({} as ScheduledMediaCue),
+        triggerSec: window.triggerSec,
+        endSec: window.endSec,
+        media: item,
+      });
+    }
+    setSaving(false);
+    if (!ok) {
+      toast({ title: t("media.cueSaveFailed"), variant: "error" });
+      onChange();
+      return;
+    }
+    onChange();
+    toast({ title: t("media.cueRundownAdded", { count: items.length }) });
   }
 
   async function patchCue(id: string, body: Record<string, unknown>) {
@@ -489,6 +583,58 @@ function ScheduledCuesSection({
       return;
     }
     onChange();
+  }
+
+  async function setPhaseLoop(phase: string, loop: boolean) {
+    if (phase === matchStatus) setLoopRundown(loop);
+    const list = phaseCues.get(phase) ?? [];
+    if (list.length === 0) return;
+    setSaving(true);
+    for (const cue of list) {
+      const res = await fetch(`/api/scheduled-media-cues/${cue.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ loop }),
+      });
+      if (!res.ok) {
+        toast({ title: t("media.cuePatchFailed"), variant: "error" });
+        setSaving(false);
+        onChange();
+        return;
+      }
+    }
+    setSaving(false);
+    onChange();
+  }
+
+  async function applyRestack(list: ScheduledMediaCue[]) {
+    const stacked = restackRundownWindows(list);
+    for (const row of stacked) {
+      const res = await fetch(`/api/scheduled-media-cues/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ triggerSec: row.triggerSec, endSec: row.endSec }),
+      });
+      if (!res.ok) {
+        toast({ title: t("media.cuePatchFailed"), variant: "error" });
+        onChange();
+        return;
+      }
+    }
+    onChange();
+  }
+
+  async function moveCue(phase: string, id: string, delta: number) {
+    const list = [...(phaseCues.get(phase) ?? [])];
+    const idx = list.findIndex((c) => c.id === id);
+    const next = idx + delta;
+    if (idx < 0 || next < 0 || next >= list.length) return;
+    const copy = [...list];
+    const [item] = copy.splice(idx, 1);
+    copy.splice(next, 0, item!);
+    setSaving(true);
+    await applyRestack(copy);
+    setSaving(false);
   }
 
   async function deleteCue(id: string) {
@@ -506,75 +652,189 @@ function ScheduledCuesSection({
         </p>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-[1fr_150px_120px_auto] md:items-end">
-        <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">{t("media.cueMedia")}</span>
-          <select
-            value={mediaId}
-            onChange={(e) => setMediaId(e.target.value)}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-          >
-            {activeMedia.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.title} ({m.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")})
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">{t("media.cuePhase")}</span>
-          <select
-            value={matchStatus}
-            onChange={(e) => setMatchStatus(e.target.value as typeof matchStatus)}
-            className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-          >
-            {SCHEDULED_CUE_PHASES.map((p) => (
-              <option key={p} value={p}>{t(`phases.${p}`)}</option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">{t("media.cueTime")}</span>
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_160px] lg:items-start">
+        <div className="space-y-1 text-xs">
+          <span className="text-muted-foreground">{t("media.cueMediaMulti")}</span>
           <Input
-            value={timeText}
-            onChange={(e) => setTimeText(e.target.value)}
-            placeholder="12:30"
-            className="h-10"
+            type="search"
+            placeholder={t("media.cueSearchPlaceholder")}
+            value={mediaQuery}
+            onChange={(e) => setMediaQuery(e.target.value)}
+            className="h-9"
           />
-        </label>
-        <Button type="button" onClick={() => void addCue()} disabled={saving || activeMedia.length === 0}>
-          {t("common.add")}
-        </Button>
+          <select
+            multiple
+            value={pickedIds.filter((id) => filteredMedia.some((m) => m.id === id))}
+            onChange={(e) => {
+              const visible = new Set(filteredMedia.map((m) => m.id));
+              const selectedVisible = Array.from(e.target.selectedOptions, (opt) => opt.value);
+              setPickedIds((prev) => [
+                ...prev.filter((id) => !visible.has(id)),
+                ...selectedVisible,
+              ]);
+            }}
+            className="h-36 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          >
+            {filteredMedia.length === 0 ? (
+              <option disabled value="">
+                {t("media.searchEmpty")}
+              </option>
+            ) : (
+              filteredMedia.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.title} ({m.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")} · {m.durationSec}s)
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+        <div className="space-y-3">
+          <label className="block space-y-1 text-xs">
+            <span className="text-muted-foreground">{t("media.cuePhase")}</span>
+            <select
+              value={matchStatus}
+              onChange={(e) => setMatchStatus(e.target.value as typeof matchStatus)}
+              className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+            >
+              {SCHEDULED_CUE_PHASES.map((p) => (
+                <option key={p} value={p}>{t(`phases.${p}`)}</option>
+              ))}
+            </select>
+          </label>
+          <Button
+            type="button"
+            className="w-full"
+            onClick={() => void appendRundown()}
+            disabled={saving || pickedIds.length === 0}
+          >
+            {t("media.cueAppendRundown")}
+          </Button>
+          <label className="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={loopRundown}
+              onChange={(e) => void setPhaseLoop(matchStatus, e.target.checked)}
+              disabled={saving}
+            />
+            <span>
+              <span className="font-medium">{t("media.cueLoop")}</span>
+              <span className="mt-0.5 block text-muted-foreground">{t("media.cueLoopHint")}</span>
+            </span>
+          </label>
+        </div>
       </div>
 
-      <div className="rounded-lg border border-border overflow-hidden">
+      <details className="rounded-lg border border-border bg-background/50 px-3 py-2">
+        <summary className="cursor-pointer text-xs font-medium">{t("media.cueExactTime")}</summary>
+        <div className="mt-3 grid gap-3 sm:grid-cols-[auto_auto_auto] sm:items-end">
+          <ClockMmSsField
+            label={t("media.cueStart")}
+            sec={startSec}
+            onChange={setStartSec}
+          />
+          <ClockMmSsField
+            label={t("media.cueEnd")}
+            sec={endSec}
+            onChange={setEndSec}
+          />
+          <Button type="button" variant="outline" onClick={() => void addAtTime()} disabled={saving || pickedIds.length === 0}>
+            {t("media.cueAddAtTime")}
+          </Button>
+        </div>
+      </details>
+
+      <div className="space-y-3">
         {cues.length === 0 ? (
-          <div className="p-4 text-sm text-muted-foreground">{t("media.cuesEmpty")}</div>
-        ) : (
-          <div className="divide-y divide-border">
-            {cues.map((cue) => (
-              <div key={cue.id} className="grid gap-2 p-3 md:grid-cols-[90px_120px_1fr_auto] md:items-center">
-                <label className="flex items-center gap-2 text-xs">
-                  <input
-                    type="checkbox"
-                    checked={cue.enabled}
-                    onChange={(e) => void patchCue(cue.id, { enabled: e.target.checked })}
-                  />
-                  {t("common.active")}
-                </label>
-                <div className="text-xs font-mono">{formatCueClock(cue.triggerSec)}</div>
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{cue.media.title}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {phaseLabel(cue.matchStatus, t)} · {cue.media.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")} · {cue.media.durationSec}s
-                  </div>
-                </div>
-                <Button type="button" variant="ghost" size="sm" onClick={() => void deleteCue(cue.id)}>
-                  {t("common.delete")}
-                </Button>
-              </div>
-            ))}
+          <div className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
+            {t("media.cuesEmpty")}
           </div>
+        ) : (
+          SCHEDULED_CUE_PHASES.map((phase) => {
+            const list = phaseCues.get(phase) ?? [];
+            if (list.length === 0) return null;
+            return (
+              <div key={phase} className="overflow-hidden rounded-lg border border-border">
+                <div className="space-y-1 bg-secondary/50 px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
+                    <span>
+                      {t(`phases.${phase}`)} · {t("media.cueRundownCount", { count: list.length })}
+                    </span>
+                    <label className="flex items-center gap-1.5 font-normal">
+                      <input
+                        type="checkbox"
+                        checked={list.some((c) => c.loop)}
+                        onChange={(e) => void setPhaseLoop(phase, e.target.checked)}
+                        disabled={saving}
+                      />
+                      {t("media.cueLoop")}
+                    </label>
+                  </div>
+                  {phase === "PREMATCH" ? (
+                    <p className="text-[11px] font-normal text-muted-foreground">
+                      {t("media.cuePrematchKickoffHint")}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="divide-y divide-border">
+                  {list.map((cue, idx) => (
+                    <div key={cue.id} className="grid gap-2 p-3 md:grid-cols-[90px_88px_1fr_auto] md:items-center">
+                      <label className="flex items-center gap-2 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={cue.enabled}
+                          onChange={(e) => void patchCue(cue.id, { enabled: e.target.checked })}
+                        />
+                        {t("common.active")}
+                      </label>
+                      <div className="text-xs font-mono">
+                        {cue.endSec != null && cue.endSec > cue.triggerSec
+                          ? t("media.cueWindow", {
+                              start: formatCueClock(cue.triggerSec),
+                              end: formatCueClock(cue.endSec),
+                            })
+                          : formatCueClock(cue.triggerSec)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium">{cue.media.title}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {cue.media.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")}
+                          {cue.endSec != null && cue.endSec > cue.triggerSec
+                            ? ` · ${cue.endSec - cue.triggerSec}s`
+                            : ` · ${cue.media.durationSec}s`}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2"
+                          disabled={saving || idx === 0}
+                          onClick={() => void moveCue(phase, cue.id, -1)}
+                        >
+                          ↑
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2"
+                          disabled={saving || idx === list.length - 1}
+                          onClick={() => void moveCue(phase, cue.id, 1)}
+                        >
+                          ↓
+                        </Button>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => void deleteCue(cue.id)}>
+                          {t("common.delete")}
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
     </section>
@@ -592,6 +852,7 @@ function MediaCard({
 }) {
   const { t } = useTranslation();
   const [durDraft, setDurDraft] = useState(String(item.durationSec));
+  const [fixing, setFixing] = useState(false);
 
   useEffect(() => {
     setDurDraft(String(item.durationSec));
@@ -639,6 +900,30 @@ function MediaCard({
       </div>
       <div className="p-2 text-xs flex flex-col gap-1">
         <div className="truncate font-semibold">{item.title}</div>
+        {isDisplayPlaybackRisk(item.playbackWarning) ? (
+          <div className="flex flex-col gap-1">
+            <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 leading-snug">
+              {t("media.playbackWarnBadge")}
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px]"
+              type="button"
+              disabled={fixing}
+              onClick={() => {
+                setFixing(true);
+                void prepareMediaPlayback(t, item.id)
+                  .then((ok) => {
+                    if (ok) onChange();
+                  })
+                  .finally(() => setFixing(false));
+              }}
+            >
+              {fixing ? t("media.playbackFixing") : t("media.playbackFix")}
+            </Button>
+          </div>
+        ) : null}
         {item.type === "VIDEO" ? (
           <div className="flex flex-col gap-1">
             <div className="text-muted-foreground">{t("media.videoDurationSet", { sec: item.durationSec })}</div>
@@ -690,6 +975,22 @@ function MediaCard({
             {t("media.playAudio")}
           </label>
         )}
+        <label className="flex items-start gap-1.5 text-[10px] cursor-pointer select-none">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={item.quickLaunch ?? false}
+            onChange={async (e) => {
+              const ok = await patchMediaJson(item.id, { quickLaunch: e.target.checked });
+              if (ok) onChange();
+              else toast({ title: t("media.saveFailed"), variant: "error" });
+            }}
+          />
+          <span>
+            <span className="font-medium">{t("media.quickLaunch")}</span>
+            <span className="block text-muted-foreground">{t("media.quickLaunchHint")}</span>
+          </span>
+        </label>
         <SponsorMediaPhasePicker media={item} onChange={onChange} />
         <div className="flex gap-1">
           {lockManualSponsorInterrupt ? (
@@ -724,122 +1025,6 @@ function MediaCard({
             ✕
           </Button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function PlaylistEditor({
-  slot,
-  playlist,
-  media,
-  onChange,
-}: {
-  slot: PlaylistSlot;
-  playlist: Playlist | null;
-  media: MediaItem[];
-  onChange: () => void;
-}) {
-  const { t } = useTranslation();
-  const [adding, setAdding] = useState(false);
-
-  async function addItem(mediaId: string) {
-    await fetch(`/api/playlists/${slot}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mediaId }),
-    });
-    onChange();
-  }
-
-  async function removeItem(id: string) {
-    await fetch(`/api/playlists/items/${id}`, { method: "DELETE" });
-    onChange();
-  }
-
-  async function move(id: string, dir: -1 | 1) {
-    if (!playlist) return;
-    const order = [...playlist.items].sort((a, b) => a.order - b.order).map((i) => i.id);
-    const idx = order.indexOf(id);
-    const newIdx = idx + dir;
-    if (newIdx < 0 || newIdx >= order.length) return;
-    [order[idx], order[newIdx]] = [order[newIdx], order[idx]];
-    await fetch(`/api/playlists/${slot}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ order }),
-    });
-    onChange();
-  }
-
-  const items = playlist?.items ? [...playlist.items].sort((a, b) => a.order - b.order) : [];
-
-  return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <div className="text-xs text-muted-foreground">
-          {t("media.playlistItemCount", { count: items.length, slot: slot.toLowerCase() })}
-        </div>
-        <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>
-          {adding ? t("common.close") : t("media.addPlaylistItem")}
-        </Button>
-      </div>
-      {adding && (
-        <div className="border rounded-lg p-2 bg-background max-h-60 overflow-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-            {media.map((m) => (
-              <button
-                key={m.id}
-                className="rounded border p-2 text-xs text-left hover:bg-secondary"
-                onClick={() => addItem(m.id)}
-              >
-                <div className="aspect-video bg-black rounded mb-1 overflow-hidden">
-                  {m.type === "VIDEO" ? (
-                    <video src={mediaUrl(m.path)} muted className="w-full h-full object-cover" />
-                  ) : (
-                    <img src={mediaUrl(m.path)} alt="" className="w-full h-full object-cover" />
-                  )}
-                </div>
-                <div className="truncate">{m.title}</div>
-              </button>
-            ))}
-            {media.length === 0 && (
-              <div className="text-muted-foreground text-xs">{t("media.uploadFirst")}</div>
-            )}
-          </div>
-        </div>
-      )}
-      <div className="flex flex-col gap-1">
-        {items.map((it, idx) => (
-          <div
-            key={it.id}
-            className="flex items-center gap-3 rounded border border-border p-2 text-sm"
-          >
-            <span className="w-8 text-right text-xs text-muted-foreground">{idx + 1}.</span>
-            <div className="w-16 aspect-video bg-black rounded overflow-hidden flex-shrink-0">
-              {it.media.type === "VIDEO" ? (
-                <video src={mediaUrl(it.media.path)} muted className="w-full h-full object-cover" />
-              ) : (
-                <img src={mediaUrl(it.media.path)} alt="" className="w-full h-full object-cover" />
-              )}
-            </div>
-            <div className="flex-1 truncate">
-              <div className="truncate">{it.media.title}</div>
-              <div className="text-xs text-muted-foreground">
-                {it.durationOverrideSec ?? it.media.durationSec}s · {it.media.type}
-              </div>
-            </div>
-            <Button size="sm" variant="ghost" onClick={() => move(it.id, -1)}>
-              ↑
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => move(it.id, 1)}>
-              ↓
-            </Button>
-            <Button size="sm" variant="ghost" onClick={() => removeItem(it.id)}>
-              ✕
-            </Button>
-          </div>
-        ))}
       </div>
     </div>
   );
@@ -1030,6 +1215,7 @@ function SponsorCard({
   const { t } = useTranslation();
   const halves = matchHalfMinutesFromSponsor(sponsor);
   const [name, setName] = useState(sponsor.name);
+  const [fixingId, setFixingId] = useState<string | null>(null);
   const [active, setActive] = useState(sponsor.active);
   const [prematchMin, setPrematchMin] = useState(secondsToMinutesStr(sponsor.prematchSeconds));
   const [matchFirstMin, setMatchFirstMin] = useState(halves.first);
@@ -1232,7 +1418,8 @@ function SponsorCard({
       }),
     });
     if (!res.ok) return;
-    const created = (await res.json()) as { id?: string };
+    const created = (await res.json()) as { id?: string; playbackInspect?: PlaybackInspect };
+    notifyPlaybackRisk(t, created.playbackInspect, fileName);
     if (created.id) await appendSponsorPlaybackOrderRow(sponsor.id, created.id);
   }
 
@@ -1559,6 +1746,30 @@ function SponsorCard({
               </div>
               <div className="p-2 text-xs flex flex-col gap-1">
                 <div className="truncate font-semibold">{m.title}</div>
+                {isDisplayPlaybackRisk(m.playbackWarning) ? (
+                  <div className="flex flex-col gap-1">
+                    <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 leading-snug">
+                      {t("media.playbackWarnBadge")}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[10px]"
+                      type="button"
+                      disabled={fixingId === m.id}
+                      onClick={() => {
+                        setFixingId(m.id);
+                        void prepareMediaPlayback(t, m.id)
+                          .then((ok) => {
+                            if (ok) onChange();
+                          })
+                          .finally(() => setFixingId(null));
+                      }}
+                    >
+                      {fixingId === m.id ? t("media.playbackFixing") : t("media.playbackFix")}
+                    </Button>
+                  </div>
+                ) : null}
                 <div className="text-muted-foreground">
                   {m.type} · {m.durationSec}s
                 </div>
@@ -1798,19 +2009,52 @@ function formatMin(sec: number): string {
   return s === 0 ? `${m}m` : `${m}m ${String(s).padStart(2, "0")}s`;
 }
 
-function parseClockInput(value: string): number | null {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (/^\d+:\d{1,2}$/.test(trimmed)) {
-    const [mRaw, sRaw] = trimmed.split(":");
-    const m = Number(mRaw);
-    const s = Number(sRaw);
-    if (!Number.isFinite(m) || !Number.isFinite(s) || s < 0 || s > 59) return null;
-    return Math.max(0, Math.round(m * 60 + s));
-  }
-  const min = Number(trimmed.replace(",", "."));
-  if (!Number.isFinite(min) || min < 0) return null;
-  return Math.round(min * 60);
+function ClockMmSsField({
+  label,
+  sec,
+  onChange,
+}: {
+  label: string;
+  sec: number;
+  onChange: (next: number) => void;
+}) {
+  const safe = Math.max(0, Math.round(sec));
+  const minutes = Math.floor(safe / 60);
+  const seconds = safe % 60;
+  return (
+    <label className="space-y-1 text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <div className="flex h-10 items-center gap-1 rounded-lg border border-input bg-background px-2">
+        <input
+          type="number"
+          min={0}
+          max={199}
+          inputMode="numeric"
+          className="h-8 w-14 bg-transparent text-center text-sm tabular-nums outline-none"
+          value={minutes}
+          onChange={(e) => {
+            const m = Number(e.target.value);
+            if (!Number.isFinite(m)) return;
+            onChange(Math.max(0, Math.round(m)) * 60 + seconds);
+          }}
+        />
+        <span className="text-muted-foreground">:</span>
+        <input
+          type="number"
+          min={0}
+          max={59}
+          inputMode="numeric"
+          className="h-8 w-12 bg-transparent text-center text-sm tabular-nums outline-none"
+          value={seconds}
+          onChange={(e) => {
+            const s = Number(e.target.value);
+            if (!Number.isFinite(s)) return;
+            onChange(minutes * 60 + Math.min(59, Math.max(0, Math.round(s))));
+          }}
+        />
+      </div>
+    </label>
+  );
 }
 
 function formatCueClock(sec: number): string {
@@ -1818,12 +2062,6 @@ function formatCueClock(sec: number): string {
   const m = Math.floor(safe / 60);
   const s = safe % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function phaseLabel(status: string, t: (key: string) => string): string {
-  return SCHEDULED_CUE_PHASES.includes(status as (typeof SCHEDULED_CUE_PHASES)[number])
-    ? t(`phases.${status}`)
-    : status;
 }
 
 /** Afbeelding / afgeronde videoseconds voor opslag (1 … 600). */

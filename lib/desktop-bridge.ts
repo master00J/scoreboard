@@ -1,4 +1,12 @@
+import type {
+  LivestreamAudioDevice,
+  LivestreamAudioMeterMap,
+  LivestreamCameraDevice,
+  LivestreamSettings,
+  LivestreamStatus,
+} from "./livestream";
 import type { Command } from "./validation/commands";
+import type { StreamDeckInfo } from "./stream-deck";
 import type { SerializedDisplayState } from "./timer";
 import type {
   SponsorLedgerPayload,
@@ -209,6 +217,7 @@ export type ElectronBridge = {
   licenseGetStatus: () => Promise<LicenseGetStatusResult>;
   licenseActivate: (opts: { licenseKey: string }) => Promise<LicenseActivateResult>;
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
+  getStreamDeckInfo: () => Promise<StreamDeckInfo | null>;
   /** CPU/RAM van deze app (Electron); GPU = GPU-hulpproces. */
   getAppResourceMetrics: () => Promise<AppResourceMetrics>;
   /** Zip met `data/stadium.db` + kopie van `uploads/` (wedstrijddag-backup). */
@@ -227,4 +236,23 @@ export type ElectronBridge = {
   reportDisplayPlaybackContext: (payload: DisplayPlaybackLogPayload) => void;
   /** Stadionscherm: video/decode-problemen naar boot.log (niet in browser-only). */
   reportDisplayMediaDiagnostic: (payload: DisplayMediaDiagnosticPayload) => void;
+  getLivestreamSettings: () => Promise<LivestreamSettings>;
+  saveLivestreamSettings: (partial: Partial<LivestreamSettings>) => Promise<LivestreamSettings>;
+  getLivestreamStatus: () => Promise<LivestreamStatus>;
+  startLivestream: () => Promise<LivestreamStatus>;
+  stopLivestream: () => Promise<LivestreamStatus>;
+  startLivestreamRecord: () => Promise<LivestreamStatus>;
+  stopLivestreamRecord: () => Promise<LivestreamStatus>;
+  listLivestreamCameras: () => Promise<LivestreamCameraDevice[]>;
+  listLivestreamAudioDevices: () => Promise<LivestreamAudioDevice[]>;
+  listLivestreamAudioOutputs: () => Promise<LivestreamAudioDevice[]>;
+  openLivestreamBrowserInteract: (url: string) => Promise<{ ok: boolean; error?: string }>;
+  onLivestreamStatus: (listener: (status: LivestreamStatus) => void) => () => void;
+  onLivestreamSettings: (listener: (settings: LivestreamSettings) => void) => () => void;
+  onLivestreamPreview: (
+    listener: (frame: { jpeg: string; inputId?: string } | string) => void,
+  ) => () => void;
+  onLivestreamAudioMeters: (listener: (meters: LivestreamAudioMeterMap) => void) => () => void;
+  onLivestreamReadyRequest: (listener: () => void) => () => void;
+  reportStreamProgramReady: () => void;
 };

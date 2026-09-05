@@ -7,6 +7,8 @@ import { tMatchStatus } from "@/lib/i18n/t-phase";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
 import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 import type { Match, Playlist, PlaylistSlot, Sponsor, SponsorSection } from "@/lib/types";
+import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
+import { buildSponsorRotationMediaList } from "@/lib/sponsor-playback-order";
 import {
   activeSponsorsForSection,
   buildSponsorSlotMap,
@@ -43,6 +45,7 @@ import {
   sponsorScheduleTime,
   type SponsorScheduleClock,
 } from "@/lib/sponsor-schedule-clock";
+import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 
 export type SponsorPhaseHudModel =
@@ -53,6 +56,9 @@ export type SponsorPhaseHudModel =
       contextLabel: string;
       phase: "scoreboard" | "sponsor";
       sponsorName: string | null;
+      mediaTitle: string | null;
+      mediaFileName: string | null;
+      hasLiveClip: boolean;
       sponsorClipProgress: number | null;
       nextSlotEtaSec: number | null;
       clipRemainingSec: number | null;
@@ -299,8 +305,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   }, [prematchSpreadActive]);
 
   const matchTimerRunning = state?.timerRunning ?? false;
+  const sponsorDistTickRef = useRef<{ key: string; value: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } } | null>(null);
+  const prematchDistTickRef = useRef<{ key: string; value: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } } | null>(null);
+  const postmatchDistTickRef = useRef<{ key: string; value: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } } | null>(null);
 
   const sponsorDistView = useMemo(() => {
+    const tickKey = `${phaseTick}|${elapsed}|${mode}|${Number(matchTimerRunning)}|${Number(sponsorInterrupted)}|${match?.id}|${match?.status}`;
+    return applySponsorSpreadTick(sponsorDistTickRef, tickKey, () => {
     const now = wallNowMs;
 
     if (sponsorBesideConfigured && match) {
@@ -369,6 +380,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     }
     sponsorPhaseHangRef.current = null;
     return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+    });
   }, [
     sponsorBesideConfigured,
     liveAutoHalftime,
@@ -385,6 +397,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   ]);
 
   const prematchDistView = useMemo(() => {
+    const tickKey = `${phaseTick}|${Number(prematchSpreadActive)}|${Number(sponsorInterrupted)}|${match?.id}`;
+    return applySponsorSpreadTick(prematchDistTickRef, tickKey, () => {
     const now = wallNowMs;
     if (!prematchSpreadActive) {
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
@@ -417,9 +431,12 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       slotT: t,
       interrupted: sponsorInterrupted,
     });
+    });
   }, [prematchSpreadActive, match, sponsorSlotMapPrematch, sponsors, phaseTick, wallNowMs, sponsorInterrupted]);
 
   const postmatchDistView = useMemo(() => {
+    const tickKey = `${phaseTick}|${Number(postmatchSpreadActive)}|${Number(sponsorInterrupted)}|${match?.id}`;
+    return applySponsorSpreadTick(postmatchDistTickRef, tickKey, () => {
     const now = wallNowMs;
     if (!postmatchSpreadActive || !match || postmatchEpochRef.current == null) {
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
@@ -449,6 +466,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       slotMap: sponsorSlotMapPostmatch,
       slotT: t,
       interrupted: sponsorInterrupted,
+    });
     });
   }, [
     postmatchSpreadActive,
@@ -580,6 +598,18 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
             ? (sponsors.find((s) => s.id === effectiveSponsorId)?.name ?? effectiveSponsorId)
             : null;
 
+      const liveClip =
+        ledgerMatchesSegment && match
+          ? ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, now)
+          : null;
+      const media =
+        resolveSponsorMedia(sponsors, liveClip?.mediaId ?? null) ??
+        plannedMediaForSponsor(
+          sponsors.find((s) => s.id === effectiveSponsorId) ?? null,
+          section,
+          matchStatus,
+        );
+
       let sponsorClipProgress: number | null = null;
       let clipRemainingSec: number | null = null;
       let nextSlotEtaSec: number | null = null;
@@ -645,6 +675,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         contextLabel,
         phase: effectivePhase,
         sponsorName: name,
+        mediaTitle: media?.title ?? null,
+        mediaFileName: media?.fileName ?? null,
+        hasLiveClip: liveClip != null,
         sponsorClipProgress,
         nextSlotEtaSec,
         clipRemainingSec,
@@ -729,6 +762,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
           contextLabel: tUi("phases.PREMATCH"),
           phase: "scoreboard",
           sponsorName: null,
+          mediaTitle: null,
+          mediaFileName: null,
+          hasLiveClip: false,
           sponsorClipProgress: null,
           nextSlotEtaSec: null,
           clipRemainingSec: null,
@@ -742,6 +778,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
           contextLabel: tUi("phases.PREMATCH"),
           phase: "scoreboard",
           sponsorName: null,
+          mediaTitle: null,
+          mediaFileName: null,
+          hasLiveClip: false,
           sponsorClipProgress: null,
           nextSlotEtaSec: null,
           clipRemainingSec: null,
@@ -792,4 +831,39 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     wallNowMs,
     tUi,
   ]);
+}
+
+function mediaLabel(title: string, path: string): { title: string; fileName: string } {
+  const fileName = path.split(/[/\\]/).pop() || title;
+  return { title: title || fileName, fileName };
+}
+
+function resolveSponsorMedia(
+  sponsors: Sponsor[],
+  mediaId: string | null,
+): { title: string; fileName: string } | null {
+  if (!mediaId) return null;
+  for (const sponsor of sponsors) {
+    const item = sponsor.media?.find((m) => m.id === mediaId);
+    if (!item) continue;
+    return mediaLabel(item.title, item.path);
+  }
+  return null;
+}
+
+function plannedMediaForSponsor(
+  sponsor: Sponsor | null,
+  section: SponsorSection,
+  matchStatus?: string,
+): { title: string; fileName: string } | null {
+  if (!sponsor) return null;
+  const active = (sponsor.media ?? []).filter((m) => m.active);
+  const list = buildSponsorRotationMediaList(
+    filterMediaForSponsorSpreadSection(active, section, matchStatus),
+    sponsor.sponsorPlaybackOrderJson,
+    sponsor.sponsorPlaybackRepeatsJson,
+  );
+  const item = list[0];
+  if (!item) return null;
+  return mediaLabel(item.title, item.path);
 }

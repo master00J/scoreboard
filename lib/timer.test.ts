@@ -3,6 +3,7 @@ import {
   computeElapsedSeconds,
   computeShotClockSeconds,
   pauseShotClockAt,
+  resolveLiveElapsedSeconds,
   runFrom,
   runShotClockFrom,
   stopAt,
@@ -27,6 +28,16 @@ describe("computeElapsedSeconds", () => {
         now,
       ),
     ).toBe(15);
+  });
+
+  it("blijft op de base als now achter startedAt loopt", () => {
+    const started = new Date("2024-01-01T12:00:00.200Z");
+    expect(
+      computeElapsedSeconds(
+        { timerRunning: true, timerStartedAt: started, timerBaseSec: 21 },
+        started.getTime() - 180,
+      ),
+    ).toBe(21);
   });
 });
 
@@ -84,5 +95,53 @@ describe("shotclock", () => {
       shotClockStartedAt: null,
       shotClockBaseSec: 14,
     });
+  });
+});
+
+describe("resolveLiveElapsedSeconds", () => {
+  it("volgt DisplayState wanneer het startanker geldig is", () => {
+    const started = "2024-01-01T12:00:00.000Z";
+    const now = Date.parse(started) + 5000;
+    expect(
+      resolveLiveElapsedSeconds(
+        { timerRunning: true, timerStartedAt: started, timerBaseSec: 0 },
+        null,
+        now,
+      ),
+    ).toBe(5);
+  });
+
+  it("gebruikt de tick als timerRunning aan staat zonder startanker", () => {
+    const now = 1_700_000_005_000;
+    expect(
+      resolveLiveElapsedSeconds(
+        { timerRunning: true, timerStartedAt: null, timerBaseSec: 0 },
+        { elapsed: 5, running: true, startedAt: null, baseSec: 0, serverNow: now },
+        now,
+      ),
+    ).toBe(5);
+  });
+
+  it("negeert een stale lopende tick na pauze", () => {
+    const now = 1_700_000_010_000;
+    expect(
+      resolveLiveElapsedSeconds(
+        { timerRunning: false, timerStartedAt: null, timerBaseSec: 20 },
+        { elapsed: 21.4, running: true, startedAt: null, baseSec: 20, serverNow: now - 800 },
+        now,
+      ),
+    ).toBe(20);
+  });
+
+  it("zakt niet onder de base als now achter startedAt loopt", () => {
+    const started = "2024-01-01T12:00:00.200Z";
+    const now = Date.parse(started) - 180;
+    expect(
+      resolveLiveElapsedSeconds(
+        { timerRunning: true, timerStartedAt: started, timerBaseSec: 21 },
+        null,
+        now,
+      ),
+    ).toBe(21);
   });
 });

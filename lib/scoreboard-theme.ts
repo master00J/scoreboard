@@ -5,18 +5,41 @@ export type LeftStripSegment = "home" | "timer" | "away";
 export type ScoreboardLayoutMode = "auto" | "custom" | "left-l" | "full" | "bottom-strip";
 
 export type LayoutSlotId = "home" | "away" | "clock" | "sponsor";
+export type FullSlotId = "home" | "away" | "clock";
 
 /** Positie op het LED-canvas, in procent (0–100). Onafhankelijk van resolutie. */
 export type LayoutSlot = { x: number; y: number; w: number; h: number };
 
 export type ScoreboardSlots = Record<LayoutSlotId, LayoutSlot>;
+export type FullScoreboardSlots = Record<FullSlotId, LayoutSlot>;
 
 export const LAYOUT_SLOT_IDS: LayoutSlotId[] = ["home", "away", "clock", "sponsor"];
+export const FULL_SLOT_IDS: FullSlotId[] = ["home", "away", "clock"];
 
 /**
  * Op een 16:9-LED-canvas is een vak 16:9 wanneer breedte% === hoogte%.
  * Grootste 16:9-rechthoek die in `area` past, gecentreerd.
  */
+export const SCOREBOARD_CANVAS_W = 1920;
+export const SCOREBOARD_CANVAS_H = 1080;
+
+/**
+ * Onderbalk zodat het contentvlak (1920−links) × (1080−onder) exact 16:9 is.
+ * Video vult dat vak dan zonder extra letterbox.
+ */
+export function bottomBarForSixteenByNine(leftBarWidthPx: number): number {
+  const left = clamp(Math.round(leftBarWidthPx), 180, 520);
+  return clamp(Math.round((left * SCOREBOARD_CANVAS_H) / SCOREBOARD_CANVAS_W), 120, 600);
+}
+
+/** True als het gereserveerde contentvlak (binnen afronding) 16:9 is. */
+export function reservedContentIsSixteenByNine(leftBarWidthPx: number, bottomBarHeightPx: number): boolean {
+  const w = SCOREBOARD_CANVAS_W - leftBarWidthPx;
+  const h = SCOREBOARD_CANVAS_H - bottomBarHeightPx;
+  if (w <= 0 || h <= 0) return false;
+  return Math.abs(w / h - 16 / 9) < 0.02;
+}
+
 export function largestSixteenByNineSlot(area: LayoutSlot): LayoutSlot {
   const side = Math.min(area.w, area.h);
   return {
@@ -36,6 +59,13 @@ export const DEFAULT_SLOTS: ScoreboardSlots = {
   clock: { x: 38, y: 4, w: 24, h: 20 },
   away: { x: 80, y: 6, w: 18, h: 42 },
   sponsor: { x: 22, y: 26, w: 56, h: 56 },
+};
+
+/** Standaardpositie van het volledige scorebord (geen sponsorvak). */
+export const DEFAULT_FULL_SLOTS: FullScoreboardSlots = {
+  home: { x: 2, y: 16, w: 30, h: 68 },
+  clock: { x: 34, y: 22, w: 32, h: 56 },
+  away: { x: 68, y: 16, w: 30, h: 68 },
 };
 
 export const SLOT_PRESETS: { id: string; slots: ScoreboardSlots }[] = [
@@ -138,6 +168,8 @@ export type ScoreboardTheme = {
   teamNameColor?: string;
   /** Vrije plaatsing van thuis, uit, klok en sponsors (procenten). */
   slots?: ScoreboardSlots;
+  /** Vrije plaatsing op het volledige scorebord (zonder sponsorvak). */
+  fullSlots?: FullScoreboardSlots;
   /** Onderstrip (indien later gebruikt) */
   stripHeightPx?: number;
   stripLogoPx?: number;
@@ -191,6 +223,7 @@ export type ResolvedScoreboardTheme = Required<
     | "scoreColor"
     | "teamNameColor"
     | "slots"
+    | "fullSlots"
     | "stripHeightPx"
     | "stripLogoPx"
     | "stripScorePx"
@@ -240,6 +273,7 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
   scoreColor: "#ffffff",
   teamNameColor: "rgba(255,255,255,0.88)",
   slots: normalizeSlots(DEFAULT_SLOTS),
+  fullSlots: DEFAULT_FULL_SLOTS,
   stripHeightPx: 180,
   stripLogoPx: 120,
   stripScorePx: 120,
@@ -286,6 +320,72 @@ export function normalizeSlots(raw: Partial<ScoreboardSlots> | undefined): Score
     away: normalizeSlot(raw?.away, DEFAULT_SLOTS.away),
     clock: normalizeSlot(raw?.clock, DEFAULT_SLOTS.clock),
     sponsor: normalizeSlot(raw?.sponsor, DEFAULT_SLOTS.sponsor),
+  };
+}
+
+export function normalizeFullSlots(raw: Partial<FullScoreboardSlots> | undefined): FullScoreboardSlots {
+  return {
+    home: normalizeSlot(raw?.home, DEFAULT_FULL_SLOTS.home),
+    away: normalizeSlot(raw?.away, DEFAULT_FULL_SLOTS.away),
+    clock: normalizeSlot(raw?.clock, DEFAULT_FULL_SLOTS.clock),
+  };
+}
+
+function pctOf(px: number, canvas: number): number {
+  return (px / canvas) * 100;
+}
+
+/** Vrije vakken die een L-frame benaderen, zodat je die daarna kunt verslepen. */
+export function slotsFromLeftFrame(leftBarWidthPx: number, bottomBarHeightPx: number): ScoreboardSlots {
+  const leftW = Math.max(12, pctOf(leftBarWidthPx, SCOREBOARD_CANVAS_W));
+  const botH = Math.max(10, pctOf(bottomBarHeightPx, SCOREBOARD_CANVAS_H));
+  const colH = Math.max(30, 100 - botH);
+  const homeH = colH * 0.36;
+  const clockH = colH * 0.24;
+  return normalizeSlots({
+    home: { x: 0, y: 0, w: leftW, h: homeH },
+    clock: { x: 0, y: homeH, w: leftW, h: clockH },
+    away: { x: 0, y: homeH + clockH, w: leftW, h: colH - homeH - clockH },
+    sponsor: largestSixteenByNineSlot({ x: leftW, y: 0, w: 100 - leftW, h: 100 - botH }),
+  });
+}
+
+/** Vrije vakken die een onderstrip benaderen. */
+export function slotsFromStrip(stripHeightPx: number): ScoreboardSlots {
+  const h = Math.max(12, pctOf(stripHeightPx, SCOREBOARD_CANVAS_H));
+  return normalizeSlots({
+    sponsor: largestSixteenByNineSlot({ x: 0, y: 0, w: 100, h: 100 - h }),
+    home: { x: 0, y: 100 - h, w: 28, h },
+    clock: { x: 36, y: 100 - h, w: 28, h },
+    away: { x: 72, y: 100 - h, w: 28, h },
+  });
+}
+
+/** Zet elk thema om naar sleepbare custom-vakken. */
+export function slotsFromTheme(theme: Pick<ResolvedScoreboardTheme, "layoutMode" | "slots" | "leftBarWidthPx" | "bottomBarHeightPx" | "stripHeightPx">): ScoreboardSlots {
+  if (theme.layoutMode === "left-l") {
+    return slotsFromLeftFrame(theme.leftBarWidthPx, theme.bottomBarHeightPx);
+  }
+  if (theme.layoutMode === "bottom-strip") {
+    return slotsFromStrip(theme.stripHeightPx);
+  }
+  return normalizeSlots(theme.slots);
+}
+
+/**
+ * Draft voor de canvas-editor: altijd `custom`, met vakken die het huidige frame volgen.
+ * Bij een L-balk wordt de canvaskleur de framekleur, zodat de balk zichtbaar blijft.
+ */
+export function themeForFreeformEdit(theme: ResolvedScoreboardTheme): ResolvedScoreboardTheme {
+  const slots = slotsFromTheme(theme);
+  if (theme.layoutMode === "custom") {
+    return { ...theme, slots };
+  }
+  return {
+    ...theme,
+    layoutMode: "custom",
+    slots,
+    contentAreaBg: theme.layoutMode === "left-l" ? theme.frameColorMid : theme.contentAreaBg,
   };
 }
 
@@ -410,6 +510,7 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
     scoreColor: patch.scoreColor?.trim() || DEFAULT_SCOREBOARD_THEME.scoreColor,
     teamNameColor: patch.teamNameColor?.trim() || DEFAULT_SCOREBOARD_THEME.teamNameColor,
     slots: normalizeSlots(patch.slots),
+    fullSlots: normalizeFullSlots(patch.fullSlots),
     stripHeightPx: clamp(Math.round(patch.stripHeightPx ?? DEFAULT_SCOREBOARD_THEME.stripHeightPx), 120, 280),
     stripLogoPx: clamp(Math.round(patch.stripLogoPx ?? DEFAULT_SCOREBOARD_THEME.stripLogoPx), 64, 200),
     stripScorePx: clamp(Math.round(patch.stripScorePx ?? DEFAULT_SCOREBOARD_THEME.stripScorePx), 48, 200),

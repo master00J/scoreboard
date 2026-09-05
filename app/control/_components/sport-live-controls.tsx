@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useLiveShotClockSeconds } from "@/lib/use-timer";
-import { getSportProfile, sportPeriodLabel } from "@/lib/sports";
+import { getSportProfile } from "@/lib/sports";
+import { tSportLabel, tSportPeriodLabel, tSportPeriodName } from "@/lib/i18n/t-phase";
 import type { Match } from "@/lib/types";
 
 export function SportLiveControls({ match }: { match: Match }) {
@@ -20,10 +21,10 @@ export function SportLiveControls({ match }: { match: Match }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            {t("matchLive.footballRules").replace(/^[^·]*·\s*/, `${profile.label} · `)}
+            {t("matchLive.footballRules").replace(/^[^·]*·\s*/, `${tSportLabel(t, profile.id, profile.label)} · `)}
           </div>
           <div className="mt-1 text-sm font-semibold">
-            {sportPeriodLabel(match.sport, match.currentPeriod)}
+            {tSportPeriodLabel(t, match.sport, match.currentPeriod)}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -34,7 +35,7 @@ export function SportLiveControls({ match }: { match: Match }) {
               variant={match.currentPeriod === period ? "default" : "outline"}
               onClick={() => void sendCommand({ type: "sport:setPeriod", period })}
             >
-              {profile.periodLabel} {period}
+              {tSportPeriodName(t, match.sport, period)}
             </Button>
           ))}
           <Button

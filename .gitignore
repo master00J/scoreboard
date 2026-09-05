@@ -20,11 +20,17 @@ logs/*.log
 .env
 .env.local
 .env.production
+.env.signing
 *.tsbuildinfo
 MobileApp/.expo/
 
 # Gegenereerde desktop-licenties (npm run legal:desktop vóór build)
 legal-dist/
+
+# FFmpeg binaries (npm run livestream:ensure-ffmpeg)
+vendor/ffmpeg/*.exe
+vendor/ffmpeg/*.zip
+vendor/ffmpeg/_extract/
 
 # Apart project (eigen Git-repo): github.com/master00J/ledboarding
 ledboarding/

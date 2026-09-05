@@ -8,7 +8,7 @@ import { useApi } from "@/lib/use-api";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ToastViewport, toast } from "@/components/ui/toast";
 import { TimerPanel } from "./_components/timer-panel";
-import { MatchLivePanel } from "./_components/match-live-panel";
+import { GoalScorerOverlay, MatchLivePanel } from "./_components/match-live-panel";
 import { SetupPanel, MatchDialog } from "./_components/setup-panel";
 import { MediaPanel } from "./_components/media-panel";
 import { ProofOfPlayPanel } from "./_components/proof-of-play-panel";
@@ -16,6 +16,7 @@ import { DisplayControlPanel, EventLog } from "./_components/display-control-pan
 import { SponsorLiveOverview } from "./_components/sponsor-live-overview";
 import { SponsorTimelinePreview } from "./_components/sponsor-timeline-preview";
 import { ExternalCapturePanel } from "./_components/external-capture-panel";
+import { LivestreamStudio } from "./_components/livestream-studio";
 import { PlayerIntroLauncher } from "./_components/player-intro-launcher";
 import { CrashRecoveryBanner } from "./_components/crash-recovery";
 import { SponsorPhaseHud } from "./_components/sponsor-phase-hud";
@@ -78,20 +79,20 @@ export default function ControlPage() {
     <LicenseActivationGate>
       <main
         data-control-shell
-        className="flex h-dvh w-full max-w-none flex-col overflow-hidden px-4 py-4 sm:px-6"
+        className="flex h-dvh w-full max-w-none flex-col overflow-hidden px-3 py-2.5 sm:px-4"
       >
       <ToastViewport />
 
       <UpdateNudgeBanner />
 
-      <header className="mb-4 flex shrink-0 items-center justify-between gap-3">
+      <header className="mb-2 flex shrink-0 items-center justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-bold sm:text-3xl">{t("shell.title")}</h1>
+          <h1 className="text-xl font-bold sm:text-2xl">{t("shell.title")}</h1>
           <p className="truncate text-sm text-muted-foreground">
             {!state?.matchId
               ? t("shell.noActiveMatch")
               : isFullMatch(match)
-                ? `${match.homeTeam.name} vs ${match.awayTeam.name} · ${match.status}`
+                ? `${match.homeTeam.name} vs ${match.awayTeam.name} · ${tMatchStatus(t, match.status)}`
                 : t("shell.matchLoading")}
           </p>
         </div>
@@ -130,6 +131,7 @@ export default function ControlPage() {
             <TabsTrigger value="setup">{t("shell.tabSetup")}</TabsTrigger>
             <TabsTrigger value="media">{t("shell.tabMedia")}</TabsTrigger>
             <TabsTrigger value="reports">{t("shell.tabReports")}</TabsTrigger>
+            <TabsTrigger value="livestream">{t("shell.tabLivestream")}</TabsTrigger>
           </TabsList>
           <Button
             type="button"
@@ -215,7 +217,13 @@ export default function ControlPage() {
         <TabsContent value="reports" className="min-h-0 overflow-y-auto">
           <ProofOfPlayPanel />
         </TabsContent>
+
+        <TabsContent value="livestream" forceMount className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <LivestreamStudio active={activeTab === "livestream"} />
+        </TabsContent>
       </Tabs>
+
+      <GoalScorerOverlay match={isFullMatch(match) ? match : null} />
 
       {newMatchOpen && teams && (
         <MatchDialog

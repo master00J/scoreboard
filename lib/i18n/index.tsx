@@ -8,6 +8,7 @@ import { DEFAULT_LOCALE, normalizeUiLocale, type UiLocale } from "./locales";
 import nl from "./locales/nl.json";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
+import it from "./locales/it.json";
 
 let initialized = false;
 
@@ -18,6 +19,7 @@ export function ensureI18n(locale: UiLocale = DEFAULT_LOCALE) {
         nl: { translation: nl },
         en: { translation: en },
         fr: { translation: fr },
+        it: { translation: it },
       },
       lng: locale,
       fallbackLng: DEFAULT_LOCALE,

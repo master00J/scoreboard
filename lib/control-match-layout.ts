@@ -11,6 +11,8 @@ export type MatchTabPanelId =
   | "event-log"
   | "match-info";
 
+export type MatchTabColumn = "left" | "center" | "right";
+
 export type MatchTabLayoutState = {
   orderLeft: MatchTabPanelId[];
   orderCenter: MatchTabPanelId[];
@@ -49,13 +51,13 @@ const ALL_PANEL_IDS: MatchTabPanelId[] = [
   "match-info",
 ];
 
-function isPanelId(x: unknown): x is MatchTabPanelId {
+export function isMatchTabPanelId(x: unknown): x is MatchTabPanelId {
   return typeof x === "string" && (ALL_PANEL_IDS as string[]).includes(x);
 }
 
 function normalizeSavedOrder(saved: unknown): MatchTabPanelId[] {
   if (!Array.isArray(saved)) return [];
-  const picked = saved.filter(isPanelId);
+  const picked = saved.filter(isMatchTabPanelId);
   const seen = new Set<MatchTabPanelId>();
   const out: MatchTabPanelId[] = [];
   for (const id of picked) {
@@ -154,7 +156,7 @@ export function parseMatchTabLayoutJson(raw: string | null): MatchTabLayoutState
     const collapsed =
       p.collapsed && typeof p.collapsed === "object"
         ? (Object.fromEntries(
-            Object.entries(p.collapsed).filter(([k, v]) => isPanelId(k) && typeof v === "boolean"),
+            Object.entries(p.collapsed).filter(([k, v]) => isMatchTabPanelId(k) && typeof v === "boolean"),
           ) as Partial<Record<MatchTabPanelId, boolean>>)
         : {};
     const orderLeft = normalizeSavedOrder(p.orderLeft);
@@ -192,6 +194,65 @@ export function saveMatchTabLayout(layout: MatchTabLayoutState): void {
   } catch {
     /* ignore */
   }
+}
+
+export function matchTabColumnKey(
+  column: MatchTabColumn,
+): keyof Pick<MatchTabLayoutState, "orderLeft" | "orderCenter" | "orderRight"> {
+  return column === "left" ? "orderLeft" : column === "center" ? "orderCenter" : "orderRight";
+}
+
+export function reorderPanelBefore(
+  order: MatchTabPanelId[],
+  dragged: MatchTabPanelId,
+  beforeId: MatchTabPanelId,
+): MatchTabPanelId[] {
+  if (dragged === beforeId) return order;
+  const rest = order.filter((x) => x !== dragged);
+  const ti = rest.indexOf(beforeId);
+  if (ti < 0) return order;
+  rest.splice(ti, 0, dragged);
+  return rest;
+}
+
+export function reorderPanelAfter(
+  order: MatchTabPanelId[],
+  dragged: MatchTabPanelId,
+  afterId: MatchTabPanelId,
+): MatchTabPanelId[] {
+  if (dragged === afterId) return order;
+  const rest = order.filter((x) => x !== dragged);
+  const ti = rest.indexOf(afterId);
+  if (ti < 0) return [...rest, dragged];
+  rest.splice(ti + 1, 0, dragged);
+  return rest;
+}
+
+export function insertPanelFirst(order: MatchTabPanelId[], dragged: MatchTabPanelId): MatchTabPanelId[] {
+  return [dragged, ...order.filter((x) => x !== dragged)];
+}
+
+export function moveMatchTabPanel(
+  layout: MatchTabLayoutState,
+  dragged: MatchTabPanelId,
+  fromCol: MatchTabColumn,
+  toCol: MatchTabColumn,
+  place: { before?: MatchTabPanelId; after?: MatchTabPanelId; atStart?: boolean },
+): MatchTabLayoutState {
+  const fromKey = matchTabColumnKey(fromCol);
+  const toKey = matchTabColumnKey(toCol);
+  const nextFrom = layout[fromKey].filter((x) => x !== dragged);
+  const baseTo = fromCol === toCol ? nextFrom : layout[toKey].filter((x) => x !== dragged);
+  let nextTo = baseTo;
+  if (place.atStart) nextTo = insertPanelFirst(baseTo, dragged);
+  else if (place.after) nextTo = reorderPanelAfter(baseTo, dragged, place.after);
+  else if (place.before) nextTo = reorderPanelBefore(baseTo, dragged, place.before);
+  else nextTo = [...baseTo, dragged];
+
+  if (fromCol === toCol) {
+    return { ...layout, [toKey]: nextTo };
+  }
+  return { ...layout, [fromKey]: nextFrom, [toKey]: nextTo };
 }
 
 export const MATCH_TAB_PANEL_LABELS: Record<MatchTabPanelId, string> = {

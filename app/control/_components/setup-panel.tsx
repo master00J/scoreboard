@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
@@ -42,6 +42,8 @@ export function SetupPanel() {
   const [matchDialog, setMatchDialog] = useState(false);
   const [scheduleMatch, setScheduleMatch] = useState<Match | null>(null);
   const [visualsField, setVisualsField] = useState<VisualField | null>(null);
+  const [editLayoutJson, setEditLayoutJson] = useState<string | null>(null);
+  const consumeEditLayout = useCallback(() => setEditLayoutJson(null), []);
 
   async function setUiLocale(next: UiLocale) {
     const res = await fetch("/api/settings", {
@@ -150,6 +152,7 @@ export function SetupPanel() {
           <option value="nl">{t("language.nl")}</option>
           <option value="en">{t("language.en")}</option>
           <option value="fr">{t("language.fr")}</option>
+          <option value="it">{t("language.it")}</option>
         </Select>
       </section>
       {isElectron ? (
@@ -399,12 +402,18 @@ export function SetupPanel() {
         </div>
       </section>
 
-      <SetupScoreboardTemplatesSection settings={settings} reloadSettings={reloadSettings} />
+      <SetupScoreboardTemplatesSection
+        settings={settings}
+        reloadSettings={reloadSettings}
+        onEditLayout={setEditLayoutJson}
+      />
       <SetupScoreboardThemeSection
         settings={settings}
         reloadSettings={reloadSettings}
         homeTeam={homeTeam}
         awayTeam={(teams ?? []).find((team) => team.id !== homeTeam?.id) ?? null}
+        seedThemeJson={editLayoutJson}
+        onSeedConsumed={consumeEditLayout}
       />
 
       <SetupDisplayCanvasSection settings={settings ?? null} reloadSettings={reloadSettings} />
