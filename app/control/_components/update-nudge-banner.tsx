@@ -1,28 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { isElectron } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
-const DEFAULT_FEED_URL = "https://arenacue.be/api/app/release";
-
-function releaseFeedUrl(): string {
-  const configured =
-    typeof process !== "undefined"
-      ? process.env?.NEXT_PUBLIC_APP_RELEASE_URL?.trim()
-      : "";
-  if (configured && /^https?:\/\//i.test(configured)) {
-    return configured;
-  }
-  return DEFAULT_FEED_URL;
-}
-
-const FEED_URL = releaseFeedUrl();
+/** Desktop-proxy haalt de live feed van arenacue.be op. */
+const RELEASE_API = "/api/app/release";
 /** Min. tijd tussen twee checks (focus/visibility); eerste check bij openen altijd. */
 const REFOCUS_CHECK_MIN_MS = 90_000;
+/** Extra check terwijl de app open blijft, zodat een upload tussendoor ook gezien wordt. */
+const POLL_CHECK_MS = 30 * 60 * 1000;
 const LS_LAST_CHECK = "arenacue-release-last-check";
-const LS_DISMISS_FOR = "arenacue-update-dismissed-for";
 
 type ReleaseInfo = {
   version: string;
@@ -50,6 +47,20 @@ function compareSemver(a: string, b: string): number {
   return 0;
 }
 
+function parseRelease(value: unknown): ReleaseInfo | null {
+  if (!value || typeof value !== "object") return null;
+  const rec = value as Record<string, unknown>;
+  const version = typeof rec.version === "string" ? rec.version.trim() : "";
+  const downloadUrl = typeof rec.downloadUrl === "string" ? rec.downloadUrl.trim() : "";
+  if (!version || !downloadUrl) return null;
+  return {
+    version,
+    downloadUrl,
+    title: typeof rec.title === "string" ? rec.title : null,
+    body: typeof rec.body === "string" ? rec.body : null,
+  };
+}
+
 export function UpdateNudgeBanner() {
   const { t } = useTranslation();
   const [state, setState] = useState<
@@ -57,6 +68,9 @@ export function UpdateNudgeBanner() {
     | { kind: "update"; current: string; release: ReleaseInfo }
     | { kind: "hidden" }
   >({ kind: "idle" });
+  const [modalOpen, setModalOpen] = useState(false);
+  const [bannerHidden, setBannerHidden] = useState(false);
+  const modalDismissedRef = useRef(false);
 
   useEffect(() => {
     if (!isElectron || typeof window === "undefined" || !window.electronAPI?.getAppVersion) {
@@ -80,36 +94,32 @@ export function UpdateNudgeBanner() {
           return;
         }
         const current = (await api.getAppVersion()).trim();
-        const res = await fetch(FEED_URL, { cache: "no-store" });
+        const res = await fetch(RELEASE_API, { cache: "no-store" });
         if (!res.ok) {
           localStorage.setItem(LS_LAST_CHECK, String(now));
-          setState({ kind: "hidden" });
+          if (!cancelled) setState((prev) => (prev.kind === "update" ? prev : { kind: "hidden" }));
           return;
         }
-        const release = (await res.json()) as ReleaseInfo;
-        if (!release?.version || !release?.downloadUrl) {
+        const release = parseRelease(await res.json());
+        if (!release) {
           localStorage.setItem(LS_LAST_CHECK, String(now));
-          setState({ kind: "hidden" });
+          if (!cancelled) setState((prev) => (prev.kind === "update" ? prev : { kind: "hidden" }));
           return;
         }
 
         localStorage.setItem(LS_LAST_CHECK, String(now));
-
         if (cancelled) return;
+
         if (compareSemver(current, release.version) >= 0) {
           setState({ kind: "hidden" });
-          return;
-        }
-
-        const dismissed = localStorage.getItem(LS_DISMISS_FOR);
-        if (dismissed === release.version) {
-          setState({ kind: "hidden" });
+          setModalOpen(false);
           return;
         }
 
         setState({ kind: "update", current, release });
+        if (!modalDismissedRef.current) setModalOpen(true);
       } catch {
-        if (!cancelled) setState({ kind: "hidden" });
+        if (!cancelled) setState((prev) => (prev.kind === "update" ? prev : { kind: "hidden" }));
       }
     }
 
@@ -121,11 +131,13 @@ export function UpdateNudgeBanner() {
     };
     window.addEventListener("focus", onRefocus);
     document.addEventListener("visibilitychange", onRefocus);
+    const pollId = window.setInterval(() => void checkRelease(true), POLL_CHECK_MS);
 
     return () => {
       cancelled = true;
       window.removeEventListener("focus", onRefocus);
       document.removeEventListener("visibilitychange", onRefocus);
+      window.clearInterval(pollId);
     };
   }, []);
 
@@ -135,41 +147,71 @@ export function UpdateNudgeBanner() {
 
   const { release, current } = state;
   const title = release.title?.trim() || `${t("update.available")} (${release.version})`;
+  const notes = release.body?.trim() || t("update.bodyFallback");
+
+  function dismissModal() {
+    modalDismissedRef.current = true;
+    setModalOpen(false);
+  }
+
+  function dismissBanner() {
+    dismissModal();
+    setBannerHidden(true);
+  }
+
+  function downloadLatest() {
+    void window.electronAPI?.openExternalUrl(release.downloadUrl);
+  }
 
   return (
-    <div
-      className="mb-4 flex flex-col gap-3 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-      role="status"
-    >
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-amber-100">{title}</p>
-        <p className="text-xs text-amber-200/90">
-          {t("update.body", { current, latest: release.version })}
-          {release.body ? ` ${release.body}` : ` ${t("update.bodyFallback")}`}
-        </p>
-      </div>
-      <div className="flex shrink-0 flex-wrap gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            localStorage.setItem(LS_DISMISS_FOR, release.version);
-            setState({ kind: "hidden" });
-          }}
+    <>
+      {!modalOpen && !bannerHidden ? (
+        <div
+          className="mb-3 flex shrink-0 flex-col gap-3 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+          role="status"
         >
-          {t("update.later")}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => {
-            void window.electronAPI?.openExternalUrl(release.downloadUrl);
-          }}
-        >
-          {t("update.download")}
-        </Button>
-      </div>
-    </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-amber-100">{title}</p>
+            <p className="text-xs text-amber-200/90">
+              {t("update.body", { current, latest: release.version })} {notes}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <Button type="button" size="sm" variant="secondary" onClick={dismissBanner}>
+              {t("update.later")}
+            </Button>
+            <Button type="button" size="sm" onClick={downloadLatest}>
+              {t("update.download")}
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      <Dialog
+        open={modalOpen}
+        onOpenChange={(open) => {
+          if (!open) dismissModal();
+        }}
+      >
+        <DialogContent size="md">
+          <DialogHeader>
+            <DialogTitle>{t("update.available")}</DialogTitle>
+            <DialogDescription>
+              {t("update.body", { current, latest: release.version })}
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-sm text-foreground">{notes}</p>
+          <p className="mt-3 text-sm text-muted-foreground">{t("update.replaceHint")}</p>
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={dismissModal}>
+              {t("update.later")}
+            </Button>
+            <Button type="button" onClick={downloadLatest}>
+              {t("update.download")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

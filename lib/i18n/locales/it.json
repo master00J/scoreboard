@@ -1226,11 +1226,12 @@
     "healthLabel": "stato"
   },
   "update": {
-    "available": "Aggiornamento disponibile",
+    "available": "Nuova versione disponibile",
     "download": "Scarica",
     "later": "Dopo",
     "body": "Sei alla versione {{current}}. L’ultima versione è {{latest}}.",
-    "bodyFallback": "Scarica l’ultima build e sostituisci il file."
+    "bodyFallback": "Scarica l’ultima build e sostituisci il file.",
+    "replaceHint": "Chiudi l’app e sostituisci Stadium-Scoreboard.exe con il nuovo file."
   },
   "crash": {
     "title": "Ripristino dopo un arresto anomalo",

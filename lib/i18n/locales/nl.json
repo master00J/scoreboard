@@ -1226,11 +1226,12 @@
     "healthLabel": "status"
   },
   "update": {
-    "available": "Update beschikbaar",
+    "available": "Nieuwe versie beschikbaar",
     "download": "Downloaden",
     "later": "Later",
     "body": "Je gebruikt versie {{current}}. De nieuwste versie is {{latest}}.",
-    "bodyFallback": "Download de nieuwste build en vervang je bestand."
+    "bodyFallback": "Download de nieuwste build en vervang je bestand.",
+    "replaceHint": "Sluit de app en vervang Stadium-Scoreboard.exe door het nieuwe bestand."
   },
   "crash": {
     "title": "Herstel na crash",
