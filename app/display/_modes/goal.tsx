@@ -1,8 +1,10 @@
-"use client";
+﻿"use client";
 
 import { motion } from "framer-motion";
 import type { Match, Player } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
+import { useTranslation } from "react-i18next";
+import { tBoard } from "@/lib/i18n/t-sport";
 
 export function GoalMode({
   match,
@@ -13,6 +15,7 @@ export function GoalMode({
   scorer: Player | null;
   side: "home" | "away";
 }) {
+  const { t } = useTranslation();
   const team = side === "home" ? match.homeTeam : match.awayTeam;
   return (
     <motion.div
@@ -57,7 +60,7 @@ export function GoalMode({
             className="font-black leading-none tracking-tight"
             style={{ fontSize: 180, textShadow: "0 10px 40px rgba(0,0,0,0.4)" }}
           >
-            GOAL!
+            {tBoard(t, "goal", "GOAL!")}
           </motion.div>
           {scorer && (
             <motion.div

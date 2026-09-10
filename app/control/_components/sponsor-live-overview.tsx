@@ -23,6 +23,8 @@ import {
 import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
 import { prematchRosterClockSec } from "@/lib/prematch-spread-timing";
 import { tMatchStatus } from "@/lib/i18n/t-phase";
+import { useResolvedSponsorWindow } from "@/lib/use-resolved-sponsor-window";
+import { windowLabel } from "@/lib/sponsor-windows";
 
 function formatClock(sec: number): string {
   const t = Math.max(0, Math.round(Number(sec) || 0));
@@ -34,7 +36,16 @@ function formatClock(sec: number): string {
 
 function segmentHighlightForMatch(
   status: string | undefined,
+  windowId?: string | null,
 ): "prematch" | "h1" | "h2" | "halftime" | "none" {
+  if (windowId === "prematch") return "prematch";
+  if (windowId === "halftime" || windowId === "periodBreak") return "halftime";
+  if (windowId === "play2" || windowId === "extraTime") return "h2";
+  if (windowId?.startsWith("period:")) {
+    const n = Number(windowId.slice(7)) || 1;
+    return n <= 2 ? "h1" : "h2";
+  }
+  if (windowId === "play" || windowId === "play1") return "h1";
   if (status === "SETUP" || status === "PREMATCH") return "prematch";
   if (status === "FIRST_HALF") return "h1";
   if (status === "SECOND_HALF" || status === "EXTRA_TIME") return "h2";
@@ -49,6 +60,8 @@ function sponsorHasActiveMedia(s: Sponsor): boolean {
 export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null }) {
   const { t } = useTranslation();
   const displayStateUpdatedAt = useDisplayStore((s) => s.state?.updatedAt);
+  const timerRunning = !!useDisplayStore((s) => s.state?.timerRunning);
+  const periodBreakPending = !!useDisplayStore((s) => s.state?.sponsorPeriodBreakPending);
   const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
   const sponsors = sponsorsRaw ?? [];
   const elapsedSec = useLiveTimerSeconds();
@@ -100,7 +113,8 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
   }
 
   const section = sponsorBudgetSectionFromMatchStatus(activeMatch?.status);
-  const highlightCol = segmentHighlightForMatch(activeMatch?.status);
+  const liveWindow = useResolvedSponsorWindow(activeMatch, timerRunning, periodBreakPending, null);
+  const highlightCol = segmentHighlightForMatch(activeMatch?.status, liveWindow?.id);
 
   const activeInLoop = useMemo(() => {
     if (!activeMatch) return [] as Sponsor[];
@@ -222,7 +236,9 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
             <p className="text-xs text-muted-foreground mt-1">
               {t("sponsors.matchPhase")}:{" "}
               <span className="text-foreground font-medium">
-                {tMatchStatus(t, activeMatch.status)}
+                {liveWindow && !liveWindow.footballEngine
+                  ? windowLabel(liveWindow.id, activeMatch.sport)
+                  : tMatchStatus(t, activeMatch.status)}
               </span>
               {" · "}
               {t("sponsors.segmentSchedule")}:{" "}

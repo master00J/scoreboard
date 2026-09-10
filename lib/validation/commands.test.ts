@@ -30,6 +30,27 @@ describe("CommandSchema", () => {
     ).toBe(false);
   });
 
+  it("accepteert volleybal-serving, hervatten, time-outklok en hockey-straffen", () => {
+    expect(CommandSchema.safeParse({ type: "sport:setServing", side: "away" }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "sport:resumePlay" }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "timeout:start", side: "home" }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "timeout:start", side: "technical", seconds: 60 }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "timeout:start", side: "home", seconds: 2 }).success).toBe(false);
+    expect(CommandSchema.safeParse({ type: "timeout:clear" }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "penalty:start", side: "home", seconds: 120 }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "penalty:start", side: "home", seconds: 1200 }).success).toBe(false);
+    expect(
+      CommandSchema.safeParse({ type: "card:trigger", teamId: "t", playerId: "p", color: "GREEN" }).success,
+    ).toBe(true);
+  });
+
+  it("begrenst klok- en scorecorrecties", () => {
+    expect(CommandSchema.safeParse({ type: "timer:adjust", deltaSec: 60 }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "timer:adjust", deltaSec: 99999 }).success).toBe(false);
+    expect(CommandSchema.safeParse({ type: "score:adjust", side: "home", delta: 3 }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "score:adjust", side: "home", delta: 500 }).success).toBe(false);
+  });
+
   it("wijst onbekend type af", () => {
     const r = CommandSchema.safeParse({ type: "nope" });
     expect(r.success).toBe(false);

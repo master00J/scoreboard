@@ -23,6 +23,8 @@ export const SITE_KEYWORDS = [
   "sportclub scorebord",
   "wedstrijdregie software",
   "Windows scoreboard",
+  "livestream sportclub",
+  "YouTube livestream scorebord",
 ];
 
 const DEFAULT_OG_IMAGE = "/assets/scoreboard-preview-hero.png";
@@ -83,7 +85,7 @@ export function homePageMetadata(): Metadata {
   const url = absoluteUrl("/");
   const titleAbsolute = "ArenaCue | Scoreboard, LED boarding & Display Control";
   const description =
-    "ArenaCue is professionele Windows-software voor live scoreboards, LED perimeter/tribune-output, sponsorrotatie en stadiondisplay. Lokaal, snel en betrouwbaar voor clubs en stadions.";
+    "ArenaCue is professionele Windows-software voor live scoreboards, LED perimeter/tribune-output, sponsorrotatie, stadiondisplay en livestream naar YouTube of Twitch. Lokaal, snel en betrouwbaar voor clubs en stadions.";
   return {
     title: { absolute: titleAbsolute },
     description,
@@ -97,7 +99,7 @@ export function homePageMetadata(): Metadata {
     openGraph: {
       title: titleAbsolute,
       description:
-        "Professionele scoreboard- en LED-boardingsoftware voor Belgische sportclubs en stadions.",
+        "Professionele scoreboard-, livestream- en LED-boardingsoftware voor Belgische sportclubs en stadions.",
       url,
       siteName: SITE_NAME,
       locale: "nl_BE",
@@ -115,7 +117,7 @@ export function homePageMetadata(): Metadata {
       card: "summary_large_image",
       title: titleAbsolute,
       description:
-        "Professionele Windows-software voor scoreboards, LED boarding, sponsorrotatie en stadionvisuals.",
+        "Professionele Windows-software voor scoreboards, LED boarding, sponsorrotatie, stadionvisuals en livestream.",
       images: [DEFAULT_OG_IMAGE],
     },
   };

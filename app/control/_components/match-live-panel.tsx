@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -26,7 +26,7 @@ export function MatchLivePanel() {
   const { data: settings } = useApi<AppSettings>("/api/settings");
   const [subModal, setSubModal] = useState(false);
   const [lineupModal, setLineupModal] = useState(false);
-  const [cardModal, setCardModal] = useState<null | "YELLOW" | "RED">(null);
+  const [cardModal, setCardModal] = useState<null | "YELLOW" | "RED" | "GREEN">(null);
 
   useEffect(() => {
     reload();
@@ -41,14 +41,19 @@ export function MatchLivePanel() {
   }
 
   const profile = getSportProfile(match.sport);
-  const isGoalSport = profile.scoreLabel === "Goal";
+  const isGoalSport = profile.supportsGoalVisuals;
   const homeGoalVisualEnabled = isGoalSport && (settings?.goalVisualHomeEnabled ?? true);
   const awayGoalVisualEnabled = isGoalSport && (settings?.goalVisualAwayEnabled ?? false);
 
   async function handleScoreClick(side: "home" | "away", points: number) {
     const visualEnabled = side === "home" ? homeGoalVisualEnabled : awayGoalVisualEnabled;
-    if (points === 1 && visualEnabled) {
-      setGoalPickerSide(side);
+    if (isGoalSport && points === 1) {
+      if (visualEnabled) {
+        setGoalPickerSide(side);
+        return;
+      }
+      // Zonder visual blijft het een doelpunt (GOAL-event in log/export), geen anonieme puntcorrectie.
+      await sendCommand({ type: "goal:trigger", side });
       return;
     }
     await sendCommand({ type: "score:adjust", side, delta: points });
@@ -61,7 +66,7 @@ export function MatchLivePanel() {
           {t("matchLive.title")}
         </div>
         <div className="text-xs text-muted-foreground">
-          {match.homeTeam.name} vs {match.awayTeam.name} · {tMatchStatus(t, match.status)}
+          {match.homeTeam.name} vs {match.awayTeam.name} Â· {tMatchStatus(t, match.status)}
         </div>
       </div>
 
@@ -91,31 +96,48 @@ export function MatchLivePanel() {
       <SportLiveControls match={match} />
 
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <Button variant="secondary" onClick={() => setSubModal(true)}>
-          {t("matchLive.sub")}
-        </Button>
-        <Button variant="outline" onClick={() => setLineupModal(true)}>
-          {t("matchLive.lineup")}
-        </Button>
-        <Button
-          className="bg-amber-500 text-black hover:bg-amber-600"
-          onClick={() => setCardModal("YELLOW")}
-        >
-          {t("matchLive.yellowCard")}
-        </Button>
-        <Button
-          className="bg-red-600 hover:bg-red-700 text-white"
-          onClick={() => setCardModal("RED")}
-        >
-          {t("matchLive.redCard")}
-        </Button>
+        {profile.supportsSubstitutions && (
+          <Button variant="secondary" onClick={() => setSubModal(true)}>
+            {t("matchLive.sub")}
+          </Button>
+        )}
+        {profile.supportsSubstitutions && (
+          <Button variant="outline" onClick={() => setLineupModal(true)}>
+            {t("matchLive.lineup")}
+          </Button>
+        )}
+        {profile.cardColors.includes("GREEN") && (
+          <Button
+            className="bg-emerald-600 text-white hover:bg-emerald-700"
+            onClick={() => setCardModal("GREEN")}
+          >
+            {t("matchLive.greenCard")}
+          </Button>
+        )}
+        {profile.cardColors.includes("YELLOW") && (
+          <Button
+            className="bg-amber-500 text-black hover:bg-amber-600"
+            onClick={() => setCardModal("YELLOW")}
+          >
+            {t("matchLive.yellowCard")}
+          </Button>
+        )}
+        {profile.cardColors.includes("RED") && (
+          <Button
+            className="bg-red-600 hover:bg-red-700 text-white"
+            onClick={() => setCardModal("RED")}
+          >
+            {t("matchLive.redCard")}
+          </Button>
+        )}
         <Button
           variant="outline"
-          onClick={() =>
-            sendCommand({ type: "match:setStatus", status: "HALF_TIME" })
-          }
+          onClick={() => {
+            if (match.status === "HALF_TIME") void sendCommand({ type: "sport:resumePlay" });
+            else void sendCommand({ type: "match:setStatus", status: "HALF_TIME" });
+          }}
         >
-          {t("common.pause")}
+          {match.status === "HALF_TIME" ? t("matchLive.resumePlay") : t("common.pause")}
         </Button>
       </div>
 
@@ -364,7 +386,7 @@ function subLineLabel(match: Match, line: SubLine): string {
     line.teamId === match.homeTeamId ? match.homeTeam.shortName : match.awayTeam.shortName;
   const outS = outP ? `#${outP.number} ${outP.lastName}` : "?";
   const inS = inP ? `#${inP.number} ${inP.lastName}` : "?";
-  return `${teamShort}: ${outS} → ${inS}`;
+  return `${teamShort}: ${outS} â†’ ${inS}`;
 }
 
 function MatchFieldLineupDialog({
@@ -436,7 +458,7 @@ function MatchFieldLineupDialog({
           {t("matchLive.lineupHelp", { n: maximumPlayers })}
         </p>
         <div className="text-xs font-medium text-foreground mb-3">
-          {match.homeTeam.shortName} · {homeSel.size}/{maximumPlayers}
+          {match.homeTeam.shortName} Â· {homeSel.size}/{maximumPlayers}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[52vh] overflow-y-auto pr-1">
           {squad.map((p) => {
@@ -640,7 +662,7 @@ function SubPicker({
               className="mr-auto"
               onClick={() => onRequestLineup()}
             >
-              {t("matchLive.lineup")}…
+              {t("matchLive.lineup")}â€¦
             </Button>
           )}
           <Button variant="outline" onClick={onClose}>
@@ -663,7 +685,7 @@ function CardPicker({
   onClose,
 }: {
   match: Match;
-  color: "YELLOW" | "RED";
+  color: "YELLOW" | "RED" | "GREEN";
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -676,7 +698,7 @@ function CardPicker({
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>
-            {color === "YELLOW" ? t("matchLive.yellowCard") : t("matchLive.redCard")}
+            {color === "YELLOW" ? t("matchLive.yellowCard") : color === "GREEN" ? t("matchLive.greenCard") : t("matchLive.redCard")}
           </DialogTitle>
         </DialogHeader>
         <div className="flex gap-2 mb-4">

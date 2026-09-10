@@ -1,6 +1,6 @@
 {
   "name": "stadium-scoreboard",
-  "version": "0.1.15",
+  "version": "0.1.18",
   "description": "Desktop scorebord- en sponsorweergave voor stadions (Electron + Next).",
   "author": "ArenaCue",
   "private": true,
@@ -28,13 +28,14 @@
     "soak:sponsor-transition": "node scripts/sponsor-transition-soak.mjs",
     "soak:sponsor-interrupt": "node scripts/sponsor-interruption-soak.mjs",
     "e2e:full-match": "node scripts/full-match-e2e.mjs",
-    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --publish never",
-    "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && node scripts/ensure-ffmpeg-win.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win --publish never",
+    "electron:build": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && node scripts/smoke-start.mjs && electron-builder --publish never",
+    "electron:build:win": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && node scripts/ensure-ffmpeg-win.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && node scripts/smoke-start.mjs && electron-builder --win --publish never",
     "electron:verify-win-sign": "node scripts/verify-win-signature.mjs",
     "electron:build:mac": "node scripts/pre-electron-build.mjs && node scripts/ensure-app-icons.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --mac --publish never",
     "electron:pack": "npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --dir --publish never",
     "livestream:ensure-ffmpeg": "node scripts/ensure-ffmpeg-win.mjs",
-    "electron:pack:livestream": "node scripts/ensure-ffmpeg-win.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win --dir --publish never -c.directories.output=dist-livestream-test"
+    "electron:pack:livestream": "node scripts/ensure-ffmpeg-win.mjs && npm run legal:desktop && npm run renderer:build && npm run electron:compile && electron-builder --win --dir --publish never -c.directories.output=dist-livestream-test",
+    "smoke:start": "node scripts/smoke-start.mjs"
   },
   "build": {
     "forceCodeSigning": false,

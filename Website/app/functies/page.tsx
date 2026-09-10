@@ -8,7 +8,7 @@ import { pageMetadata } from "@/lib/seo";
 export const metadata: Metadata = pageMetadata({
   segmentTitle: "Functies",
   description:
-    "ArenaCue Scoreboard en ArenaCue LED boarding: alle hoofdfuncties voor wedstrijdregie, stadionscherm, sponsors, media — plus perimeter/tribune-LED met zones en playlists.",
+    "ArenaCue Scoreboard en ArenaCue LED boarding: alle hoofdfuncties voor wedstrijdregie, stadionscherm, sponsors, livestream, media — plus perimeter/tribune-LED met zones en playlists.",
   path: "/functies",
   keywordsExtra: [
     "wedstrijdregie",
@@ -18,6 +18,8 @@ export const metadata: Metadata = pageMetadata({
     "sponsorplanning",
     "wedstrijddisplay",
     "voetbal display software",
+    "livestream YouTube",
+    "sportclub livestream",
   ],
 });
 
@@ -52,9 +54,9 @@ export default function FunctiesPage() {
         <h1>Alle functies</h1>
         <p className="features-deep-lead">
           ArenaCue bestaat uit <strong>twee producten</strong>: <strong>ArenaCue Scoreboard</strong> voor live
-          wedstrijdregie en het hoofdstadionscherm, en <strong>ArenaCue LED boarding</strong> voor perimeter-, lint- en
-          tribuneschermen met eigen zones en playlists. Hieronder zie je per product welke impact je operationeel mag
-          verwachten.
+          wedstrijdregie, het hoofdstadionscherm en de ingebouwde livestream, en <strong>ArenaCue LED boarding</strong>{" "}
+          voor perimeter-, lint- en tribuneschermen met eigen zones en playlists. Hieronder zie je per product welke
+          impact je operationeel mag verwachten.
         </p>
         <p className="features-deep-lead tight">
           <strong>Wedstrijd-PC:</strong> voor langere sessies (typisch 4–6 uur) met video en sponsorrotatie gelden
@@ -68,8 +70,9 @@ export default function FunctiesPage() {
             ArenaCue Scoreboard
           </h2>
           <p className="features-deep-lead tight">
-            Live scorebord, timer, wedstrijdmodi, sponsors naast of fullscreen op het display — één control‑paneel, één
-            duidelijke regieflow naar je stadionscherm voor een professioneel wedstrijdbeeld.
+            Live scorebord, timer, wedstrijdmodi, sponsors naast of fullscreen op het display, plus een ingebouwde
+            livestream — één control‑paneel, één duidelijke regieflow naar je stadionscherm én naar YouTube, Twitch of
+            RTMP.
           </p>
 
           <section className="features-deep-section" id="platform-scoreboard">
@@ -203,6 +206,36 @@ export default function FunctiesPage() {
               <li>
                 <strong>Toetsenbordsneltoetsen</strong> voor veelgebruikte acties (bv. timer start/stop) zodat operators
                 snel blijven.
+              </li>
+            </ul>
+          </section>
+
+          <section className="features-deep-section" id="livestream">
+            <h3>Livestream</h3>
+            <ul className="features-deep-list">
+              <li>
+                Stream vanuit het Scoreboard control panel naar <strong>YouTube</strong>, <strong>Twitch</strong> of een{" "}
+                <strong>eigen RTMP-bestemming</strong> — zonder aparte broadcastsoftware voor de basisflow.
+              </li>
+              <li>
+                Kies je beeldbron: <strong>camera</strong>, <strong>stadiondisplay</strong>, een{" "}
+                <strong>browservenster</strong> of <strong>lokaal media</strong>, en schakel live tussen bronnen.
+              </li>
+              <li>
+                Zet een <strong>score-overlay</strong> en optionele sponsorvisuals over de stream, zodat kijkers dezelfde
+                wedstrijdinformatie zien als in het stadion.
+              </li>
+              <li>
+                Encodeer in <strong>1080p of 720p</strong>, bij voorkeur via <strong>NVIDIA NVENC</strong> (of software
+                x264 als fallback). Optioneel een tweede bestemming en een <strong>lokale opname</strong>.
+              </li>
+              <li>
+                Audiomixer voor microfoon, systeemgeluid en bronnen; geschikt voor commentaar naast het wedstrijdbeeld.
+              </li>
+              <li>
+                Voor langere streams met video én encode: check de{" "}
+                <Link href="/vereisten">systeemvereisten</Link> — een dedicated GPU met hardware-encode is sterk
+                aanbevolen.
               </li>
             </ul>
           </section>

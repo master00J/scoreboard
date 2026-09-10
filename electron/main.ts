@@ -1,5 +1,16 @@
 import { spawnSync } from "child_process";
-import { app, BrowserWindow, desktopCapturer, ipcMain, dialog, Menu, screen, session, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  desktopCapturer,
+  ipcMain,
+  dialog,
+  Menu,
+  powerSaveBlocker,
+  screen,
+  session,
+  shell,
+} from "electron";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -95,6 +106,19 @@ function migrateStadiumVenueBundleFromDefaultUserData(defaultUserData: string, p
 }
 
 function applyPortableUserDataPathEarly(): void {
+  // Smoke-test / geïsoleerde ontwikkelsessie: eigen userData, geen migratie van bestaande venue-data.
+  const isolatedDir = process.env.ARENACUE_USER_DATA_DIR?.trim();
+  if (isolatedDir) {
+    try {
+      const dataRoot = path.resolve(isolatedDir);
+      fs.mkdirSync(dataRoot, { recursive: true });
+      app.setPath("userData", dataRoot);
+      console.log(`[electron] isolated userData → ${dataRoot}`);
+    } catch (e) {
+      console.error("[electron] isolated userData:", e);
+    }
+    return;
+  }
   const fromDir = process.env.PORTABLE_EXECUTABLE_DIR?.trim();
   const fromFile = process.env.PORTABLE_EXECUTABLE_FILE?.trim();
   const base =
@@ -281,25 +305,83 @@ function bootLogPath(): string {
   return path.join(app.getPath("userData"), "boot.log");
 }
 
-function bootLog(line: string) {
-  const lineWithNl = `[${new Date().toISOString()}] ${line}\n`;
+/**
+ * Logger zonder synchrone I/O op de main thread: regels worden gebufferd en met één append per
+ * event-loop-tick weggeschreven. Rotatie: boot.log → boot.log.1 zodra 5 MB is bereikt (geen
+ * 5 MB read+rewrite meer midden in een wedstrijd).
+ */
+const BOOT_LOG_MAX_BYTES = 5 * 1024 * 1024;
+let bootLogBuffer: string[] = [];
+let bootLogFlushScheduled = false;
+let bootLogFlushing = false;
+let bootLogApproxBytes: number | null = null;
+
+function rotateBootLogIfNeeded(logFile: string, incomingBytes: number) {
   try {
-    const logFile = bootLogPath();
-    try {
-      const st = fs.statSync(logFile);
-      const maxBytes = 5 * 1024 * 1024;
-      if (st.size > maxBytes) {
-        const keep = fs.readFileSync(logFile, "utf8").slice(-Math.floor(maxBytes / 2));
-        fs.writeFileSync(logFile, keep, "utf8");
-      }
-    } catch {
-      /* ignore */
+    if (bootLogApproxBytes == null) {
+      bootLogApproxBytes = fs.existsSync(logFile) ? fs.statSync(logFile).size : 0;
     }
-    fs.appendFileSync(bootLogPath(), lineWithNl, "utf8");
+    if (bootLogApproxBytes + incomingBytes > BOOT_LOG_MAX_BYTES) {
+      const rotated = `${logFile}.1`;
+      try {
+        fs.rmSync(rotated, { force: true });
+      } catch {
+        /* ignore */
+      }
+      fs.renameSync(logFile, rotated);
+      bootLogApproxBytes = 0;
+    }
+  } catch {
+    bootLogApproxBytes = 0;
+  }
+}
+
+function flushBootLog() {
+  bootLogFlushScheduled = false;
+  if (bootLogFlushing || bootLogBuffer.length === 0) return;
+  const chunk = bootLogBuffer.join("");
+  bootLogBuffer = [];
+  bootLogFlushing = true;
+  const logFile = bootLogPath();
+  rotateBootLogIfNeeded(logFile, chunk.length);
+  fs.appendFile(logFile, chunk, "utf8", () => {
+    bootLogFlushing = false;
+    bootLogApproxBytes = (bootLogApproxBytes ?? 0) + chunk.length;
+    if (bootLogBuffer.length > 0) scheduleBootLogFlush();
+  });
+}
+
+function scheduleBootLogFlush() {
+  if (bootLogFlushScheduled) return;
+  bootLogFlushScheduled = true;
+  setImmediate(flushBootLog);
+}
+
+/** Bij afsluiten of fatale fout: wat nog in de buffer zit synchroon wegschrijven. */
+function flushBootLogSync() {
+  if (bootLogBuffer.length === 0) return;
+  const chunk = bootLogBuffer.join("");
+  bootLogBuffer = [];
+  try {
+    fs.appendFileSync(bootLogPath(), chunk, "utf8");
   } catch {
     /* ignore */
   }
-  console.log(line);
+}
+
+function bootLog(line: string) {
+  const lineWithNl = `[${new Date().toISOString()}] ${line}\n`;
+  try {
+    bootLogBuffer.push(lineWithNl);
+    scheduleBootLogFlush();
+  } catch {
+    /* ignore */
+  }
+  try {
+    console.log(line);
+  } catch {
+    /* stdout kan weg zijn (losgekoppelde launcher) */
+  }
 }
 
 process.on("unhandledRejection", (reason) => {
@@ -309,6 +391,11 @@ process.on("unhandledRejection", (reason) => {
 
 process.on("uncaughtException", (error) => {
   bootLog(`[process] uncaughtException ${error.name}: ${error.message}`);
+  flushBootLogSync();
+});
+
+app.on("will-quit", () => {
+  flushBootLogSync();
 });
 
 function appRoot(): string {
@@ -332,8 +419,12 @@ function windowIconPath(): string | undefined {
   return undefined;
 }
 
+/**
+ * SQLite kent één schrijver tegelijk; met één connectie in de Prisma-pool gelden `busy_timeout` en
+ * WAL-instellingen voor élke query en verdwijnt "database is locked" tussen tick-loop en commando's.
+ */
 function prismaDatabaseUrl(dbPath: string): string {
-  return `file:${dbPath.replace(/\\/g, "/")}`;
+  return `file:${dbPath.replace(/\\/g, "/")}?connection_limit=1`;
 }
 
 function configureDesktopContext() {
@@ -392,6 +483,7 @@ async function loadRuntime() {
       runCommand: (command) => runtime!.runCommand(command as any),
     },
     log: bootLog,
+    credentialsPath: path.join(app.getPath("userData"), "mobile-bridge-credentials.json"),
   });
   cloudAgent = startCloudControlAgent({
     runtime: {
@@ -982,6 +1074,65 @@ function createWindows() {
     controlWindow = null;
   });
 
+  createDisplayWindow();
+  void buildMenu();
+}
+
+function displayWindowAlive(): boolean {
+  return !!displayWindow && !displayWindow.isDestroyed();
+}
+
+/** Displayvenster terughalen als het weg is (gesloten, gecrasht, monitor losgekoppeld). */
+function ensureDisplayWindow(): BrowserWindow | null {
+  if (displayWindowAlive()) return displayWindow;
+  bootLog("[display] venster ontbreekt — opnieuw aanmaken");
+  createDisplayWindow();
+  return displayWindow;
+}
+
+function wireDisplayWindow(win: BrowserWindow) {
+  /** Navigatie/renderer-fouten op het stadionscherm (los van video-element). */
+  win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
+    bootLog(
+      `[display] did-fail-load code=${errorCode} ${errorDescription} url=${String(validatedURL ?? "").slice(0, 200)}${bootPlaybackContextSuffix()}`,
+    );
+  });
+  /** Bounds op stadionscherm, dan fullscreen — geen taakbalk op die monitor. */
+  win.once("ready-to-show", () => {
+    applyDisplayFullscreen(win);
+    win.show();
+    setImmediate(() => applyDisplayFullscreen(win));
+  });
+  win.webContents.on("did-finish-load", () => {
+    void runtime?.broadcastDisplayState();
+  });
+  win.webContents.on("render-process-gone", (_event, details) => {
+    bootLog(
+      `[display] render-process-gone reason=${details.reason} exitCode=${details.exitCode}${bootPlaybackContextSuffix()}`,
+    );
+    if (!win.isDestroyed()) win.webContents.reloadIgnoringCache();
+  });
+  win.webContents.on("unresponsive", () => {
+    bootLog(`[display] renderer unresponsive -> reload${bootPlaybackContextSuffix()}`);
+    if (!win.isDestroyed()) win.webContents.reloadIgnoringCache();
+  });
+  win.on("closed", () => {
+    if (displayWindow === win) displayWindow = null;
+    if (allowQuitWithoutConfirm) return;
+    // Een per ongeluk gesloten stadionscherm komt automatisch terug (geen herstart van de hele app nodig).
+    setTimeout(() => {
+      if (!allowQuitWithoutConfirm && !displayWindowAlive()) {
+        bootLog("[display] venster gesloten — automatisch herstellen");
+        createDisplayWindow();
+      }
+    }, 300);
+  });
+}
+
+function createDisplayWindow() {
+  if (displayWindowAlive()) return;
+  const preload = path.join(__dirname, "preload.js");
+  const winIcon = windowIconPath();
   displayWindow = new BrowserWindow({
     title: "Stadium Scoreboard — Display",
     backgroundColor: "#000000",
@@ -999,42 +1150,48 @@ function createWindows() {
     },
   });
   void loadView(displayWindow, "display");
-  /** Navigatie/renderer-fouten op het stadionscherm (los van video-element). */
-  displayWindow.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
-    bootLog(
-      `[display] did-fail-load code=${errorCode} ${errorDescription} url=${String(validatedURL ?? "").slice(0, 200)}${bootPlaybackContextSuffix()}`,
-    );
-  });
-  /** Bounds op stadionscherm, dan fullscreen — geen taakbalk op die monitor. */
-  displayWindow.once("ready-to-show", () => {
-    applyDisplayFullscreen(displayWindow);
-    displayWindow?.show();
-    setImmediate(() => applyDisplayFullscreen(displayWindow));
-  });
-  displayWindow.webContents.on("did-finish-load", () => {
-    void runtime?.broadcastDisplayState();
-  });
-  displayWindow.webContents.on("render-process-gone", (_event, details) => {
-    bootLog(
-      `[display] render-process-gone reason=${details.reason} exitCode=${details.exitCode}${bootPlaybackContextSuffix()}`,
-    );
-    const win = displayWindow;
-    if (win && !win.isDestroyed()) {
-      win.webContents.reloadIgnoringCache();
-    }
-  });
-  displayWindow.webContents.on("unresponsive", () => {
-    bootLog(`[display] renderer unresponsive -> reload${bootPlaybackContextSuffix()}`);
-    const win = displayWindow;
-    if (win && !win.isDestroyed()) {
-      win.webContents.reloadIgnoringCache();
-    }
-  });
-  displayWindow.on("closed", () => {
-    displayWindow = null;
-  });
+  wireDisplayWindow(displayWindow);
+}
 
-  void buildMenu();
+/** HDMI eruit/erin of resolutiewissel: stadionscherm opnieuw fullscreen op de juiste monitor. */
+function wireDisplayMonitorTracking() {
+  const relayout = () => {
+    if (!displayWindowAlive()) {
+      if (!allowQuitWithoutConfirm) createDisplayWindow();
+      return;
+    }
+    bootLog("[display] monitor gewijzigd — fullscreen opnieuw plaatsen");
+    applyDisplayFullscreen(displayWindow);
+  };
+  screen.on("display-added", relayout);
+  screen.on("display-removed", relayout);
+  screen.on("display-metrics-changed", relayout);
+}
+
+/**
+ * Stadionscherm mag nooit in slaap- of schermbeveiliging vallen zolang de app draait, ongeacht de
+ * Windows-energie-instellingen van de club-pc.
+ */
+let powerSaveBlockerId: number | null = null;
+
+function startDisplayPowerSaveBlocker() {
+  if (powerSaveBlockerId != null && powerSaveBlocker.isStarted(powerSaveBlockerId)) return;
+  try {
+    powerSaveBlockerId = powerSaveBlocker.start("prevent-display-sleep");
+    bootLog(`[power] prevent-display-sleep actief (id=${powerSaveBlockerId})`);
+  } catch (err) {
+    bootLog(`[power] powerSaveBlocker mislukt: ${String(err)}`);
+  }
+}
+
+function stopDisplayPowerSaveBlocker() {
+  if (powerSaveBlockerId == null) return;
+  try {
+    if (powerSaveBlocker.isStarted(powerSaveBlockerId)) powerSaveBlocker.stop(powerSaveBlockerId);
+  } catch {
+    /* ignore */
+  }
+  powerSaveBlockerId = null;
 }
 
 function psSingleQuoteEscape(p: string): string {
@@ -1071,7 +1228,19 @@ async function runVenueBackupExport(parent: BrowserWindow | null): Promise<{
   try {
     fs.mkdirSync(path.join(staging, "data"), { recursive: true });
     fs.mkdirSync(path.join(staging, "uploads"), { recursive: true });
+    // WAL-modus: recente commits staan in stadium.db-wal. Eerst checkpointen, anders is de kopie onvolledig.
+    try {
+      await runtime?.checkpointDatabaseForBackup();
+    } catch (err) {
+      bootLog(`[backup] wal_checkpoint mislukt: ${String(err)} — kopie bevat ook -wal/-shm als vangnet`);
+    }
     fs.copyFileSync(dbSrc, path.join(staging, "data", "stadium.db"));
+    for (const suffix of ["-wal", "-shm"]) {
+      const side = `${dbSrc}${suffix}`;
+      if (fs.existsSync(side) && fs.statSync(side).size > 0) {
+        fs.copyFileSync(side, path.join(staging, "data", `stadium.db${suffix}`));
+      }
+    }
     if (fs.existsSync(ctx.uploadsDir)) {
       fs.cpSync(ctx.uploadsDir, path.join(staging, "uploads"), { recursive: true });
     }
@@ -1512,19 +1681,21 @@ function registerIpc() {
   });
 
   ipcMain.handle("window:focusDisplay", async () => {
-    if (!displayWindow) return;
-    applyDisplayFullscreen(displayWindow);
-    displayWindow.show();
-    displayWindow.focus();
-    setImmediate(() => applyDisplayFullscreen(displayWindow));
+    const w = ensureDisplayWindow();
+    if (!w) return;
+    applyDisplayFullscreen(w);
+    w.show();
+    w.focus();
+    setImmediate(() => applyDisplayFullscreen(w));
   });
 
   ipcMain.handle("window:reloadDisplay", async () => {
-    if (!displayWindow) return { ok: false };
+    const w = ensureDisplayWindow();
+    if (!w) return { ok: false };
     try {
-      displayWindow.webContents.reloadIgnoringCache();
+      w.webContents.reloadIgnoringCache();
       setImmediate(() => {
-        if (displayWindow) applyDisplayFullscreen(displayWindow);
+        if (!w.isDestroyed()) applyDisplayFullscreen(w);
       });
       return { ok: true };
     } catch (err) {
@@ -1794,6 +1965,7 @@ if (!gotLock) {
       await loadRuntime();
       registerIpc();
       createWindows();
+      wireDisplayMonitorTracking();
       wireSplashUntilControlReady();
 
       app.on("child-process-gone", (_event, details) => {
@@ -1845,12 +2017,14 @@ if (!gotLock) {
       if (videoDecodeFallbackEnabled()) {
         bootLog("[gpu-fallback] hardware video decode uitgeschakeld voor deze sessie");
       }
+      startDisplayPowerSaveBlocker();
       bootLog("Desktop runtime OK — open vensters.");
       startBootMetricsLogging();
     } catch (err) {
       closeSplashWindow();
       const message = err instanceof Error ? err.message : String(err);
       bootLog(`FATAL: ${message}`);
+      flushBootLogSync();
       dialog.showErrorBox(
         "Stadium Scoreboard — opstartfout",
         `De desktop-app kon niet initialiseren.\n\n${message}\n\nLogbestand:\n${bootLogPath()}`,
@@ -1877,6 +2051,7 @@ app.on("before-quit", (e) => {
     return;
   }
   closeSplashWindow();
+  stopDisplayPowerSaveBlocker();
   if (mobileBridge) {
     void mobileBridge.stop();
     mobileBridge = null;

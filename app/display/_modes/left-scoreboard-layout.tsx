@@ -2,7 +2,6 @@
 
 import { Fragment } from "react";
 import { StableClockText } from "@/components/stable-clock-text";
-import { formatTime } from "@/lib/utils";
 import type { Match } from "@/lib/types";
 import {
   type ResolvedScoreboardTheme,
@@ -11,7 +10,8 @@ import {
 } from "@/lib/scoreboard-theme";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { TeamLogo } from "./scoreboard-strip";
-import { getSportProfile, type SportProfile } from "@/lib/sports";
+import { formatSportClock, getSportProfile, type SportProfile } from "@/lib/sports";
+import { SportMatchMeta, SportTeamExtras, sportHasTeamExtras } from "./sport-score-extras";
 
 /**
  * Vast 1920×1080-layout tijdens actieve match / sponsor naast scorebord.
@@ -70,9 +70,8 @@ export function LeftScoreboardLayout({
                 <TeamBlock
                   team={match.homeTeam}
                   score={match.homeScore}
-                  timeouts={match.homeTimeouts}
-                  fouls={match.homeFouls}
-                  sets={match.homeSets}
+                  match={match}
+                  side="home"
                   profile={profile}
                   theme={theme}
                 />
@@ -80,12 +79,12 @@ export function LeftScoreboardLayout({
             )}
             {seg === "timer" && (
               <TimerBlock
+                match={match}
                 elapsed={elapsed}
                 running={running}
                 period={period}
                 addedTime={addedTime}
                 shotClock={shotClock}
-                showShotClock={profile.shotClockPresets.length > 0}
                 theme={theme}
               />
             )}
@@ -94,9 +93,8 @@ export function LeftScoreboardLayout({
                 <TeamBlock
                   team={match.awayTeam}
                   score={match.awayScore}
-                  timeouts={match.awayTimeouts}
-                  fouls={match.awayFouls}
-                  sets={match.awaySets}
+                  match={match}
+                  side="away"
                   profile={profile}
                   theme={theme}
                 />
@@ -137,26 +135,31 @@ function Divider() {
 function TeamBlock({
   team,
   score,
-  timeouts,
-  fouls,
-  sets,
+  match,
+  side,
   profile,
   theme,
 }: {
   team: Match["homeTeam"];
   score: number;
-  timeouts: number;
-  fouls: number;
-  sets: number;
+  match: Match;
+  side: "home" | "away";
   profile: SportProfile;
   theme: ResolvedScoreboardTheme;
 }) {
+  const showExtras = sportHasTeamExtras(profile.id);
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 py-4">
-      {theme.showLogos ? <TeamLogo team={team} size={theme.leftLogoPx} /> : null}
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 py-4">
+      {theme.showLogos ? (
+        <TeamLogo
+          team={team}
+          size={theme.leftLogoPx}
+          style={{ maxHeight: showExtras ? "38%" : "56%", width: "auto" }}
+        />
+      ) : null}
       {theme.fullShowTeamNames ? (
         <div
-          className={`max-w-full px-2 text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
+          className={`max-w-full shrink-0 px-2 text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
           style={{
             fontSize: Math.max(12, theme.leftPeriodPx + 4),
             color: theme.teamNameColor,
@@ -167,9 +170,9 @@ function TeamBlock({
       ) : null}
       {theme.showScores ? (
       <div
-        className="font-black tabular-nums leading-none"
+        className="shrink-0 font-black tabular-nums leading-none"
         style={{
-          fontSize: theme.leftScorePx,
+          fontSize: showExtras ? Math.round(theme.leftScorePx * 0.78) : theme.leftScorePx,
           color: theme.scoreColor,
           textShadow: "0 4px 20px rgba(0,0,0,0.4)",
         }}
@@ -177,32 +180,32 @@ function TeamBlock({
         {score}
       </div>
       ) : null}
-      {(profile.timeoutLimitForPeriod(1) > 0 || profile.statLabel || profile.hasSets) && (
-        <div className="flex flex-wrap justify-center gap-2 px-2 text-center text-[13px] font-bold uppercase tracking-wide text-white/65">
-          {profile.hasSets && <span>Sets {sets}</span>}
-          {profile.timeoutLimitForPeriod(1) > 0 && <span>TO {timeouts}</span>}
-          {profile.statLabel && <span>{profile.statLabel} {fouls}</span>}
-        </div>
+      {showExtras && (
+        <SportTeamExtras
+          match={match}
+          side={side}
+          className="flex w-full max-w-full shrink-0 flex-nowrap justify-center gap-1.5 px-2 text-center text-[13px] font-bold uppercase leading-none tracking-wide text-white/65"
+        />
       )}
     </div>
   );
 }
 
 function TimerBlock({
+  match,
   elapsed,
   running,
   period,
   addedTime,
   shotClock,
-  showShotClock,
   theme,
 }: {
+  match: Match;
   elapsed: number;
   running: boolean;
   period: string;
   addedTime: number;
   shotClock: number;
-  showShotClock: boolean;
   theme: ResolvedScoreboardTheme;
 }) {
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
@@ -222,7 +225,7 @@ function TimerBlock({
       <div className="mt-2 flex items-end justify-center gap-3">
         {theme.showClock ? (
         <StableClockText
-          value={formatTime(elapsed)}
+          value={formatSportClock(match.sport, elapsed)}
           className="font-black leading-none text-white"
           style={{
             fontSize: theme.leftTimerPx,
@@ -245,11 +248,9 @@ function TimerBlock({
           </div>
         )}
       </div>
-      {showShotClock && (
-        <div className="mt-2 rounded border border-red-400/50 bg-red-600/20 px-3 py-1 text-2xl font-black tabular-nums text-red-300">
-          {Math.ceil(shotClock)}
-        </div>
-      )}
+      <div className="mt-2">
+        <SportMatchMeta match={match} shotClock={shotClock} scale={0.6} />
+      </div>
     </div>
   );
 }

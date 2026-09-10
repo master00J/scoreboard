@@ -1,11 +1,11 @@
-"use client";
+﻿"use client";
 
 import type { CSSProperties, ReactNode } from "react";
 import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { StableClockText } from "@/components/stable-clock-text";
-import { formatTime } from "@/lib/utils";
+import { formatSportClock } from "@/lib/sports";
 import { mediaUrl } from "@/lib/media-url";
 import {
   frameGradientCss,
@@ -82,7 +82,7 @@ export function ScoreboardStrip({
             ) : null}
             {theme.showClock ? (
               <StableClockText
-                value={formatTime(elapsed)}
+                value={formatSportClock(match.sport, elapsed)}
                 className="font-black leading-none"
                 style={{ fontSize: theme.stripTimerPx, color: accent }}
               />
@@ -177,6 +177,7 @@ export function TeamLogo({
   style?: CSSProperties;
 }) {
   const box = size != null ? { width: size, height: size } : undefined;
+  const fit: CSSProperties = { minWidth: 0, minHeight: 0, flexShrink: 1 };
   if (team.logoPath) {
     return (
       <img
@@ -185,7 +186,7 @@ export function TeamLogo({
         width={size}
         height={size}
         className={className}
-        style={{ ...box, objectFit: "contain", ...style }}
+        style={{ ...box, objectFit: "contain", ...fit, ...style }}
       />
     );
   }
@@ -194,6 +195,7 @@ export function TeamLogo({
       className={`flex items-center justify-center rounded-full font-black text-white ${className ?? ""}`}
       style={{
         ...box,
+        ...fit,
         background: team.primaryColor,
         fontSize: size != null ? size * 0.4 : "40%",
         ...style,

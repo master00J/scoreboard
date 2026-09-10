@@ -3,14 +3,14 @@
 import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
 import { StableClockText } from "@/components/stable-clock-text";
-import { formatTime } from "@/lib/utils";
 import {
   type ResolvedScoreboardTheme,
   mergeScoreboardTheme,
   slotStyle,
 } from "@/lib/scoreboard-theme";
 import { TeamLogo } from "./scoreboard-strip";
-import { getSportProfile, type SportProfile } from "@/lib/sports";
+import { formatSportClock, getSportProfile, type SportProfile } from "@/lib/sports";
+import { SportMatchMeta, SportTeamExtras, sportHasTeamExtras } from "./sport-score-extras";
 
 /**
  * Volledig scherm tijdens de match zonder sponsorpaneel: thuis, klok en uit
@@ -54,29 +54,27 @@ export function MatchScoreboardFull({
       <TeamSide
         team={match.homeTeam}
         score={match.homeScore}
-        timeouts={match.homeTimeouts}
-        fouls={match.homeFouls}
-        sets={match.homeSets}
+        match={match}
+        side="home"
         profile={profile}
         theme={theme}
         style={slotStyle(theme.fullSlots.home)}
       />
       <CenterBlock
+        match={match}
         elapsed={elapsed}
         running={running}
         period={period}
         addedTime={addedTime}
         shotClock={shotClock}
-        showShotClock={profile.shotClockPresets.length > 0}
         theme={theme}
         style={slotStyle(theme.fullSlots.clock)}
       />
       <TeamSide
         team={match.awayTeam}
         score={match.awayScore}
-        timeouts={match.awayTimeouts}
-        fouls={match.awayFouls}
-        sets={match.awaySets}
+        match={match}
+        side="away"
         profile={profile}
         theme={theme}
         style={slotStyle(theme.fullSlots.away)}
@@ -88,25 +86,23 @@ export function MatchScoreboardFull({
 function TeamSide({
   team,
   score,
-  timeouts,
-  fouls,
-  sets,
+  match,
+  side,
   profile,
   theme,
   style,
 }: {
   team: Match["homeTeam"];
   score: number;
-  timeouts: number;
-  fouls: number;
-  sets: number;
+  match: Match;
+  side: "home" | "away";
   profile: SportProfile;
   theme: ResolvedScoreboardTheme;
   style: { left: string; top: string; width: string; height: string };
 }) {
   const nameEl = theme.fullShowTeamNames ? (
     <div
-      className={`max-w-full px-[4cqw] text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
+      className={`max-w-full shrink-0 px-[4cqw] text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
       style={{
         fontSize: `min(${theme.fullTeamNamePx}px, 14cqh, 12cqw)`,
         color: theme.teamNameColor,
@@ -116,6 +112,7 @@ function TeamSide({
       <span className="line-clamp-3">{team.shortName || team.name}</span>
     </div>
   ) : null;
+  const showExtras = sportHasTeamExtras(profile.id);
   const logoEl = theme.showLogos ? (
     <TeamLogo
       team={team}
@@ -123,15 +120,17 @@ function TeamSide({
         width: "min(78cqw, 48cqh)",
         height: "min(78cqw, 48cqh)",
         maxWidth: "100%",
-        maxHeight: theme.showScores ? "56%" : "86%",
+        maxHeight: showExtras && theme.showScores ? "42%" : theme.showScores ? "56%" : "86%",
+        flexShrink: 1,
+        minHeight: 0,
       }}
     />
   ) : null;
   const scoreEl = theme.showScores ? (
     <div
-      className="font-black tabular-nums leading-none"
+      className="shrink-0 font-black tabular-nums leading-none"
       style={{
-        fontSize: `min(${theme.fullScorePx}px, 40cqh, 50cqw)`,
+        fontSize: `min(${theme.fullScorePx}px, ${showExtras ? 32 : 40}cqh, 50cqw)`,
         color: theme.scoreColor,
         textShadow: "0 8px 40px rgba(0,0,0,0.55)",
       }}
@@ -154,18 +153,16 @@ function TeamSide({
       style={{ ...style, containerType: "size" }}
     >
       <div
-        className="flex h-full w-full flex-col items-center justify-center min-w-0"
+        className="flex h-full min-h-0 w-full min-w-0 flex-col items-center justify-center"
         style={{ gap: `${Math.min(theme.fullTeamStackGapPx, 12)}cqh` }}
       >
         {stack}
-        {(profile.timeoutLimitForPeriod(1) > 0 || profile.statLabel || profile.hasSets) && (
-          <div className="flex flex-wrap items-center justify-center gap-[2cqw] text-center font-bold uppercase tracking-wider text-white/65"
-            style={{ fontSize: "min(18px, 8cqh, 10cqw)" }}
-          >
-            {profile.hasSets && <span>Sets {sets}</span>}
-            {profile.timeoutLimitForPeriod(1) > 0 && <span>TO {timeouts}</span>}
-            {profile.statLabel && <span>{profile.statLabel} {fouls}</span>}
-          </div>
+        {showExtras && (
+          <SportTeamExtras
+            match={match}
+            side={side}
+            style={{ fontSize: "clamp(11px, 5.5cqw, 18px)", paddingBlock: "0.4em" }}
+          />
         )}
       </div>
     </div>
@@ -173,21 +170,21 @@ function TeamSide({
 }
 
 function CenterBlock({
+  match,
   elapsed,
   running,
   period,
   addedTime,
   shotClock,
-  showShotClock,
   theme,
   style,
 }: {
+  match: Match;
   elapsed: number;
   running: boolean;
   period: string;
   addedTime: number;
   shotClock: number;
-  showShotClock: boolean;
   theme: ResolvedScoreboardTheme;
   style: { left: string; top: string; width: string; height: string };
 }) {
@@ -212,7 +209,7 @@ function CenterBlock({
         <div className="flex items-end justify-center gap-[4cqw]">
           {theme.showClock && (
             <StableClockText
-              value={formatTime(elapsed)}
+              value={formatSportClock(match.sport, elapsed)}
               className="font-black leading-none text-white"
               style={{
                 fontSize: `min(${theme.fullTimerPx}px, 42cqh, 36cqw)`,
@@ -235,18 +232,7 @@ function CenterBlock({
             </div>
           )}
         </div>
-        {showShotClock && (
-          <div className="mt-[2cqh] rounded-xl border border-red-400/50 bg-red-600/15 px-[6cqw] py-[3cqh] text-center">
-            <div className="text-[min(14px,6cqh)] font-bold uppercase tracking-[0.3em] text-red-200/80">
-              Shotclock
-            </div>
-            <div className="mt-[1cqh] font-black tabular-nums leading-none text-red-400"
-              style={{ fontSize: "min(64px, 28cqh, 24cqw)" }}
-            >
-              {Math.ceil(shotClock)}
-            </div>
-          </div>
-        )}
+        <SportMatchMeta match={match} shotClock={shotClock} scale={1} />
       </div>
     </div>
   );

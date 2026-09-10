@@ -1,4 +1,5 @@
 import { prisma } from "../lib/prisma";
+import type { Db } from "./db";
 import {
   applySubstitutionToFieldIds,
   defaultFieldFromRoster,
@@ -17,9 +18,10 @@ export type SubPair = { teamId: string; playerOutId: string; playerInId: string 
 export async function validateSubPairsSequential(
   matchId: string,
   pairs: SubPair[],
+  db: Db = prisma,
 ): Promise<void> {
   if (pairs.length === 0) return;
-  const m = await prisma.match.findUnique({ where: { id: matchId } });
+  const m = await db.match.findUnique({ where: { id: matchId } });
   if (!m) throw new Error("Match not found");
 
   let home = parsePlayerIdArrayJson(m.homeFieldPlayerIdsJson);
@@ -51,8 +53,9 @@ export async function validateSubPairsSequential(
 export async function validateSubPairAgainstField(
   matchId: string,
   pair: SubPair,
+  db: Db = prisma,
 ): Promise<void> {
-  const m = await prisma.match.findUnique({ where: { id: matchId } });
+  const m = await db.match.findUnique({ where: { id: matchId } });
   if (!m) throw new Error("Match not found");
   const raw =
     pair.teamId === m.homeTeamId
@@ -71,8 +74,8 @@ export async function validateSubPairAgainstField(
   }
 }
 
-export async function ensureDefaultMatchFieldLineups(matchId: string): Promise<void> {
-  const m = await prisma.match.findUnique({
+export async function ensureDefaultMatchFieldLineups(matchId: string, db: Db = prisma): Promise<void> {
+  const m = await db.match.findUnique({
     where: { id: matchId },
     include: {
       homeTeam: { include: { players: { orderBy: { number: "asc" } } } },
@@ -90,7 +93,7 @@ export async function ensureDefaultMatchFieldLineups(matchId: string): Promise<v
   const nuAway =
     away.length > 0 ? away : defaultFieldFromRoster(m.awayTeam.players ?? [], maximum);
 
-  await prisma.match.update({
+  await db.match.update({
     where: { id: matchId },
     data: {
       homeFieldPlayerIdsJson: JSON.stringify(nuHome),
@@ -102,8 +105,9 @@ export async function ensureDefaultMatchFieldLineups(matchId: string): Promise<v
 export async function applySubToFieldRoster(
   matchId: string,
   pair: { teamId: string; playerOutId: string; playerInId: string },
+  db: Db = prisma,
 ): Promise<void> {
-  const m = await prisma.match.findUnique({ where: { id: matchId } });
+  const m = await db.match.findUnique({ where: { id: matchId } });
   if (!m) return;
   const key =
     pair.teamId === m.homeTeamId
@@ -118,7 +122,7 @@ export async function applySubToFieldRoster(
   if (ids.length === 0) return;
 
   ids = applySubstitutionToFieldIds(ids, pair.playerOutId, pair.playerInId);
-  await prisma.match.update({
+  await db.match.update({
     where: { id: matchId },
     data: { [key]: JSON.stringify(ids) },
   });

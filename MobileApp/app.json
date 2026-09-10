@@ -3,17 +3,23 @@
     "name": "ArenaCue Control",
     "slug": "arenacue-control",
     "description": "Mobiele remote-control companion voor de ArenaCue desktopsoftware.",
-    "version": "1.1.0",
+    "version": "1.2.5",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "scheme": "arenacue",
     "icon": "./assets/icon.png",
+    "newArchEnabled": false,
     "updates": {
       "checkAutomatically": "NEVER"
     },
     "assetBundlePatterns": [
-      "**/*"
+      "assets/*"
     ],
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#05070f"
+    },
     "plugins": [
       [
         "expo-camera",
@@ -25,7 +31,7 @@
     ],
     "android": {
       "package": "be.arenacue.control",
-      "versionCode": 1,
+      "versionCode": 9,
       "usesCleartextTraffic": true,
       "permissions": [
         "INTERNET",

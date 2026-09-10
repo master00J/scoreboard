@@ -12,7 +12,9 @@ import { useLicenseFeatures } from "@/lib/use-license-features";
 import type { Match, MatchEvent, Player, MediaItem } from "@/lib/types";
 import type { MatchStatusT } from "@/lib/validation/commands";
 import { isLivePlayingMatchStatus, programmedDisplayMode } from "@/lib/live-cycle-settings";
-import { getSportProfile } from "@/lib/sports";
+import { getSportProfile, sportMaxPeriod } from "@/lib/sports";
+import { applyLivePeriod, applyLivePhase } from "@/lib/live-phase-commands";
+import { tPeriodButton } from "@/lib/i18n/t-sport";
 
 const PHASES: { status: MatchStatusT; hint?: string }[] = [
   { status: "PREMATCH", hint: "SETUP of PREMATCH" },
@@ -93,23 +95,30 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
     );
   }, [mediaList, mediaSearch]);
 
+  /**
+   * Speelhelften: automatisch «Scorebord + sponsors» (naast-layout).
+   * Andere fases: alleen scorebord — operator kan sponsors manueel aanzetten.
+   */
   const applyPhase = useCallback(
     async (status: MatchStatusT) => {
-      await sendCommand({ type: "match:setStatus", status });
-      /**
-       * Speelhelften: automatisch «Scorebord + sponsors» (naast-layout).
-       * Andere fases: alleen scorebord — operator kan sponsors manueel aanzetten.
-       */
-      const liveHalfWithSponsors =
-        automaticSponsorsAllowed &&
-        (status === "FIRST_HALF" || status === "SECOND_HALF" || status === "EXTRA_TIME");
-      await sendCommand({
-        type: "display:setMode",
-        mode: liveHalfWithSponsors ? "SPONSOR_ROTATION" : "MATCH",
-      });
+      await applyLivePhase(status, automaticSponsorsAllowed);
     },
     [automaticSponsorsAllowed],
   );
+  /** Quarter/set/verlenging: zelfde sponsorgedrag als de voetbalfases. */
+  const applyPeriod = useCallback(
+    async (period: number) => {
+      await applyLivePeriod(period, automaticSponsorsAllowed);
+    },
+    [automaticSponsorsAllowed],
+  );
+  const overtimeAvailable = sportProfile.overtimeDurationSec > 0 && sportProfile.maxOvertimePeriods > 0;
+  const nextOvertimePeriod = (() => {
+    const current = activeMatch?.currentPeriod ?? 1;
+    const first = sportProfile.periodCount + 1;
+    const candidate = current >= sportProfile.periodCount ? current + 1 : first;
+    return Math.min(Math.max(first, candidate), sportMaxPeriod(sportProfile.id));
+  })();
 
   async function playMediaId(mediaId: string) {
     if (!mediaId) return;
@@ -221,11 +230,25 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
                   size="sm"
                   variant={activeMatch?.currentPeriod === period && livePlay ? "default" : "outline"}
                   disabled={!activeMatch}
-                  onClick={() => void sendCommand({ type: "sport:setPeriod", period })}
+                  onClick={() => void applyPeriod(period)}
                 >
-                  {sportProfile.periodLabel} {period}
+                  {tPeriodButton(t, sportProfile.id, period)}
                 </Button>
               ))}
+              {overtimeAvailable && (
+                <Button
+                  size="sm"
+                  variant={
+                    (activeMatch?.currentPeriod ?? 1) > sportProfile.periodCount && livePlay ? "default" : "outline"
+                  }
+                  disabled={!activeMatch}
+                  onClick={() => void applyPeriod(nextOvertimePeriod)}
+                >
+                  {(activeMatch?.currentPeriod ?? 1) > sportProfile.periodCount
+                    ? tPeriodButton(t, sportProfile.id, nextOvertimePeriod)
+                    : t("matchLive.overtimeButton")}
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant={activeMatch?.status === "HALF_TIME" ? "default" : "outline"}
@@ -234,6 +257,25 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
               >
                 {t("display.pause")}
               </Button>
+              {activeMatch?.status === "HALF_TIME" && (
+                <Button
+                  size="sm"
+                  variant="default"
+                  disabled={!activeMatch}
+                  onClick={() =>
+                    void (async () => {
+                      const r = await sendCommand({ type: "sport:resumePlay" });
+                      if (!r.ok) return;
+                      await sendCommand({
+                        type: "display:setMode",
+                        mode: automaticSponsorsAllowed ? "SPONSOR_ROTATION" : "MATCH",
+                      });
+                    })()
+                  }
+                >
+                  {t("matchLive.resumePlay")}
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant={activeMatch?.status === "FULL_TIME" ? "default" : "outline"}

@@ -66,6 +66,19 @@ model Match {
   /// Alleen zichtbaar bij sporten met sets (momenteel volleybal).
   homeSets        Int          @default(0)
   awaySets        Int          @default(0)
+  /// Volleybal: "home" | "away".
+  servingSide     String?
+  /// JSON [{home,away,firstServer}, …] — afgesloten sets.
+  setHistoryJson  String?
+  /// Volleybal: team dat de huidige set als eerste serveert (FIVB 12.3.1) — "home" | "away".
+  setFirstServer  String?
+  /// Volleybal: gewonnen sets voor matchwinst (3 = best-of-5, 2 = best-of-3).
+  setsToWin       Int          @default(3)
+  /// Volleybal: punten per reguliere set (25 zaal, 21 beach) en in de beslissende set (15).
+  pointsToWinSet  Int          @default(25)
+  pointsToWinDecider Int       @default(15)
+  /// Volleybal: technical timeout bij 8 en 16 (FIVB heeft dit afgeschaft; standaard uit).
+  technicalTimeoutsEnabled Boolean @default(false)
   /// Lengte (s) van het herhalende prematch-sponsorrooster op het scherm. 0 = automatisch (≈ som van sponsor-«voor»-budgetten, min. 60s).
   prematchSpreadWindowSec Int @default(0)
   status          String       @default("SETUP")
@@ -89,6 +102,12 @@ model MatchEvent {
   type        String
   minute      Int
   addedTime   Int      @default(0)
+  /// Periode (helft/quarter/set) waarin het event viel.
+  period      Int?
+  /// Klokstand in seconden op het moment van het event (zoals op het scorebord: aftellend voor basket/futsal/hockey).
+  clockSec    Float?
+  /// JSON met terugdraai-informatie, bv. {"stat":"timeout","side":"home","from":0,"to":1} of {"side":"home","delta":3}.
+  metaJson    String?
   teamId      String?
   playerInId  String?
   playerOutId String?
@@ -176,6 +195,8 @@ model Sponsor {
   sponsorPlaybackOrderJson String?
   /// JSON-object mediaId → aantal keer achter elkaar per doorloop unieke clips (1–20, default 1).
   sponsorPlaybackRepeatsJson String?
+  /// JSON: sport → venster-id → seconden. Voetbal gebruikt dit nooit.
+  sportBudgetsJson  String?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
   playLogs          SponsorPlayLog[]
@@ -211,12 +232,28 @@ model DisplayState {
   substitutionQueueJson String @default("[]")
   timerRunning       Boolean   @default(false)
   timerStartedAt     DateTime?
-  timerBaseSec       Int       @default(0)
+  /// Verstreken seconden op het moment van starten/pauzeren (milliseconde-precisie).
+  timerBaseSec       Float     @default(0)
   /// Onafhankelijke shotclock; alleen getoond voor sportprofielen die dit ondersteunen.
   shotClockRunning   Boolean   @default(false)
   shotClockStartedAt DateTime?
   /// Resterende seconden op het moment van starten/pauzeren.
-  shotClockBaseSec   Int       @default(24)
+  shotClockBaseSec   Float     @default(24)
+  /// Kaartkleur voor CARD-overlay: YELLOW | RED | GREEN.
+  activeCardColor    String?
+  /// Hockey: straftijd per ploeg (aftellend, loopt mee met de wedstrijdklok).
+  homePenaltyRunning Boolean   @default(false)
+  homePenaltyStartedAt DateTime?
+  homePenaltyBaseSec Float     @default(0)
+  awayPenaltyRunning Boolean   @default(false)
+  awayPenaltyStartedAt DateTime?
+  awayPenaltyBaseSec Float     @default(0)
+  /// Time-outklok (basket/futsal 60 s, volleybal 30 s, technical time-out 60 s).
+  timeoutRunning     Boolean   @default(false)
+  timeoutStartedAt   DateTime?
+  timeoutBaseSec     Float     @default(0)
+  /// "home" | "away" | "technical" zolang de time-outklok loopt.
+  timeoutSide        String?
   /// Actuele blessuretijd in minuten voor live scorebord-overlay (+1, +2, ...).
   addedTimeMinutes   Int       @default(0)
   externalCaptureSourceId  String?
@@ -267,6 +304,8 @@ model AppSettings {
   idleFallbackMedia   MediaItem? @relation("IdleFallbackMedia", fields: [idleFallbackMediaId], references: [id], onDelete: SetNull)
   /// Interfacetaal voor de control UI: nl | en | fr | it.
   uiLocale            String  @default("nl")
+  /// JSON: sport → two_blocks | per_period | inplay_plus_breaks. FOOTBALL wordt genegeerd.
+  sponsorLayoutsJson  String?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.

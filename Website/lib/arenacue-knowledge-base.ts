@@ -6,7 +6,7 @@
 export const ARENACUE_KNOWLEDGE_BASE = `# ArenaCue – complete kennisbank voor support
 
 ArenaCue bestaat uit drie delen die samenwerken:
-1. **ArenaCue Scoreboard** – Windows desktop-app voor live wedstrijdregie en het hoofdstadionscherm.
+1. **ArenaCue Scoreboard** – Windows desktop-app voor live wedstrijdregie, het hoofdstadionscherm en de ingebouwde livestream (YouTube, Twitch of eigen RTMP).
 2. **ArenaCue LED boarding** – Windows desktop-app voor perimeter-/lint-/tribunescherm met meerdere outputs en zones.
 3. **ArenaCue Mobile** – Android-app om vanaf de telefoon de desktop te bedienen via LAN of cloud.
 4. De **website arenacue.be** met klantportaal, demo-aanvragen, licentie-API en changelog.
@@ -26,7 +26,7 @@ Twee vensters: een **Control Panel** voor de operator en een **Display** dat ful
 - Na installatie zie je twee vensters: links/control panel, rechts/display. Sleep het display naar je tweede monitor (stadionscherm) en zet hem fullscreen.
 
 ### Control panel – tabs
-Het control panel heeft drie hoofdtabs.
+Het control panel heeft vier hoofdtabs.
 
 **1. Match-tab (live wedstrijdregie)**
 Een aanpasbare grid van panelen die je zelf kunt herschikken (drag-and-drop, opslaan in localStorage):
@@ -44,7 +44,17 @@ Een aanpasbare grid van panelen die je zelf kunt herschikken (drag-and-drop, ops
 **2. Setup-tab**
 Wedstrijden, teams en spelers aanmaken; logo's en kleuren; thuisploeg kiezen; algemene GOAL-intro video; bulk-import van speler-visuals; **GOAL +1 gedrag per ploeg** (voor thuis en uit afzonderlijk: visual tonen of alleen score), scorebord-thema (kleuren, layout); kickoff-tijd en match-sponsor (deze laatste verschijnt automatisch fullscreen vanaf 5 minuten voor kickoff in Setup/Voor wedstrijd).
 
-**3. Media-tab**
+**3. Livestream-tab**
+Ingebouwde studio om vanuit Scoreboard te streamen (alleen Electron/desktop):
+- Bestemming: **YouTube**, **Twitch** of **custom RTMP** (stream key). Optioneel een tweede bestemming.
+- Beeldbronnen: camera, stadiondisplay, browservenster, lokaal mediabestand, scherm of venster. Live schakelen tussen bronnen (cut).
+- Overlay: scorewidget en optionele sponsorvisuals over de stream.
+- Encoder: bij voorkeur **NVIDIA NVENC**, fallback **x264**. Resolutie 1080p of 720p.
+- Audio: mixer voor microfoon, systeemgeluid, browser- en mediabronnen; optioneel monitor-output.
+- Lokale opname naar een gekozen map, los van of naast de live stream.
+- Vereist FFmpeg in de app-omgeving; zonder FFmpeg start de stream niet.
+
+**4. Media-tab**
 Onderverdeeld in vier sub-tabs:
 - **Sponsors** – per sponsor: actief/inactief; budget in seconden voor *Voor wedstrijd*, *Rust*, *Eerste helft*, *Tweede helft*; gekoppelde mediabestanden; per medium optionele fase-tags (alleen tonen tijdens specifieke fasen).
 - **Bibliotheek** – upload/import van foto's en video's, met automatische duurdetectie en zoekveld.
@@ -219,7 +229,7 @@ Cookie-banner met categorieën: noodzakelijk (altijd), voorkeur (\`localStorage\
 
 **Welke hardware raden jullie aan voor 4–6 uur matchday met video?**
 - **Minimum (kleinere clubs):** i5 10e gen of Ryzen 5 3600+, liefst 6c/12t; **16 GB RAM**; SSD (min. 256 GB, liefst NVMe); recente iGPU kan, maar dedicated GPU (bv. GTX 1650-klasse) is robuuster; 2 video-uitgangen.
-- **Aanbevolen (prof / zware video):** i7 12e gen+ of Ryzen 7 5700X/7700X+; **32 GB RAM**; RTX 3060/4060-klasse of gelijkwaardig; 1 TB NVMe (eventueel tweede SSD voor media); 3+ video-uitgangen waar nodig.
+- **Aanbevolen (prof / zware video / livestream):** i7 12e gen+ of Ryzen 7 5700X/7700X+; **32 GB RAM**; RTX 3060/4060-klasse of gelijkwaardig (NVENC voor encode); 1 TB NVMe (eventueel tweede SSD voor media); 3+ video-uitgangen waar nodig. Ethernet voor upload tijdens een livestream.
 - **OS:** Windows 10/11 64-bit, met **Windows 11 Pro** als standaard voor nieuwe B2B-installaties.
 - **Matchday hardening:** UPS/noodstroom sterk aanbevolen, Ethernet voor de wedstrijd-PC, GPU-drivers vooraf testen en updates buiten wedstrijdvensters plannen.
 
@@ -261,6 +271,13 @@ Bij Auto-modus eindigt de rij vanzelf na de laatste speler en gaat het display t
 **Sponsor pauzeert niet bij overlays**
 Overlays (goal, kaart, wissel, halftime/fulltime, geplande cue) bevriezen automatisch zowel de slotmap als de hang. Als dit niet zo lijkt, controleer of je de nieuwste versie hebt; in oudere builds was dit een bug.
 
+**Livestream start niet / blijft idle**
+- Alleen in de Windows-desktopapp (Electron), niet in de browserpreview van de website.
+- Stream key ingevuld voor YouTube, Twitch of custom RTMP?
+- FFmpeg aanwezig? De Livestream-tab toont een melding als FFmpeg ontbreekt.
+- NVIDIA GPU met NVENC aanbevolen; zonder GPU valt de encoder terug op x264 (zwaarder voor de CPU).
+- Firewall of upload: Ethernet, geen zware wifi. Test eerst een korte stream buiten wedstrijduren.
+
 **Welke versie heb ik?**
 Onderaan het control panel staat de huidige versie. De update-banner toont de nieuwste beschikbare versie naast de huidige.
 
@@ -274,6 +291,7 @@ Onderaan het control panel staat de huidige versie. De update-banner toont de ni
 - **Follow mode (preview)**: control-preview dat de exacte clipsynchronisatie van het echte scherm overneemt.
 - **Beside scoreboard**: layout met scorebord-strip links en sponsor/cue rechts tijdens speelhelft.
 - **Match sponsor venster**: 5 minuten voor kickoff toont automatisch een fullscreen reclame van de match-sponsor.
+- **Livestream / RTMP**: uitgaande stream vanuit de Livestream-tab naar YouTube, Twitch of een eigen ingest-URL.
 - **Fase-tag op media**: beperking dat een mediabestand alleen in bepaalde fasen telt (bv. alleen Voor wedstrijd).
 
 ---

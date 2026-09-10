@@ -1,305 +1,220 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
-import { createBridgeApi } from "../lib/bridgeApi";
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Text, View } from 'react-native';
+import { Button, Card, Chip, ConfirmButton, EmptyState, Field, Sheet, sharedStyles as s } from '../components/ui';
+import { createBridgeApi } from '../lib/bridgeApi';
+import { useI18n } from '../lib/i18n';
+import { colors } from '../lib/theme';
 
-function fullName(player) {
-  return `#${player.number} ${player.firstName} ${player.lastName}`;
+const SPORTS = ['FOOTBALL', 'FUTSAL', 'BASKETBALL', 'VOLLEYBALL', 'HOCKEY'];
+const playerName = (p) => '#' + p.number + ' ' + [p.firstName, p.lastName].filter(Boolean).join(' ');
+const encoded = (id) => encodeURIComponent(id);
+function localDateInput(value) {
+  if (!value) return '';
+  const d = new Date(value);
+  if (!Number.isFinite(d.getTime())) return '';
+  const pad = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+}
+function parseLocalDate(value) {
+  if (!value.trim()) return null;
+  const parts = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/.exec(value.trim());
+  if (!parts) throw new Error('date');
+  const [year, month, day, hours, minutes] = parts.slice(1).map(Number);
+  const date = new Date(year, month - 1, day, hours, minutes);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day || date.getHours() !== hours || date.getMinutes() !== minutes) throw new Error('date');
+  return date.toISOString();
 }
 
-export function SetupScreen({
-  styles,
-  canCall,
-  canMutate,
-  isCloud,
-  baseUrl,
-  sessionToken,
-  callBridge,
-  onStatus,
-}) {
-  const api = useMemo(
-    () => createBridgeApi({ baseUrl, sessionToken, isCloud, callBridge }),
-    [baseUrl, sessionToken, isCloud, callBridge],
-  );
-
+export function SetupScreen({ canCall, canMutate, isCloud, baseUrl, sessionToken, callBridge, onStatus }) {
+  const { t, locale } = useI18n();
+  const copy = useRef(t); copy.current = t;
+  const status = useRef(onStatus); status.current = onStatus;
+  const operation = useRef({ id: 0, controller: null, locked: false });
   const [teams, setTeams] = useState([]);
   const [settings, setSettings] = useState(null);
   const [matches, setMatches] = useState([]);
   const [selectedTeamId, setSelectedTeamId] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [newTeamName, setNewTeamName] = useState("");
-  const [playerDraft, setPlayerDraft] = useState({ number: "10", firstName: "", lastName: "" });
+  const [loadError, setLoadError] = useState(false);
+  const [sheet, setSheet] = useState(null);
+  const [draft, setDraft] = useState({});
+  const [formError, setFormError] = useState('');
+  const selectedTeam = teams.find((team) => team.id === selectedTeamId);
+  const disabled = !canMutate || busy;
 
-  const selectedTeam = teams.find((t) => t.id === selectedTeamId) ?? null;
-  const players = selectedTeam?.players ?? [];
-
+  const apiFor = useCallback((signal) => createBridgeApi({
+    baseUrl, sessionToken, isCloud, callBridge: (...args) => callBridge(...args, { signal }),
+  }), [baseUrl, sessionToken, isCloud, callBridge]);
+  const fetchData = useCallback(async (signal) => {
+    const api = apiFor(signal);
+    const r = await Promise.all([api.get('/teams'), api.get('/settings'), api.get('/matches')]);
+    if (r.some((item) => !item.ok) || !Array.isArray(r[0].data) || !r[1].data || Array.isArray(r[1].data) || typeof r[1].data !== 'object' || !Array.isArray(r[2].data)) throw new Error('load');
+    return { teams: r[0].data, settings: r[1].data, matches: r[2].data };
+  }, [apiFor]);
+  const applyData = useCallback((data) => {
+    setTeams(data.teams); setSettings(data.settings); setMatches(data.matches); setLoadError(false);
+    setSelectedTeamId((current) => data.teams.some((team) => team.id === current) ? current : data.teams[0]?.id ?? null);
+  }, []);
   const reload = useCallback(async () => {
-    if (!canCall || isCloud) return;
+    if (!canCall || isCloud || operation.current.locked) return;
+    operation.current.controller?.abort();
+    const controller = new AbortController();
+    const id = ++operation.current.id;
+    operation.current.controller = controller;
     setBusy(true);
     try {
-      const [tRes, sRes, mRes] = await Promise.all([api.get("/teams"), api.get("/settings"), api.get("/matches")]);
-      if (tRes.ok && Array.isArray(tRes.data)) setTeams(tRes.data);
-      if (sRes.ok && sRes.data) setSettings(sRes.data);
-      if (mRes.ok && Array.isArray(mRes.data)) setMatches(mRes.data);
-      onStatus?.("Setup-data geladen");
-    } catch (e) {
-      onStatus?.(`Setup laden mislukt: ${String(e)}`);
-    } finally {
-      setBusy(false);
-    }
-  }, [api, canCall, isCloud, onStatus]);
-
+      const data = await fetchData(controller.signal);
+      if (id === operation.current.id && !controller.signal.aborted) applyData(data);
+    } catch {
+      if (id === operation.current.id && !controller.signal.aborted) {
+        setLoadError(true); status.current?.(copy.current('setup.loadError'), 'error');
+      }
+    } finally { if (id === operation.current.id) setBusy(false); }
+  }, [canCall, isCloud, fetchData, applyData]);
   useEffect(() => {
+    setTeams([]); setSettings(null); setMatches([]); setSelectedTeamId(null); setSheet(null); setLoadError(false); setBusy(false);
+    operation.current.locked = false;
     void reload();
+    return () => { operation.current.id += 1; operation.current.controller?.abort(); };
   }, [reload]);
 
-  async function patchSettings(patch) {
-    if (!canMutate) return;
-    const res = await api.patch("/settings", patch);
-    if (!res.ok) {
-      onStatus?.(res.data?.error || "Instellingen opslaan mislukt");
-      return;
-    }
-    await reload();
+  async function mutate(request) {
+    if (!canMutate || busy || operation.current.locked) return false;
+    operation.current.locked = true; operation.current.controller?.abort();
+    const controller = new AbortController();
+    const id = ++operation.current.id;
+    operation.current.controller = controller;
+    setBusy(true); setFormError('');
+    const current = () => id === operation.current.id && !controller.signal.aborted;
+    try {
+      const response = await request(apiFor(controller.signal));
+      if (!current()) return false;
+      if (!response.ok) {
+        const message = response.status === 409
+          ? t(response.data?.error === 'busy' ? 'errors.busy' : 'errors.notLive')
+          : (response.data?.error || response.data?.message || t('setup.saveError'));
+        setFormError(message); onStatus?.(message, 'error'); return false;
+      }
+      try {
+        const data = await fetchData(controller.signal);
+        if (!current()) return false;
+        applyData(data); onStatus?.(t('setup.saved'), 'success');
+      } catch {
+        if (!current()) return false;
+        setLoadError(true); onStatus?.(t('setup.savedRefreshError'), 'warning');
+      }
+      return true;
+    } catch {
+      if (current()) { setFormError(t('setup.saveError')); onStatus?.(t('setup.saveError'), 'error'); }
+      return false;
+    } finally { if (id === operation.current.id) { operation.current.locked = false; setBusy(false); } }
   }
-
-  async function createTeam() {
-    if (!canMutate || !newTeamName.trim()) return;
-    const res = await api.post("/teams", {
-      name: newTeamName.trim(),
-      shortName: newTeamName.trim().slice(0, 3).toUpperCase(),
-      primaryColor: "#1d4ed8",
-      secondaryColor: "#ffffff",
-    });
-    if (!res.ok) {
-      onStatus?.(res.data?.error || "Team aanmaken mislukt");
-      return;
-    }
-    setNewTeamName("");
-    await reload();
+  function openEditor(kind, entity = null) {
+    setFormError(''); setSheet({ kind, entity });
+    if (kind === 'team') setDraft({ name: entity?.name ?? '', shortName: entity?.shortName ?? '' });
+    if (kind === 'player') setDraft({ number: String(entity?.number ?? ''), firstName: entity?.firstName ?? '', lastName: entity?.lastName ?? '', teamId: selectedTeamId });
+    if (kind === 'match') setDraft({ homeTeamId: entity?.homeTeamId ?? teams[0]?.id ?? '', awayTeamId: entity?.awayTeamId ?? teams[1]?.id ?? '', sport: entity?.sport ?? 'FOOTBALL', kickoff: localDateInput(entity?.kickoffAt) });
   }
-
-  async function deleteTeam(teamId) {
-    if (!canMutate) return;
-    const res = await api.delete(`/teams/${teamId}`);
-    if (!res.ok) {
-      onStatus?.(res.data?.error || "Team verwijderen mislukt");
-      return;
+  const updateDraft = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+  async function saveEditor() {
+    if (!sheet || disabled) return false;
+    const entity = sheet.entity;
+    let request;
+    if (sheet.kind === 'team') {
+      if (!draft.name?.trim()) { setFormError(t('setup.nameError')); return false; }
+      const body = { name: draft.name.trim(), shortName: draft.shortName?.trim() || draft.name.trim().slice(0, 3).toUpperCase() };
+      request = (api) => entity ? api.patch('/teams/' + encoded(entity.id), body) : api.post('/teams', { ...body, primaryColor: '#1d4ed8', secondaryColor: '#ffffff' });
     }
-    await reload();
-  }
-
-  async function addPlayer() {
-    if (!canMutate || !selectedTeam) return;
-    const res = await api.post("/players", {
-      teamId: selectedTeam.id,
-      number: Number.parseInt(playerDraft.number, 10) || 0,
-      firstName: playerDraft.firstName.trim(),
-      lastName: playerDraft.lastName.trim(),
-      position: null,
-      isCoach: false,
-    });
-    if (!res.ok) {
-      onStatus?.(res.data?.error || "Speler toevoegen mislukt");
-      return;
+    if (sheet.kind === 'player') {
+      if ((!draft.firstName?.trim() && !draft.lastName?.trim()) || !/^\d{1,3}$/.test(draft.number ?? '') || !draft.teamId) { setFormError(t('setup.playerError')); return false; }
+      const body = { firstName: draft.firstName.trim(), lastName: draft.lastName.trim(), number: Number(draft.number) };
+      request = (api) => entity ? api.patch('/players/' + encoded(entity.id), body) : api.post('/players', { ...body, teamId: draft.teamId, position: null, isCoach: false });
     }
-    setPlayerDraft({ number: "10", firstName: "", lastName: "" });
-    await reload();
-  }
-
-  async function deletePlayer(playerId) {
-    if (!canMutate) return;
-    const res = await api.delete(`/players/${playerId}`);
-    if (!res.ok) {
-      onStatus?.(res.data?.error || "Speler verwijderen mislukt");
-      return;
+    if (sheet.kind === 'match') {
+      if (!draft.homeTeamId || !draft.awayTeamId || draft.homeTeamId === draft.awayTeamId) { setFormError(t('setup.matchTeamsError')); return false; }
+      let kickoffAt;
+      try { kickoffAt = parseLocalDate(draft.kickoff ?? ''); }
+      catch { setFormError(t('setup.kickoffError')); return false; }
+      const body = { kickoffAt, ...(!entity || entity.sport !== draft.sport ? { sport: draft.sport } : {}) };
+      request = (api) => entity ? api.patch('/matches/' + encoded(entity.id), body) : api.post('/matches', { ...body, homeTeamId: draft.homeTeamId, awayTeamId: draft.awayTeamId });
     }
-    await reload();
+    if (request && await mutate(request)) { setSheet(null); return true; }
+    return false;
   }
-
-  if (isCloud) {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.label}>Setup via cloud</Text>
-        <Text style={styles.status}>
-          Teams, spelers en instellingen bewerk je via LAN (Bridge URL = pc-IP:17890). Cloud is bedoeld voor live
-          bediening op afstand.
-        </Text>
+  if (isCloud) return <EmptyState title={t('setup.cloudTitle')} message={t('setup.cloudMessage')}/>;
+  if (!canCall) return <EmptyState title={t('setup.connectTitle')} message={t('setup.connectMessage')}/>;
+  const sheetTitle = sheet ? t('setup.' + (sheet.kind === 'team' ? sheet.entity ? 'editTeam' : 'addTeam' : sheet.kind === 'player' ? sheet.entity ? 'editPlayer' : 'addPlayer' : sheet.entity ? 'editMatch' : 'addMatch')) : '';
+  return <>
+    <Card title={t('setup.title')} subtitle={t('setup.subtitle')}>
+      <Button label={t('setup.refresh')} variant="secondary" onPress={reload} loading={busy}/>
+      {!canMutate && <Text style={s.muted}>{t('setup.viewer')}</Text>}
+      {loadError && <Text accessibilityLiveRegion="polite" style={{ color: colors.danger }}>{t('setup.loadError')}</Text>}
+    </Card>
+    <Card title={t('setup.homeTitle')}>
+      <View style={s.row}>
+        <Chip label={t('setup.noHome')} selected={!settings?.homeTeamId} disabled={disabled || !settings} onPress={() => mutate((api) => api.patch('/settings', { homeTeamId: null }))}/>
+        {teams.map((team) => <Chip key={team.id} label={team.name} selected={settings?.homeTeamId === team.id} disabled={disabled || !settings} onPress={() => mutate((api) => api.patch('/settings', { homeTeamId: team.id }))}/>)}
       </View>
-    );
-  }
-
-  if (!canCall) {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.status}>Koppel eerst als operator via het tabblad Koppeling.</Text>
-      </View>
-    );
-  }
-
-  return (
-    <>
-      <View style={styles.card}>
-        <View style={styles.row}>
-          <Text style={styles.label}>Setup &amp; wedstrijdvoorbereiding</Text>
-          <Pressable style={styles.buttonSecondary} onPress={() => void reload()} disabled={busy}>
-            <Text style={styles.buttonText}>{busy ? "…" : "Herlaad"}</Text>
-          </Pressable>
+      {['Home', 'Away'].map((side) => {
+        const key = 'goalVisual' + side + 'Enabled';
+        return <View key={side} style={{ gap: 9 }}><Text style={s.text}>{t('setup.visual' + side)}</Text><View style={s.row}>
+          {[true, false].map((enabled) => <Chip key={String(enabled)} label={t('setup.' + (enabled ? 'on' : 'off'))} selected={settings != null && (settings[key] ?? (side === 'Home')) === enabled} disabled={disabled || !settings} onPress={() => mutate((api) => api.patch('/settings', { [key]: enabled }))}/>)}
+        </View></View>;
+      })}
+    </Card>
+    <Card title={t('setup.teams')}>
+      <Button label={t('setup.addTeam')} onPress={() => openEditor('team')} disabled={disabled}/>
+      {!teams.length && !busy && <Text style={s.muted}>{t('setup.noTeams')}</Text>}
+      <View style={s.row}>{teams.map((team) => <Chip key={team.id} label={team.name + ' · ' + (team.players?.length ?? 0)} selected={selectedTeamId === team.id} onPress={() => setSelectedTeamId(team.id)} disabled={busy}/>)}</View>
+      {selectedTeam && <View style={s.row}>
+        <Button label={t('setup.editTeam')} variant="secondary" onPress={() => openEditor('team', selectedTeam)} disabled={disabled}/>
+        <ConfirmButton label={t('setup.remove')} title={t('setup.deleteTeam')} message={t('setup.deleteTeamMessage', { name: selectedTeam.name })} cancelLabel={t('setup.cancel')} confirmLabel={t('setup.remove')} disabled={disabled} onConfirm={() => mutate((api) => api.delete('/teams/' + encoded(selectedTeam.id)))}/>
+      </View>}
+    </Card>
+    {selectedTeam ? <Card title={t('setup.players', { name: selectedTeam.name })} subtitle={t('setup.playersCount', { count: selectedTeam.players?.length ?? 0 })}>
+      <Button label={t('setup.addPlayer')} onPress={() => openEditor('player')} disabled={disabled}/>
+      {!selectedTeam.players?.length && <Text style={s.muted}>{t('setup.noPlayers')}</Text>}
+      {(selectedTeam.players ?? []).map((player) => <View key={player.id} style={s.item}>
+        <Text style={s.text}>{playerName(player)}</Text>
+        <View style={s.row}><Button label={t('setup.edit')} variant="secondary" disabled={disabled} onPress={() => openEditor('player', player)}/>
+          <ConfirmButton label={t('setup.remove')} title={t('setup.deletePlayer')} message={t('setup.deletePlayerMessage', { name: playerName(player) })} cancelLabel={t('setup.cancel')} disabled={disabled} onConfirm={() => mutate((api) => api.delete('/players/' + encoded(player.id)))}/>
         </View>
-        {!canMutate ? (
-          <Text style={styles.status}>Alleen-lezen: log in als operator om wijzigingen op te slaan.</Text>
-        ) : null}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.label}>Thuisploeg &amp; goalvisuals</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.chipsRow}>
-            <Pressable
-              style={[styles.chip, !settings?.homeTeamId ? styles.activeBorder : null]}
-              onPress={() => canMutate && patchSettings({ homeTeamId: null })}
-            >
-              <Text style={styles.chipText}>Geen vast thuisteam</Text>
-            </Pressable>
-            {teams.map((team) => (
-              <Pressable
-                key={team.id}
-                style={[styles.chip, settings?.homeTeamId === team.id ? styles.activeBorder : null]}
-                onPress={() => canMutate && patchSettings({ homeTeamId: team.id })}
-              >
-                <Text style={styles.chipText}>{team.name}</Text>
-              </Pressable>
-            ))}
-          </View>
-        </ScrollView>
-        <View style={styles.row}>
-          <Pressable
-            style={[styles.buttonSecondary, settings?.goalVisualHomeEnabled !== false ? styles.activeBorder : null]}
-            onPress={() => canMutate && patchSettings({ goalVisualHomeEnabled: true })}
-          >
-            <Text style={styles.buttonText}>Goal visual thuis AAN</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.buttonSecondary, settings?.goalVisualHomeEnabled === false ? styles.activeBorderWarn : null]}
-            onPress={() => canMutate && patchSettings({ goalVisualHomeEnabled: false })}
-          >
-            <Text style={styles.buttonText}>Goal visual thuis UIT</Text>
-          </Pressable>
+      </View>)}
+      <Text style={s.muted}>{t('setup.photoHint')}</Text>
+    </Card> : teams.length > 0 && <Text style={s.muted}>{t('setup.selectTeam')}</Text>}
+    <Card title={t('setup.matches')}>
+      <Button label={t('setup.addMatch')} onPress={() => openEditor('match')} disabled={disabled || teams.length < 2}/>
+      {!matches.length && !busy && <Text style={s.muted}>{t('setup.noMatches')}</Text>}
+      {matches.map((match) => <View key={match.id} style={s.item}>
+        <Text style={s.title}>{match.homeTeam?.name ?? '—'} – {match.awayTeam?.name ?? '—'}</Text>
+        <Text style={s.muted}>{t('setup.sport' + (SPORTS.includes(match.sport) ? match.sport : 'FOOTBALL'))} · {match.closedAt ? t('setup.closed') : match.kickoffAt && Number.isFinite(Date.parse(match.kickoffAt)) ? new Date(match.kickoffAt).toLocaleString(locale) : t('setup.noKickoff')}</Text>
+        <View style={s.row}>
+          <Button label={t('setup.edit')} variant="secondary" disabled={disabled || !!match.closedAt} onPress={() => openEditor('match', match)}/>
+          <ConfirmButton label={t('setup.remove')} title={t('setup.deleteMatch')} message={t('setup.deleteMatchMessage', { home: match.homeTeam?.name ?? '—', away: match.awayTeam?.name ?? '—' })} cancelLabel={t('setup.cancel')} disabled={disabled} onConfirm={() => mutate((api) => api.delete('/matches/' + encoded(match.id)))}/>
         </View>
-        <View style={styles.row}>
-          <Pressable
-            style={[styles.buttonSecondary, settings?.goalVisualAwayEnabled !== false ? styles.activeBorder : null]}
-            onPress={() => canMutate && patchSettings({ goalVisualAwayEnabled: true })}
-          >
-            <Text style={styles.buttonText}>Goal visual uit AAN</Text>
-          </Pressable>
-          <Pressable
-            style={[styles.buttonSecondary, settings?.goalVisualAwayEnabled === false ? styles.activeBorderWarn : null]}
-            onPress={() => canMutate && patchSettings({ goalVisualAwayEnabled: false })}
-          >
-            <Text style={styles.buttonText}>Goal visual uit UIT</Text>
-          </Pressable>
-        </View>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.label}>Teams</Text>
-        {canMutate ? (
-          <View style={styles.row}>
-            <TextInput
-              style={[styles.input, { flex: 1 }]}
-              value={newTeamName}
-              onChangeText={setNewTeamName}
-              placeholder="Nieuwe clubnaam"
-              placeholderTextColor="#666"
-            />
-            <Pressable style={styles.button} onPress={() => void createTeam()}>
-              <Text style={styles.buttonText}>+ Team</Text>
-            </Pressable>
-          </View>
-        ) : null}
-        {teams.map((team) => (
-          <Pressable
-            key={team.id}
-            style={[styles.matchItem, selectedTeamId === team.id ? styles.matchItemActive : null]}
-            onPress={() => setSelectedTeamId(team.id)}
-          >
-            <Text style={styles.matchTitle}>{team.name}</Text>
-            <Text style={styles.matchSub}>{team.players?.length ?? 0} spelers</Text>
-            {canMutate ? (
-              <Pressable style={styles.buttonSecondary} onPress={() => void deleteTeam(team.id)}>
-                <Text style={styles.buttonTextSmall}>Verwijder</Text>
-              </Pressable>
-            ) : null}
-          </Pressable>
-        ))}
-      </View>
-
-      {selectedTeam ? (
-        <View style={styles.card}>
-          <Text style={styles.label}>Spelers — {selectedTeam.name}</Text>
-          {canMutate ? (
-            <>
-              <View style={styles.row}>
-                <TextInput
-                  style={[styles.input, { width: 56 }]}
-                  value={playerDraft.number}
-                  onChangeText={(v) => setPlayerDraft((d) => ({ ...d, number: v }))}
-                  keyboardType="number-pad"
-                  placeholder="#"
-                  placeholderTextColor="#666"
-                />
-                <TextInput
-                  style={[styles.input, { flex: 1 }]}
-                  value={playerDraft.firstName}
-                  onChangeText={(v) => setPlayerDraft((d) => ({ ...d, firstName: v }))}
-                  placeholder="Voornaam"
-                  placeholderTextColor="#666"
-                />
-                <TextInput
-                  style={[styles.input, { flex: 1 }]}
-                  value={playerDraft.lastName}
-                  onChangeText={(v) => setPlayerDraft((d) => ({ ...d, lastName: v }))}
-                  placeholder="Achternaam"
-                  placeholderTextColor="#666"
-                />
-              </View>
-              <Pressable style={styles.button} onPress={() => void addPlayer()}>
-                <Text style={styles.buttonText}>Speler toevoegen</Text>
-              </Pressable>
-            </>
-          ) : null}
-          {players.map((player) => (
-            <View key={player.id} style={styles.matchItem}>
-              <Text style={styles.matchTitle}>{fullName(player)}</Text>
-              {canMutate ? (
-                <Pressable style={styles.buttonSecondary} onPress={() => void deletePlayer(player.id)}>
-                  <Text style={styles.buttonTextSmall}>Verwijder</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ))}
-          <Text style={styles.status}>
-            Spelerfoto&apos;s en goal-video&apos;s stel je het makkelijkst in via de desktop Setup-tab (bestand kiezen).
-          </Text>
-        </View>
-      ) : null}
-
-      <View style={styles.card}>
-        <Text style={styles.label}>Geplande wedstrijden ({matches.length})</Text>
-        {matches.slice(0, 12).map((m) => (
-          <View key={m.id} style={styles.matchItem}>
-            <Text style={styles.matchTitle}>
-              {m.homeTeam?.name ?? "?"} vs {m.awayTeam?.name ?? "?"}
-            </Text>
-            <Text style={styles.matchSub}>
-              {m.status} · {m.kickoffAt ? new Date(m.kickoffAt).toLocaleString("nl-BE") : "Geen kickoff"}
-            </Text>
-          </View>
-        ))}
-        <Text style={styles.status}>
-          Nieuwe wedstrijden aanmaken, kickoff en matchsponsor: desktop Setup (of volgende app-update).
-        </Text>
-      </View>
-    </>
-  );
+      </View>)}
+    </Card>
+    <Sheet visible={!!sheet} title={sheetTitle} closeLabel={t('setup.cancel')} onClose={() => !busy && setSheet(null)}>
+      {sheet?.kind === 'team' && <>
+        <Field label={t('setup.teamName')} value={draft.name ?? ''} onChangeText={(value) => updateDraft('name', value)} editable={!disabled} maxLength={100}/>
+        <Field label={t('setup.shortName')} value={draft.shortName ?? ''} onChangeText={(value) => updateDraft('shortName', value)} editable={!disabled} maxLength={12}/>
+      </>}
+      {sheet?.kind === 'player' && <>
+        <Field label={t('setup.number')} value={draft.number ?? ''} onChangeText={(value) => updateDraft('number', value)} keyboardType="number-pad" editable={!disabled} maxLength={3}/>
+        <Field label={t('setup.firstName')} value={draft.firstName ?? ''} onChangeText={(value) => updateDraft('firstName', value)} editable={!disabled} maxLength={80}/>
+        <Field label={t('setup.lastName')} value={draft.lastName ?? ''} onChangeText={(value) => updateDraft('lastName', value)} editable={!disabled} maxLength={80}/>
+      </>}
+      {sheet?.kind === 'match' && <>
+        {['home', 'away'].map((side) => <View key={side} style={{ gap: 9 }}><Text style={s.text}>{t('setup.' + side)}</Text><View style={s.row}>
+          {teams.map((team) => <Chip key={team.id} label={team.name} selected={draft[side + 'TeamId'] === team.id} disabled={disabled || !!sheet.entity} onPress={() => updateDraft(side + 'TeamId', team.id)}/>)}
+        </View></View>)}
+        <Text style={s.text}>{t('setup.sport')}</Text><View style={s.row}>{SPORTS.map((sport) => <Chip key={sport} label={t('setup.sport' + sport)} selected={draft.sport === sport} disabled={disabled} onPress={() => updateDraft('sport', sport)}/>)}</View>
+        <Field label={t('setup.kickoff')} placeholder={t('setup.kickoffHint')} value={draft.kickoff ?? ''} onChangeText={(value) => updateDraft('kickoff', value)} editable={!disabled} autoCapitalize="none" maxLength={16}/>
+        {sheet.entity && <Text style={s.muted}>{t('setup.matchEditHint')}</Text>}
+      </>}
+      {!!formError && <Text accessibilityLiveRegion="polite" style={{ color: colors.danger }}>{formError}</Text>}
+      <Button label={t('setup.save')} onPress={saveEditor} loading={busy} disabled={!canMutate}/>
+      <Button label={t('setup.cancel')} variant="secondary" disabled={busy} onPress={() => setSheet(null)}/>
+    </Sheet>
+  </>;
 }

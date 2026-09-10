@@ -34,5 +34,12 @@ vendor/ffmpeg/_extract/
 
 # Apart project (eigen Git-repo): github.com/master00J/ledboarding
 ledboarding/
+
+# Marketingvideo (Remotion-project met 175 MB audio/renders) hoort niet in de scoreboard-broncode
+marketing-video/
+
+# Mobile build-artefacten en IDE-instellingen
+MobileApp/*.apk
+MobileApp/.idea/
 !Website/app/api/ledboarding/
 !Website/app/api/ledboarding/**

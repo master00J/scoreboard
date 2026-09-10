@@ -23,6 +23,7 @@ export function ensureI18n(locale: UiLocale = DEFAULT_LOCALE) {
       },
       lng: locale,
       fallbackLng: DEFAULT_LOCALE,
+      initImmediate: false,
       interpolation: { escapeValue: false },
       returnNull: false,
     });

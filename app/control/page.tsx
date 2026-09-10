@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSocketSync, sendCommand, onDisplayError } from "@/lib/use-socket";
+import { useSocketSync, sendCommand, onDisplayError, onDisplayHorn } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -73,6 +73,19 @@ export default function ControlPage() {
       toast({ title: t("shell.commandFailed"), description: p.message, variant: "error" });
     };
     return onDisplayError(onErr);
+  }, [t]);
+
+  // Zoemer uit de tick-loop (einde periode / shotclock / time-out) ook in het bedieningspaneel melden.
+  useEffect(() => {
+    return onDisplayHorn((p) => {
+      const title =
+        p.reason === "period_end"
+          ? t("timer.hornPeriodEnd")
+          : p.reason === "shot_clock"
+            ? t("timer.hornShotClock")
+            : t("timer.hornTimeoutEnd");
+      toast({ title, variant: p.reason === "period_end" ? "success" : "default" });
+    });
   }, [t]);
 
   return (

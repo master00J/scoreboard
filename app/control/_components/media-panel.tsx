@@ -4,10 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/form";
+import { Label, Select } from "@/components/ui/form";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useApi } from "@/lib/use-api";
-import type { Match, MediaItem, ScheduledMediaCue, Sponsor } from "@/lib/types";
+import type { AppSettings, Match, MediaItem, ScheduledMediaCue, Sponsor } from "@/lib/types";
 import { useDisplayStore } from "@/lib/store";
 import { effectiveMatchPlayRosterSeconds } from "@/lib/sponsor-roster-effective-timeline";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
@@ -43,6 +43,17 @@ import {
 import { isDisplayPlaybackRisk } from "@/lib/media-playback-compat";
 import { cueRundownPhaseKey, nextRundownWindow, restackRundownWindows } from "@/lib/scheduled-media-cue";
 import type { TFunction } from "i18next";
+import { getSportProfile, normalizeSport, SPORT_TYPES, type SportType } from "@/lib/sports";
+import {
+  mergeSportBudgetsJson,
+  parseSponsorLayoutsJson,
+  parseSportBudgetsJson,
+  resolveSponsorLayoutId,
+  sportSponsorWindows,
+  usesFootballSponsorEngine,
+  windowLabel,
+  type SponsorWindowId,
+} from "@/lib/sponsor-windows";
 
 type PlaybackInspect = {
   reason?: string;
@@ -1041,6 +1052,7 @@ function SponsorsSection({
 }) {
   const { t } = useTranslation();
   const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
+  const { data: settings } = useApi<AppSettings>("/api/settings");
   const sponsors = sponsorsRaw ?? [];
   const elapsedSec = useLiveTimerSeconds();
   const wallMs = useWallClockMs(250);
@@ -1153,6 +1165,7 @@ function SponsorsSection({
             allSponsors={sponsors}
             allMedia={allMedia}
             activeMatch={activeMatch}
+            layoutsJson={settings?.sponsorLayoutsJson ?? null}
             matchPlayRosterSeconds={matchPlayRosterSeconds}
             prematchTimelineSec={elapsedSec}
             halftimeTSec={halftimeT}
@@ -1188,11 +1201,30 @@ function matchHalfMinutesFromSponsor(s: Sponsor): { first: string; second: strin
   };
 }
 
+function fallbackWindowSeconds(sponsor: Sponsor, windowId: SponsorWindowId, sport: SportType): number {
+  if (windowId === "prematch") return Math.max(0, sponsor.prematchSeconds);
+  if (windowId === "postmatch") return Math.max(0, sponsor.postmatchSeconds ?? 0);
+  if (windowId === "halftime" || windowId === "periodBreak") return Math.max(0, sponsor.halftimeSeconds);
+  if (windowId === "play2" || windowId === "extraTime") {
+    return Math.max(0, sponsor.matchSecondHalfSeconds || 0);
+  }
+  if (windowId.startsWith("period:")) {
+    const n = Number(windowId.slice(7)) || 1;
+    const mid = Math.ceil(getSportProfile(sport).periodCount / 2);
+    return Math.max(
+      0,
+      n > mid ? sponsor.matchSecondHalfSeconds || 0 : sponsor.matchFirstHalfSeconds || sponsor.matchSeconds,
+    );
+  }
+  return Math.max(0, sponsor.matchFirstHalfSeconds || sponsor.matchSeconds);
+}
+
 function SponsorCard({
   sponsor,
   allSponsors,
   allMedia,
   activeMatch,
+  layoutsJson,
   matchPlayRosterSeconds,
   prematchTimelineSec,
   halftimeTSec,
@@ -1204,6 +1236,7 @@ function SponsorCard({
   allSponsors: Sponsor[];
   allMedia: MediaItem[];
   activeMatch: Match | null;
+  layoutsJson: string | null;
   matchPlayRosterSeconds: number;
   prematchTimelineSec: number;
   halftimeTSec: number;
@@ -1214,6 +1247,14 @@ function SponsorCard({
 }) {
   const { t } = useTranslation();
   const halves = matchHalfMinutesFromSponsor(sponsor);
+  const layouts = parseSponsorLayoutsJson(layoutsJson);
+  const [budgetSport, setBudgetSport] = useState<SportType>(() =>
+    activeMatch?.sport ? normalizeSport(activeMatch.sport) : "FOOTBALL",
+  );
+  const layoutId = resolveSponsorLayoutId(budgetSport, layouts);
+  const useFootballColumns =
+    budgetSport === "FOOTBALL" || usesFootballSponsorEngine(budgetSport, layoutId);
+  const sportWindows = sportSponsorWindows(budgetSport, layoutId);
   const [name, setName] = useState(sponsor.name);
   const [fixingId, setFixingId] = useState<string | null>(null);
   const [active, setActive] = useState(sponsor.active);
@@ -1224,6 +1265,7 @@ function SponsorCard({
   const [postmatchMin, setPostmatchMin] = useState(
     secondsToMinutesStr(sponsor.postmatchSeconds ?? 0),
   );
+  const [sportMins, setSportMins] = useState<Record<string, string>>({});
   const [imageSec, setImageSec] = useState(sponsor.imageDefaultSec);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1265,6 +1307,33 @@ function SponsorCard({
     sponsor.halftimeSeconds,
     sponsor.postmatchSeconds,
     sponsor.imageDefaultSec,
+  ]);
+
+  useEffect(() => {
+    if (activeMatch?.sport) setBudgetSport(normalizeSport(activeMatch.sport));
+  }, [activeMatch?.id, activeMatch?.sport]);
+
+  useEffect(() => {
+    const parsed = parseSportBudgetsJson(sponsor.sportBudgetsJson)?.[budgetSport] ?? {};
+    const next: Record<string, string> = {};
+    for (const window of sportSponsorWindows(budgetSport, layoutId)) {
+      const fromJson = parsed[window.id];
+      next[window.id] = secondsToMinutesStr(
+        typeof fromJson === "number" ? fromJson : fallbackWindowSeconds(sponsor, window.id, budgetSport),
+      );
+    }
+    setSportMins(next);
+  }, [
+    sponsor.id,
+    sponsor.sportBudgetsJson,
+    sponsor.prematchSeconds,
+    sponsor.matchSeconds,
+    sponsor.matchFirstHalfSeconds,
+    sponsor.matchSecondHalfSeconds,
+    sponsor.halftimeSeconds,
+    sponsor.postmatchSeconds,
+    budgetSport,
+    layoutId,
   ]);
 
   const sponsorMedia = allMedia.filter((m) => m.sponsorId === sponsor.id);
@@ -1364,22 +1433,31 @@ function SponsorCard({
   async function save() {
     setSaving(true);
     try {
-      const m1s = minutesStrToSeconds(matchFirstMin);
-      const m2s = minutesStrToSeconds(matchSecondMin);
+      const payload: Record<string, unknown> = {
+        name,
+        active,
+        imageDefaultSec: Math.max(1, Math.round(imageSec)),
+      };
+      if (useFootballColumns) {
+        const m1s = minutesStrToSeconds(matchFirstMin);
+        const m2s = minutesStrToSeconds(matchSecondMin);
+        payload.prematchSeconds = minutesStrToSeconds(prematchMin);
+        payload.matchFirstHalfSeconds = m1s;
+        payload.matchSecondHalfSeconds = m2s;
+        payload.matchSeconds = m1s + m2s;
+        payload.halftimeSeconds = minutesStrToSeconds(halftimeMin);
+        payload.postmatchSeconds = minutesStrToSeconds(postmatchMin);
+      } else {
+        const patch: Partial<Record<string, number>> = {};
+        for (const window of sportWindows) {
+          patch[window.id] = minutesStrToSeconds(sportMins[window.id] ?? "0");
+        }
+        payload.sportBudgetsJson = mergeSportBudgetsJson(sponsor.sportBudgetsJson, budgetSport, patch);
+      }
       await fetch(`/api/sponsors/${sponsor.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-          active,
-          prematchSeconds: minutesStrToSeconds(prematchMin),
-          matchFirstHalfSeconds: m1s,
-          matchSecondHalfSeconds: m2s,
-          matchSeconds: m1s + m2s,
-          halftimeSeconds: minutesStrToSeconds(halftimeMin),
-          postmatchSeconds: minutesStrToSeconds(postmatchMin),
-          imageDefaultSec: Math.max(1, Math.round(imageSec)),
-        }),
+        body: JSON.stringify(payload),
       });
       onChange();
       toast({ title: t("media.sponsorSaved") });
@@ -1539,7 +1617,29 @@ function SponsorCard({
         </div>
       )}
       <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
-        <div className="text-xs font-semibold text-foreground">{t("media.budgetPerSegment")}</div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-foreground">{t("media.budgetPerSegment")}</div>
+          <div className="flex items-center gap-2">
+            <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+              {t("media.budgetSport")}
+            </Label>
+            <Select
+              value={budgetSport}
+              onChange={(event) => setBudgetSport(event.target.value as SportType)}
+              className="h-8 w-40 text-xs"
+            >
+              {SPORT_TYPES.map((sportId) => (
+                <option key={sportId} value={sportId}>
+                  {t(`sports.${sportId}`)}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {useFootballColumns ? t("media.budgetFootballHint") : t("media.budgetOtherHint")}
+        </p>
+        {useFootballColumns ? (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div>
             <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
@@ -1607,6 +1707,27 @@ function SponsorCard({
             />
           </div>
         </div>
+        ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {sportWindows.map((window) => (
+            <div key={window.id}>
+              <Label className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                {windowLabel(window.id, budgetSport)}
+              </Label>
+              <Input
+                type="number"
+                min={0}
+                step="0.5"
+                value={sportMins[window.id] ?? "0"}
+                onChange={(e) =>
+                  setSportMins((prev) => ({ ...prev, [window.id]: e.target.value }))
+                }
+                className="mt-1 w-full"
+              />
+            </div>
+          ))}
+        </div>
+        )}
         <p className="text-[10px] text-muted-foreground leading-snug">
           {t("media.budgetHelp")}
         </p>

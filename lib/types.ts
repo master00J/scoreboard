@@ -46,6 +46,8 @@ export type AppSettings = {
   displaySafeZoneMarginPx?: number;
   /** Interfacetaal: nl | en | fr. */
   uiLocale?: "nl" | "en" | "fr" | "it";
+  /** JSON: sport → two_blocks | per_period | inplay_plus_breaks. Voetbal wordt genegeerd. */
+  sponsorLayoutsJson?: string | null;
 };
 
 export type Player = {
@@ -85,6 +87,18 @@ export type Match = {
   awayFouls: number;
   homeSets: number;
   awaySets: number;
+  /** Volleybal: wie serveert. */
+  servingSide?: "home" | "away" | null;
+  /** Volleybal: team dat de huidige set als eerste serveerde (FIVB 12.3.1). */
+  setFirstServer?: "home" | "away" | null;
+  /** Volleybal: afgesloten sets, bv. [{home:25,away:23}]. */
+  setHistory?: { home: number; away: number; firstServer?: "home" | "away" }[];
+  /** Volleybal: technical timeout bij 8 en 16 (standaard uit). */
+  technicalTimeoutsEnabled?: boolean;
+  /** Volleybal: wedstrijdformaat (3 = best-of-5, 2 = best-of-3) en puntentotalen. */
+  setsToWin?: number;
+  pointsToWinSet?: number;
+  pointsToWinDecider?: number;
   /**
    * Prematch: lengte van het herhalende sponsor-slotrooster (seconden).
    * 0 = automatisch: ongeveer de som van geplande «voor wedstrijd»-seconden per sponsor (min. 60).
@@ -108,6 +122,11 @@ export type MatchEvent = {
   type: string;
   minute: number;
   addedTime: number;
+  /** Periode (helft/quarter/set) en klokstand op het scorebord bij het event. */
+  period?: number | null;
+  clockSec?: number | null;
+  /** JSON met terugdraai-informatie (zie server/handlers). */
+  metaJson?: string | null;
   teamId: string | null;
   playerInId: string | null;
   playerOutId: string | null;
@@ -170,6 +189,8 @@ export type Sponsor = {
   sponsorPlaybackOrderJson?: string | null;
   /** JSON-object mediaId → aantal keer achter elkaar per doorloop van de clip-lijst (1–20). */
   sponsorPlaybackRepeatsJson?: string | null;
+  /** Minuten per sport/venster. Voetbal gebruikt de kolommen hierboven, nooit deze JSON. */
+  sportBudgetsJson?: string | null;
   createdAt: string;
   media?: MediaItem[];
 };

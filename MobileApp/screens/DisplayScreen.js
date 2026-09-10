@@ -1,134 +1,68 @@
-import { useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useEffect, useRef, useState } from 'react';
+import { Text, View } from 'react-native';
+import { Button, Card, Chip, ConfirmButton, sharedStyles as s } from '../components/ui';
+import { useI18n } from '../lib/i18n';
+import { sportProfile } from '../lib/match-state';
+import { colors } from '../lib/theme';
 
-const DISPLAY_MODES = [
-  { mode: "MATCH", label: "Match" },
-  { mode: "SPONSOR_ROTATION", label: "Sponsorrotatie" },
-  { mode: "IDLE", label: "Idle" },
-  { mode: "HALFTIME", label: "Halftime" },
-  { mode: "FULLTIME", label: "Fulltime" },
-  { mode: "TEAM_INTRO", label: "Team intro" },
-  { mode: "PLAYER_INTRO", label: "Spelerintro" },
-  { mode: "BLACKOUT", label: "Blackout" },
-];
+const MODES = ['MATCH', 'SPONSOR_ROTATION', 'IDLE', 'HALFTIME', 'FULLTIME', 'TEAM_INTRO', 'PLAYER_INTRO'];
+const PRESETS = ['FIRST_HALF', 'SECOND_HALF', 'ET1', 'ET2'];
+const KNOWN_MODES = [...MODES, 'BLACKOUT', 'SPONSOR', 'CUSTOM', 'GOAL', 'GOAL_INTRO_VIDEO', 'GOAL_PLAYER_VIDEO', 'SUBSTITUTION', 'CARD'];
 
-const TIMER_PRESETS = [
-  { type: "timer:preset", preset: "FIRST_HALF", label: "1e helft 45'" },
-  { type: "timer:preset", preset: "SECOND_HALF", label: "2e helft 45'" },
-  { type: "timer:preset", preset: "ET1", label: "Vl. 1" },
-  { type: "timer:preset", preset: "ET2", label: "Vl. 2" },
-];
-
-export function DisplayScreen({
-  styles,
-  canMutate,
-  sendCommand,
-  snapshot,
-  activeMatchDetails,
-  onStatus,
-}) {
-  const homePlayers = activeMatchDetails?.homeTeam?.players ?? [];
-  const awayPlayers = activeMatchDetails?.awayTeam?.players ?? [];
-  const allPlayers = useMemo(
-    () => [
-      ...homePlayers.map((p) => ({ ...p, side: "home" })),
-      ...awayPlayers.map((p) => ({ ...p, side: "away" })),
-    ],
-    [homePlayers, awayPlayers],
-  );
-
-  async function setMode(mode, meta) {
-    if (!canMutate) return;
-    await sendCommand({ type: "display:setMode", mode, meta });
-    onStatus?.(`Display: ${mode}`);
+export function DisplayScreen({ canMutate, sendCommand, snapshot, activeMatchDetails, onStatus }) {
+  const { t } = useI18n();
+  const [busy, setBusy] = useState(false);
+  const lock = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const disabled = !canMutate || busy;
+  const profile = sportProfile(activeMatchDetails?.sport);
+  const activeMode = KNOWN_MODES.includes(snapshot?.mode) ? t('display.mode' + snapshot.mode) : t('display.unknown');
+  async function act(command) {
+    if (!canMutate || lock.current) return false;
+    lock.current = true; setBusy(true);
+    try { return await sendCommand(command) === true; }
+    catch { if (mounted.current) onStatus?.(t('display.commandError'), 'error'); return false; }
+    finally { lock.current = false; if (mounted.current) setBusy(false); }
   }
-
-  return (
-    <>
-      <View style={styles.card}>
-        <Text style={styles.label}>Display-modi</Text>
-        {!canMutate ? <Text style={styles.status}>Operator vereist.</Text> : null}
-        <View style={styles.grid}>
-          {DISPLAY_MODES.map((item) => (
-            <Pressable key={item.mode} style={styles.smallButton} onPress={() => void setMode(item.mode)}>
-              <Text style={styles.buttonTextSmall}>{item.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.row}>
-          <Pressable style={styles.button} onPress={() => canMutate && sendCommand({ type: "display:blackout" })}>
-            <Text style={styles.buttonText}>Blackout toggle</Text>
-          </Pressable>
-        </View>
-        <Pressable
-          style={styles.buttonSecondary}
-          onPress={() => canMutate && sendCommand({ type: "display:setExternalCaptureToDisplay", enabled: true })}
-        >
-          <Text style={styles.buttonText}>Externe capture → display</Text>
-        </Pressable>
+  const setMode = (mode, meta) => act({ type: 'display:setMode', mode, ...(meta ? { meta } : {}) });
+  return <>
+    <Card title={t('display.title')} subtitle={t('display.subtitle')}>
+      <View style={{ padding: 14, borderRadius: 12, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line }}>
+        <Text accessibilityLiveRegion="polite" style={[s.text, { color: colors.accent }]}>{t('display.current', { mode: snapshot?.safeMode ? t('display.safeMode') : activeMode })}</Text>
       </View>
-
-      <View style={styles.card}>
-        <Text style={styles.label}>Timer presets</Text>
-        <View style={styles.grid}>
-          {TIMER_PRESETS.map((cmd) => (
-            <Pressable
-              key={cmd.preset}
-              style={styles.smallButton}
-              onPress={() => canMutate && sendCommand(cmd)}
-            >
-              <Text style={styles.buttonTextSmall}>{cmd.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.row}>
-          <Pressable
-            style={styles.buttonSecondary}
-            onPress={() => canMutate && sendCommand({ type: "timer:adjust", deltaSec: 60 })}
-          >
-            <Text style={styles.buttonText}>+1 min</Text>
-          </Pressable>
-          <Pressable
-            style={styles.buttonSecondary}
-            onPress={() => canMutate && sendCommand({ type: "timer:adjust", deltaSec: -60 })}
-          >
-            <Text style={styles.buttonText}>−1 min</Text>
-          </Pressable>
-        </View>
+      {!canMutate && <Text style={s.muted}>{t('display.viewer')}</Text>}
+      <View style={s.row}>{MODES.map((mode) => <Chip key={mode} label={t('display.mode' + mode)} selected={snapshot?.mode === mode && !snapshot?.safeMode} disabled={disabled || !!snapshot?.safeMode || ((!activeMatchDetails) && ['TEAM_INTRO', 'PLAYER_INTRO'].includes(mode))} onPress={() => setMode(mode)}/>)}</View>
+    </Card>
+    <Card title={t('display.safety')}>
+      <Button label={t('display.' + (snapshot?.mode === 'BLACKOUT' ? 'restore' : 'blackout'))} variant={snapshot?.mode === 'BLACKOUT' ? 'primary' : 'danger'} disabled={disabled || !!snapshot?.safeMode} onPress={() => act({ type: 'display:blackout' })}/>
+      <Text style={s.title}>{t('display.safeMode')}</Text>
+      <Text style={s.muted}>{t('display.safeHint')}</Text>
+      <View style={s.row}>{[true, false].map((enabled) => <Chip key={String(enabled)} label={t('display.' + (enabled ? 'on' : 'off'))} selected={snapshot != null && !!snapshot.safeMode === enabled} disabled={disabled || !snapshot || !!snapshot.safeMode === enabled} onPress={() => act({ type: 'display:setSafeMode', enabled })}/>)}</View>
+    </Card>
+    <Card title={t('display.capture')} subtitle={t('display.captureHint')}>
+      {!snapshot?.externalCaptureSourceId && <Text style={s.muted}>{t('display.noCapture')}</Text>}
+      <View style={s.row}>{[true, false].map((enabled) => <Chip key={String(enabled)} label={t('display.' + (enabled ? 'on' : 'off'))} selected={snapshot != null && !!snapshot.externalCaptureToDisplay === enabled} disabled={disabled || !snapshot || !!snapshot.externalCaptureToDisplay === enabled || (enabled && (!snapshot.externalCaptureSourceId || snapshot.safeMode))} onPress={() => act({ type: 'display:setExternalCaptureToDisplay', enabled })}/>)}</View>
+    </Card>
+    {!!activeMatchDetails && profile.id === 'FOOTBALL' && <Card title={t('display.presets')}>
+      {PRESETS.map((preset) => <ConfirmButton key={preset} label={t('display.preset' + preset)} variant="secondary" title={t('display.resetTitle')} message={t('display.resetMessage', { preset: t('display.preset' + preset) })} cancelLabel={t('display.cancel')} confirmLabel={t('display.save')} disabled={disabled} onConfirm={() => act({ type: 'timer:preset', preset })}/>)}
+    </Card>}
+    {!!activeMatchDetails && profile.timer !== 'none' && <Card title={t('display.adjust')}>
+      <View style={s.row}>
+        <Button label={t('display.minusMinute')} variant="secondary" disabled={disabled} onPress={() => act({ type: 'timer:adjust', deltaSec: -60 })}/>
+        <Button label={t('display.plusMinute')} variant="secondary" disabled={disabled} onPress={() => act({ type: 'timer:adjust', deltaSec: 60 })}/>
       </View>
-
-      <View style={styles.card}>
-        <Text style={styles.label}>Spelerintro (Start RAFC)</Text>
-        {!activeMatchDetails ? (
-          <Text style={styles.status}>Selecteer een actieve wedstrijd op Wedstrijd.</Text>
-        ) : (
-          <>
-            <Pressable style={styles.button} onPress={() => void setMode("PLAYER_INTRO", { activePlayerId: null })}>
-              <Text style={styles.buttonText}>Open spelerintro (leeg)</Text>
-            </Pressable>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-              <View style={styles.chipsRow}>
-                {allPlayers.map((player) => (
-                  <Pressable
-                    key={player.id}
-                    style={styles.chip}
-                    onPress={() =>
-                      void setMode("PLAYER_INTRO", { activePlayerId: player.id })
-                    }
-                  >
-                    <Text style={styles.chipText}>
-                      {player.side === "away" ? "U " : "T "}#{player.number} {player.lastName}
-                    </Text>
-                  </Pressable>
-                ))}
-              </View>
-            </ScrollView>
-            <Pressable style={styles.buttonSecondary} onPress={() => void setMode("MATCH")}>
-              <Text style={styles.buttonText}>Terug naar match</Text>
-            </Pressable>
-          </>
-        )}
-      </View>
-    </>
-  );
+    </Card>}
+    <Card title={t('display.intro')}>
+      {!activeMatchDetails ? <Text style={s.muted}>{t('display.noMatch')}</Text> : <>
+        <Button label={t('display.introBlank')} variant="secondary" disabled={disabled || !!snapshot?.safeMode} onPress={() => setMode('PLAYER_INTRO', { activePlayerId: null })}/>
+        {[activeMatchDetails.homeTeam, activeMatchDetails.awayTeam].filter(Boolean).map((team) => <View key={team.id} style={{ gap: 10 }}>
+          <Text style={s.title}>{team.name}</Text>
+          {!team.players?.length && <Text style={s.muted}>{t('display.noPlayers')}</Text>}
+          <View style={s.row}>{(team.players ?? []).map((player) => <Chip key={player.id} label={'#' + player.number + ' ' + [player.firstName, player.lastName].filter(Boolean).join(' ')} selected={snapshot?.mode === 'PLAYER_INTRO' && snapshot?.activePlayerId === player.id} disabled={disabled || !!snapshot?.safeMode} onPress={() => setMode('PLAYER_INTRO', { activePlayerId: player.id })}/>)}</View>
+        </View>)}
+        <Button label={t('display.returnMatch')} variant="secondary" disabled={disabled} onPress={() => setMode('MATCH')}/>
+      </>}
+    </Card>
+  </>;
 }

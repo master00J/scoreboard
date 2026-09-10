@@ -69,7 +69,7 @@ async function main() {
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="./assets/renderer.js?v=locale"></script>
+    <script type="module" src="./assets/renderer.js?v=lang-20260906"></script>
   </body>
 </html>
 `,

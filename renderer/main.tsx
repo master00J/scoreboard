@@ -170,16 +170,20 @@ function AppRouter() {
 function Root() {
   const queryLocale = uiLocaleFromSearch(window.location.search);
   const [locale, setLocale] = useState<UiLocale>(queryLocale ?? DEFAULT_LOCALE);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(Boolean(queryLocale));
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      if (queryLocale) {
+        if (!cancelled) setReady(true);
+        return;
+      }
       try {
         const res = await fetch("/api/settings");
         if (res.ok) {
           const data = (await res.json()) as { uiLocale?: string };
-          if (!cancelled) setLocale(queryLocale ?? normalizeUiLocale(data.uiLocale));
+          if (!cancelled) setLocale(normalizeUiLocale(data.uiLocale));
         }
       } catch {
         /* keep default */
@@ -189,6 +193,7 @@ function Root() {
     })();
 
     const onLocale = (event: Event) => {
+      if (queryLocale) return;
       const detail = (event as CustomEvent<string>).detail;
       setLocale(normalizeUiLocale(detail));
     };
@@ -197,7 +202,7 @@ function Root() {
       cancelled = true;
       window.removeEventListener("arenacue:ui-locale", onLocale as EventListener);
     };
-  }, []);
+  }, [queryLocale]);
 
   if (!ready) {
     return (

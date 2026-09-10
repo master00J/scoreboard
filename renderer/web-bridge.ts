@@ -1,4 +1,4 @@
-import { computeElapsedSeconds, computeShotClockSeconds, pauseShotClockAt, runFrom, runShotClockFrom, stopAt } from "@/lib/timer";
+﻿import { computeElapsedSeconds, computeShotClockSeconds, pauseShotClockAt, runFrom, runShotClockFrom, stopAt } from "@/lib/timer";
 import { getSportProfile, lifecycleStatusForPeriod, normalizeSport, resetStatsForNewPeriod, resetTimeoutsForNewPeriod } from "@/lib/sports";
 import { uiLocaleFromSearch } from "@/lib/i18n/locales";
 import { DEFAULT_LIVESTREAM_SETTINGS, DEFAULT_LIVESTREAM_STATUS, mergeLivestreamSettings } from "@/lib/livestream";
@@ -142,7 +142,7 @@ function seed(): Store {
         id: voltMediaId,
         type: "IMAGE",
         path: "/uploads/demo-volt-energy.svg",
-        title: "Volt Energy — LED",
+        title: "Volt Energy â€” LED",
         durationSec: 10,
         sponsorName: "Volt Energy",
         sponsorId: voltId,
@@ -156,7 +156,7 @@ function seed(): Store {
         id: worksMediaId,
         type: "IMAGE",
         path: "/uploads/demo-stadion-works.svg",
-        title: "Stadion Works — LED",
+        title: "Stadion Works â€” LED",
         durationSec: 10,
         sponsorName: "Stadion Works",
         sponsorId: worksId,
@@ -261,6 +261,7 @@ if (forcedLocale) persist();
 
 const stateListeners = new Set<(state: SerializedDisplayState) => void>();
 const tickListeners = new Set<(tick: TickPayload) => void>();
+let sponsorPeriodBreakPending = false;
 
 function asIso(value: Date | string | null | undefined): string | null {
   if (!value) return null;
@@ -276,6 +277,7 @@ function serializeDisplay(): SerializedDisplayState {
     postMatchStartedAt: asIso(d.postMatchStartedAt),
     preMatchStartedAt: asIso(d.preMatchStartedAt),
     updatedAt: asIso(d.updatedAt) ?? nowIso(),
+    sponsorPeriodBreakPending,
   };
 }
 
@@ -344,7 +346,7 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   const pathname = url.pathname;
   const body = parseBody(req);
 
-  if (pathname === "/api/app/release") return json(200, { version: "0.1.15", notes: "" });
+  if (pathname === "/api/app/release") return json(200, { version: "0.1.18", notes: "" });
   if (pathname === "/api/settings" && method === "GET") return json(200, settingsJson());
   if (pathname === "/api/settings" && method === "PATCH") {
     store.settings = { ...store.settings, ...body };
@@ -590,6 +592,7 @@ function handleCommand(raw: Command): CommandAck {
       case "timer:start": {
         const elapsed = computeElapsedSeconds(display);
         Object.assign(display, runFrom(elapsed));
+        sponsorPeriodBreakPending = false;
         break;
       }
       case "timer:pause": {
@@ -618,6 +621,7 @@ function handleCommand(raw: Command): CommandAck {
         const p = presets[cmd.preset];
         Object.assign(display, stopAt(p.sec), { addedTimeMinutes: 0 });
         updateMatch({ status: p.status });
+        sponsorPeriodBreakPending = false;
         break;
       }
       case "timer:setAddedTime":
@@ -644,11 +648,21 @@ function handleCommand(raw: Command): CommandAck {
       case "match:setActive":
         display.matchId = cmd.matchId;
         display.addedTimeMinutes = 0;
+        sponsorPeriodBreakPending = false;
         break;
       case "match:setStatus":
         updateMatch({ status: cmd.status });
         if (cmd.status === "HALF_TIME" || cmd.status === "FULL_TIME" || cmd.status === "POST_MATCH") {
           Object.assign(display, stopAt(computeElapsedSeconds(display)));
+        }
+        if (
+          cmd.status === "HALF_TIME" ||
+          cmd.status === "PREMATCH" ||
+          cmd.status === "SETUP" ||
+          cmd.status === "FULL_TIME" ||
+          cmd.status === "POST_MATCH"
+        ) {
+          sponsorPeriodBreakPending = false;
         }
         {
           const isPostMatch = cmd.status === "FULL_TIME" || cmd.status === "POST_MATCH";
@@ -663,16 +677,20 @@ function handleCommand(raw: Command): CommandAck {
         if (!match) throw new Error("No active match");
         const sport = normalizeSport(match.sport);
         const profile = getSportProfile(sport);
+        const prevPeriod = match.currentPeriod;
         updateMatch({
           currentPeriod: cmd.period,
           status: lifecycleStatusForPeriod(sport, cmd.period),
           ...(resetTimeoutsForNewPeriod(sport, match.currentPeriod, cmd.period) ? { homeTimeouts: 0, awayTimeouts: 0 } : {}),
-          ...(resetStatsForNewPeriod(sport) ? { homeFouls: 0, awayFouls: 0 } : {}),
+          ...(resetStatsForNewPeriod(sport, match.currentPeriod, cmd.period) ? { homeFouls: 0, awayFouls: 0 } : {}),
         });
         Object.assign(display, stopAt(profile.timerMode === "COUNT_UP" ? Math.max(0, (cmd.period - 1) * match.periodDurationSec) : 0), {
           mode: "MATCH",
           addedTimeMinutes: 0,
         });
+        if (cmd.period !== prevPeriod && sport !== "FOOTBALL") {
+          sponsorPeriodBreakPending = true;
+        }
         break;
       }
       case "sport:statAdjust": {
@@ -881,7 +899,7 @@ export function installWebDemoBridge() {
     reportSponsorClipEnd: async () => ({ ok: true }),
     reportSponsorClipProgress: async () => ({ ok: true }),
     getSponsorLedgerSnapshot: async () => null,
-    getAppVersion: async () => "0.1.15-web",
+    getAppVersion: async () => "0.1.18-web",
     openExternalUrl: async (url) => {
       window.open(url, "_blank", "noopener,noreferrer");
       return { ok: true };

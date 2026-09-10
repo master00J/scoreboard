@@ -1,0 +1,13 @@
+# EAS archiveert de git-root. Alleen de Expo-app is nodig.
+/*
+!/MobileApp
+!/MobileApp/**
+
+MobileApp/node_modules/
+MobileApp/.expo/
+MobileApp/*.apk
+MobileApp/*.aab
+MobileApp/ArenaCue-Control-*.apk
+MobileApp/eas-*.log
+MobileApp/eas-*.json
+MobileApp/eas-*.txt

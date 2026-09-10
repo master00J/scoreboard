@@ -10,7 +10,7 @@ import { getPublishedReviews } from "@/lib/reviews-public";
 
 export const metadata: Metadata = homePageMetadata();
 
-const highlights = ["Live score", "Sponsorrotatie", "Display output", "LED boarding"];
+const highlights = ["Live score", "Sponsorrotatie", "Display output", "Livestream", "LED boarding"];
 
 const stats = [
   { value: "16:9", label: "stadiondisplay" },
@@ -40,6 +40,11 @@ const features = [
     tag: "Broadcast output",
   },
   {
+    title: "Livestream",
+    body: "Stream vanuit het control panel naar YouTube, Twitch of een eigen RTMP-bestemming, met camera of display, score-overlay en optionele opname.",
+    tag: "Broadcast stream",
+  },
+  {
     title: "LED boarding",
     body: "Gebruik ArenaCue LED boarding als aparte app voor perimeter, tribunezones en playlists.",
     tag: "LED zones",
@@ -55,7 +60,7 @@ const workflow = [
   "Start ArenaCue Scoreboard op de regie-opstelling.",
   "Koppel de schermketen, output of capturebron.",
   "Zet teams, sponsors en wedstrijdflow klaar voor de aftrap.",
-  "Bedien klok, score, visuals en sponsorrotatie live tijdens de match.",
+  "Bedien klok, score, visuals, sponsorrotatie en optioneel de livestream live tijdens de match.",
 ];
 
 const releaseItems = [
@@ -121,8 +126,8 @@ export default async function Home() {
             </h1>
             <p className="hero-lead">
               ArenaCue helpt operators om elke wedstrijdfase gecontroleerd te sturen: van klok en score tot
-              sponsorrotatie, spelerintro&apos;s, display-output en LED boarding. Strak genoeg voor een stadion,
-              simpel genoeg voor een vrijwilliger met gezonde stress.
+              sponsorrotatie, spelerintro&apos;s, display-output, livestream en LED boarding. Strak genoeg voor een
+              stadion, simpel genoeg voor een vrijwilliger met gezonde stress.
             </p>
             <div className="hero-badges" aria-label="ArenaCue onderdelen">
               {highlights.map((item) => (
@@ -236,12 +241,13 @@ export default async function Home() {
         <div className="product-grid">
           <article className="product-card product-card-primary">
             <p className="section-kicker">ArenaCue Scoreboard</p>
-            <h2>Voor klok, score, sponsors en displays.</h2>
+            <h2>Voor klok, score, sponsors, displays en livestream.</h2>
             <p>
               De centrale regiesoftware voor matchdagen. Operators sturen de volledige wedstrijdflow vanuit een
-              dashboard, met duidelijke preview en snelle controles.
+              dashboard, met duidelijke preview, snelle controles en een ingebouwde livestream naar YouTube, Twitch of
+              RTMP.
             </p>
-            <Link className="secondary-button" href="/functies">
+            <Link className="secondary-button" href="/functies#livestream">
               Bekijk scoreboard features
             </Link>
           </article>

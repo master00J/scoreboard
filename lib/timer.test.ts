@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  clearTimeoutClock,
   computeElapsedSeconds,
+  computePenaltySeconds,
   computeShotClockSeconds,
+  computeTimeoutSeconds,
+  pausePenaltyAt,
   pauseShotClockAt,
   resolveLiveElapsedSeconds,
   runFrom,
+  runPenaltyFrom,
   runShotClockFrom,
+  runTimeoutFrom,
   stopAt,
 } from "./timer";
 
@@ -90,10 +96,57 @@ describe("shotclock", () => {
       shotClockStartedAt: started,
       shotClockBaseSec: 24,
     });
+    // Pauzeren bewaart de echte resttijd (ms-precisie); vroeger werd naar boven afgerond en
+    // kreeg de aanval tot een seconde cadeau per pauze.
     expect(pauseShotClockAt(13.2)).toEqual({
       shotClockRunning: false,
       shotClockStartedAt: null,
-      shotClockBaseSec: 14,
+      shotClockBaseSec: 13.2,
+    });
+  });
+
+  it("bewaart milliseconden bij pauzeren van de wedstrijdklok", () => {
+    expect(stopAt(20.85).timerBaseSec).toBe(20.85);
+    expect(runFrom(20.85, new Date("2026-01-01T12:00:00.000Z")).timerBaseSec).toBe(20.85);
+    expect(stopAt(-3).timerBaseSec).toBe(0);
+  });
+});
+
+describe("time-outklok", () => {
+  it("telt af en meldt de kant", () => {
+    const started = new Date("2026-01-01T12:00:00.000Z");
+    const state = runTimeoutFrom("home", 60, started);
+    expect(state).toEqual({
+      timeoutRunning: true,
+      timeoutStartedAt: started,
+      timeoutBaseSec: 60,
+      timeoutSide: "home",
+    });
+    expect(computeTimeoutSeconds(state, started.getTime() + 15_000)).toBe(45);
+    expect(computeTimeoutSeconds(state, started.getTime() + 90_000)).toBe(0);
+    expect(clearTimeoutClock()).toEqual({
+      timeoutRunning: false,
+      timeoutStartedAt: null,
+      timeoutBaseSec: 0,
+      timeoutSide: null,
+    });
+  });
+});
+
+describe("straftijd", () => {
+  it("telt per kant af en pauzeert met resttijd", () => {
+    const started = new Date("2026-01-01T12:00:00.000Z");
+    const running = runPenaltyFrom("away", 120, started);
+    expect(running.awayPenaltyRunning).toBe(true);
+    const remaining = computePenaltySeconds(
+      { running: true, startedAt: started, baseSec: 120 },
+      started.getTime() + 30_000,
+    );
+    expect(remaining).toBe(90);
+    expect(pausePenaltyAt("away", remaining)).toEqual({
+      awayPenaltyRunning: false,
+      awayPenaltyStartedAt: null,
+      awayPenaltyBaseSec: 90,
     });
   });
 });

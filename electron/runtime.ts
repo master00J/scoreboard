@@ -3,18 +3,35 @@ import fs from "fs";
 import path from "path";
 import { prisma } from "../lib/prisma";
 import {
+  clearTimeoutClock,
   computeElapsedSeconds,
+  computePenaltySeconds,
   computeShotClockSeconds,
+  computeTimeoutSeconds,
+  pausePenaltyAt,
   pauseShotClockAt,
+  penaltyStateFor,
+  runFrom,
+  runShotClockFrom,
   serializeDisplayState,
+  stopAt,
 } from "../lib/timer";
-import { getSportProfile, normalizeSport } from "../lib/sports";
+import {
+  formatSportClock,
+  getSportProfile,
+  normalizeSport,
+  periodDurationSecFor,
+  sportPeriodLabel,
+} from "../lib/sports";
+import { normalizeVolleyballFormat, parseSetHistory } from "../lib/volleyball";
+import { checkpointSqlite, ensureSqliteSchema } from "../server/db-init";
 import { CommandSchema, type Command } from "../lib/validation/commands";
 import type {
   CommandAck,
   DesktopApiRequest,
   DesktopApiResponse,
   ExportFormat,
+  HornPayload,
   TickPayload,
 } from "../lib/desktop-bridge";
 import type {
@@ -271,293 +288,12 @@ export function resetSponsorLedger(): void {
   sendAll("display:sponsorLedger", null);
 }
 
-async function ensureSqliteSchema() {
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS "Team" (
-      "id" TEXT NOT NULL PRIMARY KEY,
-      "name" TEXT NOT NULL,
-      "shortName" TEXT NOT NULL,
-      "logoPath" TEXT,
-      "primaryColor" TEXT NOT NULL,
-      "secondaryColor" TEXT NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS "Player" (
-      "id" TEXT NOT NULL PRIMARY KEY,
-      "teamId" TEXT NOT NULL,
-      "number" INTEGER NOT NULL,
-      "firstName" TEXT NOT NULL,
-      "lastName" TEXT NOT NULL,
-      "position" TEXT,
-      "photoPath" TEXT,
-      "isCoach" BOOLEAN NOT NULL DEFAULT false,
-      "goalMediaId" TEXT,
-      CONSTRAINT "Player_teamId_fkey"
-        FOREIGN KEY ("teamId") REFERENCES "Team" ("id")
-        ON DELETE CASCADE ON UPDATE CASCADE
-    )`,
-    `CREATE TABLE IF NOT EXISTS "Match" (
-      "id" TEXT NOT NULL PRIMARY KEY,
-      "homeTeamId" TEXT NOT NULL,
-      "awayTeamId" TEXT NOT NULL,
-      "kickoffAt" DATETIME,
-      "halfDurationSec" INTEGER NOT NULL DEFAULT 2700,
-      "halfBreakSec" INTEGER NOT NULL DEFAULT 900,
-      "status" TEXT NOT NULL DEFAULT 'SETUP',
-      "homeScore" INTEGER NOT NULL DEFAULT 0,
-      "awayScore" INTEGER NOT NULL DEFAULT 0,
-      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT "Match_homeTeamId_fkey"
-        FOREIGN KEY ("homeTeamId") REFERENCES "Team" ("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE,
-      CONSTRAINT "Match_awayTeamId_fkey"
-        FOREIGN KEY ("awayTeamId") REFERENCES "Team" ("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE
-    )`,
-    `CREATE TABLE IF NOT EXISTS "MatchEvent" (
-      "id" TEXT NOT NULL PRIMARY KEY,
-      "matchId" TEXT NOT NULL,
-      "type" TEXT NOT NULL,
-      "minute" INTEGER NOT NULL,
-      "addedTime" INTEGER NOT NULL DEFAULT 0,
-      "teamId" TEXT,
-      "playerInId" TEXT,
-      "playerOutId" TEXT,
-      "note" TEXT,
-      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT "MatchEvent_matchId_fkey"
-        FOREIGN KEY ("matchId") REFERENCES "Match" ("id")
-        ON DELETE CASCADE ON UPDATE CASCADE
-    )`,
-    `CREATE TABLE IF NOT EXISTS "MediaItem" (
-      "id" TEXT NOT NULL PRIMARY KEY,
-      "type" TEXT NOT NULL,
-      "path" TEXT NOT NULL,
-      "title" TEXT NOT NULL,
-      "durationSec" INTEGER NOT NULL,
-      "sponsorName" TEXT,
-      "active" BOOLEAN NOT NULL DEFAULT true,
-      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`,
-    `CREATE TABLE IF NOT EXISTS "Playlist" (
-      "id" TEXT NOT NULL PRIMARY KEY,
-      "name" TEXT NOT NULL,
-      "slot" TEXT NOT NULL
-    )`,
-    `CREATE UNIQUE INDEX IF NOT EXISTS "Playlist_slot_key" ON "Playlist"("slot")`,
-    `CREATE TABLE IF NOT EXISTS "PlaylistItem" (
-      "id" TEXT NOT NULL PRIMARY KEY,
-      "playlistId" TEXT NOT NULL,
-      "mediaId" TEXT NOT NULL,
-      "order" INTEGER NOT NULL,
-      "durationOverrideSec" INTEGER,
-      CONSTRAINT "PlaylistItem_playlistId_fkey"
-        FOREIGN KEY ("playlistId") REFERENCES "Playlist" ("id")
-        ON DELETE CASCADE ON UPDATE CASCADE,
-      CONSTRAINT "PlaylistItem_mediaId_fkey"
-        FOREIGN KEY ("mediaId") REFERENCES "MediaItem" ("id")
-        ON DELETE RESTRICT ON UPDATE CASCADE
-    )`,
-    `CREATE TABLE IF NOT EXISTS "ScheduledMediaCue" (
-      "id" TEXT NOT NULL PRIMARY KEY,
-      "mediaId" TEXT NOT NULL,
-      "matchStatus" TEXT NOT NULL,
-      "triggerSec" INTEGER NOT NULL,
-      "endSec" INTEGER,
-      "enabled" BOOLEAN NOT NULL DEFAULT true,
-      "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      CONSTRAINT "ScheduledMediaCue_mediaId_fkey"
-        FOREIGN KEY ("mediaId") REFERENCES "MediaItem" ("id")
-        ON DELETE CASCADE ON UPDATE CASCADE
-    )`,
-    `CREATE TABLE IF NOT EXISTS "DisplayState" (
-      "id" INTEGER NOT NULL PRIMARY KEY DEFAULT 1,
-      "mode" TEXT NOT NULL DEFAULT 'IDLE',
-      "matchId" TEXT,
-      "activePlayerId" TEXT,
-      "activeSubOutId" TEXT,
-      "activeSubInId" TEXT,
-      "activeGoalScorerId" TEXT,
-      "activeMediaId" TEXT,
-      "timerRunning" BOOLEAN NOT NULL DEFAULT false,
-      "timerStartedAt" DATETIME,
-      "timerBaseSec" INTEGER NOT NULL DEFAULT 0,
-      "updatedAt" DATETIME NOT NULL
-    )`,
-    `CREATE TABLE IF NOT EXISTS "AppSettings" (
-      "id" INTEGER NOT NULL PRIMARY KEY DEFAULT 1,
-      "homeTeamId" TEXT
-    )`,
-  ];
-
-  for (const sql of statements) {
-    await prisma.$executeRawUnsafe(sql);
-  }
-
-  await addColumnIfMissing("ScheduledMediaCue", "endSec", "INTEGER");
-  await addColumnIfMissing("ScheduledMediaCue", "loop", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Player", "goalVideoPath", "TEXT");
-  await addColumnIfMissing("Player", "subImagePath", "TEXT");
-  await addColumnIfMissing("Player", "lineupVideoPath", "TEXT");
-  await addColumnIfMissing("AppSettings", "goalIntroVideoPath", "TEXT");
-  await addColumnIfMissing("AppSettings", "goalVisualHomeEnabled", "BOOLEAN NOT NULL DEFAULT 1");
-  await addColumnIfMissing("AppSettings", "goalVisualAwayEnabled", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("AppSettings", "matchLiveScoreboardSec", "INTEGER NOT NULL DEFAULT 45");
-  await addColumnIfMissing("AppSettings", "matchLiveSponsorSec", "INTEGER NOT NULL DEFAULT 15");
-  await addColumnIfMissing("AppSettings", "firstHalfScoreboardSec", "INTEGER NOT NULL DEFAULT 45");
-  await addColumnIfMissing("AppSettings", "firstHalfSponsorSec", "INTEGER NOT NULL DEFAULT 15");
-  await addColumnIfMissing("AppSettings", "halftimeScoreboardSec", "INTEGER NOT NULL DEFAULT 30");
-  await addColumnIfMissing("AppSettings", "halftimeSponsorSec", "INTEGER NOT NULL DEFAULT 15");
-  await addColumnIfMissing("AppSettings", "secondHalfScoreboardSec", "INTEGER NOT NULL DEFAULT 45");
-  await addColumnIfMissing("AppSettings", "secondHalfSponsorSec", "INTEGER NOT NULL DEFAULT 15");
-  await addColumnIfMissing("AppSettings", "liveCycleLegacyImported", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("AppSettings", "scoreboardThemeJson", "TEXT");
-  await addColumnIfMissing("AppSettings", "proofOfPlayBrandJson", "TEXT");
-  await addColumnIfMissing("AppSettings", "displayCanvasWidth", "INTEGER NOT NULL DEFAULT 1920");
-  await addColumnIfMissing("AppSettings", "displayCanvasHeight", "INTEGER NOT NULL DEFAULT 1080");
-  await addColumnIfMissing("AppSettings", "displayScalingMode", `TEXT NOT NULL DEFAULT 'cover'`);
-  await addColumnIfMissing("AppSettings", "displaySafeZoneVisible", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("AppSettings", "displaySafeZoneMarginPx", "INTEGER NOT NULL DEFAULT 40");
-  await addColumnIfMissing("AppSettings", "idleFallbackMediaId", "TEXT");
-  await addColumnIfMissing("AppSettings", "uiLocale", `TEXT NOT NULL DEFAULT 'nl'`);
-  await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");
-  await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("DisplayState", "safeMode", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("DisplayState", "blackoutResumeMode", "TEXT");
-  await addColumnIfMissing("DisplayState", "addedTimeMinutes", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing(
-    "DisplayState",
-    "substitutionQueueJson",
-    `TEXT NOT NULL DEFAULT '[]'`,
-  );
-
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "ScoreboardTemplate" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "label" TEXT,
-    "themeJson" TEXT NOT NULL,
-    "isBuiltIn" BOOLEAN NOT NULL DEFAULT 0,
-    "sortIndex" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`);
-
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "Sponsor" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "name" TEXT NOT NULL,
-    "active" BOOLEAN NOT NULL DEFAULT true,
-    "prematchSeconds" INTEGER NOT NULL DEFAULT 0,
-    "matchSeconds" INTEGER NOT NULL DEFAULT 0,
-    "halftimeSeconds" INTEGER NOT NULL DEFAULT 0,
-    "imageDefaultSec" INTEGER NOT NULL DEFAULT 10,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )`);
-  await addColumnIfMissing("MediaItem", "sponsorId", "TEXT");
-  await addColumnIfMissing("MediaItem", "playAudio", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("MediaItem", "sponsorPhaseTagsJson", "TEXT");
-  await addColumnIfMissing("MediaItem", "hideFromLibrary", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("MediaItem", "playbackWarning", "TEXT");
-  await addColumnIfMissing("MediaItem", "quickLaunch", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Match", "homeFieldPlayerIdsJson", "TEXT");
-  await addColumnIfMissing("Match", "awayFieldPlayerIdsJson", "TEXT");
-  await addColumnIfMissing("Match", "matchSponsorMediaId", "TEXT");
-  await addColumnIfMissing("Match", "closedAt", "DATETIME");
-  await addColumnIfMissing("Match", "prematchSpreadWindowSec", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Match", "sport", `TEXT NOT NULL DEFAULT 'FOOTBALL'`);
-  await addColumnIfMissing("Match", "currentPeriod", "INTEGER NOT NULL DEFAULT 1");
-  await addColumnIfMissing("Match", "periodDurationSec", "INTEGER NOT NULL DEFAULT 2700");
-  await addColumnIfMissing("Match", "homeTimeouts", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Match", "awayTimeouts", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Match", "homeFouls", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Match", "awayFouls", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Match", "homeSets", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Match", "awaySets", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("DisplayState", "shotClockRunning", "BOOLEAN NOT NULL DEFAULT 0");
-  await addColumnIfMissing("DisplayState", "shotClockStartedAt", "DATETIME");
-  await addColumnIfMissing("DisplayState", "shotClockBaseSec", "INTEGER NOT NULL DEFAULT 24");
-  await addColumnIfMissing("DisplayState", "postMatchStartedAt", "DATETIME");
-  await addColumnIfMissing("DisplayState", "preMatchStartedAt", "DATETIME");
-  await addColumnIfMissing("Sponsor", "firstHalfScoreboardSec", "INTEGER");
-  await addColumnIfMissing("Sponsor", "firstHalfSponsorSec", "INTEGER");
-  await addColumnIfMissing("Sponsor", "halftimeScoreboardSec", "INTEGER");
-  await addColumnIfMissing("Sponsor", "halftimeSponsorSec", "INTEGER");
-  await addColumnIfMissing("Sponsor", "secondHalfScoreboardSec", "INTEGER");
-  await addColumnIfMissing("Sponsor", "secondHalfSponsorSec", "INTEGER");
-  await addColumnIfMissing("Sponsor", "matchFirstHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Sponsor", "matchSecondHalfSeconds", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Sponsor", "postmatchSeconds", "INTEGER NOT NULL DEFAULT 0");
-  await addColumnIfMissing("Sponsor", "sponsorPlaybackOrderJson", "TEXT");
-  await addColumnIfMissing("Sponsor", "sponsorPlaybackRepeatsJson", "TEXT");
-  await migrateSponsorMatchHalfFromLegacy();
-
-  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPlayLog" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "matchId" TEXT,
-    "sponsorId" TEXT,
-    "mediaId" TEXT,
-    "sponsorName" TEXT NOT NULL,
-    "mediaTitle" TEXT NOT NULL,
-    "segmentKey" TEXT NOT NULL,
-    "matchStatus" TEXT,
-    "expectedSec" INTEGER NOT NULL,
-    "actualSec" INTEGER NOT NULL,
-    "startedAt" DATETIME NOT NULL,
-    "endedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "clipSessionId" TEXT NOT NULL,
-    CONSTRAINT "SponsorPlayLog_matchId_fkey"
-      FOREIGN KEY ("matchId") REFERENCES "Match" ("id")
-      ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "SponsorPlayLog_sponsorId_fkey"
-      FOREIGN KEY ("sponsorId") REFERENCES "Sponsor" ("id")
-      ON DELETE SET NULL ON UPDATE CASCADE,
-    CONSTRAINT "SponsorPlayLog_mediaId_fkey"
-      FOREIGN KEY ("mediaId") REFERENCES "MediaItem" ("id")
-      ON DELETE SET NULL ON UPDATE CASCADE
-  )`);
-  await prisma.$executeRawUnsafe(
-    `CREATE UNIQUE INDEX IF NOT EXISTS "SponsorPlayLog_clipSessionId_key" ON "SponsorPlayLog" ("clipSessionId")`,
-  );
-  await prisma.$executeRawUnsafe(
-    `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_matchId_idx" ON "SponsorPlayLog" ("matchId")`,
-  );
-  await prisma.$executeRawUnsafe(
-    `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_sponsorId_idx" ON "SponsorPlayLog" ("sponsorId")`,
-  );
-  await prisma.$executeRawUnsafe(
-    `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_endedAt_idx" ON "SponsorPlayLog" ("endedAt")`,
-  );
-}
-
-/** Eénmalig: oude enkelvoudige matchSeconds → 1e helft als nieuwe velden nog 0 zijn. */
-async function migrateSponsorMatchHalfFromLegacy() {
-  try {
-    await prisma.$executeRawUnsafe(
-      `UPDATE "Sponsor" SET "matchFirstHalfSeconds" = "matchSeconds", "matchSecondHalfSeconds" = 0 WHERE "matchFirstHalfSeconds" = 0 AND "matchSecondHalfSeconds" = 0 AND "matchSeconds" > 0`,
-    );
-  } catch {
-    /* tabel/kolom ontbreekt op oudere kopie */
-  }
-}
-
 function parseCueEndSec(raw: unknown, startSec: number): number | null {
   if (raw == null || raw === "") return null;
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n)) return null;
   const end = Math.max(0, Math.round(n));
   return end > startSec ? end : null;
-}
-
-async function addColumnIfMissing(
-  table: string,
-  column: string,
-  typeDecl: string,
-) {
-  const rows = await prisma.$queryRawUnsafe<Array<{ name: string }>>(
-    `PRAGMA table_info("${table}")`,
-  );
-  if (rows.some((r) => r.name === column)) return;
-  await prisma.$executeRawUnsafe(
-    `ALTER TABLE "${table}" ADD COLUMN "${column}" ${typeDecl}`,
-  );
 }
 
 /** Eénmalig oude matchLive*-kolommen naar per-fase velden kopiëren. */
@@ -657,6 +393,7 @@ type AppSettingsRow = {
   displaySafeZoneMarginPx?: number | null;
   idleFallbackMediaId?: string | null;
   uiLocale?: string | null;
+  sponsorLayoutsJson?: string | null;
 };
 
 function defaultLiveCycle(): LiveCycleStored {
@@ -703,6 +440,7 @@ async function getAppSettings(): Promise<{
   displaySafeZoneVisible: boolean;
   displaySafeZoneMarginPx: number;
   uiLocale: "nl" | "en" | "fr" | "it";
+  sponsorLayoutsJson: string | null;
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
@@ -714,7 +452,7 @@ async function getAppSettings(): Promise<{
       "scoreboardThemeJson", "proofOfPlayBrandJson",
       "displayCanvasWidth", "displayCanvasHeight",
       "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx",
-      "uiLocale"
+      "uiLocale", "sponsorLayoutsJson"
      FROM "AppSettings" WHERE "id" = 1`,
   );
   const row = rows[0];
@@ -743,6 +481,7 @@ async function getAppSettings(): Promise<{
         row.displaySafeZoneVisible == null ? false : Boolean(row.displaySafeZoneVisible),
       displaySafeZoneMarginPx: row.displaySafeZoneMarginPx ?? 40,
       uiLocale: normalizeUiLocale(row.uiLocale),
+      sponsorLayoutsJson: row.sponsorLayoutsJson ?? null,
     };
   }
   await prisma.$executeRawUnsafe(
@@ -763,6 +502,7 @@ async function getAppSettings(): Promise<{
     displaySafeZoneVisible: false,
     displaySafeZoneMarginPx: 40,
     uiLocale: "nl",
+    sponsorLayoutsJson: null,
     ...defaults,
   };
 }
@@ -866,6 +606,7 @@ async function buildSettingsApiJson() {
     idleFallbackMedia,
     homeTeamBranding,
     uiLocale: s.uiLocale,
+    sponsorLayoutsJson: s.sponsorLayoutsJson,
   };
 }
 
@@ -974,6 +715,13 @@ async function setProofOfPlayBrandJson(json: string | null) {
   );
 }
 
+async function setSponsorLayoutsJson(json: string | null) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "sponsorLayoutsJson" = ? WHERE "id" = 1`,
+    json,
+  );
+}
+
 async function touchState() {
   const state = await getStateRow();
   const now = new Date();
@@ -1023,6 +771,9 @@ async function detachDisplayStateForMatchId(matchId: string): Promise<void> {
       shotClockRunning: false,
       shotClockStartedAt: null,
       shotClockBaseSec: 0,
+      ...pausePenaltyAt("home", 0),
+      ...pausePenaltyAt("away", 0),
+      ...clearTimeoutClock(),
     },
   });
   resetSponsorLedger();
@@ -1056,9 +807,41 @@ async function repairOrphanDisplayMatchId(): Promise<void> {
   resetSponsorLedger();
 }
 
+let sponsorPeriodBreakPending = false;
+
+function withSponsorPeriodBreak<T extends object>(state: T): T & { sponsorPeriodBreakPending: boolean } {
+  return { ...state, sponsorPeriodBreakPending };
+}
+
+type DisplayStateRow = Awaited<ReturnType<typeof getStateRow>>;
+
+/**
+ * In-memory kopie van DisplayState voor de tick-loop. Elke broadcast (na elk commando en elke
+ * API-mutatie die `touchState`/`broadcastDisplayState` aanroept) verst hem; als vangnet leest de
+ * tick-loop hem hoogstens elke seconde opnieuw uit SQLite.
+ */
+let cachedState: DisplayStateRow | null = null;
+let cachedStateAt = 0;
+const STATE_CACHE_MAX_AGE_MS = 1000;
+
+async function getStateRowCached(): Promise<DisplayStateRow> {
+  const now = Date.now();
+  if (cachedState && now - cachedStateAt < STATE_CACHE_MAX_AGE_MS) return cachedState;
+  const fresh = await getStateRow();
+  cachedState = fresh;
+  cachedStateAt = now;
+  return fresh;
+}
+
+function rememberState(state: DisplayStateRow) {
+  cachedState = state;
+  cachedStateAt = Date.now();
+}
+
 export async function getDisplaySnapshot() {
   const state = await getStateRow();
-  return serializeDisplayState(state);
+  rememberState(state);
+  return withSponsorPeriodBreak(serializeDisplayState(state));
 }
 
 export async function broadcastDisplayState() {
@@ -1067,18 +850,158 @@ export async function broadcastDisplayState() {
   return state;
 }
 
+function broadcastHorn(reason: HornPayload["reason"]) {
+  const payload: HornPayload = { reason, atMs: Date.now() };
+  sendAll("display:horn", payload);
+}
+
+type TickMatchInfo = {
+  id: string;
+  sport: string;
+  currentPeriod: number;
+  periodDurationSec: number;
+};
+
+let tickMatchCache: { key: string; match: TickMatchInfo | null } | null = null;
+
+/** Match-gegevens voor de tick-loop; cache-sleutel = matchId + DisplayState.updatedAt (elk commando bumpt die). */
+async function tickMatchInfo(state: DisplayStateRow): Promise<TickMatchInfo | null> {
+  if (!state.matchId) return null;
+  const key = `${state.matchId}:${state.updatedAt.getTime()}`;
+  if (tickMatchCache && tickMatchCache.key === key) return tickMatchCache.match;
+  const match = await prisma.match.findUnique({
+    where: { id: state.matchId },
+    select: { id: true, sport: true, currentPeriod: true, periodDurationSec: true },
+  });
+  tickMatchCache = { key, match };
+  return match;
+}
+
+/**
+ * Wall-clock vs. monotone klok. Windows-tijdsync of een handmatige klokwijziging verschuift
+ * `Date.now()`; `performance.now()` niet. Springt de wall-clock meer dan een seconde weg van de
+ * monotone klok terwijl klokken lopen, dan verankeren we die klokken opnieuw op de monotone tijd.
+ */
+let clockGuardWallMs = Date.now();
+let clockGuardMonoMs = performance.now();
+
+function detectWallClockJumpMs(): number {
+  const wall = Date.now();
+  const mono = performance.now();
+  const jump = (wall - clockGuardWallMs) - (mono - clockGuardMonoMs);
+  clockGuardWallMs = wall;
+  clockGuardMonoMs = mono;
+  return jump;
+}
+
 function startTickLoop() {
   if (tickInterval) return;
+  let tickInFlight = false;
+  let lastTickBroadcastAt = 0;
+  clockGuardWallMs = Date.now();
+  clockGuardMonoMs = performance.now();
   tickInterval = setInterval(async () => {
+    if (tickInFlight) return;
+    tickInFlight = true;
     try {
-      let state = await getStateRow();
-      if (state.shotClockRunning && computeShotClockSeconds(state) <= 0) {
+      let state = await getStateRowCached();
+      let mutated = false;
+      const now = Date.now();
+
+      const jumpMs = detectWallClockJumpMs();
+      if (Math.abs(jumpMs) > 1000) {
+        const anyRunning =
+          state.timerRunning || state.shotClockRunning || state.homePenaltyRunning ||
+          state.awayPenaltyRunning || state.timeoutRunning;
+        requireOpts().log(
+          `[clock-guard] systeemklok sprong ${Math.round(jumpMs)} ms${anyRunning ? " — lopende klokken opnieuw verankerd" : ""}`,
+        );
+        if (anyRunning) {
+          // Elke lopende klok krijgt de waarde van vóór de sprong en start opnieuw vanaf nu,
+          // zodat er geen seconden bijkomen of verdwijnen.
+          const before = now - jumpMs;
+          const data: Record<string, unknown> = {};
+          if (state.timerRunning) Object.assign(data, runFrom(computeElapsedSeconds(state, before)));
+          if (state.shotClockRunning) Object.assign(data, runShotClockFrom(computeShotClockSeconds(state, before)));
+          if (state.homePenaltyRunning) {
+            const rem = computePenaltySeconds(penaltyStateFor(state, "home"), before);
+            Object.assign(data, { homePenaltyStartedAt: new Date(now), homePenaltyBaseSec: rem });
+          }
+          if (state.awayPenaltyRunning) {
+            const rem = computePenaltySeconds(penaltyStateFor(state, "away"), before);
+            Object.assign(data, { awayPenaltyStartedAt: new Date(now), awayPenaltyBaseSec: rem });
+          }
+          if (state.timeoutRunning) {
+            const rem = computeTimeoutSeconds(state, before);
+            Object.assign(data, { timeoutStartedAt: new Date(now), timeoutBaseSec: rem });
+          }
+          state = await prisma.displayState.update({ where: { id: 1 }, data });
+          mutated = true;
+        }
+      }
+
+      // Aftellende wedstrijdklok: automatisch stoppen op 00:00 en horn.
+      if (state.timerRunning) {
+        const match = await tickMatchInfo(state);
+        if (match) {
+          const profile = getSportProfile(match.sport);
+          if (profile.timerMode === "COUNT_DOWN") {
+            const duration = periodDurationSecFor(match.sport, match.currentPeriod, match.periodDurationSec);
+            if (duration > 0 && computeElapsedSeconds(state, now) >= duration) {
+              const data: Record<string, unknown> = { ...stopAt(duration) };
+              if (state.shotClockRunning) Object.assign(data, pauseShotClockAt(computeShotClockSeconds(state, now)));
+              if (profile.penaltyFollowsClock) {
+                if (state.homePenaltyRunning) {
+                  Object.assign(data, pausePenaltyAt("home", computePenaltySeconds(penaltyStateFor(state, "home"), now)));
+                }
+                if (state.awayPenaltyRunning) {
+                  Object.assign(data, pausePenaltyAt("away", computePenaltySeconds(penaltyStateFor(state, "away"), now)));
+                }
+              }
+              state = await prisma.displayState.update({ where: { id: 1 }, data });
+              mutated = true;
+              broadcastHorn("period_end");
+              requireOpts().log(
+                `[tick] periode-einde: klok gestopt op 00:00 (${match.sport} periode ${match.currentPeriod})`,
+              );
+            }
+          }
+        }
+      }
+
+      if (state.shotClockRunning && computeShotClockSeconds(state, now) <= 0) {
         state = await prisma.displayState.update({
           where: { id: 1 },
           data: pauseShotClockAt(0),
         });
-        sendAll("display:state", serializeDisplayState(state));
+        mutated = true;
+        broadcastHorn("shot_clock");
       }
+      if (state.homePenaltyRunning && computePenaltySeconds(penaltyStateFor(state, "home"), now) <= 0) {
+        state = await prisma.displayState.update({ where: { id: 1 }, data: pausePenaltyAt("home", 0) });
+        mutated = true;
+      }
+      if (state.awayPenaltyRunning && computePenaltySeconds(penaltyStateFor(state, "away"), now) <= 0) {
+        state = await prisma.displayState.update({ where: { id: 1 }, data: pausePenaltyAt("away", 0) });
+        mutated = true;
+      }
+      if (state.timeoutRunning && computeTimeoutSeconds(state, now) <= 0) {
+        state = await prisma.displayState.update({ where: { id: 1 }, data: clearTimeoutClock() });
+        mutated = true;
+        broadcastHorn("timeout_end");
+      }
+
+      if (mutated) {
+        rememberState(state);
+        sendAll("display:state", withSponsorPeriodBreak(serializeDisplayState(state)));
+      }
+      const clocksLive =
+        state.timerRunning ||
+        state.shotClockRunning ||
+        state.homePenaltyRunning ||
+        state.awayPenaltyRunning ||
+        state.timeoutRunning;
+      if (!clocksLive && now - lastTickBroadcastAt < 2000) return;
       const tick: TickPayload = {
         elapsed: computeElapsedSeconds(state),
         running: state.timerRunning,
@@ -1087,15 +1010,23 @@ function startTickLoop() {
         serverNow: Date.now(),
       };
       sendAll("display:tick", tick);
+      lastTickBroadcastAt = now;
     } catch (err) {
       requireOpts().log(`[tick] ${String(err)}`);
+    } finally {
+      tickInFlight = false;
     }
   }, 250);
 }
 
+/** Vóór een bestandskopie van stadium.db: WAL leegschrijven zodat de kopie compleet is. */
+export async function checkpointDatabaseForBackup(): Promise<void> {
+  await checkpointSqlite();
+}
+
 export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   opts = runtimeOptions;
-  await ensureSqliteSchema();
+  await ensureSqliteSchema(runtimeOptions.log);
   await ensureBaseData();
   await migrateAppSettingsLiveCycleFromLegacy();
   await repairOrphanDisplayMatchId();
@@ -1171,6 +1102,8 @@ export function disposeDesktopRuntime() {
   }
   sponsorLedgerSnapshot = null;
   sponsorClipBestActualSec.clear();
+  cachedState = null;
+  tickMatchCache = null;
 }
 
 type SponsorPlayFilters = {
@@ -1495,6 +1428,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           displaySafeZoneMarginPx?: number;
           idleFallbackMediaId?: string | null;
           uiLocale?: "nl" | "en" | "fr" | "it";
+          sponsorLayoutsJson?: string | null;
         }) ?? {};
       if ("uiLocale" in body && body.uiLocale) {
         await setUiLocale(normalizeUiLocale(body.uiLocale));
@@ -1537,6 +1471,12 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       if ("proofOfPlayBrandJson" in body) {
         const raw = body.proofOfPlayBrandJson;
         await setProofOfPlayBrandJson(
+          raw === null || raw === undefined ? null : String(raw),
+        );
+      }
+      if ("sponsorLayoutsJson" in body) {
+        const raw = body.sponsorLayoutsJson;
+        await setSponsorLayoutsJson(
           raw === null || raw === undefined ? null : String(raw),
         );
       }
@@ -1787,6 +1727,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         active: true,
         sponsorPlaybackOrderJson: true,
         sponsorPlaybackRepeatsJson: true,
+        sportBudgetsJson: true,
       };
       const data: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(body)) {
@@ -1812,7 +1753,13 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         include: { homeTeam: true, awayTeam: true },
         orderBy: { createdAt: "desc" },
       });
-      return json(200, matches);
+      return json(
+        200,
+        matches.map(({ setHistoryJson, ...rest }) => ({
+          ...rest,
+          setHistory: parseSetHistory(setHistoryJson),
+        })),
+      );
     }
 
     if (pathname === "/api/matches" && method === "POST") {
@@ -1825,10 +1772,25 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         halfBreakSec?: number;
         sport?: string;
         periodDurationSec?: number;
+        servingSide?: "home" | "away" | null;
+        technicalTimeoutsEnabled?: boolean;
+        setsToWin?: number;
+        pointsToWinSet?: number;
+        pointsToWinDecider?: number;
         prematchSpreadWindowSec?: number | null;
       };
       const sport = normalizeSport(body.sport);
       const sportProfile = getSportProfile(sport);
+      const volleyFormat = normalizeVolleyballFormat({
+        setsToWin: body.setsToWin,
+        pointsToWinSet: body.pointsToWinSet,
+        pointsToWinDecider: body.pointsToWinDecider,
+      });
+      const breakSecRaw = Number(body.halfBreakSec);
+      const halfBreakSec =
+        Number.isFinite(breakSecRaw) && breakSecRaw > 0
+          ? Math.min(3600, Math.max(60, Math.floor(breakSecRaw)))
+          : sportProfile.breakDurationSec;
       let sponsorId: string | null = null;
       if (typeof body.matchSponsorMediaId === "string" && body.matchSponsorMediaId.length > 0) {
         const mi = await prisma.mediaItem.findUnique({ where: { id: body.matchSponsorMediaId } });
@@ -1849,12 +1811,22 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           prematchSpreadWindowSec,
           sport,
           currentPeriod: 1,
+          servingSide: sportProfile.hasSets ? (body.servingSide === "away" ? "away" : "home") : null,
+          setFirstServer: sportProfile.hasSets ? (body.servingSide === "away" ? "away" : "home") : null,
+          setHistoryJson: sportProfile.hasSets ? "[]" : null,
+          technicalTimeoutsEnabled: sportProfile.hasSets && body.technicalTimeoutsEnabled === true,
+          setsToWin: volleyFormat.setsToWin,
+          pointsToWinSet: volleyFormat.pointsToWinSet,
+          pointsToWinDecider: volleyFormat.pointsToWinDecider,
           periodDurationSec:
             typeof body.periodDurationSec === "number" && body.periodDurationSec >= 0
               ? Math.floor(body.periodDurationSec)
               : sportProfile.defaultPeriodDurationSec,
-          halfDurationSec: body.halfDurationSec ?? sportProfile.defaultPeriodDurationSec,
-          halfBreakSec: body.halfBreakSec ?? 900,
+          halfDurationSec:
+            typeof body.periodDurationSec === "number" && body.periodDurationSec > 0
+              ? Math.floor(body.periodDurationSec)
+              : (body.halfDurationSec ?? sportProfile.defaultPeriodDurationSec),
+          halfBreakSec,
         },
         include: { homeTeam: true, awayTeam: true, matchSponsorMedia: true },
       });
@@ -1890,12 +1862,15 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       const {
         homeFieldPlayerIdsJson,
         awayFieldPlayerIdsJson,
+        setHistoryJson,
         ...rest
       } = match;
       return json(200, {
         ...rest,
         homeFieldPlayerIds: parsePlayerIdArrayJson(homeFieldPlayerIdsJson),
         awayFieldPlayerIds: parsePlayerIdArrayJson(awayFieldPlayerIdsJson),
+        setHistory: parseSetHistory(setHistoryJson),
+        servingSide: match.servingSide === "away" ? "away" : match.servingSide === "home" ? "home" : null,
       });
     }
     if (matchId && method === "PATCH") {
@@ -1937,9 +1912,37 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           data.awayFouls = 0;
           data.homeSets = 0;
           data.awaySets = 0;
+          data.servingSide = profile.hasSets ? "home" : null;
+          data.setFirstServer = profile.hasSets ? "home" : null;
+          data.setHistoryJson = profile.hasSets ? "[]" : null;
+          data.technicalTimeoutsEnabled = false;
+          data.halfBreakSec = profile.breakDurationSec;
         }
         if (typeof body.periodDurationSec === "number" && Number.isFinite(body.periodDurationSec)) {
-          data.periodDurationSec = Math.max(0, Math.min(24 * 60 * 60, Math.floor(body.periodDurationSec)));
+          const periodSec = Math.max(0, Math.min(24 * 60 * 60, Math.floor(body.periodDurationSec)));
+          data.periodDurationSec = periodSec;
+          if (periodSec > 0) data.halfDurationSec = periodSec;
+        }
+        if (typeof body.halfBreakSec === "number" && Number.isFinite(body.halfBreakSec)) {
+          data.halfBreakSec = Math.max(60, Math.min(3600, Math.floor(body.halfBreakSec)));
+        }
+        if (typeof body.technicalTimeoutsEnabled === "boolean") {
+          data.technicalTimeoutsEnabled = body.technicalTimeoutsEnabled;
+        }
+        if ("setsToWin" in body || "pointsToWinSet" in body || "pointsToWinDecider" in body) {
+          const fmt = normalizeVolleyballFormat({
+            setsToWin: typeof body.setsToWin === "number" ? body.setsToWin : cur.setsToWin,
+            pointsToWinSet: typeof body.pointsToWinSet === "number" ? body.pointsToWinSet : cur.pointsToWinSet,
+            pointsToWinDecider:
+              typeof body.pointsToWinDecider === "number" ? body.pointsToWinDecider : cur.pointsToWinDecider,
+          });
+          data.setsToWin = fmt.setsToWin;
+          data.pointsToWinSet = fmt.pointsToWinSet;
+          data.pointsToWinDecider = fmt.pointsToWinDecider;
+        }
+        if (body.servingSide === "home" || body.servingSide === "away") {
+          data.servingSide = body.servingSide;
+          if (cur.homeScore === 0 && cur.awayScore === 0) data.setFirstServer = body.servingSide;
         }
         if (body.kickoffAt === null) data.kickoffAt = null;
         else if (typeof body.kickoffAt === "string") data.kickoffAt = new Date(body.kickoffAt);
@@ -2446,24 +2449,83 @@ function commandResetsSponsorTelemetry(cmd: Command): boolean {
   }
 }
 
-export async function runCommand(input: Command): Promise<CommandAck> {
-  try {
-    const cmd = CommandSchema.parse(input);
-    const result = await handleCommand(cmd);
-    if (result.ok && commandResetsSponsorTelemetry(cmd)) {
-      resetSponsorLedger();
-    }
-    await broadcastDisplayState();
-    if (result.ok && result.warning) {
-      sendControl("display:error", { message: result.warning });
-    }
-    return result;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    requireOpts().log(`[command] ${message}`);
-    sendControl("display:error", { message });
-    return { ok: false, error: message };
+function applySponsorPeriodBreakFlag(cmd: Command, prevPeriod: number | null, sport: string | null) {
+  if (cmd.type === "timer:start" || cmd.type === "match:setActive" || cmd.type === "timer:preset") {
+    sponsorPeriodBreakPending = false;
+    return;
   }
+  if (cmd.type === "match:setStatus") {
+    if (
+      cmd.status === "HALF_TIME" ||
+      cmd.status === "PREMATCH" ||
+      cmd.status === "SETUP" ||
+      cmd.status === "FULL_TIME" ||
+      cmd.status === "POST_MATCH"
+    ) {
+      sponsorPeriodBreakPending = false;
+    }
+    return;
+  }
+  if (
+    cmd.type === "sport:setPeriod" &&
+    prevPeriod != null &&
+    cmd.period !== prevPeriod &&
+    sport != null &&
+    normalizeSport(sport) !== "FOOTBALL"
+  ) {
+    sponsorPeriodBreakPending = true;
+  }
+}
+
+/**
+ * Commando's worden strikt na elkaar uitgevoerd (desktop, mobiel, cloud en tick-loop delen dezelfde
+ * DisplayState- en Match-rij) en elk commando draait in één SQLite-transactie: een fout halverwege
+ * laat geen halve stand achter.
+ */
+let commandQueue: Promise<unknown> = Promise.resolve();
+
+export async function runCommand(input: Command): Promise<CommandAck> {
+  const run = async (): Promise<CommandAck> => {
+    try {
+      const cmd = CommandSchema.parse(input);
+      let prevPeriod: number | null = null;
+      let periodSport: string | null = null;
+      if (cmd.type === "sport:setPeriod") {
+        const state = await getStateRow();
+        if (state.matchId) {
+          const match = await prisma.match.findUnique({
+            where: { id: state.matchId },
+            select: { currentPeriod: true, sport: true },
+          });
+          prevPeriod = match?.currentPeriod ?? null;
+          periodSport = match?.sport ?? null;
+        }
+      }
+      const result = await prisma.$transaction((tx) => handleCommand(cmd, tx), {
+        maxWait: 10_000,
+        timeout: 20_000,
+      });
+      if (result.ok) {
+        applySponsorPeriodBreakFlag(cmd, prevPeriod, periodSport);
+      }
+      if (result.ok && commandResetsSponsorTelemetry(cmd)) {
+        resetSponsorLedger();
+      }
+      await broadcastDisplayState();
+      if (result.ok && result.warning) {
+        sendControl("display:error", { message: result.warning });
+      }
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      requireOpts().log(`[command] ${message}`);
+      sendControl("display:error", { message });
+      return { ok: false, error: message };
+    }
+  };
+  const next = commandQueue.then(run, run);
+  commandQueue = next.catch(() => undefined);
+  return next;
 }
 
 type ExportMatch = Awaited<ReturnType<typeof prisma.match.findUnique>>;
@@ -2491,6 +2553,8 @@ function renderHtml(
       id: string;
       type: string;
       minute: number;
+      period?: number | null;
+      clockSec?: number | null;
       teamId: string | null;
       playerInId: string | null;
       playerOutId: string | null;
@@ -2506,24 +2570,57 @@ function renderHtml(
   for (const player of match.awayTeam.players) {
     playerMap[player.id] = `#${player.number} ${player.firstName} ${player.lastName}`;
   }
+  const sport = normalizeSport(match.sport);
+  const profile = getSportProfile(sport);
 
   const rows = match.events
     .map((event) => {
       const playerIn = event.playerInId ? playerMap[event.playerInId] : "";
       const playerOut = event.playerOutId ? playerMap[event.playerOutId] : "";
+      const team =
+        event.teamId === match.homeTeamId
+          ? match.homeTeam.name
+          : event.teamId === match.awayTeamId
+            ? match.awayTeam.name
+            : "";
       const description =
         event.type === "GOAL"
-          ? `Goal — ${playerIn}`
-          : event.type === "SUB"
-            ? `Sub: ${playerOut} → ${playerIn}`
-            : event.type === "CARD_YELLOW"
-              ? `Yellow — ${playerIn}`
-              : event.type === "CARD_RED"
-                ? `Red — ${playerIn}`
-                : event.type === "TIMER_ADJUST"
-                  ? `Timer adjust — ${event.note ?? ""}`
-                  : event.type;
-      return `<tr><td>${escapeHtml(`${event.minute}'`)}</td><td>${escapeHtml(event.type)}</td><td>${escapeHtml(description)}</td></tr>`;
+          ? `Goal — ${team}${playerIn ? ` · ${playerIn}` : ""}`
+          : event.type === "POINT"
+            ? `Punt — ${team} ${event.note ?? ""}`
+            : event.type === "SET_WON"
+              ? `Setwinst — ${team} (${event.note ?? ""})`
+              : event.type === "SUB"
+                ? `Sub: ${playerOut} → ${playerIn}`
+                : event.type === "CARD_YELLOW"
+                  ? `Yellow — ${playerIn}`
+                  : event.type === "CARD_RED"
+                    ? `Red — ${playerIn}`
+                    : event.type === "CARD_GREEN"
+                      ? `Green — ${playerIn}`
+                      : event.type === "TIMEOUT"
+                        ? `Time-out — ${team} (${event.note ?? ""})`
+                        : event.type === "TECHNICAL_TIMEOUT"
+                          ? "Technical time-out"
+                          : event.type === "FOUL"
+                            ? `${profile.statLabel ?? "Fout"} — ${team} (${event.note ?? ""})`
+                            : event.type === "PERIOD"
+                              ? `Periode — ${event.note ?? ""}`
+                              : event.type === "TIMER_ADJUST"
+                                ? `Timer adjust — ${event.note ?? ""}`
+                                : `${event.type}${event.note ? ` — ${event.note}` : ""}`;
+      const periodLabel =
+        event.period != null && profile.timerMode !== "COUNT_UP"
+          ? sportPeriodLabel(sport, event.period)
+          : "";
+      const clockLabel =
+        typeof event.clockSec === "number" && Number.isFinite(event.clockSec) && profile.timerMode !== "NONE"
+          ? formatSportClock(sport, event.clockSec)
+          : profile.timerMode === "NONE"
+            ? ""
+            : `${event.minute}'`;
+      const when = [periodLabel, clockLabel].filter(Boolean).join(" · ") || `${event.minute}'`;
+      return `<tr><td>${escapeHtml(when)}</td><td>${escapeHtml(event.type)}</td><td>${escapeHtml(description)}</td></tr>`;
     })
     .join("");
 
@@ -2544,7 +2641,7 @@ function renderHtml(
   <div class="sub">Status: ${escapeHtml(match.status)} · ${escapeHtml(new Date(match.createdAt).toLocaleString())}</div>
   <div class="score">${escapeHtml(`${match.homeScore} – ${match.awayScore}`)}</div>
   <table>
-    <thead><tr><th>Min</th><th>Type</th><th>Description</th></tr></thead>
+    <thead><tr><th>Tijd</th><th>Type</th><th>Omschrijving</th></tr></thead>
     <tbody>${rows || '<tr><td colspan="3">No events</td></tr>'}</tbody>
   </table>
 </body></html>`;

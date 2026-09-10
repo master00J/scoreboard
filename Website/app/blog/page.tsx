@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = pageMetadata({
   segmentTitle: "Blog",
   description:
-    "Praktische ArenaCue-artikels over scorebordsoftware, sponsorrotatie, stadiondisplay en LED boarding voor sportclubs.",
+    "Praktische ArenaCue-artikels over scorebordsoftware, sponsorrotatie, stadiondisplay, livestream en LED boarding voor sportclubs.",
   path: "/blog",
   keywordsExtra: [
     "ArenaCue blog",
@@ -31,6 +31,11 @@ const topicLinks = [
     href: "/functies#sponsors",
     title: "Sponsorrotatie op wedstrijddagen",
     text: "Bekijk hoe sponsorbeelden, schermtijd en wedstrijdmomenten binnen ArenaCue samenkomen.",
+  },
+  {
+    href: "/functies#livestream",
+    title: "Livestream vanuit het scorebord",
+    text: "Stream naar YouTube, Twitch of RTMP met camera of display en dezelfde score-overlay als in het stadion.",
   },
   {
     href: "/vereisten",
