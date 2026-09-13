@@ -1,9 +1,17 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { getCaptureStream } from "@/lib/get-desktop-capture-stream";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
+
+export type ExternalCaptureVideoHandle = {
+  isPlaying: () => boolean;
+};
+
+function videoIsLive(video: HTMLVideoElement | null): boolean {
+  return Boolean(video && !video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0);
+}
 
 /** Live capture: desktop/venster (desktopCapturer-id) of webcam (`camera:deviceId`). */
 export function ExternalCaptureVideo({
@@ -81,4 +89,4 @@ export function ExternalCaptureVideo({
       />
     </DisplayMediaStage>
   );
-}
+});

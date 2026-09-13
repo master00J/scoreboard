@@ -22,9 +22,12 @@ import { cn } from "@/lib/utils";
 import DisplayPage from "@/app/display/page";
 import {
   DEFAULT_MATCH_TAB_LAYOUT,
+  isMatchTabPanelId,
+  moveMatchTabPanel,
   resolveHydratedMatchTabLayout,
   sanitizeMatchTabLayout,
   saveMatchTabLayout,
+  type MatchTabColumn,
   type MatchTabLayoutState,
   type MatchTabPanelId,
 } from "@/lib/control-match-layout";
@@ -54,10 +57,20 @@ function reorderBefore(
   return rest;
 }
 
-/** Zet `dragged` op index 0 (ook bij slepen naar andere kolom). */
-function insertFirst(order: MatchTabPanelId[], dragged: MatchTabPanelId): MatchTabPanelId[] {
-  const rest = order.filter((x) => x !== dragged);
-  return [dragged, ...rest];
+function readPanelDrag(e: DragEvent): PanelDragPayload | null {
+  const raw = e.dataTransfer.getData("text/plain");
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as PanelDragPayload;
+      if (isMatchTabPanelId(parsed.id) && isMatchTabColumn(parsed.column)) return parsed;
+    } catch {
+      /* fallback */
+    }
+  }
+  const id = e.dataTransfer.getData("application/x-stadium-panel");
+  const column = e.dataTransfer.getData("application/x-stadium-column");
+  if (isMatchTabPanelId(id) && isMatchTabColumn(column)) return { id, column };
+  return activePanelDrag;
 }
 
 /** Zet `dragged` als laatste module in de gekozen kolom. */
@@ -77,7 +90,7 @@ function ColumnTopDropZone({
   setLayout,
   placement = "top",
 }: {
-  column: "left" | "center" | "right";
+  column: MatchTabColumn;
   setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;
   placement?: "top" | "bottom";
 }) {
@@ -161,7 +174,7 @@ function LayoutPanelWrapper({
   editable = true,
 }: {
   id: MatchTabPanelId;
-  column: "left" | "center" | "right";
+  column: MatchTabColumn;
   layout: MatchTabLayoutState;
   setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;
   children: ReactNode;
@@ -172,9 +185,7 @@ function LayoutPanelWrapper({
   const title = t(`panels.${id}`);
 
   const onDragStart = (e: DragEvent) => {
-    e.dataTransfer.setData("application/x-stadium-panel", id);
-    e.dataTransfer.setData("application/x-stadium-column", column);
-    e.dataTransfer.effectAllowed = "move";
+    writePanelDrag(e, { id, column });
     const img = new Image();
     img.src =
       "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
@@ -192,31 +203,11 @@ function LayoutPanelWrapper({
 
   const onDrop = (e: DragEvent) => {
     e.preventDefault();
-    const dragged = e.dataTransfer.getData("application/x-stadium-panel") as MatchTabPanelId;
-    const fromCol = e.dataTransfer.getData("application/x-stadium-column") as
-      | "left"
-      | "center"
-      | "right";
-    if (!dragged || dragged === id) return;
-    if (fromCol !== "left" && fromCol !== "center" && fromCol !== "right") return;
-
-    const toKey = colToKey(column);
-    const fromKey = colToKey(fromCol);
-
-    setLayout((prev) => {
-      if (fromCol === column) {
-        return { ...prev, [toKey]: reorderBefore(prev[toKey], dragged, id) };
-      }
-      const fromOrder = prev[fromKey].filter((x) => x !== dragged);
-      const toOrder = [...prev[toKey].filter((x) => x !== dragged)];
-      const ti = toOrder.indexOf(id);
-      if (ti >= 0) {
-        toOrder.splice(ti, 0, dragged);
-      } else {
-        toOrder.push(dragged);
-      }
-      return { ...prev, [fromKey]: fromOrder, [toKey]: toOrder };
-    });
+    e.stopPropagation();
+    const drag = readPanelDrag(e);
+    if (!drag || drag.id === id) return;
+    setLayout((prev) => moveMatchTabPanel(prev, drag.id, drag.column, column, { before: id }));
+    activePanelDrag = null;
   };
 
   const toggle = () =>
@@ -290,6 +281,46 @@ function LivePreviewPanel({
   );
 }
 
+function BetweenPanelDropZone({
+  column,
+  afterId,
+  setLayout,
+}: {
+  column: MatchTabColumn;
+  afterId: MatchTabPanelId;
+  setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;
+}) {
+  const [active, setActive] = useState(false);
+  return (
+    <div
+      className={cn(
+        "shrink-0 min-h-3 rounded-md border border-dashed transition-colors",
+        active ? "border-primary/60 bg-primary/20" : "border-transparent",
+      )}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = "move";
+        setActive(true);
+      }}
+      onDragLeave={(e) => {
+        const rel = e.relatedTarget as Node | null;
+        if (rel && e.currentTarget.contains(rel)) return;
+        setActive(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setActive(false);
+        const drag = readPanelDrag(e);
+        if (!drag || drag.id === afterId) return;
+        setLayout((prev) => moveMatchTabPanel(prev, drag.id, drag.column, column, { after: afterId }));
+        activePanelDrag = null;
+      }}
+    />
+  );
+}
+
 function Column({
   column,
   order,
@@ -298,7 +329,7 @@ function Column({
   panels,
   editable = true,
 }: {
-  column: "left" | "center" | "right";
+  column: MatchTabColumn;
   order: MatchTabPanelId[];
   layout: MatchTabLayoutState;
   setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;

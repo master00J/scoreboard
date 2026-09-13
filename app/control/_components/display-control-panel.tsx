@@ -417,7 +417,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
 
   async function backToLiveProgram() {
     if (!automaticSponsorsAllowed) return;
-    await sendCommand({ type: "display:setMode", mode: "SPONSOR_ROTATION" });
+    await resumeProgrammedDisplay();
   }
 
   const primaryLive = mode === "SPONSOR_ROTATION";
@@ -939,6 +939,50 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
 
       {false && advancedOpen && (
       <section className="space-y-2 border-t border-border pt-4">
+        <div className="text-xs font-medium text-foreground/90">{t("display.quickLaunchTitle")}</div>
+        <p className="text-[11px] text-muted-foreground leading-snug">
+          {t("display.quickLaunchHint")}
+        </p>
+        {quickLaunchMedia.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground rounded-md border border-dashed border-border px-3 py-2">
+            {t("display.quickLaunchEmpty")}
+          </p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {quickLaunchMedia.map((m) => {
+              const playing = oneOffMedia && state?.activeMediaId === m.id;
+              return (
+                <Button
+                  key={m.id}
+                  type="button"
+                  size="lg"
+                  variant={playing ? "default" : "outline"}
+                  className="h-auto min-h-14 flex-col items-stretch justify-center gap-0.5 px-2 py-2 whitespace-normal text-left leading-tight border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20"
+                  onClick={() => void playMediaId(m.id)}
+                >
+                  <span className="text-[10px] uppercase tracking-wide text-amber-800 dark:text-amber-300">
+                    {m.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")}
+                    {playing ? ` · ${t("display.oneOffPlayingShort")}` : ""}
+                  </span>
+                  <span className="text-sm font-semibold break-words text-foreground">{m.title}</span>
+                </Button>
+              );
+            })}
+          </div>
+        )}
+        {oneOffMedia ? (
+          <Button
+            type="button"
+            variant="destructive"
+            className="w-full"
+            onClick={() => void resumeProgrammedDisplay()}
+          >
+            {t("display.oneOffStop")}
+          </Button>
+        ) : null}
+      </section>
+
+      <section className="space-y-2 border-t border-border pt-4">
         <div className="text-xs font-medium text-foreground/90">{t("display.oneOffTitle")}</div>
         <p className="text-[11px] text-muted-foreground leading-snug">
           {t("display.oneOffPick")}
@@ -996,6 +1040,11 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             </p>
           )}
         </div>
+        {oneOffMedia ? (
+          <p className="text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-snug">
+            {t("display.oneOffPlaying")}
+          </p>
+        ) : null}
         <div className="flex flex-col sm:flex-row gap-2">
           <Button
             type="button"
@@ -1006,8 +1055,14 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           >
             {t("display.oneOffShow")}
           </Button>
-          <Button type="button" variant="outline" className="sm:flex-1" onClick={() => void backToLiveProgram()}>
-            {t("display.boardPlusSponsors")}
+          <Button
+            type="button"
+            variant="destructive"
+            className="sm:flex-1"
+            disabled={!oneOffMedia}
+            onClick={() => void resumeProgrammedDisplay()}
+          >
+            {t("display.oneOffStop")}
           </Button>
         </div>
       </section>

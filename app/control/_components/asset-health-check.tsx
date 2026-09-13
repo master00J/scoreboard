@@ -6,6 +6,7 @@ import type { TFunction } from "i18next";
 import { Button } from "@/components/ui/button";
 import type { MediaItem } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
+import { isDisplayPlaybackRisk } from "@/lib/media-playback-compat";
 
 type CheckRow = {
   id: string;
@@ -123,11 +124,15 @@ export function AssetHealthCheck() {
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [rows, setRows] = useState<CheckRow[]>([]);
   const [finishedAt, setFinishedAt] = useState<number | null>(null);
+  const [riskIds, setRiskIds] = useState<string[]>([]);
+  const [preparing, setPreparing] = useState(false);
+  const [prepareProgress, setPrepareProgress] = useState({ done: 0, total: 0 });
 
   const run = useCallback(async () => {
     setRunning(true);
     setRows([]);
     setFinishedAt(null);
+    setRiskIds([]);
     try {
       const res = await fetch("/api/media");
       const all = ((await res.json()) as MediaItem[]).filter((m) => m.active);
@@ -141,6 +146,35 @@ export function AssetHealthCheck() {
         setRows([...results]);
         setProgress({ done: i + 1, total: all.length });
       }
+      try {
+        const compatRes = await fetch("/api/media/compat-report");
+        if (compatRes.ok) {
+          const report = (await compatRes.json()) as {
+            id: string;
+            reason: string;
+            fps?: number | null;
+            codec?: string | null;
+          }[];
+          const byId = new Map(report.map((r) => [r.id, r]));
+          const foundRisk: string[] = [];
+          for (const row of results) {
+            const risk = byId.get(row.id);
+            if (!risk || !isDisplayPlaybackRisk(risk.reason)) continue;
+            foundRisk.push(row.id);
+            row.status = "fail";
+            row.message =
+              risk.reason === "high_fps"
+                ? t("setup.healthPlaybackRiskHighFps", { fps: Math.round(risk.fps ?? 60) })
+                : risk.reason === "unsupported_codec"
+                  ? t("setup.healthPlaybackRiskCodec", { codec: risk.codec || "?" })
+                  : t("setup.healthPlaybackRiskPixel");
+          }
+          setRows([...results]);
+          setRiskIds(foundRisk);
+        }
+      } catch {
+        /* import-check blijft staan als ffmpeg-probe faalt */
+      }
       setFinishedAt(Date.now());
     } catch (err) {
       console.error("[AssetHealthCheck]", err);
@@ -148,6 +182,23 @@ export function AssetHealthCheck() {
       setRunning(false);
     }
   }, [t]);
+
+  const prepareRisks = useCallback(async () => {
+    if (riskIds.length === 0) return;
+    setPreparing(true);
+    setPrepareProgress({ done: 0, total: riskIds.length });
+    try {
+      for (let i = 0; i < riskIds.length; i++) {
+        const id = riskIds[i]!;
+        await fetch(`/api/media/${id}/prepare`, { method: "POST" });
+        setPrepareProgress({ done: i + 1, total: riskIds.length });
+      }
+      setRiskIds([]);
+      await run();
+    } finally {
+      setPreparing(false);
+    }
+  }, [riskIds, run]);
 
   const failCount = rows.filter((r) => r.status === "fail").length;
   const slowCount = rows.filter((r) => r.status === "slow").length;
@@ -162,11 +213,23 @@ export function AssetHealthCheck() {
             {t("setup.healthBody")}
           </p>
         </div>
-        <Button size="sm" disabled={running} onClick={() => void run()}>
-          {running
-            ? t("setup.healthRunning", { done: progress.done, total: progress.total })
-            : t("setup.healthRun")}
-        </Button>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <Button size="sm" disabled={running || preparing} onClick={() => void run()}>
+            {running
+              ? t("setup.healthRunning", { done: progress.done, total: progress.total })
+              : t("setup.healthRun")}
+          </Button>
+          {riskIds.length > 0 && !running && (
+            <Button size="sm" variant="outline" disabled={preparing} onClick={() => void prepareRisks()}>
+              {preparing
+                ? t("setup.healthPreparing", {
+                    done: prepareProgress.done,
+                    total: prepareProgress.total,
+                  })
+                : t("setup.healthPrepare")}
+            </Button>
+          )}
+        </div>
       </div>
 
       {rows.length > 0 && (

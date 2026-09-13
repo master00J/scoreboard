@@ -26,6 +26,10 @@ const features = [
     body: "Toon visuals fullscreen of naast het scorebord op een vaste 16:9 display-output.",
   },
   {
+    title: "Livestream",
+    body: "Stream naar YouTube, Twitch of een eigen RTMP-bestemming vanuit het control panel, met camera of display en score-overlay.",
+  },
+  {
     title: "LED boarding",
     body: "Aparte ArenaCue-app voor perimeter- en tribuneschermen: zones, playlists en sponsorlogo's op een configureerbare pixelcanvas.",
   },
@@ -39,7 +43,7 @@ const workflow = [
   "Start ArenaCue Scoreboard (en optioneel LED boarding) op de regie-opstelling.",
   "Koppel je scherm- of displayketen en controleer de output.",
   "Stel teams, wedstrijd en sponsors op voor de aftrap.",
-  "Bedien de volledige match live vanuit het control panel.",
+  "Bedien de volledige match live vanuit het control panel, inclusief optionele livestream.",
 ];
 
 const releaseItems = [
@@ -101,9 +105,9 @@ export default function Home() {
               Impress every crowd.
             </h1>
             <p className="hero-lead">
-              ArenaCue bestaat uit professionele software voor live scoreboards, sponsorrotatie en stadionvisuals — met
-              aparte <strong>LED boarding</strong> voor perimeter en tribunes. Zo beheer je elke wedstrijdfase
-              gecontroleerd, strak en betrouwbaar.
+              ArenaCue bestaat uit professionele software voor live scoreboards, sponsorrotatie, stadionvisuals en
+              livestream — met aparte <strong>LED boarding</strong> voor perimeter en tribunes. Zo beheer je elke
+              wedstrijdfase gecontroleerd, strak en betrouwbaar.
             </p>
             <div className="hero-actions">
               <a className="primary-button" href="#contact">

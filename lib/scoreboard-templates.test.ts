@@ -4,8 +4,13 @@ import {
   builtInTemplateRows,
   extractVisualTheme,
   sanitizeTemplateThemeJson,
+  templateMediaKind,
 } from "./scoreboard-templates";
-import { mergeScoreboardTheme } from "./scoreboard-theme";
+import {
+  mergeScoreboardTheme,
+  reservedContentIsSixteenByNine,
+  slotIsSixteenByNine,
+} from "./scoreboard-theme";
 
 describe("layout-templates bevatten alleen vormgeving", () => {
   it("laat afspeelinstellingen buiten de template", () => {
@@ -59,10 +64,32 @@ describe("meegeleverde layouts", () => {
     for (const row of rows) {
       expect(row.isBuiltIn).toBe(true);
       const theme = mergeScoreboardTheme(row.themeJson);
-      // mergeScoreboardTheme clampt; waarden moeten binnen de grenzen vallen.
       expect(theme.leftBarWidthPx).toBeGreaterThanOrEqual(180);
       expect(theme.leftBarWidthPx).toBeLessThanOrEqual(520);
       expect(theme.leftColumnOrder).toHaveLength(3);
+    }
+  });
+
+  it("spannen echte layout-verschillen, niet alleen balkdikte", () => {
+    const modes = new Set(builtInTemplateRows().map((row) => mergeScoreboardTheme(row.themeJson).layoutMode));
+    expect(modes.has("custom")).toBe(true);
+    expect(modes.has("left-l")).toBe(true);
+    expect(modes.has("bottom-strip")).toBe(true);
+    expect(modes.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it("houdt video op 16:9: overlay-vak of gereserveerd contentvlak", () => {
+    for (const row of builtInTemplateRows()) {
+      const theme = mergeScoreboardTheme(row.themeJson);
+      if (theme.layoutMode === "left-l") {
+        expect(reservedContentIsSixteenByNine(theme.leftBarWidthPx, theme.bottomBarHeightPx)).toBe(true);
+        expect(templateMediaKind(row.themeJson)).toBe("reserved");
+      } else {
+        expect(templateMediaKind(row.themeJson)).toBe("overlay");
+        if (theme.layoutMode === "custom") {
+          expect(slotIsSixteenByNine(theme.slots.sponsor)).toBe(true);
+        }
+      }
     }
   });
 
@@ -71,5 +98,13 @@ describe("meegeleverde layouts", () => {
     const b = builtInTemplateRows().map((r) => r.id);
     expect(a).toEqual(b);
     expect(new Set(a).size).toBe(a.length);
+    expect(a).toEqual([
+      "builtin_standaard",
+      "builtin_pro-league",
+      "builtin_amateur",
+      "builtin_beker",
+      "builtin_minimal",
+      "builtin_led-strip",
+    ]);
   });
 });

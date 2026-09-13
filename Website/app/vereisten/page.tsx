@@ -8,7 +8,7 @@ import { pageMetadata } from "@/lib/seo";
 export const metadata: Metadata = pageMetadata({
   segmentTitle: "Systeemvereisten",
   description:
-    "Minimale en aanbevolen hardware voor ArenaCue Scoreboard en LED boarding op Windows — geschikt voor wedstrijddagen van 4–6 uur met video en sponsorrotatie.",
+    "Minimale en aanbevolen hardware voor ArenaCue Scoreboard en LED boarding op Windows — geschikt voor wedstrijddagen van 4–6 uur met video, sponsorrotatie en livestream.",
   path: "/vereisten",
   keywordsExtra: [
     "Windows",
@@ -17,6 +17,8 @@ export const metadata: Metadata = pageMetadata({
     "videoweergave",
     "systeemvereisten",
     "aanbevolen specificaties",
+    "livestream hardware",
+    "NVENC",
   ],
 });
 
@@ -52,8 +54,10 @@ export default function VereistenPage() {
           ArenaCue <strong>Scoreboard</strong> en <strong>LED boarding</strong> draaien als{" "}
           <strong>Windows-desktopsoftware</strong> (Electron). Tijdens een typische wedstrijddag staat de pc vaak{" "}
           <strong>4 tot 6 uur</strong> aan met <strong>live regie</strong>, <strong>timer</strong> en herhaaldelijk{" "}
-          <strong>fullscreen- of rotatievideo</strong> (sponsors, clips). Daarvoor is voldoende rekenkracht, geheugen
-          en vooral <strong>betrouwbare videodecode</strong> op de GPU belangrijk.
+          <strong>fullscreen- of rotatievideo</strong> (sponsors, clips). Optioneel komt daar een{" "}
+          <strong>livestream</strong> bij (YouTube, Twitch of RTMP): dan decodeert de GPU sponsors én encodeert ze de
+          stream. Daarvoor is voldoende rekenkracht, geheugen en vooral <strong>betrouwbare videodecode én -encode</strong>{" "}
+          op de GPU belangrijk.
         </p>
 
         <h2>Besturingssysteem</h2>
@@ -69,8 +73,8 @@ export default function VereistenPage() {
 
         <h2>Minimum (kleinere clubs, werkbaar)</h2>
         <p className="legal-muted">
-          Geschikt voor scorebord + lichte tot middelzware sponsorvideo. Bij zware playlists of veel HD/4K-content zit
-          deze klasse sneller tegen de grens.
+          Geschikt voor scorebord + lichte tot middelzware sponsorvideo. Bij zware playlists, veel HD/4K-content of een
+          gelijktijdige livestream zit deze klasse sneller tegen de grens.
         </p>
         <ul>
           <li>
@@ -96,7 +100,8 @@ export default function VereistenPage() {
 
         <h2>Aanbevolen (profclub / zware matchday 4–6 uur)</h2>
         <p className="legal-muted">
-          Voor hoge betrouwbaarheid met langere sessies, zwaardere video, meerdere outputs en minder risico op haperingen.
+          Voor hoge betrouwbaarheid met langere sessies, zwaardere video, livestream-encode, meerdere outputs en minder
+          risico op haperingen.
         </p>
         <ul>
           <li>
@@ -107,7 +112,7 @@ export default function VereistenPage() {
           </li>
           <li>
             <strong>Grafisch:</strong> NVIDIA RTX 3060 / 4060-klasse of gelijkwaardig; focus op stabiele
-            hardware-decode/encode en multi-display output
+            hardware-decode/encode (NVENC voor livestream) en multi-display output
           </li>
           <li>
             <strong>Opslag:</strong> <strong>1 TB NVMe SSD</strong> (eventueel tweede SSD voor media om I/O te scheiden)
@@ -125,9 +130,10 @@ export default function VereistenPage() {
         <h2>Netwerk (afhankelijk van inzet)</h2>
         <p>
           De kern van Scoreboard kan <strong>volledig offline</strong>. Voor{" "}
-          <strong>cloud remote control</strong>, <strong>licentiecontrole</strong> of koppelingen met online diensten is
-          een stabiele internetverbinding nodig. Voor bediening via de <strong>mobiele app</strong> op hetzelfde netwerk
-          is bekabeld Ethernet voor de wedstrijd-PC sterk aanbevolen; wifi alleen als fallback.
+          <strong>cloud remote control</strong>, <strong>licentiecontrole</strong>, <strong>livestream</strong> naar
+          YouTube/Twitch/RTMP of koppelingen met online diensten is een stabiele internetverbinding nodig. Voor
+          bediening via de <strong>mobiele app</strong> op hetzelfde netwerk én voor een betrouwbare upload tijdens
+          streams is bekabeld Ethernet voor de wedstrijd-PC sterk aanbevolen; wifi alleen als fallback.
         </p>
 
         <h2>Matchday hardening (sterk aanbevolen)</h2>

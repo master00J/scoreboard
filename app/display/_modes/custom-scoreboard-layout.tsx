@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import type { ReactNode } from "react";
 import { StableClockText } from "@/components/stable-clock-text";
-import { formatTime } from "@/lib/utils";
+import { formatSportClock } from "@/lib/sports";
 import type { Match } from "@/lib/types";
 import {
   mergeScoreboardTheme,
@@ -75,7 +75,7 @@ export function CustomScoreboardLayout({
             ) : null}
             {theme.showClock ? (
               <StableClockText
-                value={formatTime(elapsed)}
+                value={formatSportClock(match.sport, elapsed)}
                 className="font-black leading-none"
                 style={{
                   fontSize: "min(42cqh, 28cqw, 160px)",

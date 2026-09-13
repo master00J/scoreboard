@@ -8,7 +8,7 @@ import { useApi } from "@/lib/use-api";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ToastViewport, toast } from "@/components/ui/toast";
 import { TimerPanel } from "./_components/timer-panel";
-import { MatchLivePanel } from "./_components/match-live-panel";
+import { GoalScorerOverlay, MatchLivePanel } from "./_components/match-live-panel";
 import { SetupPanel, MatchDialog } from "./_components/setup-panel";
 import { MediaPanel } from "./_components/media-panel";
 import { ProofOfPlayPanel } from "./_components/proof-of-play-panel";
@@ -16,6 +16,7 @@ import { DisplayControlPanel, EventLog } from "./_components/display-control-pan
 import { SponsorLiveOverview } from "./_components/sponsor-live-overview";
 import { SponsorTimelinePreview } from "./_components/sponsor-timeline-preview";
 import { ExternalCapturePanel } from "./_components/external-capture-panel";
+import { LivestreamStudio } from "./_components/livestream-studio";
 import { PlayerIntroLauncher } from "./_components/player-intro-launcher";
 import { CrashRecoveryBanner } from "./_components/crash-recovery";
 import { SponsorPhaseHud } from "./_components/sponsor-phase-hud";
@@ -283,7 +284,13 @@ export default function ControlPage() {
         <TabsContent value="reports" className="min-h-0 overflow-y-auto">
           <ProofOfPlayPanel />
         </TabsContent>
+
+        <TabsContent value="livestream" forceMount className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <LivestreamStudio active={activeTab === "livestream"} />
+        </TabsContent>
       </Tabs>
+
+      <GoalScorerOverlay match={isFullMatch(match) ? match : null} />
 
       {newMatchOpen && teams && (
         <MatchDialog

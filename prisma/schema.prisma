@@ -133,6 +133,10 @@ model MediaItem {
   sponsorPhaseTagsJson String?
   /// True = technisch item (bv. auto-aangemaakt voor speler goalVideoPath); niet tonen in Media-bibliotheek.
   hideFromLibrary Boolean @default(false)
+  /// VIDEO: risico op het stadionscherm (high_fps, unsupported_codec, pixel_format). Null = ok of niet gecheckt.
+  playbackWarning String?
+  /// Toon als sneltoets op Display (waarschuwingen, manuele clips).
+  quickLaunch Boolean @default(false)
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
@@ -148,7 +152,10 @@ model ScheduledMediaCue {
   media       MediaItem @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   matchStatus String
   triggerSec  Int
+  endSec      Int?
   enabled     Boolean   @default(true)
+  /// Rundown van deze fase herhaalt na de laatste clip.
+  loop        Boolean   @default(false)
   createdAt   DateTime  @default(now())
 }
 
@@ -190,6 +197,8 @@ model Sponsor {
   sponsorPlaybackOrderJson String?
   /// JSON-object mediaId → aantal volledige weergaven per doorloop unieke clips (default 1).
   sponsorPlaybackRepeatsJson String?
+  /// JSON: sport → venster-id → seconden. Voetbal gebruikt dit nooit.
+  sportBudgetsJson  String?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
   playLogs          SponsorPlayLog[]
@@ -295,8 +304,10 @@ model AppSettings {
   /// Standaard fullscreen-media (afbeelding of video) wanneer er nog geen playlist-items zijn (IDLE / lege prematch).
   idleFallbackMediaId String? @unique
   idleFallbackMedia   MediaItem? @relation("IdleFallbackMedia", fields: [idleFallbackMediaId], references: [id], onDelete: SetNull)
-  /// Interfacetaal voor de control UI: nl | en | fr.
+  /// Interfacetaal voor de control UI: nl | en | fr | it.
   uiLocale            String  @default("nl")
+  /// JSON: sport → two_blocks | per_period | inplay_plus_breaks. FOOTBALL wordt genegeerd.
+  sponsorLayoutsJson  String?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.

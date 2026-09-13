@@ -9,8 +9,9 @@ export function createBridgeApi({ baseUrl, sessionToken, isCloud, callBridge }) 
         data: { error: "Setup en media beheer vereist LAN-modus (directe bridge naar de desktop)." },
       };
     }
-    const desktopPath = path.startsWith("/api/") ? path : `/api${path}`;
-    return callBridge(baseUrl, sessionToken, `/mobile/api${desktopPath}`, method, body);
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    const desktopPath = normalizedPath.startsWith("/api/") ? normalizedPath : `/api${normalizedPath}`;
+    return callBridge(baseUrl, sessionToken, `/mobile${desktopPath}`, method, body);
   }
 
   return {

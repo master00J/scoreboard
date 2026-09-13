@@ -1,16 +1,13 @@
-import { useMemo } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useEffect, useRef, useState } from 'react';
+import { Text, View } from 'react-native';
+import { Button, Card, Chip, ConfirmButton, sharedStyles as s } from '../components/ui';
+import { useI18n } from '../lib/i18n';
+import { sportProfile } from '../lib/match-state';
+import { colors } from '../lib/theme';
 
-const DISPLAY_MODES = [
-  { mode: "MATCH", label: "Match" },
-  { mode: "SPONSOR_ROTATION", label: "Sponsorrotatie" },
-  { mode: "IDLE", label: "Idle" },
-  { mode: "HALFTIME", label: "Halftime" },
-  { mode: "FULLTIME", label: "Fulltime" },
-  { mode: "TEAM_INTRO", label: "Team intro" },
-  { mode: "PLAYER_INTRO", label: "Spelerintro" },
-  { mode: "BLACKOUT", label: "Blackout" },
-];
+const MODES = ['MATCH', 'SPONSOR_ROTATION', 'IDLE', 'HALFTIME', 'FULLTIME', 'TEAM_INTRO', 'PLAYER_INTRO'];
+const PRESETS = ['FIRST_HALF', 'SECOND_HALF', 'ET1', 'ET2'];
+const KNOWN_MODES = [...MODES, 'BLACKOUT', 'SPONSOR', 'CUSTOM', 'GOAL', 'GOAL_INTRO_VIDEO', 'GOAL_PLAYER_VIDEO', 'SUBSTITUTION', 'CARD'];
 
 const TIMER_PRESETS = [
   { type: "timer:preset", preset: "FIRST_HALF", label: "1e helft 45'" },
@@ -44,30 +41,11 @@ export function DisplayScreen({
     await sendCommand({ type: "display:setMode", mode, meta });
     onStatus?.(`Display: ${mode}`);
   }
-
-  return (
-    <>
-      <View style={styles.card}>
-        <Text style={styles.label}>Display-modi</Text>
-        {!canMutate ? <Text style={styles.status}>Operator vereist.</Text> : null}
-        <View style={styles.grid}>
-          {DISPLAY_MODES.map((item) => (
-            <Pressable key={item.mode} style={styles.smallButton} onPress={() => void setMode(item.mode)}>
-              <Text style={styles.buttonTextSmall}>{item.label}</Text>
-            </Pressable>
-          ))}
-        </View>
-        <View style={styles.row}>
-          <Pressable style={styles.button} onPress={() => canMutate && sendCommand({ type: "display:blackout" })}>
-            <Text style={styles.buttonText}>Blackout toggle</Text>
-          </Pressable>
-        </View>
-        <Pressable
-          style={styles.buttonSecondary}
-          onPress={() => canMutate && sendCommand({ type: "display:setExternalCaptureToDisplay", enabled: true })}
-        >
-          <Text style={styles.buttonText}>Externe capture → display</Text>
-        </Pressable>
+  const setMode = (mode, meta) => act({ type: 'display:setMode', mode, ...(meta ? { meta } : {}) });
+  return <>
+    <Card title={t('display.title')} subtitle={t('display.subtitle')}>
+      <View style={{ padding: 14, borderRadius: 12, backgroundColor: colors.bg, borderWidth: 1, borderColor: colors.line }}>
+        <Text accessibilityLiveRegion="polite" style={[s.text, { color: colors.accent }]}>{t('display.current', { mode: snapshot?.safeMode ? t('display.safeMode') : activeMode })}</Text>
       </View>
 
       {showTimerPresets ? (

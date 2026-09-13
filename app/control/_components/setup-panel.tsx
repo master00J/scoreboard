@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { sendCommand } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
@@ -15,12 +15,19 @@ import { isElectron, selectFilesViaDialog, selectFolderViaDialog, exportVenueBac
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
 import { normalizeUiLocale, type UiLocale } from "@/lib/i18n";
-import { tMatchStatus } from "@/lib/i18n/t-phase";
+import { sportStartEventVars, tMatchStatus, tSportLabel } from "@/lib/i18n/t-phase";
+import { tPeriodLabel } from "@/lib/i18n/t-sport";
 import { SetupScoreboardTemplatesSection } from "./setup-scoreboard-templates";
 import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
 import { SetupDisplayCanvasSection } from "./setup-display-canvas";
 import { AssetHealthCheck } from "./asset-health-check";
 import { getSportProfile, SPORT_TYPES, type SportType } from "@/lib/sports";
+import {
+  parseSponsorLayoutsJson,
+  resolveSponsorLayoutId,
+  serializeSponsorLayoutsJson,
+  type SponsorLayoutId,
+} from "@/lib/sponsor-windows";
 
 type VisualField = "goalVideoPath" | "subImagePath" | "lineupVideoPath";
 
@@ -42,6 +49,8 @@ export function SetupPanel() {
   const [matchDialog, setMatchDialog] = useState(false);
   const [scheduleMatch, setScheduleMatch] = useState<Match | null>(null);
   const [visualsField, setVisualsField] = useState<VisualField | null>(null);
+  const [editLayoutJson, setEditLayoutJson] = useState<string | null>(null);
+  const consumeEditLayout = useCallback(() => setEditLayoutJson(null), []);
 
   async function setUiLocale(next: UiLocale) {
     const res = await fetch("/api/settings", {
@@ -120,6 +129,23 @@ export function SetupPanel() {
     reloadSettings();
   }
 
+  async function setSponsorLayout(sport: SportType, layout: SponsorLayoutId) {
+    const current = parseSponsorLayoutsJson(settings?.sponsorLayoutsJson);
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sponsorLayoutsJson: serializeSponsorLayoutsJson({ ...current, [sport]: layout }),
+      }),
+    });
+    if (!res.ok) {
+      toast({ title: t("setup.sponsorModelSaveFailed"), variant: "error" });
+      return;
+    }
+    toast({ title: t("setup.sponsorModelSaved"), variant: "success" });
+    reloadSettings();
+  }
+
   async function setIdleFallbackMedia(mediaId: string | null) {
     const res = await fetch("/api/settings", {
       method: "PATCH",
@@ -150,6 +176,7 @@ export function SetupPanel() {
           <option value="nl">{t("language.nl")}</option>
           <option value="en">{t("language.en")}</option>
           <option value="fr">{t("language.fr")}</option>
+          <option value="it">{t("language.it")}</option>
         </Select>
       </section>
       {isElectron ? (
@@ -399,12 +426,56 @@ export function SetupPanel() {
         </div>
       </section>
 
-      <SetupScoreboardTemplatesSection settings={settings} reloadSettings={reloadSettings} />
+      <section className="bg-card border border-border rounded-xl p-6">
+        <h2 className="text-lg font-semibold mb-1">{t("setup.sponsorModelTitle")}</h2>
+        <p className="text-sm text-muted-foreground mb-4 max-w-2xl">{t("setup.sponsorModelBody")}</p>
+        <p className="text-xs text-muted-foreground mb-4">{t("setup.sponsorModelFootballFixed")}</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          {SPORT_TYPES.filter((sportId) => sportId !== "FOOTBALL").map((sportId) => {
+            const layout = resolveSponsorLayoutId(
+              sportId,
+              parseSponsorLayoutsJson(settings?.sponsorLayoutsJson),
+            );
+            return (
+              <div key={sportId} className="rounded-lg border border-border p-3">
+                <Label htmlFor={`sponsor-layout-${sportId}`}>{t(`sports.${sportId}`)}</Label>
+                <Select
+                  id={`sponsor-layout-${sportId}`}
+                  className="mt-1"
+                  value={layout}
+                  onChange={(event) =>
+                    void setSponsorLayout(sportId, event.target.value as SponsorLayoutId)
+                  }
+                >
+                  <option value="two_blocks">{t("setup.layoutTwoBlocks")}</option>
+                  <option value="per_period">{t("setup.layoutPerPeriod")}</option>
+                  <option value="inplay_plus_breaks">{t("setup.layoutInplay")}</option>
+                </Select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  {layout === "per_period"
+                    ? t("setup.layoutHintPerPeriod")
+                    : layout === "inplay_plus_breaks"
+                      ? t("setup.layoutHintInplay")
+                      : t("setup.layoutHintTwoBlocks")}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <SetupScoreboardTemplatesSection
+        settings={settings}
+        reloadSettings={reloadSettings}
+        onEditLayout={setEditLayoutJson}
+      />
       <SetupScoreboardThemeSection
         settings={settings}
         reloadSettings={reloadSettings}
         homeTeam={homeTeam}
         awayTeam={(teams ?? []).find((team) => team.id !== homeTeam?.id) ?? null}
+        seedThemeJson={editLayoutJson}
+        onSeedConsumed={consumeEditLayout}
       />
 
       <SetupDisplayCanvasSection settings={settings ?? null} reloadSettings={reloadSettings} />
@@ -447,7 +518,7 @@ export function SetupPanel() {
                   {m.kickoffAt ? (
                     <>
                       {" "}
-                      · {t("setup.kickoff").toLowerCase()}{" "}
+                      · {sportStartEventVars(t, m.sport).start}{" "}
                       {new Date(m.kickoffAt).toLocaleString(i18n.language, {
                         day: "2-digit",
                         month: "2-digit",
@@ -474,7 +545,7 @@ export function SetupPanel() {
               </div>
               <div className="flex gap-2 flex-wrap justify-end">
                 <Button size="sm" variant="outline" onClick={() => setScheduleMatch(m)}>
-                  {t("setup.kickoff")}
+                  {t("setup.kickoff", sportStartEventVars(t, m.sport))}
                 </Button>
                 {state?.matchId === m.id ? (
                   <Button variant="secondary" disabled size="sm">
@@ -2039,6 +2110,8 @@ export function MatchDialog({
       return;
     }
 
+    const periodMin = Number(periodMinutes);
+    const breakMin = Number(breakMinutes);
     const payload: Record<string, unknown> = {
       homeTeamId: homeTeam.id,
       awayTeamId: resolvedAwayId,
@@ -2118,12 +2191,12 @@ export function MatchDialog({
           >
             {SPORT_TYPES.map((sportId) => (
               <option key={sportId} value={sportId}>
-                {getSportProfile(sportId).label}
+                {tSportLabel(t, sportId, getSportProfile(sportId).label)}
               </option>
             ))}
           </Select>
           <p className="mt-2 text-xs text-muted-foreground">
-            {sportProfile.periodCount} × {sportProfile.periodLabel.toLowerCase()}
+            {sportProfile.periodCount} × {tPeriodLabel(t, sport).toLowerCase()}
             {sportProfile.timerMode === "NONE"
               ? ` · ${t("setup.noClock")}`
               : ` · ${Math.round(sportProfile.defaultPeriodDurationSec / 60)} ${t("common.minutes")} · ${
@@ -2131,6 +2204,12 @@ export function MatchDialog({
                 }`}
             {sportProfile.shotClockPresets.length > 0
               ? ` · ${t("setup.shotclock", { presets: sportProfile.shotClockPresets.join("/") })}`
+              : ""}
+            {sportProfile.overtimeDurationSec > 0
+              ? ` · ${t("setup.overtimeInfo", {
+                  n: sportProfile.maxOvertimePeriods,
+                  min: Math.round(sportProfile.overtimeDurationSec / 60),
+                })}`
               : ""}
           </p>
           {sportProfile.timerMode !== "NONE" && (
@@ -2357,7 +2436,7 @@ export function MatchDialog({
               </summary>
               <div className="mt-3 space-y-3 border-t border-border pt-3">
               <div>
-                <Label>{t("setup.plannedKickoff")}</Label>
+                <Label>{t("setup.plannedKickoff", startEvent)}</Label>
                 <Input
                   type="datetime-local"
                   value={kickoffLocal}
@@ -2367,11 +2446,12 @@ export function MatchDialog({
                 <p className="text-xs text-muted-foreground mt-1">
                   {t("setup.matchSponsorLeadHelp", {
                     minutes: PREMATCH_MATCH_SPONSOR_LEAD_MS / 60_000,
+                    ...startEvent,
                   })}
                 </p>
               </div>
               <div>
-                <Label>{t("setup.prematchWindowLabel")}</Label>
+                <Label>{t("setup.prematchWindowLabel", startEvent)}</Label>
                 <Input
                   type="number"
                   min={0}
@@ -2383,7 +2463,7 @@ export function MatchDialog({
                   className="mt-1 max-w-xs"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  {t("setup.prematchWindowHelp")}
+                  {t("setup.prematchWindowHelp", startEvent)}
                 </p>
               </div>
               <div>
@@ -2524,6 +2604,7 @@ function MatchScheduleDialog({
   onSaved: () => void;
 }) {
   const { t } = useTranslation();
+  const startEvent = sportStartEventVars(t, match.sport);
   const { data: mediaList } = useApi<MediaItem[]>("/api/media");
   const [kickoffLocal, setKickoffLocal] = useState(() => isoToDatetimeLocalValue(match.kickoffAt));
   const [sponsorId, setSponsorId] = useState(match.matchSponsorMediaId ?? "");
@@ -2574,7 +2655,7 @@ function MatchScheduleDialog({
     <Dialog open onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{t("setup.scheduleTitle")}</DialogTitle>
+          <DialogTitle>{t("setup.scheduleTitle", startEvent)}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
           {match.homeTeam.name}{" "}
@@ -2582,7 +2663,7 @@ function MatchScheduleDialog({
         </p>
         <div className="grid gap-3 pt-2">
           <div>
-            <Label>{t("setup.plannedKickoff")}</Label>
+            <Label>{t("setup.plannedKickoff", startEvent)}</Label>
             <Input
               type="datetime-local"
               value={kickoffLocal}
@@ -2596,7 +2677,7 @@ function MatchScheduleDialog({
             </p>
           </div>
           <div>
-            <Label>{t("setup.prematchWindowLabel")}</Label>
+            <Label>{t("setup.prematchWindowLabel", startEvent)}</Label>
             <Input
               type="number"
               min={0}
@@ -2608,7 +2689,7 @@ function MatchScheduleDialog({
               className="mt-1 max-w-xs"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              {t("setup.prematchWindowHelp")}
+              {t("setup.prematchWindowHelp", startEvent)}
             </p>
           </div>
           <div>

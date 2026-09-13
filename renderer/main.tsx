@@ -2,7 +2,10 @@ import { createRoot } from "react-dom/client";
 import { useEffect, useState } from "react";
 import ControlPage from "@/app/control/page";
 import DisplayPage from "@/app/display/page";
+import StreamProgramPage from "@/app/stream/page";
+import { StreamMediaPage } from "@/app/stream/stream-media-page";
 import { DEFAULT_LOCALE, I18nProvider, normalizeUiLocale, type UiLocale } from "@/lib/i18n";
+import { uiLocaleFromSearch } from "@/lib/i18n/locales";
 
 function extractPathFromInput(input: RequestInfo | URL): string | null {
   if (typeof input === "string") return input;
@@ -154,17 +157,28 @@ function AppRouter() {
   if (view === "display") {
     return <DisplayPage />;
   }
+  if (view === "stream") {
+    return <StreamProgramPage />;
+  }
+  if (view === "media") {
+    return <StreamMediaPage />;
+  }
 
   return <ControlPage />;
 }
 
 function Root() {
-  const [locale, setLocale] = useState<UiLocale>(DEFAULT_LOCALE);
-  const [ready, setReady] = useState(false);
+  const queryLocale = uiLocaleFromSearch(window.location.search);
+  const [locale, setLocale] = useState<UiLocale>(queryLocale ?? DEFAULT_LOCALE);
+  const [ready, setReady] = useState(Boolean(queryLocale));
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
+      if (queryLocale) {
+        if (!cancelled) setReady(true);
+        return;
+      }
       try {
         const res = await fetch("/api/settings");
         if (res.ok) {
@@ -179,6 +193,7 @@ function Root() {
     })();
 
     const onLocale = (event: Event) => {
+      if (queryLocale) return;
       const detail = (event as CustomEvent<string>).detail;
       setLocale(normalizeUiLocale(detail));
     };
@@ -187,7 +202,7 @@ function Root() {
       cancelled = true;
       window.removeEventListener("arenacue:ui-locale", onLocale as EventListener);
     };
-  }, []);
+  }, [queryLocale]);
 
   if (!ready) {
     return (

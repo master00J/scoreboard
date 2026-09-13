@@ -60,3 +60,29 @@ export function isLivePlayingMatchStatus(status: string | undefined): boolean {
     status === "EXTRA_TIME"
   );
 }
+
+/** Wat het display toont als een eenmalige clip stopt of blackout afloopt. */
+export function programmedDisplayMode(opts: {
+  matchStatus?: string | null;
+  automaticSponsorsAllowed?: boolean;
+}): "IDLE" | "MATCH" | "SPONSOR_ROTATION" {
+  if (!opts.matchStatus) return "IDLE";
+  if (
+    (opts.automaticSponsorsAllowed ?? true) &&
+    isLivePlayingMatchStatus(opts.matchStatus)
+  ) {
+    return "SPONSOR_ROTATION";
+  }
+  return "MATCH";
+}
+
+/** Max. tijd dat een eenmalige clip op het scherm mag blijven (eind + hang-vangnet). */
+export function oneOffMediaHoldMs(media: {
+  type: string;
+  durationSec?: number | null;
+}): number {
+  const sec = Number(media.durationSec);
+  const catalog = Number.isFinite(sec) && sec > 0 ? sec : media.type === "VIDEO" ? 30 : 8;
+  if (media.type === "IMAGE") return Math.max(2000, catalog * 1000);
+  return Math.max(8000, Math.round(catalog * 1500) + 4000);
+}

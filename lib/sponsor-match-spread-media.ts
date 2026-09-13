@@ -1,5 +1,5 @@
-import type { MediaItem, SponsorSection } from "@/lib/types";
-import { mediaAllowedForSponsorPhase } from "@/lib/sponsor-media-phases";
+import type { MediaItem, SponsorSection } from "./types";
+import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 
 /**
  * Sponsorclips naast het scorebord: filter alleen op wedstrijdfase-tags.

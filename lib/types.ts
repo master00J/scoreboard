@@ -45,7 +45,9 @@ export type AppSettings = {
   displaySafeZoneVisible?: boolean;
   displaySafeZoneMarginPx?: number;
   /** Interfacetaal: nl | en | fr. */
-  uiLocale?: "nl" | "en" | "fr";
+  uiLocale?: "nl" | "en" | "fr" | "it";
+  /** JSON: sport → two_blocks | per_period | inplay_plus_breaks. Voetbal wordt genegeerd. */
+  sponsorLayoutsJson?: string | null;
 };
 
 export type Player = {
@@ -114,6 +116,11 @@ export type MatchEvent = {
   type: string;
   minute: number;
   addedTime: number;
+  /** Periode (helft/quarter/set) en klokstand op het scorebord bij het event. */
+  period?: number | null;
+  clockSec?: number | null;
+  /** JSON met terugdraai-informatie (zie server/handlers). */
+  metaJson?: string | null;
   teamId: string | null;
   playerInId: string | null;
   playerOutId: string | null;
@@ -138,6 +145,10 @@ export type MediaItem = {
   sponsorPhaseTagsJson?: string | null;
   /** Technisch item (bv. auto voor speler goalVideoPath); verborgen in Media-bibliotheek. */
   hideFromLibrary?: boolean;
+  /** VIDEO: high_fps / unsupported_codec / pixel_format — risico op het stadionscherm. */
+  playbackWarning?: string | null;
+  /** Knop op Display voor manuele fullscreen (waarschuwingen e.d.). */
+  quickLaunch?: boolean;
   createdAt: string;
 };
 
@@ -149,7 +160,11 @@ export type ScheduledMediaCue = {
   matchStatus: string;
   /** Matchklok in seconden vanaf start van die fase. */
   triggerSec: number;
+  /** Optioneel: tot dit matchtijdstip zichtbaar (foto’s). Null = duur van het mediabestand. */
+  endSec?: number | null;
   enabled: boolean;
+  /** Hele rundown van deze fase herhaalt na de laatste clip. */
+  loop?: boolean;
   createdAt: string;
 };
 
@@ -170,6 +185,8 @@ export type Sponsor = {
   sponsorPlaybackOrderJson?: string | null;
   /** JSON-object mediaId → aantal volledige weergaven per doorloop van de clip-lijst. */
   sponsorPlaybackRepeatsJson?: string | null;
+  /** Minuten per sport/venster. Voetbal gebruikt de kolommen hierboven, nooit deze JSON. */
+  sportBudgetsJson?: string | null;
   createdAt: string;
   media?: MediaItem[];
 };

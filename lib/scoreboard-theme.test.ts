@@ -2,12 +2,16 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SLOTS,
   SLOT_PRESETS,
+  bottomBarForSixteenByNine,
   largestSixteenByNineSlot,
   mergeScoreboardTheme,
+  reservedContentIsSixteenByNine,
   scoreboardUsesCustom,
   scoreboardUsesLeftFrame,
   scoreboardUsesStrip,
   slotIsSixteenByNine,
+  slotsFromTheme,
+  themeForFreeformEdit,
 } from "./scoreboard-theme";
 
 describe("scoreboard theme personalization", () => {
@@ -54,6 +58,50 @@ describe("scoreboard theme personalization", () => {
       w: 56,
       h: 56,
     });
+  });
+
+  it("leidt de onderbalk af zodat het L-contentvlak 16:9 blijft", () => {
+    expect(bottomBarForSixteenByNine(320)).toBe(180);
+    expect(reservedContentIsSixteenByNine(320, 180)).toBe(true);
+    expect(reservedContentIsSixteenByNine(320, 300)).toBe(false);
+  });
+
+  it("zet een L-balk om naar sleepbare vakken links + 16:9-video", () => {
+    const theme = mergeScoreboardTheme(
+      JSON.stringify({ layoutMode: "left-l", leftBarWidthPx: 320, bottomBarHeightPx: 180 }),
+    );
+    const slots = slotsFromTheme(theme);
+    expect(slots.home.x).toBe(0);
+    expect(slots.away.x).toBe(0);
+    expect(slots.clock.x).toBe(0);
+    expect(slots.sponsor.x).toBeGreaterThan(10);
+    expect(slotIsSixteenByNine(slots.sponsor)).toBe(true);
+    const edit = themeForFreeformEdit(theme);
+    expect(edit.layoutMode).toBe("custom");
+    expect(edit.contentAreaBg).toBe(theme.frameColorMid);
+  });
+
+  it("bewaart vakken van het volledige scorebord", () => {
+    const theme = mergeScoreboardTheme(
+      JSON.stringify({ fullSlots: { home: { x: 10, y: 10, w: 25, h: 40 } } }),
+    );
+    expect(theme.fullSlots.home).toEqual({ x: 10, y: 10, w: 25, h: 40 });
+    expect(theme.fullSlots.clock.w).toBeGreaterThan(8);
+    expect(theme.fullSlots.away.x).toBeGreaterThan(0);
+  });
+
+  it("houdt custom-vakken bij freeform-edit", () => {
+    const theme = mergeScoreboardTheme(
+      JSON.stringify({
+        layoutMode: "custom",
+        contentAreaBg: "#111111",
+        slots: { home: { x: 8, y: 8, w: 20, h: 30 } },
+      }),
+    );
+    const edit = themeForFreeformEdit(theme);
+    expect(edit.layoutMode).toBe("custom");
+    expect(edit.contentAreaBg).toBe("#111111");
+    expect(edit.slots.home).toEqual({ x: 8, y: 8, w: 20, h: 30 });
   });
 
   it("L-frame wint alleen in auto als de runtime dat vraagt", () => {

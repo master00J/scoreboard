@@ -1,11 +1,11 @@
-"use client";
+﻿"use client";
 
 import type { CSSProperties, ReactNode } from "react";
 import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { StableClockText } from "@/components/stable-clock-text";
-import { formatTime } from "@/lib/utils";
+import { formatSportClock } from "@/lib/sports";
 import { mediaUrl } from "@/lib/media-url";
 import {
   frameGradientCss,
@@ -22,6 +22,7 @@ export function ScoreboardStrip({
   period,
   shotClock = 0,
   theme: themeProp,
+  placement = "bottom",
 }: {
   match: Match;
   elapsed: number;
@@ -30,22 +31,24 @@ export function ScoreboardStrip({
   period?: string;
   shotClock?: number;
   theme?: ResolvedScoreboardTheme;
+  placement?: "top" | "bottom";
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
+  const offscreen = placement === "top" ? -theme.stripHeightPx : theme.stripHeightPx;
   return (
     <motion.div
-      key="scoreboard-strip"
-      initial={{ y: theme.stripHeightPx, opacity: 0 }}
+      key={`scoreboard-strip-${placement}`}
+      initial={{ y: offscreen, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      exit={{ y: theme.stripHeightPx, opacity: 0 }}
+      exit={{ y: offscreen, opacity: 0 }}
       transition={{ duration: 0.45, ease: "easeOut" }}
-      className="absolute left-0 right-0 bottom-0"
+      className={placement === "top" ? "absolute left-0 right-0 top-0" : "absolute left-0 right-0 bottom-0"}
       style={{ height: theme.stripHeightPx, fontFamily: theme.fontFamily }}
     >
       <div className="absolute inset-0" style={{ background: frameGradientCss(theme) }} />
       <div
-        className="absolute inset-x-0 top-0 h-[6px]"
+        className={placement === "top" ? "absolute inset-x-0 bottom-0 h-[6px]" : "absolute inset-x-0 top-0 h-[6px]"}
         style={{
           background: `linear-gradient(90deg, ${match.homeTeam.primaryColor} 0%, ${match.homeTeam.primaryColor} 50%, ${match.awayTeam.primaryColor} 50%, ${match.awayTeam.primaryColor} 100%)`,
         }}
@@ -83,7 +86,7 @@ export function ScoreboardStrip({
             ) : null}
             {theme.showClock ? (
               <StableClockText
-                value={formatTime(elapsed)}
+                value={formatSportClock(match.sport, elapsed)}
                 className="font-black leading-none"
                 style={{ fontSize: theme.stripTimerPx, color: accent }}
               />
@@ -152,14 +155,8 @@ export function StripScoreboardLayout({
   return (
     <div className="absolute inset-0" style={{ fontFamily: theme.fontFamily }}>
       <div
-        className="absolute overflow-hidden"
-        style={{
-          left: 0,
-          right: 0,
-          top: 0,
-          bottom: theme.stripHeightPx,
-          background: theme.contentAreaBg,
-        }}
+        className="absolute inset-0 overflow-hidden"
+        style={{ background: theme.contentAreaBg }}
       >
         <DisplayMediaStage>{children}</DisplayMediaStage>
       </div>
@@ -188,6 +185,7 @@ export function TeamLogo({
   style?: CSSProperties;
 }) {
   const box = size != null ? { width: size, height: size } : undefined;
+  const fit: CSSProperties = { minWidth: 0, minHeight: 0, flexShrink: 1 };
   if (team.logoPath) {
     return (
       <img
@@ -196,7 +194,7 @@ export function TeamLogo({
         width={size}
         height={size}
         className={className}
-        style={{ ...box, objectFit: "contain", ...style }}
+        style={{ ...box, objectFit: "contain", ...fit, ...style }}
       />
     );
   }
@@ -205,6 +203,7 @@ export function TeamLogo({
       className={`flex items-center justify-center rounded-full font-black text-white ${className ?? ""}`}
       style={{
         ...box,
+        ...fit,
         background: team.primaryColor,
         fontSize: size != null ? size * 0.4 : "40%",
         ...style,

@@ -4,6 +4,7 @@
  */
 import { spawnSync } from "node:child_process";
 import { setTimeout } from "node:timers/promises";
+import { azureSigningReady, azureSigningConfig } from "./load-signing-env.mjs";
 
 const EXE_NAMES = [
   "Stadium-Scoreboard.exe",
@@ -12,6 +13,13 @@ const EXE_NAMES = [
 ];
 
 async function main() {
+  if (azureSigningReady()) {
+    const c = azureSigningConfig();
+    console.log(`[signing] Azure Artifact Signing actief (${c.account} / ${c.profile} @ ${c.endpoint})`);
+  } else {
+    console.log("[signing] geen Azure-credentials — Windows-build blijft unsigned");
+  }
+
   if (process.platform !== "win32") return;
 
   for (const im of EXE_NAMES) {

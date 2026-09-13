@@ -19,6 +19,8 @@ type BridgeRuntime = {
 type MobileBridgeOptions = {
   runtime: BridgeRuntime;
   log: (line: string) => void;
+  /** Blijft dezelfde pairing/PIN na een desktop-herstart, zodat de telefoon automatisch kan herkoppelen. */
+  credentialsPath?: string;
 };
 
 type SessionRole = "viewer" | "operator";
@@ -77,6 +79,39 @@ function normalizeOperatorPinFromEnv(raw: string | undefined, log: (line: string
   return randomOperatorPin();
 }
 
+function readPersistedCredentials(filePath: string | undefined): { pairingCode?: string; operatorPin?: string } {
+  if (!filePath) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+      pairingCode?: unknown;
+      operatorPin?: unknown;
+    };
+    const pairingCode = typeof parsed.pairingCode === "string" && /^\d{6,12}$/.test(parsed.pairingCode)
+      ? parsed.pairingCode
+      : undefined;
+    const operatorPin = typeof parsed.operatorPin === "string" && /^\d{6,12}$/.test(parsed.operatorPin)
+      ? parsed.operatorPin
+      : undefined;
+    return { pairingCode, operatorPin };
+  } catch {
+    return {};
+  }
+}
+
+function writePersistedCredentials(
+  filePath: string | undefined,
+  pairingCode: string,
+  operatorPin: string,
+  log: (line: string) => void,
+) {
+  if (!filePath) return;
+  try {
+    fs.writeFileSync(filePath, JSON.stringify({ pairingCode, operatorPin }, null, 2), { encoding: "utf8", mode: 0o600 });
+  } catch (error) {
+    log(`[mobile-bridge] kon pairinggegevens niet bewaren: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function parseBindHost(raw: string | undefined, log: (line: string) => void): string {
   const t = (raw ?? "0.0.0.0").trim();
   if (t === "0.0.0.0" || t === "127.0.0.1" || t === "localhost") {
@@ -120,8 +155,12 @@ export async function startMobileBridge(
 ): Promise<MobileBridgeHandle> {
   const preferredPort = Number(process.env.MOBILE_BRIDGE_PORT ?? "17890");
   const port = Number.isFinite(preferredPort) ? preferredPort : 17890;
-  const pairingCode = process.env.MOBILE_BRIDGE_PAIRING_CODE?.trim() || randomPairingCode();
-  const operatorPin = normalizeOperatorPinFromEnv(process.env.MOBILE_BRIDGE_OPERATOR_PIN, options.log);
+  const persisted = readPersistedCredentials(options.credentialsPath);
+  const pairingCode = process.env.MOBILE_BRIDGE_PAIRING_CODE?.trim() || persisted.pairingCode || randomPairingCode();
+  const operatorPin = process.env.MOBILE_BRIDGE_OPERATOR_PIN?.trim()
+    ? normalizeOperatorPinFromEnv(process.env.MOBILE_BRIDGE_OPERATOR_PIN, options.log)
+    : persisted.operatorPin || randomOperatorPin();
+  writePersistedCredentials(options.credentialsPath, pairingCode, operatorPin, options.log);
   const bindHost = parseBindHost(process.env.MOBILE_BRIDGE_BIND, options.log);
   const sessionTtlMs = Number(process.env.MOBILE_BRIDGE_SESSION_TTL_MS ?? 1000 * 60 * 60 * 8);
 
@@ -286,6 +325,7 @@ export async function startMobileBridge(
               : snapshot,
           ),
         );
+        writeJson(res, 200, await withActiveMatch(timed, options.runtime));
         return;
       }
 

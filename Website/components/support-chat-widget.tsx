@@ -22,7 +22,7 @@ const WELCOME_MESSAGE: Message = {
   id: "welcome",
   role: "assistant",
   content:
-    "Hoi, ik ben de ArenaCue support-assistent. Stel gerust een vraag over de software, mobiele app of LED boarding — ik antwoord direct.",
+    "Hoi, ik ben de ArenaCue support-assistent. Stel gerust een vraag over de software, livestream, mobiele app of LED boarding — ik antwoord direct.",
 };
 
 function makeId(): string {

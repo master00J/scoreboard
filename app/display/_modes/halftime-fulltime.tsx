@@ -1,11 +1,13 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useTranslation } from "react-i18next";
 import type { Match } from "@/lib/types";
 import { getSportProfile, sportBreakLabel } from "@/lib/sports";
 import { formatSetHistory } from "@/lib/volleyball";
 
 export function HalfTimeMode({ match }: { match: Match }) {
+  const { t } = useTranslation();
   const profile = getSportProfile(match.sport);
   const history = formatSetHistory(match.setHistory ?? []);
   const showSetsPrimary = profile.hasSets;
@@ -18,7 +20,7 @@ export function HalfTimeMode({ match }: { match: Match }) {
       className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-slate-900 to-black"
     >
       <div className="text-[96px] uppercase tracking-[0.3em] text-white/40 mb-8">
-        {sportBreakLabel(match.sport)}
+        {tSportBreakLabel(t, match.sport)}
       </div>
       <div className="flex items-center gap-16">
         <div className="text-[72px] font-bold text-white/80">
@@ -46,6 +48,7 @@ export function HalfTimeMode({ match }: { match: Match }) {
 }
 
 export function FullTimeMode({ match }: { match: Match }) {
+  const { t } = useTranslation();
   const profile = getSportProfile(match.sport);
   const history = formatSetHistory(match.setHistory ?? []);
   const showSetsPrimary = profile.hasSets;

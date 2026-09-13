@@ -14,16 +14,71 @@ function startedAtMs(value: Date | string | null): number {
  * Authoritative timer math.
  * Elapsed seconds = base + (running ? (now - startedAt) / 1000 : 0)
  */
+export function startedAtMs(value: Date | string | null | undefined): number | null {
+  if (value == null) return null;
+  const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Klokwaarden bewaren we op milliseconde-precisie (geen seconde verlies per pauze). */
+function toClockSeconds(seconds: number): number {
+  if (!Number.isFinite(seconds)) return 0;
+  return Math.max(0, Math.round(seconds * 1000) / 1000);
+}
+
 export function computeElapsedSeconds(state: {
   timerRunning: boolean;
   timerStartedAt: Date | string | null;
   timerBaseSec: number;
 }, now: number = Date.now()): number {
-  if (!state.timerRunning || !state.timerStartedAt) {
+  const started = startedAtMs(state.timerStartedAt);
+  if (!state.timerRunning || started == null) {
     return Math.max(0, state.timerBaseSec);
   }
   const diffSec = (now - startedAtMs(state.timerStartedAt)) / 1000;
   return Math.max(0, state.timerBaseSec + diffSec);
+}
+
+/** Control-UI + preview: DisplayState wint; tick alleen als er geen bruikbaar anker is. */
+export function resolveLiveElapsedSeconds(
+  state: {
+    timerRunning?: boolean;
+    timerStartedAt?: Date | string | null;
+    timerBaseSec?: number;
+  } | null,
+  tick: {
+    elapsed: number;
+    running: boolean;
+    startedAt: string | null;
+    baseSec: number;
+    serverNow: number;
+  } | null,
+  now: number = Date.now(),
+): number {
+  if (state) {
+    if (!state.timerRunning) {
+      return Math.max(0, Number(state.timerBaseSec ?? 0));
+    }
+    const started = startedAtMs(state.timerStartedAt);
+    if (started != null) {
+      const base = Math.max(0, Number(state.timerBaseSec ?? 0));
+      return base + Math.max(0, now - started) / 1000;
+    }
+  }
+  if (tick) {
+    if (!tick.running) {
+      return Math.max(0, Number.isFinite(tick.baseSec) ? tick.baseSec : tick.elapsed);
+    }
+    const started = startedAtMs(tick.startedAt);
+    if (started != null) {
+      const base = Math.max(0, Number(tick.baseSec ?? 0));
+      return base + Math.max(0, now - started) / 1000;
+    }
+    if (Number.isFinite(tick.elapsed) && Number.isFinite(tick.serverNow)) {
+      return Math.max(0, tick.elapsed + Math.max(0, now - tick.serverNow) / 1000);
+    }
+  }
+  return Math.max(0, Number(state?.timerBaseSec ?? 0));
 }
 
 /**
@@ -192,6 +247,8 @@ export type SerializedDisplayState = Omit<
   awayPenaltyStartedAt: string | null;
   timeoutStartedAt: string | null;
   updatedAt: string;
+  /** Alleen runtime: na sport:setPeriod, tot timer:start. Niet in Prisma. */
+  sponsorPeriodBreakPending?: boolean;
 };
 
 function isoOrNull(value: Date | string | null | undefined): string | null {
@@ -200,6 +257,10 @@ function isoOrNull(value: Date | string | null | undefined): string | null {
 }
 
 export function serializeDisplayState(s: DisplayState): SerializedDisplayState {
+  const row = s as DisplayState & {
+    postMatchStartedAt?: Date | null;
+    preMatchStartedAt?: Date | null;
+  };
   return {
     ...s,
     timerStartedAt: isoOrNull(s.timerStartedAt),

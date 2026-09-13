@@ -1,11 +1,14 @@
-import { computeElapsedSeconds, computeShotClockSeconds, pauseShotClockAt, runFrom, runShotClockFrom, stopAt } from "@/lib/timer";
+﻿import { computeElapsedSeconds, computeShotClockSeconds, pauseShotClockAt, runFrom, runShotClockFrom, stopAt } from "@/lib/timer";
 import { getSportProfile, lifecycleStatusForPeriod, normalizeSport, resetStatsForNewPeriod, resetTimeoutsForNewPeriod } from "@/lib/sports";
+import { uiLocaleFromSearch } from "@/lib/i18n/locales";
+import { DEFAULT_LIVESTREAM_SETTINGS, DEFAULT_LIVESTREAM_STATUS, mergeLivestreamSettings } from "@/lib/livestream";
 import { CommandSchema, type Command } from "@/lib/validation/commands";
 import { captureOnBlackoutEnter, captureOnBlackoutExit } from "@/lib/external-capture-blackout";
 import type { CommandAck, DesktopApiRequest, DesktopApiResponse, ElectronBridge, SerializedDisplayState, TickPayload } from "@/lib/desktop-bridge";
 
 const CHANNEL = "arenacue-web-scoreboard";
 const STORAGE_KEY = "arenacue_web_scoreboard_v4";
+let webLivestreamSettings = { ...DEFAULT_LIVESTREAM_SETTINGS };
 
 function id(prefix = "c") {
   return `${prefix}${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
@@ -140,26 +143,28 @@ function seed(): Store {
         id: voltMediaId,
         type: "IMAGE",
         path: "/uploads/demo-volt-energy.svg",
-        title: "Volt Energy — LED",
+        title: "Volt Energy â€” LED",
         durationSec: 10,
         sponsorName: "Volt Energy",
         sponsorId: voltId,
         active: true,
         playAudio: false,
         hideFromLibrary: false,
+        quickLaunch: false,
         createdAt,
       },
       {
         id: worksMediaId,
         type: "IMAGE",
         path: "/uploads/demo-stadion-works.svg",
-        title: "Stadion Works — LED",
+        title: "Stadion Works â€” LED",
         durationSec: 10,
         sponsorName: "Stadion Works",
         sponsorId: worksId,
         active: true,
         playAudio: false,
         hideFromLibrary: false,
+        quickLaunch: false,
         createdAt,
       },
     ],
@@ -236,6 +241,15 @@ function loadStore(): Store {
 
 let store = loadStore();
 
+function queryUiLocale() {
+  return uiLocaleFromSearch(window.location.search);
+}
+
+const forcedLocale = queryUiLocale();
+if (forcedLocale && store.settings?.uiLocale !== forcedLocale) {
+  store.settings = { ...store.settings, uiLocale: forcedLocale };
+}
+
 function persist() {
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
@@ -244,8 +258,11 @@ function persist() {
   }
 }
 
+if (forcedLocale) persist();
+
 const stateListeners = new Set<(state: SerializedDisplayState) => void>();
 const tickListeners = new Set<(tick: TickPayload) => void>();
+let sponsorPeriodBreakPending = false;
 
 function asIso(value: Date | string | null | undefined): string | null {
   if (!value) return null;
@@ -258,7 +275,10 @@ function serializeDisplay(): SerializedDisplayState {
     ...d,
     timerStartedAt: asIso(d.timerStartedAt),
     shotClockStartedAt: asIso(d.shotClockStartedAt),
+    postMatchStartedAt: asIso(d.postMatchStartedAt),
+    preMatchStartedAt: asIso(d.preMatchStartedAt),
     updatedAt: asIso(d.updatedAt) ?? nowIso(),
+    sponsorPeriodBreakPending,
   };
 }
 
@@ -289,7 +309,8 @@ function matchById(matchId: string) {
 }
 
 function settingsJson() {
-  const s = store.settings;
+  const forced = queryUiLocale();
+  const s = forced ? { ...store.settings, uiLocale: forced } : store.settings;
   const home = s.homeTeamId ? store.teams.find((t) => t.id === s.homeTeamId) : null;
   return {
     ...s,
@@ -479,7 +500,7 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
 
   if (pathname === "/api/media" && method === "GET") return json(200, store.media.filter((m) => !m.hideFromLibrary));
   if (pathname === "/api/media" && method === "POST") {
-    const item = { id: id("md"), active: true, playAudio: false, hideFromLibrary: false, createdAt: nowIso(), durationSec: 10, ...body };
+    const item = { id: id("md"), active: true, playAudio: false, hideFromLibrary: false, quickLaunch: false, createdAt: nowIso(), durationSec: 10, ...body };
     store.media.push(item);
     touchDisplay();
     return json(200, item);
@@ -511,10 +532,21 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   }
   if (pathname === "/api/scheduled-media-cues" && method === "GET") return json(200, store.cues);
   if (pathname === "/api/scheduled-media-cues" && method === "POST") {
-    const cue = { id: id("cue"), enabled: true, createdAt: nowIso(), ...body };
+    const cue = { id: id("cue"), enabled: true, loop: false, createdAt: nowIso(), ...body };
     store.cues.push(cue);
     persist();
     return json(200, cue);
+  }
+  const scheduledCueId = pathname.match(/^\/api\/scheduled-media-cues\/([^/]+)$/)?.[1];
+  if (scheduledCueId && method === "PATCH") {
+    store.cues = store.cues.map((c) => (c.id === scheduledCueId ? { ...c, ...body } : c));
+    persist();
+    return json(200, { ok: true });
+  }
+  if (scheduledCueId && method === "DELETE") {
+    store.cues = store.cues.filter((c) => c.id !== scheduledCueId);
+    persist();
+    return json(200, { ok: true });
   }
   if (pathname === "/api/scoreboard-templates" && method === "GET") return json(200, store.templates);
   if (pathname === "/api/scoreboard-templates" && method === "POST") {
@@ -561,6 +593,7 @@ function handleCommand(raw: Command): CommandAck {
       case "timer:start": {
         const elapsed = computeElapsedSeconds(display);
         Object.assign(display, runFrom(elapsed));
+        sponsorPeriodBreakPending = false;
         break;
       }
       case "timer:pause": {
@@ -589,6 +622,7 @@ function handleCommand(raw: Command): CommandAck {
         const p = presets[cmd.preset];
         Object.assign(display, stopAt(p.sec), { addedTimeMinutes: 0 });
         updateMatch({ status: p.status });
+        sponsorPeriodBreakPending = false;
         break;
       }
       case "timer:setAddedTime":
@@ -615,27 +649,49 @@ function handleCommand(raw: Command): CommandAck {
       case "match:setActive":
         display.matchId = cmd.matchId;
         display.addedTimeMinutes = 0;
+        sponsorPeriodBreakPending = false;
         break;
       case "match:setStatus":
         updateMatch({ status: cmd.status });
         if (cmd.status === "HALF_TIME" || cmd.status === "FULL_TIME" || cmd.status === "POST_MATCH") {
           Object.assign(display, stopAt(computeElapsedSeconds(display)));
         }
+        if (
+          cmd.status === "HALF_TIME" ||
+          cmd.status === "PREMATCH" ||
+          cmd.status === "SETUP" ||
+          cmd.status === "FULL_TIME" ||
+          cmd.status === "POST_MATCH"
+        ) {
+          sponsorPeriodBreakPending = false;
+        }
+        {
+          const isPostMatch = cmd.status === "FULL_TIME" || cmd.status === "POST_MATCH";
+          const isPrematch = cmd.status === "SETUP" || cmd.status === "PREMATCH";
+          Object.assign(display, {
+            postMatchStartedAt: isPostMatch ? (display.postMatchStartedAt ?? nowIso()) : null,
+            preMatchStartedAt: isPrematch ? (display.preMatchStartedAt ?? nowIso()) : null,
+          });
+        }
         break;
       case "sport:setPeriod": {
         if (!match) throw new Error("No active match");
         const sport = normalizeSport(match.sport);
         const profile = getSportProfile(sport);
+        const prevPeriod = match.currentPeriod;
         updateMatch({
           currentPeriod: cmd.period,
           status: lifecycleStatusForPeriod(sport, cmd.period),
           ...(resetTimeoutsForNewPeriod(sport, match.currentPeriod, cmd.period) ? { homeTimeouts: 0, awayTimeouts: 0 } : {}),
-          ...(resetStatsForNewPeriod(sport) ? { homeFouls: 0, awayFouls: 0 } : {}),
+          ...(resetStatsForNewPeriod(sport, match.currentPeriod, cmd.period) ? { homeFouls: 0, awayFouls: 0 } : {}),
         });
         Object.assign(display, stopAt(profile.timerMode === "COUNT_UP" ? Math.max(0, (cmd.period - 1) * match.periodDurationSec) : 0), {
           mode: "MATCH",
           addedTimeMinutes: 0,
         });
+        if (cmd.period !== prevPeriod && sport !== "FOOTBALL") {
+          sponsorPeriodBreakPending = true;
+        }
         break;
       }
       case "sport:statAdjust": {
@@ -875,6 +931,7 @@ export function installWebDemoBridge() {
       },
     }),
     licenseActivate: async () => ({ ok: true, organizationLabel: "ArenaCue web demo", status: "already_activated" }),
+    getStreamDeckInfo: async () => null,
     getMobileBridgeInfo: async () => ({
       enabled: false,
       port: null,
@@ -898,6 +955,32 @@ export function installWebDemoBridge() {
     persistMatchTabLayout: (value) => window.localStorage.setItem("arenacue_match_tab_layout", value),
     reportDisplayPlaybackContext: () => undefined,
     reportDisplayMediaDiagnostic: () => undefined,
+    getLivestreamSettings: async () => ({ ...webLivestreamSettings }),
+    saveLivestreamSettings: async (partial) => {
+      webLivestreamSettings = mergeLivestreamSettings({ ...webLivestreamSettings, ...partial });
+      return webLivestreamSettings;
+    },
+    getLivestreamStatus: async () => ({ ...DEFAULT_LIVESTREAM_STATUS }),
+    startLivestream: async () => ({
+      ...DEFAULT_LIVESTREAM_STATUS,
+      error: "Alleen in de desktop-app",
+    }),
+    stopLivestream: async () => ({ ...DEFAULT_LIVESTREAM_STATUS }),
+    startLivestreamRecord: async () => ({
+      ...DEFAULT_LIVESTREAM_STATUS,
+      error: "Alleen in de desktop-app",
+    }),
+    stopLivestreamRecord: async () => ({ ...DEFAULT_LIVESTREAM_STATUS }),
+    listLivestreamCameras: async () => [],
+    listLivestreamAudioDevices: async () => [],
+    listLivestreamAudioOutputs: async () => [],
+    openLivestreamBrowserInteract: async () => ({ ok: false, error: "Alleen in de desktop-app" }),
+    onLivestreamStatus: () => () => undefined,
+    onLivestreamSettings: () => () => undefined,
+    onLivestreamPreview: () => () => undefined,
+    onLivestreamAudioMeters: () => () => undefined,
+    onLivestreamReadyRequest: () => () => undefined,
+    reportStreamProgramReady: () => undefined,
   };
 
   window.electronAPI = bridge;

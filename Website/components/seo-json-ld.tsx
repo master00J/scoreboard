@@ -29,6 +29,7 @@ export function SeoJsonLd() {
         "stadiondisplay",
         "sponsorrotatie",
         "wedstrijdregie",
+        "livestream",
       ],
       sameAs: [] as string[],
     },
@@ -39,7 +40,7 @@ export function SeoJsonLd() {
       name: SITE_NAME,
       url: rootUrl,
       description:
-        "ArenaCue — professionele Windows-scoreboardsoftware voor clubs en stadions: live scorebord, sponsorrotatie en display control.",
+        "ArenaCue — professionele Windows-scoreboardsoftware voor clubs en stadions: live scorebord, sponsorrotatie, display control en livestream.",
       publisher: { "@id": `${rootUrl}#organization` },
       about: { "@id": `${rootUrl}#software` },
       inLanguage: "nl-BE",
@@ -50,7 +51,7 @@ export function SeoJsonLd() {
       "@id": `${rootUrl}#software`,
       name: `${SITE_NAME} Stadium Scoreboard`,
       description:
-        "Windows-software voor live scorebord, wedstrijdregie, sponsorrotatie, stadiondisplay en LED boarding.",
+        "Windows-software voor live scorebord, wedstrijdregie, sponsorrotatie, stadiondisplay, livestream en LED boarding.",
       applicationCategory: "SportsApplication",
       applicationSubCategory: "ScoreboardSoftware",
       operatingSystem: "Windows",
@@ -67,6 +68,7 @@ export function SeoJsonLd() {
         "Sponsorrotatie per wedstrijdfase",
         "Stadiondisplay output",
         "LED boarding playlists",
+        "Livestream naar YouTube, Twitch of RTMP",
         "Mobiele bediening via LAN of cloud",
       ],
       offers: {

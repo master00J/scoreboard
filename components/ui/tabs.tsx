@@ -106,6 +106,7 @@ export function TabsContent({
     <div
       className={cn("mt-4 min-h-0", active ? "flex flex-1 flex-col" : null, className)}
       aria-hidden={!active}
+      {...(!active ? { inert: "" } : {})}
       // forceMount: buiten beeld houden zonder document-overflow (geen left:-100000px)
       style={
         active

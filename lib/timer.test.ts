@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  clearTimeoutClock,
   computeElapsedSeconds,
+  computePenaltySeconds,
   computeShotClockSeconds,
+  computeTimeoutSeconds,
+  pausePenaltyAt,
   pauseShotClockAt,
+  resolveLiveElapsedSeconds,
   runFrom,
+  runPenaltyFrom,
   runShotClockFrom,
+  runTimeoutFrom,
   stopAt,
 } from "./timer";
 
@@ -27,6 +34,16 @@ describe("computeElapsedSeconds", () => {
         now,
       ),
     ).toBe(15);
+  });
+
+  it("blijft op de base als now achter startedAt loopt", () => {
+    const started = new Date("2024-01-01T12:00:00.200Z");
+    expect(
+      computeElapsedSeconds(
+        { timerRunning: true, timerStartedAt: started, timerBaseSec: 21 },
+        started.getTime() - 180,
+      ),
+    ).toBe(21);
   });
 });
 
@@ -79,10 +96,105 @@ describe("shotclock", () => {
       shotClockStartedAt: started,
       shotClockBaseSec: 24,
     });
+    // Pauzeren bewaart de echte resttijd (ms-precisie); vroeger werd naar boven afgerond en
+    // kreeg de aanval tot een seconde cadeau per pauze.
     expect(pauseShotClockAt(13.2)).toEqual({
       shotClockRunning: false,
       shotClockStartedAt: null,
-      shotClockBaseSec: 14,
+      shotClockBaseSec: 13.2,
     });
+  });
+
+  it("bewaart milliseconden bij pauzeren van de wedstrijdklok", () => {
+    expect(stopAt(20.85).timerBaseSec).toBe(20.85);
+    expect(runFrom(20.85, new Date("2026-01-01T12:00:00.000Z")).timerBaseSec).toBe(20.85);
+    expect(stopAt(-3).timerBaseSec).toBe(0);
+  });
+});
+
+describe("time-outklok", () => {
+  it("telt af en meldt de kant", () => {
+    const started = new Date("2026-01-01T12:00:00.000Z");
+    const state = runTimeoutFrom("home", 60, started);
+    expect(state).toEqual({
+      timeoutRunning: true,
+      timeoutStartedAt: started,
+      timeoutBaseSec: 60,
+      timeoutSide: "home",
+    });
+    expect(computeTimeoutSeconds(state, started.getTime() + 15_000)).toBe(45);
+    expect(computeTimeoutSeconds(state, started.getTime() + 90_000)).toBe(0);
+    expect(clearTimeoutClock()).toEqual({
+      timeoutRunning: false,
+      timeoutStartedAt: null,
+      timeoutBaseSec: 0,
+      timeoutSide: null,
+    });
+  });
+});
+
+describe("straftijd", () => {
+  it("telt per kant af en pauzeert met resttijd", () => {
+    const started = new Date("2026-01-01T12:00:00.000Z");
+    const running = runPenaltyFrom("away", 120, started);
+    expect(running.awayPenaltyRunning).toBe(true);
+    const remaining = computePenaltySeconds(
+      { running: true, startedAt: started, baseSec: 120 },
+      started.getTime() + 30_000,
+    );
+    expect(remaining).toBe(90);
+    expect(pausePenaltyAt("away", remaining)).toEqual({
+      awayPenaltyRunning: false,
+      awayPenaltyStartedAt: null,
+      awayPenaltyBaseSec: 90,
+    });
+  });
+});
+
+describe("resolveLiveElapsedSeconds", () => {
+  it("volgt DisplayState wanneer het startanker geldig is", () => {
+    const started = "2024-01-01T12:00:00.000Z";
+    const now = Date.parse(started) + 5000;
+    expect(
+      resolveLiveElapsedSeconds(
+        { timerRunning: true, timerStartedAt: started, timerBaseSec: 0 },
+        null,
+        now,
+      ),
+    ).toBe(5);
+  });
+
+  it("gebruikt de tick als timerRunning aan staat zonder startanker", () => {
+    const now = 1_700_000_005_000;
+    expect(
+      resolveLiveElapsedSeconds(
+        { timerRunning: true, timerStartedAt: null, timerBaseSec: 0 },
+        { elapsed: 5, running: true, startedAt: null, baseSec: 0, serverNow: now },
+        now,
+      ),
+    ).toBe(5);
+  });
+
+  it("negeert een stale lopende tick na pauze", () => {
+    const now = 1_700_000_010_000;
+    expect(
+      resolveLiveElapsedSeconds(
+        { timerRunning: false, timerStartedAt: null, timerBaseSec: 20 },
+        { elapsed: 21.4, running: true, startedAt: null, baseSec: 20, serverNow: now - 800 },
+        now,
+      ),
+    ).toBe(20);
+  });
+
+  it("zakt niet onder de base als now achter startedAt loopt", () => {
+    const started = "2024-01-01T12:00:00.200Z";
+    const now = Date.parse(started) - 180;
+    expect(
+      resolveLiveElapsedSeconds(
+        { timerRunning: true, timerStartedAt: started, timerBaseSec: 21 },
+        null,
+        now,
+      ),
+    ).toBe(21);
   });
 });

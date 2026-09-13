@@ -1,4 +1,4 @@
-export type MenuLocale = "nl" | "en" | "fr";
+export type MenuLocale = "nl" | "en" | "fr" | "it";
 
 type MenuDict = Record<string, string>;
 
@@ -84,10 +84,37 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     backupSaved: "Sauvegarde enregistrée.",
     unknownError: "Erreur inconnue",
   },
+  it: {
+    file: "File",
+    view: "Visualizza",
+    help: "Aiuto",
+    quit: "Esci",
+    quitConfirmTitle: "Uscire da Stadium Scoreboard?",
+    quitConfirmMessage:
+      "Vuoi davvero chiudere l’applicazione? Una partita in corso resta nel database; preferibilmente interrompila prima con «Interrompi partita».",
+    quitConfirmCancel: "Annulla",
+    quitConfirmOk: "Esci",
+    exportVenueBackup: "Esporta backup venue (ZIP)…",
+    hideDisplay: "Nascondi finestra display",
+    showDisplay: "Mostra finestra display",
+    toggleFullscreen: "Display a schermo intero on/off",
+    openLogs: "Apri cartella log (diagnostica)",
+    openUploads: "Apri cartella upload",
+    reload: "Ricarica (finestra attiva)",
+    reloadControl: "Ricarica pannello di controllo",
+    reloadDisplay: "Ricarica display stadio",
+    devtoolsControl: "DevTools (controllo)",
+    devtoolsDisplay: "DevTools (display)",
+    licenses: "Licenze e open source…",
+    backupTitle: "Backup venue",
+    backupFailed: "Esportazione non riuscita.",
+    backupSaved: "Backup salvato.",
+    unknownError: "Errore sconosciuto",
+  },
 };
 
 export function normalizeMenuLocale(raw: unknown): MenuLocale {
-  return raw === "en" || raw === "fr" ? raw : "nl";
+  return raw === "en" || raw === "fr" || raw === "it" ? raw : "nl";
 }
 
 export function menuLabel(locale: MenuLocale, key: keyof (typeof MENUS)["nl"]): string {

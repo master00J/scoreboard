@@ -179,7 +179,11 @@ export function SponsorBudgetRotation({
   }
   const playbackOwnerKey =
     !followMode && playbackTelemetry
-      ? `${playbackTelemetry.matchId}:${section}`
+      ? sponsorTelemetrySegmentKey(
+          playbackTelemetry.matchId,
+          playbackTelemetry.matchStatus,
+          section,
+        )
       : null;
   const [isPlaybackOwner, setIsPlaybackOwner] = useState(playbackOwnerKey == null);
 
@@ -404,7 +408,7 @@ export function SponsorBudgetRotation({
       clearTimeout(sponsorSwitchTimerRef.current);
       sponsorSwitchTimerRef.current = null;
     }
-  }, [section, phaseSponsorSignature]);
+  }, [section, matchStatus, phaseSponsorSignature]);
 
   useEffect(() => {
     completedScheduledSponsorSlotRef.current = null;
@@ -545,6 +549,8 @@ export function SponsorBudgetRotation({
       reason: opts?.reason,
     });
   }, []);
+  const finishTelemetryClipRef = useRef(finishTelemetryClip);
+  finishTelemetryClipRef.current = finishTelemetryClip;
 
   const visibleClipKey = current
     ? `${current.sponsorId}-${current.mediaId}-${cycleId}-${slideTick}`
@@ -901,9 +907,11 @@ export function SponsorBudgetRotation({
         ? browserSec
         : catalogSec;
     const expectedMs = Math.max(5_000, durationBasisSec * 1000);
+    const alreadyMs = Math.max(0, playbackProgressMsRef.current);
+    const remainingMs = Math.max(1_500, expectedMs - alreadyMs);
     const fallbackMs = Math.min(
       900_000,
-      Math.max(8_000, expectedMs + 20_000),
+      Math.max(8_000, remainingMs + 20_000),
     );
     videoCommitTimerRef.current = setTimeout(() => {
       videoCommitTimerRef.current = null;
@@ -911,7 +919,7 @@ export function SponsorBudgetRotation({
         plan,
         capBilledSecondsForSponsorBudget(plan.item, plan.playSec, durationBasisSec),
       );
-    }, Math.max(1_500, durationBasisSec * 1000));
+    }, remainingMs);
     videoFallbackTimerRef.current = setTimeout(() => {
       videoFallbackTimerRef.current = null;
       const progressed = playbackProgressMsRef.current / 1000;
@@ -1100,9 +1108,14 @@ export function SponsorBudgetRotation({
     );
     if (!segmentKey) return;
 
+    const telemetryKey = `${segmentKey}-${cycleId}-${slideTick}-${current.sponsorId}-${current.mediaId}`;
+    const existing = telemetryClipRef.current;
+    if (existing && existing.key === telemetryKey && !existing.ended) {
+      return;
+    }
     const startedAtMs = Date.now();
     const clipSessionId = stableClipSessionId(segmentKey, current);
-    const telemetryKey = `${segmentKey}-${cycleId}-${slideTick}-${current.sponsorId}-${current.mediaId}`;
+    const itemType = current.item.type;
     telemetryClipRef.current = {
       key: telemetryKey,
       matchId: playbackTelemetry.matchId,
@@ -1113,7 +1126,7 @@ export function SponsorBudgetRotation({
       startedAtMs,
       ended: false,
     };
-    lastPausedTelemetryRef.current = false;
+    lastPausedTelemetryRef.current = pausedRef.current;
 
     void reportSponsorClipStart({
       matchId: playbackTelemetry.matchId,
@@ -1123,8 +1136,8 @@ export function SponsorBudgetRotation({
       expectedPlaySec: current.playSec,
       clipSessionId,
       startedAtMs,
-      playbackPositionMs: 0,
-      paused: false,
+      playbackPositionMs: Math.max(0, playbackProgressMsRef.current),
+      paused: pausedRef.current,
     });
 
     return () => {
@@ -1132,17 +1145,29 @@ export function SponsorBudgetRotation({
       if (!clip || clip.key !== telemetryKey || clip.ended) return;
       const playbackSec = playbackProgressMsRef.current / 1000;
       const actualSec =
-        current.item.type === "VIDEO" && playbackSec > 0
+        itemType === "VIDEO" && playbackSec > 0
           ? playbackSec
           : (Date.now() - startedAtMs) / 1000;
-      finishTelemetryClip(actualSec);
+      finishTelemetryClipRef.current(actualSec);
     };
-  }, [current, slideTick, section, playbackTelemetry, followMode, isPlaybackOwner, cycleId, finishTelemetryClip]);
+  }, [
+    current?.sponsorId,
+    current?.mediaId,
+    slideTick,
+    section,
+    playbackTelemetry?.matchId,
+    playbackTelemetry?.matchStatus,
+    followMode,
+    isPlaybackOwner,
+    cycleId,
+  ]);
 
   useEffect(() => {
     if (followMode) return;
     if (!isPlaybackOwner) return;
     if (!playbackTelemetry || !current) return;
+    const clip = telemetryClipRef.current;
+    if (!clip || clip.ended) return;
     if (lastPausedTelemetryRef.current === paused) return;
     const activeTelemetryClip = telemetryClipRef.current;
     if (!activeTelemetryClip || activeTelemetryClip.ended) return;
@@ -1165,7 +1190,7 @@ export function SponsorBudgetRotation({
       playbackPositionMs: positionMs,
       paused,
     });
-  }, [paused, current, slideTick, section, playbackTelemetry, followMode, isPlaybackOwner]);
+  }, [paused, current, slideTick, section, playbackTelemetry, followMode, isPlaybackOwner, pushActiveClipProgress]);
 
   useEffect(() => {
     if (!followMode) return;
@@ -1433,6 +1458,11 @@ function MediaRenderer({
   const earlyEndHoldTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Eerste `playing`-event na mount van dit item (alleen hoofd-display). */
   const firstPlayingAtRef = useRef<number | null>(null);
+  const pausedAtMsRef = useRef(0);
+  const stuckRetryUsedRef = useRef(false);
+  const resumeGraceUntilRef = useRef(0);
+  const pausedPropRef = useRef(paused);
+  pausedPropRef.current = paused;
 
   const logMediaDiag = useCallback(
     (event: string, v?: HTMLVideoElement | null, extra?: Partial<DisplayMediaDiagnosticPayload>) => {
@@ -1482,6 +1512,9 @@ function MediaRenderer({
     endedRef.current = false;
     falseEndedRetriesRef.current = 0;
     firstPlayingAtRef.current = null;
+    pausedAtMsRef.current = 0;
+    stuckRetryUsedRef.current = false;
+    resumeGraceUntilRef.current = 0;
   }, [item.id, item.path]);
 
   // Decode-watchdog: als een video niet binnen 4s metadata aanlevert,
@@ -1495,6 +1528,8 @@ function MediaRenderer({
     if (!v) return;
     const watchdog = window.setTimeout(() => {
       if (endedRef.current) return;
+      if (pausedPropRef.current) return;
+      if (Date.now() < resumeGraceUntilRef.current) return;
       if (Number.isFinite(v.duration) && v.duration > 0) return;
       if (!onVideoPlaybackFault) return;
       endedRef.current = true;
@@ -1515,12 +1550,25 @@ function MediaRenderer({
     if (!onVideoPlaybackFault) return;
     const id = window.setInterval(() => {
       if (endedRef.current || paused) return;
+      if (Date.now() < resumeGraceUntilRef.current) return;
       const v = videoRef.current;
       if (!v || v.paused) return;
       const t0 = firstPlayingAtRef.current;
       if (t0 == null) return;
       const sincePlay = Date.now() - t0;
       if (sincePlay > 8500 && v.currentTime < 0.04) {
+        if (!stuckRetryUsedRef.current) {
+          stuckRetryUsedRef.current = true;
+          firstPlayingAtRef.current = Date.now();
+          logMediaDiag("watchdog_stuck_t0_retry", v);
+          try {
+            v.currentTime = 0;
+          } catch {
+            /* ignore */
+          }
+          void v.play().catch(() => {});
+          return;
+        }
         endedRef.current = true;
         logMediaDiag("watchdog_stuck_t0", v);
         console.warn("[sponsor] video blijft hangen op t≈0 — clip overgeslagen:", item.title);
@@ -1598,10 +1646,20 @@ function MediaRenderer({
     const v = videoRef.current;
     if (!v) return;
     if (paused) {
+      pausedAtMsRef.current = Math.max(pausedAtMsRef.current, v.currentTime * 1000);
       onVideoProgressMs?.(v.currentTime * 1000);
       v.pause();
       return;
     }
+    const restoreSec = pausedAtMsRef.current / 1000;
+    if (restoreSec > 0.4 && (v.currentTime < restoreSec - 0.35 || v.currentTime < 0.05)) {
+      try {
+        v.currentTime = restoreSec;
+      } catch {
+        /* ignore media seek race */
+      }
+    }
+    resumeGraceUntilRef.current = Date.now() + 12_000;
     void v.play().catch(() => {});
   }, [item.id, item.path, item.type, onVideoProgressMs, paused]);
 
@@ -1656,6 +1714,7 @@ function MediaRenderer({
 
   const maybeFireEarlyEnd = (video: HTMLVideoElement) => {
     if (endedRef.current) return;
+    if (pausedPropRef.current) return;
     if (syncPlaybackMs != null) return;
     const browserDur = video.duration;
     if (!Number.isFinite(browserDur) || browserDur <= 0) return;
@@ -1687,7 +1746,7 @@ function MediaRenderer({
   const videoProps = {
     ref: videoRef,
     src,
-    autoPlay: true,
+    autoPlay: !paused,
     loop: false,
     muted: !(item.playAudio ?? false),
     playsInline: true,
@@ -1730,6 +1789,7 @@ function MediaRenderer({
       maybeFireEarlyEnd(v);
     },
     onEnded: (e: SyntheticEvent<HTMLVideoElement>) => {
+      if (pausedPropRef.current) return;
       const v = e.currentTarget;
       onVideoProgressMs?.(v.currentTime * 1000);
       const catalogDur = Math.max(
@@ -1790,12 +1850,16 @@ function MediaRenderer({
     },
     onStalled: (e: SyntheticEvent<HTMLVideoElement>) => {
       logMediaDiag("stalled", e.currentTarget);
+      if (!pausedPropRef.current) void e.currentTarget.play().catch(() => {});
     },
     onWaiting: (e: SyntheticEvent<HTMLVideoElement>) => {
       logMediaDiag("waiting", e.currentTarget);
     },
     onSuspend: (e: SyntheticEvent<HTMLVideoElement>) => {
-      logMediaDiag("suspend", e.currentTarget);
+      const v = e.currentTarget;
+      logMediaDiag("suspend", v);
+      if (pausedPropRef.current) return;
+      if (v.currentTime < 0.05) void v.play().catch(() => {});
     },
     onError: (e: SyntheticEvent<HTMLVideoElement>) => {
       logMediaDiag("error", e.currentTarget);
@@ -1822,7 +1886,7 @@ function MediaRenderer({
             <video
               key={`${item.id}-${src}`}
               {...videoProps}
-              preload="metadata"
+              preload={syncPlaybackMs != null ? "metadata" : "auto"}
               className="max-h-full max-w-full"
               style={{ objectFit: "contain", objectPosition: "center" }}
             />
@@ -1845,7 +1909,7 @@ function MediaRenderer({
         <video
           key={`${item.id}-${src}`}
           {...videoProps}
-          preload="metadata"
+          preload={syncPlaybackMs != null ? "metadata" : "auto"}
           style={DISPLAY_COVER_MEDIA_STYLE}
         />
       </DisplayMediaStage>

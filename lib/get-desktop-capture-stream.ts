@@ -23,6 +23,22 @@ export function isCameraCaptureSourceId(sourceId: string): boolean {
   return sourceId.startsWith(CAMERA_PREFIX);
 }
 
+export function isWindowCaptureSourceId(sourceId: string): boolean {
+  return sourceId.startsWith("window:");
+}
+
+export function isScreenCaptureSourceId(sourceId: string): boolean {
+  return sourceId.startsWith("screen:");
+}
+
+export function isDesktopCaptureSourceId(sourceId: string): boolean {
+  return isWindowCaptureSourceId(sourceId) || isScreenCaptureSourceId(sourceId);
+}
+
+export function isInternalArenaCueCaptureName(name: string): boolean {
+  return /ArenaCue — (Browserbron|Mediabron|Inloggen)/i.test(name);
+}
+
 export type CameraCaptureOptions = {
   /** Forceer HD/Full HD waar mogelijk (ideaal voor pro HDMI/SDI capture-cards zoals Magewell, Elgato). */
   preferHighRes?: boolean;

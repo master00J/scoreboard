@@ -156,6 +156,10 @@ export default function SmallMediumClubsPage() {
               <strong>Sponsorrotatie:</strong> media en playlists voor lokale sponsors, prematch, rust en live fases.
             </li>
             <li>
+              <strong>Livestream:</strong> optioneel streamen naar YouTube, Twitch of een eigen RTMP-bestemming vanuit
+              hetzelfde control panel, met score-overlay.
+            </li>
+            <li>
               <strong>Mobiele bediening:</strong> optioneel via LAN of cloud voor snelle acties vanaf een telefoon.
             </li>
           </ul>

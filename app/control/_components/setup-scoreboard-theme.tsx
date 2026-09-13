@@ -8,6 +8,7 @@ import {
   TEAM_STACK_ORDERS,
   mergeScoreboardTheme,
   sponsorRepeatBudgetCyclesFromThemeJson,
+  themeForFreeformEdit,
   type LeftStripSegment,
   type ResolvedScoreboardTheme,
   type TeamStackOrder,
@@ -16,8 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
-import { ScoreboardThemePreview } from "./setup-scoreboard-preview";
-import { SetupScoreboardPlacer } from "./setup-scoreboard-placer";
+import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
 
 const FONT_PRESETS = [
   {
@@ -46,18 +46,23 @@ export function SetupScoreboardThemeSection({
   reloadSettings,
   homeTeam,
   awayTeam,
+  seedThemeJson,
+  onSeedConsumed,
 }: {
   settings: AppSettings | null | undefined;
   reloadSettings: () => void;
   homeTeam?: Team | null;
   awayTeam?: Team | null;
+  seedThemeJson?: string | null;
+  onSeedConsumed?: () => void;
 }) {
   const { t } = useTranslation();
   const resolved = useMemo(
     () => mergeScoreboardTheme(settings?.scoreboardThemeJson ?? null),
     [settings?.scoreboardThemeJson],
   );
-  const [draft, setDraft] = useState<ResolvedScoreboardTheme>(resolved);
+  const [draft, setDraft] = useState<ResolvedScoreboardTheme>(() => themeForFreeformEdit(resolved));
+  const [surface, setSurface] = useState<EditorSurface>("sponsor");
 
   const [repeatSponsorBudgetCycles, setRepeatSponsorBudgetCycles] = useState(false);
 
@@ -68,8 +73,14 @@ export function SetupScoreboardThemeSection({
   };
 
   useEffect(() => {
-    setDraft(resolved);
+    setDraft(themeForFreeformEdit(resolved));
   }, [resolved]);
+
+  useEffect(() => {
+    if (!seedThemeJson) return;
+    setDraft(themeForFreeformEdit(mergeScoreboardTheme(seedThemeJson)));
+    onSeedConsumed?.();
+  }, [seedThemeJson, onSeedConsumed]);
 
   useEffect(() => {
     setRepeatSponsorBudgetCycles(
@@ -165,7 +176,7 @@ export function SetupScoreboardThemeSection({
   );
 
   return (
-    <section className="bg-card border border-border rounded-xl p-6">
+    <section id="scoreboard-layout-editor" className="bg-card border border-border rounded-xl p-6">
       <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
         <div>
           <h2 className="text-lg font-semibold">{t("setup.themeTitle")}</h2>
@@ -185,18 +196,33 @@ export function SetupScoreboardThemeSection({
 
       <div className="mb-6 space-y-3 rounded-lg border border-border p-4">
         <div className="font-semibold text-sm">{t("setup.themePlacerTitle")}</div>
+        <div className="flex flex-wrap gap-2">
+          {(
+            [
+              ["sponsor", "themeSurfaceSponsor"],
+              ["full", "themeSurfaceFull"],
+            ] as const
+          ).map(([id, labelKey]) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSurface(id)}
+              className={`rounded-md border px-3 py-1.5 text-sm ${
+                surface === id
+                  ? "border-primary bg-primary/10 font-medium"
+                  : "border-border hover:bg-muted/50"
+              }`}
+            >
+              {t(`setup.${labelKey}`)}
+            </button>
+          ))}
+        </div>
         <SetupScoreboardPlacer
-          slots={draft.slots}
-          onChange={(slots) => setDraft((d) => ({ ...d, slots, layoutMode: "custom" }))}
-        />
-      </div>
-
-      <div className="mb-6">
-        <div className="mb-2 font-semibold text-sm">{t("setup.themePreviewTitle")}</div>
-        <ScoreboardThemePreview
-          theme={{ ...draft, layoutMode: draft.layoutMode === "auto" ? "custom" : draft.layoutMode }}
+          theme={draft}
+          onChange={setDraft}
           homeTeam={homeTeam}
           awayTeam={awayTeam}
+          surface={surface}
         />
       </div>
 
@@ -261,6 +287,9 @@ export function SetupScoreboardThemeSection({
               }`}
             >
               <div className="font-semibold">{t(`setup.themeLayout_${mode}`)}</div>
+              <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                {t(`setup.themeLayoutHelp_${mode}`)}
+              </div>
             </button>
           ))}
         </div>

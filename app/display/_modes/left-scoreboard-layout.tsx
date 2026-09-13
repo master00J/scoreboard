@@ -2,7 +2,6 @@
 
 import { Fragment } from "react";
 import { StableClockText } from "@/components/stable-clock-text";
-import { formatTime } from "@/lib/utils";
 import type { Match } from "@/lib/types";
 import {
   type ResolvedScoreboardTheme,
@@ -142,12 +141,19 @@ function TeamBlock({
   side: "home" | "away";
   theme: ResolvedScoreboardTheme;
 }) {
+  const showExtras = sportHasTeamExtras(profile.id);
   return (
-    <div className="flex flex-1 flex-col items-center justify-center gap-3 py-4">
-      {theme.showLogos ? <TeamLogo team={team} size={theme.leftLogoPx} /> : null}
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 py-4">
+      {theme.showLogos ? (
+        <TeamLogo
+          team={team}
+          size={theme.leftLogoPx}
+          style={{ maxHeight: showExtras ? "38%" : "56%", width: "auto" }}
+        />
+      ) : null}
       {theme.fullShowTeamNames ? (
         <div
-          className={`max-w-full px-2 text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
+          className={`max-w-full shrink-0 px-2 text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
           style={{
             fontSize: Math.max(12, theme.leftPeriodPx + 4),
             color: theme.teamNameColor,
@@ -158,9 +164,9 @@ function TeamBlock({
       ) : null}
       {theme.showScores ? (
       <div
-        className="font-black tabular-nums leading-none"
+        className="shrink-0 font-black tabular-nums leading-none"
         style={{
-          fontSize: theme.leftScorePx,
+          fontSize: showExtras ? Math.round(theme.leftScorePx * 0.78) : theme.leftScorePx,
           color: theme.scoreColor,
           textShadow: "0 4px 20px rgba(0,0,0,0.4)",
         }}
@@ -207,7 +213,7 @@ function TimerBlock({
       <div className="mt-2 flex items-end justify-center gap-3">
         {theme.showClock ? (
         <StableClockText
-          value={formatTime(elapsed)}
+          value={formatSportClock(match.sport, elapsed)}
           className="font-black leading-none text-white"
           style={{
             fontSize: theme.leftTimerPx,

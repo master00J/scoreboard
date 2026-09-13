@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     template: "%s | ArenaCue",
   },
   description:
-    "ArenaCue is professionele Windows-software voor live scoreboards, LED boarding, sponsorrotatie, matchstatus en stadiondisplay.",
+    "ArenaCue is professionele Windows-software voor live scoreboards, LED boarding, sponsorrotatie, matchstatus, stadiondisplay en livestream.",
   keywords: SITE_KEYWORDS,
   authors: [{ name: "ArenaCue", url: siteUrl }],
   creator: "ArenaCue",

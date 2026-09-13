@@ -3,7 +3,7 @@ import type { DisplayState, Match } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import type { Db } from "./db";
 import type { Command } from "../lib/validation/commands";
-import { isLivePlayingMatchStatus } from "../lib/live-cycle-settings";
+import { programmedDisplayMode } from "../lib/live-cycle-settings";
 import {
   captureOnBlackoutEnter,
   captureOnBlackoutExit,
@@ -362,8 +362,7 @@ async function defaultResumeModeAfterBlackout(db: Db, matchId: string | null): P
     select: { status: true },
   });
   if (!m) return "IDLE";
-  if (isLivePlayingMatchStatus(m.status)) return "SPONSOR_ROTATION";
-  return "MATCH";
+  return programmedDisplayMode({ matchStatus: m.status });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1013,10 +1012,10 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       }
       await updateState(db, {
         mode: "GOAL_INTRO_VIDEO",
-        activeMediaId,
+        activeMediaId: await resolveGoalIntroMediaId(db),
         activeGoalScorerId: null,
       });
-      return { ok: true };
+      return { ok: true, result: { visual: true } };
     }
     case "goal:cancel": {
       await updateState(db, {

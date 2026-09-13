@@ -1,8 +1,19 @@
 import {
   DEFAULT_SCOREBOARD_THEME,
+  SLOT_PRESETS,
+  bottomBarForSixteenByNine,
   type ResolvedScoreboardTheme,
   type ScoreboardTheme,
 } from "./scoreboard-theme";
+
+const OVERLAY_SLOTS = SLOT_PRESETS.find((p) => p.id === "overlay")!.slots;
+const TOP_BAR_SLOTS = SLOT_PRESETS.find((p) => p.id === "topBar")!.slots;
+const FULL_BLEED_SLOTS = {
+  home: { x: 3, y: 72, w: 18, h: 24 },
+  away: { x: 79, y: 72, w: 18, h: 24 },
+  clock: { x: 38, y: 78, w: 24, h: 18 },
+  sponsor: { x: 0, y: 0, w: 100, h: 100 },
+};
 
 /**
  * Scorebord-layouts als herbruikbare templates.
@@ -74,6 +85,14 @@ export function templateDisplayName(t: ScoreboardTemplate): string {
   return t.label ? `${t.name} · ${t.label}` : t.name;
 }
 
+export type TemplateMediaKind = "overlay" | "reserved";
+
+/** Overlay = video full-bleed 16:9 met graphics erover. Reserved = vast vak naast/boven de balken. */
+export function templateMediaKind(themeJson: string): TemplateMediaKind {
+  const theme = extractVisualTheme(themeJson);
+  return theme.layoutMode === "custom" || theme.layoutMode === "bottom-strip" ? "overlay" : "reserved";
+}
+
 /* ————————————————————————— meegeleverde voorbeelden ————————————————————————— */
 
 type BuiltIn = { key: string; name: string; label: string; theme: ScoreboardTheme };
@@ -85,89 +104,107 @@ type BuiltIn = { key: string; name: string; label: string; theme: ScoreboardThem
 export const BUILT_IN_TEMPLATES: BuiltIn[] = [
   {
     key: "standaard",
-    name: "Standaard",
-    label: "ArenaCue",
-    theme: {},
+    name: "Broadcast",
+    label: "Video 16:9 full-bleed, score eroverheen",
+    theme: {
+      layoutMode: "custom",
+      slots: FULL_BLEED_SLOTS,
+      fullShowTeamNames: true,
+      fullShowPeriod: true,
+      fullShowAddedTime: true,
+      showLogos: true,
+      showScores: true,
+      showClock: true,
+    },
   },
   {
     key: "pro-league",
-    name: "Pro League",
-    label: "Brede balk, grote klok",
+    name: "LED L-balk",
+    label: "Score links, video 16:9 ernaast",
     theme: {
+      layoutMode: "left-l",
       leftBarWidthPx: 320,
-      bottomBarHeightPx: 300,
+      bottomBarHeightPx: bottomBarForSixteenByNine(320),
       leftLogoPx: 150,
       leftScorePx: 150,
-      leftTimerPx: 84,
-      fullLogoPx: 340,
-      fullScorePx: 210,
-      fullTimerPx: 140,
-      fullShowTeamNames: true,
-      fullTeamNamePx: 44,
-      fullTeamNameUppercase: true,
+      leftTimerPx: 72,
+      fullShowTeamNames: false,
+      fullShowPeriod: true,
+      fullShowAddedTime: true,
+      showLogos: true,
+      showScores: true,
+      showClock: true,
     },
   },
   {
     key: "amateur",
-    name: "Amateur",
-    label: "Compact, leesbaar van ver",
+    name: "Bovenbalk",
+    label: "Dunne balk boven, maximale 16:9-video",
     theme: {
-      leftBarWidthPx: 240,
-      bottomBarHeightPx: 240,
-      leftLogoPx: 110,
-      leftScorePx: 130,
-      leftTimerPx: 70,
-      fullLogoPx: 260,
-      fullScorePx: 200,
-      fullTimerPx: 130,
+      layoutMode: "custom",
+      slots: TOP_BAR_SLOTS,
+      fullShowTeamNames: true,
       fullShowPeriod: true,
-      fullShowTeamNames: false,
+      fullShowAddedTime: false,
+      showLogos: true,
+      showScores: true,
+      showClock: true,
     },
   },
   {
     key: "beker",
     name: "Beker",
-    label: "Met teamnamen en extra tijd",
+    label: "Namen, periode en extra tijd over 16:9",
     theme: {
-      leftBarWidthPx: 300,
+      layoutMode: "custom",
+      slots: OVERLAY_SLOTS,
       fullShowTeamNames: true,
       fullTeamNamePx: 40,
       fullTeamNameUppercase: false,
       fullShowAddedTime: true,
       fullShowPeriod: true,
-      fullCenterWidthPx: 620,
+      showLogos: true,
+      showScores: true,
+      showClock: true,
     },
   },
   {
     key: "minimal",
     name: "Minimaal",
-    label: "Alleen score en klok",
+    label: "Alleen score en klok over 16:9",
     theme: {
-      leftBarWidthPx: 220,
-      bottomBarHeightPx: 200,
+      layoutMode: "custom",
+      slots: {
+        home: { x: 4, y: 80, w: 14, h: 16 },
+        away: { x: 82, y: 80, w: 14, h: 16 },
+        clock: { x: 42, y: 82, w: 16, h: 14 },
+        sponsor: { x: 0, y: 0, w: 100, h: 100 },
+      },
       fullShowPeriod: false,
       fullShowAddedTime: false,
       fullShowTeamNames: false,
-      fullLogoPx: 280,
-      fullScorePx: 240,
-      fullTimerPx: 120,
-      fullCenterWidthPx: 460,
+      showLogos: true,
+      showScores: true,
+      showClock: true,
     },
   },
   {
     key: "led-strip",
     name: "LED-strip",
-    label: "Lage onderbalk voor smalle schermen",
+    label: "Lage onderbalk, video 16:9 erboven",
     theme: {
       layoutMode: "bottom-strip",
-      leftBarWidthPx: 200,
-      bottomBarHeightPx: 140,
-      stripHeightPx: 140,
-      stripLogoPx: 90,
-      stripScorePx: 96,
-      stripTimerPx: 64,
-      stripPeriodPx: 18,
-      fullShowTeamNames: false,
+      stripHeightPx: 160,
+      stripLogoPx: 88,
+      stripScorePx: 88,
+      stripTimerPx: 56,
+      stripPeriodPx: 16,
+      fullShowTeamNames: true,
+      fullShowPeriod: true,
+      fullShowAddedTime: true,
+      showLogos: true,
+      showScores: true,
+      showClock: true,
     },
   },
 ];

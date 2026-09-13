@@ -3,17 +3,17 @@
 import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
 import { StableClockText } from "@/components/stable-clock-text";
-import { formatTime } from "@/lib/utils";
 import {
   type ResolvedScoreboardTheme,
   mergeScoreboardTheme,
+  slotStyle,
 } from "@/lib/scoreboard-theme";
 import { TeamLogo } from "./scoreboard-strip";
 import { SportMatchMeta, SportTeamExtras } from "./sport-score-extras";
 
 /**
- * Volledig scherm tijdens de match zonder sponsorpaneel: thuis links, uit rechts,
- * timer en periode in het midden (horizontaal scorebord).
+ * Volledig scherm tijdens de match zonder sponsorpaneel: thuis, klok en uit
+ * op vrije vakken (fullSlots).
  */
 export function MatchScoreboardFull({
   match,
@@ -40,7 +40,7 @@ export function MatchScoreboardFull({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.35 }}
-      className="absolute inset-0 flex flex-row items-stretch justify-between"
+      className="absolute inset-0"
       style={{
         fontFamily: theme.fontFamily,
         background: `
@@ -55,6 +55,7 @@ export function MatchScoreboardFull({
         match={match}
         side="home"
         theme={theme}
+        style={slotStyle(theme.fullSlots.home)}
       />
       <CenterBlock
         match={match}
@@ -64,6 +65,7 @@ export function MatchScoreboardFull({
         addedTime={addedTime}
         shotClock={shotClock}
         theme={theme}
+        style={slotStyle(theme.fullSlots.clock)}
       />
       <TeamSide
         team={match.awayTeam}
@@ -71,6 +73,7 @@ export function MatchScoreboardFull({
         match={match}
         side="away"
         theme={theme}
+        style={slotStyle(theme.fullSlots.away)}
       />
     </motion.div>
   );
@@ -82,38 +85,53 @@ function TeamSide({
   match,
   side,
   theme,
+  style,
 }: {
   team: Match["homeTeam"];
   score: number;
   match: Match;
   side: "home" | "away";
   theme: ResolvedScoreboardTheme;
+  style: { left: string; top: string; width: string; height: string };
 }) {
   const nameEl = theme.fullShowTeamNames ? (
-        <div
-          className={`max-w-full px-2 text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
-          style={{
-            fontSize: theme.fullTeamNamePx,
-            color: theme.teamNameColor,
-            textShadow: "0 4px 24px rgba(0,0,0,0.45)",
-          }}
-        >
-          <span className="line-clamp-3">{team.shortName || team.name}</span>
-        </div>
-      ) : null;
-  const logoEl = theme.showLogos ? <TeamLogo team={team} size={theme.fullLogoPx} /> : null;
+    <div
+      className={`max-w-full shrink-0 px-[4cqw] text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
+      style={{
+        fontSize: `min(${theme.fullTeamNamePx}px, 14cqh, 12cqw)`,
+        color: theme.teamNameColor,
+        textShadow: "0 4px 24px rgba(0,0,0,0.45)",
+      }}
+    >
+      <span className="line-clamp-3">{team.shortName || team.name}</span>
+    </div>
+  ) : null;
+  const showExtras = sportHasTeamExtras(profile.id);
+  const logoEl = theme.showLogos ? (
+    <TeamLogo
+      team={team}
+      style={{
+        width: "min(78cqw, 48cqh)",
+        height: "min(78cqw, 48cqh)",
+        maxWidth: "100%",
+        maxHeight: showExtras && theme.showScores ? "42%" : theme.showScores ? "56%" : "86%",
+        flexShrink: 1,
+        minHeight: 0,
+      }}
+    />
+  ) : null;
   const scoreEl = theme.showScores ? (
-        <div
-          className="font-black tabular-nums leading-none"
-          style={{
-            fontSize: theme.fullScorePx,
-            color: theme.scoreColor,
-            textShadow: "0 8px 40px rgba(0,0,0,0.55)",
-          }}
-        >
-          {score}
-        </div>
-      ) : null;
+    <div
+      className="shrink-0 font-black tabular-nums leading-none"
+      style={{
+        fontSize: `min(${theme.fullScorePx}px, ${showExtras ? 32 : 40}cqh, 50cqw)`,
+        color: theme.scoreColor,
+        textShadow: "0 8px 40px rgba(0,0,0,0.55)",
+      }}
+    >
+      {score}
+    </div>
+  ) : null;
   const stack =
     theme.fullTeamStackOrder === "name-logo-score"
       ? [nameEl, logoEl, scoreEl]
@@ -125,12 +143,8 @@ function TeamSide({
 
   return (
     <div
-      className="flex flex-1 flex-col items-center justify-center z-10 min-w-0"
-      style={{
-        gap: theme.fullTeamStackGapPx,
-        paddingLeft: theme.fullSidePaddingPx,
-        paddingRight: theme.fullSidePaddingPx,
-      }}
+      className="absolute z-10 box-border overflow-hidden"
+      style={{ ...style, containerType: "size" }}
     >
       {stack}
       <SportTeamExtras match={match} side={side} />
@@ -146,6 +160,7 @@ function CenterBlock({
   addedTime,
   shotClock,
   theme,
+  style,
 }: {
   match: Match;
   elapsed: number;
@@ -154,47 +169,24 @@ function CenterBlock({
   addedTime: number;
   shotClock: number;
   theme: ResolvedScoreboardTheme;
+  style: { left: string; top: string; width: string; height: string };
 }) {
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
   return (
     <div
-      className="flex shrink-0 flex-col items-center justify-center z-10 min-w-0"
-      style={{
-        width: theme.fullCenterWidthPx,
-        gap: theme.fullCenterStackGapPx,
-      }}
+      className="absolute z-10 box-border overflow-hidden"
+      style={{ ...style, containerType: "size" }}
     >
-      {theme.fullShowPeriod && (
-        <div
-          className="uppercase leading-none tracking-[0.35em] text-white/55"
-          style={{ fontSize: theme.fullPeriodPx }}
-        >
-          {period}
-        </div>
-      )}
-      <div className="flex items-end justify-center gap-4">
-        {theme.showClock && (
-        <StableClockText
-          value={formatTime(elapsed)}
-          className="font-black leading-none text-white"
-          style={{
-            fontSize: theme.fullTimerPx,
-            textShadow: "0 6px 36px rgba(0,0,0,0.5)",
-            opacity: running ? 1 : 0.82,
-            color: accent,
-          }}
-        />
-        )}
-        {theme.showClock && theme.fullShowAddedTime && addedTime > 0 && (
+      <div
+        className="flex h-full w-full flex-col items-center justify-center min-w-0"
+        style={{ gap: `${Math.min(theme.fullCenterStackGapPx, 10)}cqh` }}
+      >
+        {theme.fullShowPeriod && (
           <div
-            className="mb-1 rounded-md px-4 py-2 font-black tabular-nums"
-            style={{
-              fontSize: Math.max(18, theme.fullTimerPx * 0.27),
-              background: accent,
-              color: "#0a0a0a",
-            }}
+            className="uppercase leading-none tracking-[0.35em] text-white/55"
+            style={{ fontSize: `min(${theme.fullPeriodPx}px, 14cqh, 10cqw)` }}
           >
-            +{addedTime}
+            {period}
           </div>
         )}
       </div>
