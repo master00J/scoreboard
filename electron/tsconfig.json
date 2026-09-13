@@ -19,6 +19,7 @@
     "../lib/sponsor-telemetry.ts",
     "../lib/prisma.ts",
     "../lib/media-playback-compat.ts",
+    "../lib/scheduled-media-cue.ts",
     "../lib/timer.ts",
     "../lib/validation/**/*.ts",
     "../server/handlers.ts"

@@ -202,6 +202,10 @@ if (process.env.STADIUM_DISABLE_GPU_COMPOSITING === "1") {
 
 let controlWindow: BrowserWindow | null = null;
 let displayWindow: BrowserWindow | null = null;
+let streamWindow: BrowserWindow | null = null;
+let browserSourceWindow: BrowserWindow | null = null;
+let browserInteractWindow: BrowserWindow | null = null;
+let mediaSourceWindow: BrowserWindow | null = null;
 let gpuCrashStreak = 0;
 let lastGpuCrashAt = 0;
 /** True na bevestigde afsluiting of fatale fout — slaat de quit-waarschuwing over. */

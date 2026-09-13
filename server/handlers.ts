@@ -55,7 +55,7 @@ import {
   validateSubPairsSequential,
 } from "./match-lineup";
 
-export type CommandResult = { ok: true; warning?: string } | { ok: false; error: string };
+export type CommandResult = { ok: true; warning?: string; result?: unknown } | { ok: false; error: string };
 
 type StateUpdate = Parameters<Db["displayState"]["update"]>[0]["data"];
 type MatchUpdate = Parameters<Db["match"]["update"]>[0]["data"];
@@ -1012,7 +1012,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       }
       await updateState(db, {
         mode: "GOAL_INTRO_VIDEO",
-        activeMediaId: await resolveGoalIntroMediaId(db),
+        activeMediaId,
         activeGoalScorerId: null,
       });
       return { ok: true, result: { visual: true } };

@@ -49,6 +49,9 @@ import { handleCommand } from "../server/handlers";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
 import { startupDisplayStatePatch } from "../lib/display-startup";
+import { isDisplayPlaybackRisk } from "../lib/media-playback-compat";
+import { inspectVideoForDisplay, prepareVideoForDisplay } from "./media-transcode";
+import { cueEndSec } from "../lib/scheduled-media-cue";
 
 type RuntimeOptions = {
   getControlWindow: () => BrowserWindow | null;
@@ -64,6 +67,11 @@ let tickInterval: NodeJS.Timeout | null = null;
 function requireOpts() {
   if (!opts) throw new Error("Desktop runtime is not initialized");
   return opts;
+}
+
+function parseCueEndSec(endSec: number | null | undefined, startSec: number): number | null {
+  if (endSec == null) return null;
+  return cueEndSec({ triggerSec: startSec, endSec });
 }
 
 function windows() {

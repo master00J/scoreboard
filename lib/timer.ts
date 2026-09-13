@@ -6,24 +6,10 @@ function toClockSeconds(seconds: number): number {
   return Math.max(0, Math.round(seconds * 1000) / 1000);
 }
 
-function startedAtMs(value: Date | string | null): number {
-  return value instanceof Date ? value.getTime() : new Date(value as string).getTime();
-}
-
-/**
- * Authoritative timer math.
- * Elapsed seconds = base + (running ? (now - startedAt) / 1000 : 0)
- */
 export function startedAtMs(value: Date | string | null | undefined): number | null {
   if (value == null) return null;
   const ms = value instanceof Date ? value.getTime() : new Date(value).getTime();
   return Number.isFinite(ms) ? ms : null;
-}
-
-/** Klokwaarden bewaren we op milliseconde-precisie (geen seconde verlies per pauze). */
-function toClockSeconds(seconds: number): number {
-  if (!Number.isFinite(seconds)) return 0;
-  return Math.max(0, Math.round(seconds * 1000) / 1000);
 }
 
 export function computeElapsedSeconds(state: {
@@ -35,7 +21,7 @@ export function computeElapsedSeconds(state: {
   if (!state.timerRunning || started == null) {
     return Math.max(0, state.timerBaseSec);
   }
-  const diffSec = (now - startedAtMs(state.timerStartedAt)) / 1000;
+  const diffSec = (now - started) / 1000;
   return Math.max(0, state.timerBaseSec + diffSec);
 }
 
@@ -112,8 +98,9 @@ export type CountdownState = {
 
 export function computeCountdownSeconds(state: CountdownState, now: number = Date.now()): number {
   const base = Math.max(0, state.baseSec);
-  if (!state.running || !state.startedAt) return base;
-  return Math.max(0, base - (now - startedAtMs(state.startedAt)) / 1000);
+  const started = startedAtMs(state.startedAt);
+  if (!state.running || started == null) return base;
+  return Math.max(0, base - (now - started) / 1000);
 }
 
 /** Shotclock telt af vanaf `baseSec` zolang hij loopt. */

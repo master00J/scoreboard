@@ -41,6 +41,7 @@ import {
   Radio,
   Settings2,
   Square,
+  Video,
   Wifi,
   WifiOff,
 } from "lucide-react";
@@ -195,6 +196,10 @@ export default function ControlPage() {
             <TabsTrigger value="reports" className="h-10 gap-2 px-3 sm:px-4">
               <FileBarChart className="size-4" />
               {t("shell.tabReports")}
+            </TabsTrigger>
+            <TabsTrigger value="livestream" className="h-10 gap-2 px-3 sm:px-4">
+              <Video className="size-4" />
+              {t("shell.tabLivestream")}
             </TabsTrigger>
           </TabsList>
           <div className="flex items-center gap-2">

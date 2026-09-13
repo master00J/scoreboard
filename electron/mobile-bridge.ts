@@ -1,4 +1,5 @@
 import http from "http";
+import fs from "fs";
 import { randomBytes, randomInt, timingSafeEqual } from "crypto";
 import type { DesktopApiRequest } from "../lib/desktop-bridge";
 import { withClockTelemetry } from "../lib/clock-telemetry";
@@ -148,6 +149,31 @@ function writeJson(
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(payload));
+}
+
+async function withActiveMatch(snapshot: unknown, runtime: BridgeRuntime) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return snapshot;
+  const state = snapshot as { matchId?: unknown; activeMatch?: unknown };
+  const matchId = typeof state.matchId === "string" && state.matchId.trim() ? state.matchId : null;
+  if (!matchId) return snapshot;
+  try {
+    const response = await runtime.apiRequest({
+      method: "GET",
+      path: `/api/matches/${encodeURIComponent(matchId)}`,
+    });
+    if (
+      response.status >= 200 &&
+      response.status < 300 &&
+      response.json &&
+      typeof response.json === "object" &&
+      !Array.isArray(response.json)
+    ) {
+      return { ...state, activeMatch: response.json };
+    }
+  } catch {
+    /* live klok/score blijven beschikbaar */
+  }
+  return snapshot;
 }
 
 export async function startMobileBridge(
@@ -319,13 +345,15 @@ export async function startMobileBridge(
         writeJson(
           res,
           200,
-          withClockTelemetry(
-            snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
-              ? { ...snapshot, sponsorLedger: ledger }
-              : snapshot,
+          await withActiveMatch(
+            withClockTelemetry(
+              snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
+                ? { ...snapshot, sponsorLedger: ledger }
+                : snapshot,
+            ),
+            options.runtime,
           ),
         );
-        writeJson(res, 200, await withActiveMatch(timed, options.runtime));
         return;
       }
 
