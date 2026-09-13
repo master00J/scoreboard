@@ -3,9 +3,12 @@
 import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
 import { getSportProfile, sportBreakLabel } from "@/lib/sports";
+import { formatSetHistory } from "@/lib/volleyball";
 
 export function HalfTimeMode({ match }: { match: Match }) {
   const profile = getSportProfile(match.sport);
+  const history = formatSetHistory(match.setHistory ?? []);
+  const showSetsPrimary = profile.hasSets;
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -22,19 +25,20 @@ export function HalfTimeMode({ match }: { match: Match }) {
           {match.homeTeam.shortName}
         </div>
         <div className="text-[360px] font-black tabular-nums leading-none text-white">
-          {match.homeScore}
+          {showSetsPrimary ? match.homeSets : match.homeScore}
         </div>
         <div className="text-[240px] font-black text-white/30">-</div>
         <div className="text-[360px] font-black tabular-nums leading-none text-white">
-          {match.awayScore}
+          {showSetsPrimary ? match.awaySets : match.awayScore}
         </div>
         <div className="text-[72px] font-bold text-white/80">
           {match.awayTeam.shortName}
         </div>
       </div>
-      {profile.hasSets && (
+      {showSetsPrimary && (
         <div className="mt-10 text-5xl font-bold uppercase tracking-widest text-white/60">
-          Sets {match.homeSets} – {match.awaySets}
+          Set {match.homeScore} – {match.awayScore}
+          {history ? ` · ${history}` : ""}
         </div>
       )}
     </motion.div>
@@ -43,6 +47,8 @@ export function HalfTimeMode({ match }: { match: Match }) {
 
 export function FullTimeMode({ match }: { match: Match }) {
   const profile = getSportProfile(match.sport);
+  const history = formatSetHistory(match.setHistory ?? []);
+  const showSetsPrimary = profile.hasSets;
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -55,7 +61,7 @@ export function FullTimeMode({ match }: { match: Match }) {
       }}
     >
       <div className="text-[120px] uppercase tracking-[0.3em] text-white/70 mb-12 font-bold">
-        Full-time
+        {profile.hasSets ? "Match" : "Full-time"}
       </div>
       <div className="flex items-center gap-20">
         <div className="flex flex-col items-center gap-4">
@@ -66,7 +72,7 @@ export function FullTimeMode({ match }: { match: Match }) {
             {match.homeTeam.shortName}
           </div>
           <div className="text-[400px] font-black tabular-nums leading-none text-white">
-            {match.homeScore}
+            {showSetsPrimary ? match.homeSets : match.homeScore}
           </div>
         </div>
         <div className="text-[240px] font-black text-white/20">-</div>
@@ -78,15 +84,15 @@ export function FullTimeMode({ match }: { match: Match }) {
             {match.awayTeam.shortName}
           </div>
           <div className="text-[400px] font-black tabular-nums leading-none text-white">
-            {match.awayScore}
+            {showSetsPrimary ? match.awaySets : match.awayScore}
           </div>
         </div>
       </div>
-      {profile.hasSets && (
+      {showSetsPrimary && history ? (
         <div className="mt-10 text-5xl font-bold uppercase tracking-widest text-white/60">
-          Sets {match.homeSets} – {match.awaySets}
+          {history}
         </div>
-      )}
+      ) : null}
     </motion.div>
   );
 }

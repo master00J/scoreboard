@@ -2,25 +2,28 @@ import type { MatchEvent, Player } from "@/lib/types";
 
 /**
  * Bepaalt per team wie "op het veld" staat vs. wisselbank, op basis van:
- * - start: eerste 11 niet-coaches (op rugnummer), rest bank;
+ * - start: eerste N niet-coaches (op rugnummer; N = `maximum`, default 11), rest bank;
+
  * - daarna chronologische SUB-events (player uit → bank, player in → veld).
  */
 export function squadOnFieldAndBench(
   teamId: string,
   players: Player[],
   events: MatchEvent[] | undefined,
+  maximum = 11,
 ): { onField: Player[]; bench: Player[] } {
   const squad = players.filter((p) => !p.isCoach && p.teamId === teamId);
   const sorted = [...squad].sort((a, b) => a.number - b.number);
+  const maxOnField = Math.max(1, Math.floor(maximum) || 11);
 
   const onField = new Set<string>();
   const bench = new Set<string>();
 
-  if (sorted.length <= 11) {
+  if (sorted.length <= maxOnField) {
     for (const p of sorted) onField.add(p.id);
   } else {
-    for (const p of sorted.slice(0, 11)) onField.add(p.id);
-    for (const p of sorted.slice(11)) bench.add(p.id);
+    for (const p of sorted.slice(0, maxOnField)) onField.add(p.id);
+    for (const p of sorted.slice(maxOnField)) bench.add(p.id);
   }
 
   const subEvents = [...(events ?? [])]

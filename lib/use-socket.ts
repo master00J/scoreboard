@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useDisplayStore } from "./store";
 import type { Command } from "./validation/commands";
-import type { ElectronBridge } from "./desktop-bridge";
+import type { ElectronBridge, HornPayload } from "./desktop-bridge";
 import type {
   SponsorTelemetryClipEnd,
   SponsorTelemetryClipProgress,
@@ -103,6 +103,21 @@ export async function sendCommand(cmd: Command) {
     return { ok: false, error: "Electron bridge unavailable" };
   }
   return api.sendCommand(cmd);
+}
+
+/** Zoemer-events (einde periode / shotclock / time-out) uit de main-process tick-loop. */
+export function onDisplayHorn(listener: (payload: HornPayload) => void) {
+  let active = true;
+  let unsubscribe: (() => void) | null = null;
+  void (async () => {
+    const api = await waitForElectronApi();
+    if (!active || !api?.onDisplayHorn) return;
+    unsubscribe = api.onDisplayHorn(listener);
+  })();
+  return () => {
+    active = false;
+    unsubscribe?.();
+  };
 }
 
 export function onDisplayError(listener: (payload: { message: string }) => void) {

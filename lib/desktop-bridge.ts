@@ -62,6 +62,12 @@ export type TickPayload = {
   serverNow: number;
 };
 
+/** Zoemer-event vanuit de main-process tick-loop (einde periode, shotclock op nul, einde time-out). */
+export type HornPayload = {
+  reason: "period_end" | "shot_clock" | "timeout_end";
+  atMs: number;
+};
+
 export type CommandAck = {
   ok: boolean;
   error?: string;
@@ -182,6 +188,8 @@ export type ElectronBridge = {
   getDisplaySnapshot: () => Promise<SerializedDisplayState | null>;
   onDisplayState: (listener: (state: SerializedDisplayState) => void) => () => void;
   onTick: (listener: (tick: TickPayload) => void) => () => void;
+  /** Zoemer (einde periode / shotclock / time-out); optioneel voor oudere bridges. */
+  onDisplayHorn?: (listener: (payload: HornPayload) => void) => () => void;
   onSponsorLedger: (listener: (ledger: SponsorLedgerPayload | null) => void) => () => void;
   onDisplayError: (listener: (payload: { message: string }) => void) => () => void;
   focusDisplayWindow: () => Promise<void>;

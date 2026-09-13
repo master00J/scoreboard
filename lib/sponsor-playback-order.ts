@@ -1,7 +1,7 @@
 import type { MediaItem } from "@/lib/types";
 
 const REPEAT_MIN = 1;
-const REPEAT_MAX = 20;
+const REPEAT_MAX = 600;
 
 /** JSON-array van media-id's in gewenste volgorde voor sponsorrotatie. */
 export function parseSponsorPlaybackOrderJson(raw: string | null | undefined): string[] {
@@ -35,6 +35,23 @@ export function parseSponsorPlaybackRepeatsJson(raw: string | null | undefined):
 export function clampRepeat(n: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.min(REPEAT_MAX, Math.max(REPEAT_MIN, Math.round(n)));
+}
+
+/** Zet een begrijpelijke gewenste zendtijd om naar het aantal volledige clipweergaven. */
+export function repeatCountForTargetSeconds(
+  mediaDurationSec: number,
+  targetSeconds: number,
+): number {
+  const duration = Math.max(1, Number.isFinite(mediaDurationSec) ? mediaDurationSec : 1);
+  const target = Math.max(duration, Number.isFinite(targetSeconds) ? targetSeconds : duration);
+  return clampRepeat(Math.ceil(target / duration));
+}
+
+export function plannedSecondsForRepeats(
+  mediaDurationSec: number,
+  repeats: number,
+): number {
+  return Math.max(1, Math.round(mediaDurationSec)) * clampRepeat(repeats);
 }
 
 /**

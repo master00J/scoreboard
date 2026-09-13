@@ -20,7 +20,7 @@ export type MatchTabLayoutState = {
 
 const STORAGE_KEY = "stadium-control-match-tab-layout-v1";
 
-export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
+const LEGACY_DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
   orderLeft: [
     "timer",
     "display",
@@ -32,6 +32,20 @@ export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
   ],
   orderCenter: ["preview", "match-live", "event-log"],
   orderRight: ["match-info"],
+  collapsed: {},
+};
+
+export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
+  orderLeft: ["timer", "match-live"],
+  orderCenter: [
+    "sponsor-hud",
+    "player-intro",
+    "event-log",
+    "sponsor-overview",
+    "sponsor-timeline",
+    "external",
+  ],
+  orderRight: ["preview", "display", "match-info"],
   collapsed: {},
 };
 
@@ -122,6 +136,14 @@ function layoutsEqual(a: MatchTabLayoutState, b: MatchTabLayoutState): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function layoutOrdersEqual(a: MatchTabLayoutState, b: MatchTabLayoutState): boolean {
+  return (
+    JSON.stringify(a.orderLeft) === JSON.stringify(b.orderLeft) &&
+    JSON.stringify(a.orderCenter) === JSON.stringify(b.orderCenter) &&
+    JSON.stringify(a.orderRight) === JSON.stringify(b.orderRight)
+  );
+}
+
 /**
  * Kiest de beste startlay-out voor de control-app: Electron-userData-bestand én localStorage
  * worden meegenomen. Zo blijft een gepersonaliseerde lay-out behouden als het bestand ontbreekt,
@@ -163,12 +185,16 @@ export function parseMatchTabLayoutJson(raw: string | null): MatchTabLayoutState
     if (orderLeft.length === 0 && orderCenter.length === 0 && orderRight.length === 0) {
       return DEFAULT_MATCH_TAB_LAYOUT;
     }
-    return sanitizeMatchTabLayout({
+    const parsed = sanitizeMatchTabLayout({
       orderLeft,
       orderCenter,
       orderRight,
       collapsed,
     });
+    if (layoutOrdersEqual(parsed, LEGACY_DEFAULT_MATCH_TAB_LAYOUT)) {
+      return { ...DEFAULT_MATCH_TAB_LAYOUT, collapsed: parsed.collapsed };
+    }
+    return parsed;
   } catch {
     return DEFAULT_MATCH_TAB_LAYOUT;
   }

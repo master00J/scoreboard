@@ -85,6 +85,12 @@ export type Match = {
   awayFouls: number;
   homeSets: number;
   awaySets: number;
+  /** Volleybal: wie serveert. */
+  servingSide?: "home" | "away" | null;
+  /** Volleybal: afgesloten sets, bv. [{home:25,away:23}]. */
+  setHistory?: { home: number; away: number }[];
+  /** Volleybal: technical timeout bij 8 en 16 in sets 1–4. */
+  technicalTimeoutsEnabled?: boolean;
   /**
    * Prematch: lengte van het herhalende sponsor-slotrooster (seconden).
    * 0 = automatisch: ongeveer de som van geplande «voor wedstrijd»-seconden per sponsor (min. 60).
@@ -120,6 +126,8 @@ export type MediaItem = {
   type: "VIDEO" | "IMAGE";
   path: string;
   title: string;
+  /** Korte, door de operator gekozen naam voor de live snelknop. */
+  quickButtonLabel?: string | null;
   durationSec: number;
   sponsorName: string | null;
   sponsorId: string | null;
@@ -160,7 +168,7 @@ export type Sponsor = {
   imageDefaultSec: number;
   /** JSON-array van media-id's: volgorde tijdens sponsorrotatie op display; null = uploadvolgorde. */
   sponsorPlaybackOrderJson?: string | null;
-  /** JSON-object mediaId → aantal keer achter elkaar per doorloop van de clip-lijst (1–20). */
+  /** JSON-object mediaId → aantal volledige weergaven per doorloop van de clip-lijst. */
   sponsorPlaybackRepeatsJson?: string | null;
   createdAt: string;
   media?: MediaItem[];

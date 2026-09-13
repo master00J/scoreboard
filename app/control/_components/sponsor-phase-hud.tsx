@@ -9,12 +9,26 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
   const model = useSponsorPhaseHud(match);
 
   if (model.kind === "inactive") {
-    return null;
+    return (
+      <div className="flex flex-col gap-2 rounded-xl border border-border bg-card p-3">
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">
+          {t("sponsors.hudTitle")}
+        </div>
+        <div className="rounded-lg border border-dashed border-border bg-background/40 px-3 py-5 text-center">
+          <p className="text-sm font-semibold text-foreground">
+            {t("sponsors.hudInactiveTitle")}
+          </p>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {t("sponsors.hudInactiveBody")}
+          </p>
+        </div>
+      </div>
+    );
   }
 
   if (model.kind === "playlist_only") {
     return (
-      <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
+      <div className="rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">
         <div className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
           {t("sponsors.hudTiming")}
         </div>
@@ -27,7 +41,7 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
     model.sponsorClipProgress != null ? Math.round(model.sponsorClipProgress * 100) : null;
 
   return (
-    <div className="rounded-xl border border-border bg-card p-4 flex flex-col gap-3">
+    <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3">
       <div className="text-xs uppercase tracking-widest text-muted-foreground">
         {t("sponsors.hudTitle")} · {model.contextLabel}
       </div>
@@ -38,12 +52,34 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
             ? (model.sponsorName ?? t("sponsors.hudSponsor"))
             : t("sponsors.hudScoreboard")}
         </span>
-        <span className="text-xs font-mono text-muted-foreground shrink-0">
-          {model.phase === "sponsor" ? t("sponsors.hudBusy") : t("sponsors.hudWait")}
+        <span
+          className={`text-xs font-mono shrink-0 ${
+            model.phase === "sponsor" && model.playbackUnconfirmed
+              ? "text-amber-500"
+              : "text-muted-foreground"
+          }`}
+        >
+          {model.phase === "sponsor"
+            ? model.playbackUnconfirmed
+              ? t("sponsors.hudUnconfirmed")
+              : t("sponsors.hudBusy")
+            : t("sponsors.hudWait")}
         </span>
       </div>
 
-      {model.phase === "sponsor" && model.sponsorClipProgress != null && (
+      {model.coveredByCapture && (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-600/90">
+          {t("sponsors.hudCapturePaused")}
+        </p>
+      )}
+
+      {model.phase === "sponsor" && model.playbackUnconfirmed && !model.coveredByCapture && (
+        <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-600/90">
+          {t("sponsors.hudUnconfirmedHint")}
+        </p>
+      )}
+
+      {model.phase === "sponsor" && !model.playbackUnconfirmed && model.sponsorClipProgress != null && (
         <div className="space-y-1">
           <div className="h-2 rounded-full bg-secondary overflow-hidden">
             <div

@@ -35,6 +35,16 @@ export function hasSponsorsForSection(
   return activeSponsorsForSection(sponsors, section, matchStatus).length > 0;
 }
 
+/**
+ * Prematch-sponsors en de PREMATCH-playlist horen bij een geladen wedstrijd.
+ * Op leeg IDLE (geen wedstrijd) mogen ze niet automatisch starten.
+ */
+export function idleMayPlayPrematchSponsors<T>(
+  match: T | null | undefined,
+): match is T {
+  return match != null;
+}
+
 /** Tijdens speelhelft naast scorebord: is er sponsor-budget of playlist-media om te tonen? */
 export function sponsorBesideShowsPanel(
   match: Match,

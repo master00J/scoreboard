@@ -13,8 +13,8 @@ import { ScaleContainer } from "@/components/scale-container";
 import { useSocketSync, sendCommand } from "@/lib/use-socket";
 import type { DisplayModeT } from "@/lib/validation/commands";
 import { useDisplayStore } from "@/lib/store";
-import { useLiveShotClockSeconds, useLiveTimerSeconds } from "@/lib/use-timer";
-import { sportClockSeconds, sportPeriodLabel } from "@/lib/sports";
+import { useLiveShotClockSeconds, useLiveTimeoutSeconds, useLiveTimerSeconds } from "@/lib/use-timer";
+import { getSportProfile, resolveDisplayShowClock, sportBreakLabel, sportClockSeconds, sportHasMainClock, sportPeriodLabel } from "@/lib/sports";
 import type {
   AppSettings,
   Match,
@@ -64,6 +64,7 @@ import {
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import {
   hasSponsorsForSection,
+  idleMayPlayPrematchSponsors,
   pickSponsorPlaylist,
   sectionForStatus,
   shouldShowFullScreenMatchBoard,
@@ -87,8 +88,13 @@ import { PlayerIntroMode } from "./_modes/player-intro";
 import { SponsorRotation, type IdleEmptyFallback } from "./_modes/sponsor-rotation";
 import { SponsorBudgetRotation } from "./_modes/sponsor-budget-rotation";
 import { HalfTimeMode, FullTimeMode } from "./_modes/halftime-fulltime";
+import { TimeoutOverlay } from "./_modes/timeout-overlay";
 import { DisplayWatchdog } from "./_components/watchdog";
 import { ExternalCaptureVideo } from "@/components/external-capture-video";
+import {
+  externalCaptureCoversDisplay,
+  isSponsorPlaybackInterrupted,
+} from "@/lib/sponsor-playback-interruption";
 
 /** Modes die naast het scorebord in het content-vlak staan (niet fullscreen over het canvas). */
 const LEFT_PANEL_INTERRUPT_MODES = new Set(["GOAL", "CARD"]);
@@ -104,17 +110,6 @@ function ledgerAwareSponsorDistOverride(
   const ac = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, Date.now());
   if (!ac) return base;
   return { phase: "sponsor", sponsorFilterId: ac.sponsorId };
-}
-
-const EXTERNAL_CAPTURE_AUDIO_PREF_KEY = "arenacue_external_capture_audio_v1";
-
-function readExternalCaptureAudioPref(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(EXTERNAL_CAPTURE_AUDIO_PREF_KEY) === "1";
-  } catch {
-    return false;
-  }
 }
 
 function isPreviewIframe(): boolean {
@@ -141,6 +136,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
   const elapsed = useLiveTimerSeconds();
   const shotClock = useLiveShotClockSeconds();
+  const timeoutRemaining = useLiveTimeoutSeconds();
 
   const [match, setMatch] = useState<Match | null>(null);
   const [playlists, setPlaylists] = useState<Record<PlaylistSlot, Playlist | null>>({
@@ -156,6 +152,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const [scoreboardTheme, setScoreboardTheme] = useState<ResolvedScoreboardTheme>(() =>
     mergeScoreboardTheme(null),
   );
+  const liveTheme = useMemo(() => {
+    const profile = getSportProfile(match?.sport);
+    return {
+      ...scoreboardTheme,
+      showClock: resolveDisplayShowClock(match?.sport, scoreboardTheme.showClock),
+      fullShowAddedTime: profile.supportsInjuryTime ? scoreboardTheme.fullShowAddedTime : false,
+    };
+  }, [scoreboardTheme, match?.sport]);
   const [sponsorRepeatBudgetCycles, setSponsorRepeatBudgetCycles] = useState(false);
   const [displayCanvas, setDisplayCanvas] = useState<{
     width: number;
@@ -329,8 +333,16 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const section = sectionForStatus(match.status);
     return ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger);
   }, [embedInControl, elapsed, match, sponsorLedger]);
-  /** Zonder lopend display-venster (browserdemo) speelt de preview zelf af i.p.v. zwart te blijven. */
-  const previewFollowsLiveDisplay = Boolean(embedInControl && previewFollowClip);
+  /**
+   * De preview volgt het stadionscherm zodra de Electron-brug er is: ook zónder actieve clip
+   * blijft ze in follow-mode, anders start ze een eigen rotatie en toont ze andere media dan
+   * het LED-scherm. Alleen de browserdemo (geen electronAPI) speelt zelf af i.p.v. zwart te blijven.
+   */
+  const previewCanFollowDisplay =
+    typeof window !== "undefined" && !!window.electronAPI;
+  const previewFollowsLiveDisplay = Boolean(
+    embedInControl && (previewCanFollowDisplay || previewFollowClip),
+  );
 
   const [prematchClock, setPrematchClock] = useState(0);
   useEffect(() => {
@@ -363,6 +375,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       HALFTIME: { ms: 10000, next: "SPONSOR_ROTATION" },
       FULLTIME: { ms: 15000, next: "SPONSOR_ROTATION" },
     };
+    // Volleybal-setbreak blijft staan tot "Verder spelen" of het eerste punt van de volgende set.
+    if (state.mode === "HALFTIME" && getSportProfile(match?.sport).hasSets) return;
     const t = transitions[state.mode];
     if (!t) return;
     const id = setTimeout(() => {
@@ -379,6 +393,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     state?.activeSubInId,
     state?.activeSubOutId,
     activeMedia?.durationSec,
+    match?.sport,
   ]);
 
   const scorer = state?.activeGoalScorerId
@@ -429,7 +444,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           running={state.timerRunning ?? false}
           period={period}
           addedTime={addedTimeMinutes}
-          theme={scoreboardTheme}
+          theme={liveTheme}
         />
       );
     }
@@ -440,7 +455,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         idleEmptyFallback={idleEmptyFallback}
       />
     );
-  }, [state, match, scoreboardClock, shotClock, period, addedTimeMinutes, scoreboardTheme, playlists, embedInControl, idleEmptyFallback]);
+  }, [state, match, scoreboardClock, shotClock, period, addedTimeMinutes, liveTheme, playlists, embedInControl, idleEmptyFallback]);
 
   const halftimeSponsorFallback = useMemo(() => {
     if (!match) return null;
@@ -642,17 +657,16 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     }
   }, [prematchSpreadActive]);
 
-  /** Tijdens deze modi loopt een overlay (goal/speler/kaart/wissel/halftime/fulltime).
-   * Sponsor-hang vriest dan in zodat de clip later volledig kan afspelen. */
-  const sponsorInterrupted =
-    activeScheduledCue != null ||
-    mode === "GOAL" ||
-    mode === "GOAL_INTRO_VIDEO" ||
-    mode === "GOAL_PLAYER_VIDEO" ||
-    mode === "SUBSTITUTION" ||
-    mode === "CARD" ||
-    mode === "HALFTIME" ||
-    mode === "FULLTIME";
+  /**
+   * Tijdelijke schermcontent bevriest het sponsorrooster en de lopende sponsortijd.
+   * Na de onderbreking start dezelfde clip opnieuw vanaf het begin.
+   */
+  const captureCovers = externalCaptureCoversDisplay(state);
+  const sponsorInterrupted = isSponsorPlaybackInterrupted(
+    mode,
+    activeScheduledCue != null,
+    captureCovers,
+  );
 
   const matchTimerRunning = state?.timerRunning ?? false;
 
@@ -931,6 +945,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             mode !== "SPONSOR_ROTATION" ||
             !matchTimerRunning
           }
+          restartCurrentOnResume={sponsorInterrupted}
           {...matchSponsorPinProps}
         />
       );
@@ -1063,6 +1078,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               mode !== "SPONSOR_ROTATION" ||
               !matchTimerRunning
             }
+            restartCurrentOnResume={sponsorInterrupted}
             {...matchSponsorPinProps}
           />
         );
@@ -1086,7 +1102,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         <CardMode
           key="card"
           player={cardPlayer}
-          color={"YELLOW"}
+          color={(state?.activeCardColor === "RED" || state?.activeCardColor === "GREEN" ? state.activeCardColor : "YELLOW")}
           minute={currentMinute}
         />
       );
@@ -1110,7 +1126,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           running={state.timerRunning ?? false}
           period={period}
           addedTime={addedTimeMinutes}
-          theme={scoreboardTheme}
+          theme={liveTheme}
         />
       );
     }
@@ -1136,7 +1152,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     sponsorPlaybackTelemetry,
     previewFollowsLiveDisplay,
     previewFollowClip,
-    scoreboardTheme,
+    liveTheme,
     sponsorBudgetFallbackScoreboard,
     sponsorRepeatBudgetCycles,
     idleEmptyFallback,
@@ -1161,7 +1177,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         {!state && <IdleScreen key="ix" connecting={!connected} />}
 
         {state && mode === "IDLE" && (() => {
-          if (hasSponsorsForSection(sponsors, "prematch")) {
+          if (idleMayPlayPrematchSponsors(match) && hasSponsorsForSection(sponsors, "prematch")) {
             if (prematchDistView.phase === "sponsor") {
               return (
                 <SponsorBudgetRotation
@@ -1176,31 +1192,23 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   renderVideo
                   fallback={sponsorBudgetFallbackScoreboard}
                   cycleBudgetForever={sponsorRepeatBudgetCycles}
+                  paused={sponsorInterrupted}
+                  restartCurrentOnResume={sponsorInterrupted}
                   matchSponsorMediaId={null}
                   matchSponsorMedia={null}
                 />
               );
             }
-            if (match) {
-              return (
-                <MatchScoreboardFull
-                  key="idle-prematch-scoreboard"
-                  match={match}
-                  elapsed={scoreboardClock}
-                  shotClock={shotClock}
-                  running={state.timerRunning ?? false}
-                  period={period}
-                  addedTime={addedTimeMinutes}
-                  theme={scoreboardTheme}
-                />
-              );
-            }
             return (
-              <SponsorRotation
-                key="idle-pl-spread"
-                playlist={playlists.PREMATCH ?? playlists.IDLE}
-                showPreviewProgress={embedInControl}
-                idleEmptyFallback={idleEmptyFallback}
+              <MatchScoreboardFull
+                key="idle-prematch-scoreboard"
+                match={match}
+                elapsed={scoreboardClock}
+                shotClock={shotClock}
+                running={state.timerRunning ?? false}
+                period={period}
+                addedTime={addedTimeMinutes}
+                theme={liveTheme}
               />
             );
           }
@@ -1240,13 +1248,15 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                     running={state.timerRunning ?? false}
                     period={period}
                     addedTime={addedTimeMinutes}
-                    theme={scoreboardTheme}
+                    theme={liveTheme}
                   />
                 ) : null
               }
               sponsorBudgetFallback={sponsorBudgetFallbackScoreboard}
               cycleBudgetForever={sponsorRepeatBudgetCycles}
               idleEmptyFallback={idleEmptyFallback}
+              paused={sponsorInterrupted}
+              restartCurrentOnResume={sponsorInterrupted}
             />
           )}
 
@@ -1271,7 +1281,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               running={state.timerRunning ?? false}
               period={period}
               addedTime={addedTimeMinutes}
-              theme={scoreboardTheme}
+              theme={liveTheme}
             />
           )}
 
@@ -1297,6 +1307,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 renderVideo
                 fallback={halftimeSponsorFallback}
                 cycleBudgetForever={sponsorRepeatBudgetCycles}
+                paused={sponsorInterrupted}
+                restartCurrentOnResume={sponsorInterrupted}
                 {...matchSponsorPinProps}
               />
             ) : (
@@ -1327,7 +1339,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               running={state.timerRunning ?? false}
               period={period}
               addedTime={addedTimeMinutes}
-              theme={scoreboardTheme}
+              theme={liveTheme}
             />
           )}
 
@@ -1361,6 +1373,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             playerIn={subIn}
             playerOut={subOut}
             minute={currentMinute}
+            showMinute={sportHasMainClock(match.sport)}
           />
         )}
 
@@ -1387,7 +1400,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               running={state.timerRunning ?? false}
               period={period}
               addedTime={addedTimeMinutes}
-              theme={scoreboardTheme}
+              theme={liveTheme}
             />
           )}
 
@@ -1424,6 +1437,21 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         {state && mode === "BLACKOUT" && <BlackoutMode key="bo" />}
       </AnimatePresence>
 
+      {state &&
+        match &&
+        mode !== "BLACKOUT" &&
+        timeoutRemaining > 0 && (
+          <TimeoutOverlay
+            match={match}
+            side={
+              state.timeoutSide === "home" || state.timeoutSide === "away" || state.timeoutSide === "technical"
+                ? state.timeoutSide
+                : null
+            }
+            remaining={timeoutRemaining}
+          />
+        )}
+
       {activeScheduledCue && mode !== "BLACKOUT" && match && sponsorRotationBesideScoreboard(match.status) && (
         <div className="absolute inset-0 z-[88]">
           <ScoreFrame
@@ -1433,7 +1461,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             running={state?.timerRunning ?? false}
             period={period}
             addedTime={addedTimeMinutes}
-            theme={scoreboardTheme}
+            theme={liveTheme}
           >
             <SingleMediaMode
               key={`scheduled-cue-panel-${activeScheduledCue.id}`}
@@ -1499,7 +1527,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             running={state.timerRunning ?? false}
             period={period}
             addedTime={addedTimeMinutes}
-            theme={scoreboardTheme}
+            theme={liveTheme}
           >
             <AnimatePresence mode="sync">
               <motion.div
@@ -1518,7 +1546,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       )}
 
       {/* Active-match modes: wrap content in the left-scoreboard / strip layout */}
-      {showScoreFrame && match && !keepLiveSponsorBesideMounted && (
+      {showScoreFrame && match && (!keepLiveSponsorBesideMounted || !showLiveSponsorBeside) && (
         <ScoreFrame
           match={match}
           elapsed={scoreboardClock}
@@ -1526,7 +1554,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           running={state?.timerRunning ?? false}
           period={period}
           addedTime={addedTimeMinutes}
-          theme={scoreboardTheme}
+          theme={liveTheme}
         >
           <AnimatePresence mode="wait">{activeContent}</AnimatePresence>
         </ScoreFrame>
@@ -1538,7 +1566,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           <div className="absolute inset-0 z-[55] bg-black">
             <ExternalCaptureVideo
               sourceId={state.externalCaptureSourceId}
-              audio={readExternalCaptureAudioPref()}
+              audio={!!state.externalCaptureAudio}
             />
           </div>
         )}
@@ -1561,6 +1589,8 @@ function SponsorRotationLiveContent({
   sponsorBudgetFallback = null,
   cycleBudgetForever = false,
   idleEmptyFallback = null,
+  paused = false,
+  restartCurrentOnResume = false,
 }: {
   match: Match | null;
   playlists: Record<PlaylistSlot, Playlist | null>;
@@ -1589,6 +1619,8 @@ function SponsorRotationLiveContent({
   sponsorBudgetFallback?: ReactNode;
   cycleBudgetForever?: boolean;
   idleEmptyFallback?: IdleEmptyFallback | null;
+  paused?: boolean;
+  restartCurrentOnResume?: boolean;
 }) {
   if (!match) {
     return (
@@ -1618,6 +1650,8 @@ function SponsorRotationLiveContent({
           renderVideo
           fallback={sponsorBudgetFallback ?? undefined}
           cycleBudgetForever={cycleBudgetForever}
+          paused={paused}
+          restartCurrentOnResume={restartCurrentOnResume}
           /**
            * Géén matchsponsor-pin op het rooster: `applyMatchSponsorMediaPin` vervangt dan
            * de hele medialijst van de sponsor door die ene clip, waardoor een sponsor met
@@ -1660,6 +1694,8 @@ function SponsorRotationLiveContent({
           renderVideo
           fallback={sponsorBudgetFallback ?? undefined}
           cycleBudgetForever={cycleBudgetForever}
+          paused={paused}
+          restartCurrentOnResume={restartCurrentOnResume}
           /** Zelfde reden als bij het prematch-rooster: geen pin over de rotatie heen. */
           matchSponsorMediaId={null}
           matchSponsorMedia={null}
@@ -1690,6 +1726,8 @@ function SponsorRotationLiveContent({
         renderVideo
         fallback={sponsorBudgetFallback ?? undefined}
         cycleBudgetForever={cycleBudgetForever}
+        paused={paused}
+        restartCurrentOnResume={restartCurrentOnResume}
         matchSponsorMediaId={match.matchSponsorMediaId ?? null}
         matchSponsorMedia={match.matchSponsorMedia ?? null}
       />
@@ -1916,9 +1954,9 @@ function humanPeriod(match: Match | null): string {
     case "SECOND_HALF":
       return "2ND HALF";
     case "HALF_TIME":
-      return "PAUZE";
+      return match ? sportBreakLabel(match.sport) : "PAUZE";
     case "FULL_TIME":
-      return "FULL-TIME";
+      return match && getSportProfile(match.sport).hasSets ? "MATCH" : "FULL-TIME";
     case "EXTRA_TIME":
       return "EXTRA TIME";
     default:

@@ -12,6 +12,18 @@ describe("CommandSchema", () => {
     expect(r.success).toBe(true);
   });
 
+  it("accepteert volleybal-serving, resume en hockey-straffen", () => {
+    expect(CommandSchema.safeParse({ type: "sport:setServing", side: "away" }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "sport:resumePlay" }).success).toBe(true);
+    expect(
+      CommandSchema.safeParse({ type: "penalty:start", side: "home", seconds: 120 }).success,
+    ).toBe(true);
+    expect(
+      CommandSchema.safeParse({ type: "card:trigger", teamId: "t", playerId: "p", color: "GREEN" })
+        .success,
+    ).toBe(true);
+  });
+
   it("accepteert multisport- en shotclockcommando's", () => {
     expect(CommandSchema.safeParse({ type: "sport:setPeriod", period: 4 }).success).toBe(true);
     expect(
@@ -27,6 +39,18 @@ describe("CommandSchema", () => {
     ).toBe(true);
     expect(
       CommandSchema.safeParse({ type: "shotclock:reset", seconds: 120 }).success,
+    ).toBe(false);
+  });
+
+  it("accepteert externe-capture-commando's", () => {
+    expect(
+      CommandSchema.safeParse({ type: "display:setExternalCapture", sourceId: "window:1" }).success,
+    ).toBe(true);
+    expect(
+      CommandSchema.safeParse({ type: "display:setExternalCaptureAudio", enabled: true }).success,
+    ).toBe(true);
+    expect(
+      CommandSchema.safeParse({ type: "display:setExternalCaptureAudio" }).success,
     ).toBe(false);
   });
 

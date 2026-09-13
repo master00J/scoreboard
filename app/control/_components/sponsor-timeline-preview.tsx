@@ -46,12 +46,12 @@ export function SponsorTimelinePreview({
   const { t } = useTranslation();
   const displayStateUpdatedAt = useDisplayStore((s) => s.state?.updatedAt);
   // useApi start met null — default `= []` vangt dat niet op (alleen undefined).
-  const { data: sponsorsData } = useApi<Sponsor[]>("/api/sponsors");
+  const { data: sponsorsData, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
   const sponsors = Array.isArray(sponsorsData) ? sponsorsData : [];
 
   useEffect(() => {
-    displayStateUpdatedAt;
-  }, [displayStateUpdatedAt]);
+    if (displayStateUpdatedAt) reloadSponsors();
+  }, [displayStateUpdatedAt, reloadSponsors]);
 
   const matchStatus = match?.status;
 

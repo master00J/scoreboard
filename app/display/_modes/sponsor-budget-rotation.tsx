@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -130,6 +131,7 @@ export function SponsorBudgetRotation({
   fallback = null,
   cycleBudgetForever = false,
   paused = false,
+  restartCurrentOnResume = false,
   matchSponsorMediaId = null,
   matchSponsorMedia = null,
 }: {
@@ -149,6 +151,7 @@ export function SponsorBudgetRotation({
     mediaId: string;
     startedAtMs: number;
     expectedPlaySec: number;
+    clipSessionId?: string;
     playbackPositionMs?: number;
     paused?: boolean;
   } | null;
@@ -162,6 +165,11 @@ export function SponsorBudgetRotation({
   cycleBudgetForever?: boolean;
   /** Tijdelijk pauzeren zonder current clip te vergeten, bv. tijdens goal/wissel-overlay. */
   paused?: boolean;
+  /**
+   * De pauze komt door vervangende schermcontent. Reken het reeds getoonde deel af,
+   * maar behoud sponsor en mediacursor en speel dezelfde clip na afloop vanaf 0:00.
+   */
+  restartCurrentOnResume?: boolean;
 }) {
   const followMode = followPlayback;
   const ownerIdRef = useRef<string>("");
@@ -279,6 +287,8 @@ export function SponsorBudgetRotation({
   const clipSessionRef = useRef<{ key: string; id: string } | null>(null);
   const completedScheduledSponsorSlotRef = useRef<string | null>(null);
   const [sponsorSwitchReleaseUntilMs, setSponsorSwitchReleaseUntilMs] = useState(0);
+  const [sponsorSwitchHoldFrame, setSponsorSwitchHoldFrame] = useState<string | null>(null);
+  const lastCompletedVideoFrameRef = useRef<string | null>(null);
   const telemetryClipRef = useRef<{
     key: string;
     matchId: string;
@@ -291,6 +301,11 @@ export function SponsorBudgetRotation({
   } | null>(null);
   const lastPausedTelemetryRef = useRef<boolean | null>(null);
   const lastProgressReportMsRef = useRef(0);
+  const visibleClipKeyRef = useRef<string | null>(null);
+  const visibleClipElapsedMsRef = useRef(0);
+  const visibleClipRunStartedAtMsRef = useRef<number | null>(null);
+  const restartPendingClipKeyRef = useRef<string | null>(null);
+  const followClipSessionRef = useRef<string | null>(null);
 
   const sponsorsById = useMemo(() => {
     const m: Record<string, Sponsor> = {};
@@ -382,6 +397,8 @@ export function SponsorBudgetRotation({
     setVideoProgressDurationMs(0);
     setVideoFaultPauseUntilMs(0);
     setSponsorSwitchReleaseUntilMs(0);
+    setSponsorSwitchHoldFrame(null);
+    lastCompletedVideoFrameRef.current = null;
     playbackProgressMsRef.current = 0;
     if (sponsorSwitchTimerRef.current != null) {
       clearTimeout(sponsorSwitchTimerRef.current);
@@ -529,6 +546,90 @@ export function SponsorBudgetRotation({
     });
   }, []);
 
+  const visibleClipKey = current
+    ? `${current.sponsorId}-${current.mediaId}-${cycleId}-${slideTick}`
+    : null;
+
+  /** Houd uitsluitend werkelijk zichtbare tijd bij; pauzes tellen nooit als sponsortijd. */
+  useLayoutEffect(() => {
+    const now = Date.now();
+    if (visibleClipKeyRef.current !== visibleClipKey) {
+      visibleClipKeyRef.current = visibleClipKey;
+      visibleClipElapsedMsRef.current = 0;
+      visibleClipRunStartedAtMsRef.current = visibleClipKey && !paused ? now : null;
+      return;
+    }
+    if (!visibleClipKey) {
+      visibleClipRunStartedAtMsRef.current = null;
+      return;
+    }
+    if (paused) {
+      const runStartedAt = visibleClipRunStartedAtMsRef.current;
+      if (runStartedAt != null) {
+        visibleClipElapsedMsRef.current += Math.max(0, now - runStartedAt);
+        visibleClipRunStartedAtMsRef.current = null;
+      }
+      return;
+    }
+    if (visibleClipRunStartedAtMsRef.current == null) {
+      visibleClipRunStartedAtMsRef.current = now;
+    }
+  }, [paused, visibleClipKey]);
+
+  const visibleClipSeconds = useCallback(() => {
+    const runningMs =
+      visibleClipRunStartedAtMsRef.current == null
+        ? 0
+        : Math.max(0, Date.now() - visibleClipRunStartedAtMsRef.current);
+    return Math.max(0, (visibleClipElapsedMsRef.current + runningMs) / 1000);
+  }, []);
+
+  /**
+   * Bij een echte schermonderbreking wordt het reeds getoonde deel geboekt. De
+   * mediacursor wordt niet verhoogd; bij hervatten remount `slideTick` exact dezelfde
+   * clip op 0:00 met een nieuwe proof-of-play sessie.
+   */
+  useLayoutEffect(() => {
+    if (!current || !visibleClipKey) {
+      restartPendingClipKeyRef.current = null;
+      return;
+    }
+
+    if (paused && restartCurrentOnResume) {
+      if (restartPendingClipKeyRef.current === visibleClipKey) return;
+      restartPendingClipKeyRef.current = visibleClipKey;
+      const partialSec = capBilledSecondsForSponsorBudget(
+        current.item,
+        current.playSec,
+        current.item.type === "VIDEO"
+          ? playbackProgressMsRef.current / 1000
+          : visibleClipSeconds(),
+      );
+      if (partialSec > 0) {
+        const previous = stateRef.current.spentPerSponsor[current.sponsorId] ?? 0;
+        stateRef.current.spentPerSponsor[current.sponsorId] = previous + partialSec;
+      }
+      finishTelemetryClip(partialSec, { reason: "screen_interrupted_restart" });
+      return;
+    }
+
+    if (!paused && restartPendingClipKeyRef.current === visibleClipKey) {
+      restartPendingClipKeyRef.current = null;
+      playbackProgressMsRef.current = 0;
+      setVideoProgressDurationMs(0);
+      setSponsorSwitchHoldFrame(null);
+      lastCompletedVideoFrameRef.current = null;
+      setSlideTick((tick) => tick + 1);
+    }
+  }, [
+    current,
+    finishTelemetryClip,
+    paused,
+    restartCurrentOnResume,
+    visibleClipKey,
+    visibleClipSeconds,
+  ]);
+
   const pushActiveClipProgress = useCallback(
     (
       positionMs: number,
@@ -635,6 +736,8 @@ export function SponsorBudgetRotation({
           }
           const until = Date.now() + SPONSOR_CROSS_SPONSOR_VIDEO_RELEASE_MS;
           setSponsorSwitchReleaseUntilMs(until);
+          setSponsorSwitchHoldFrame(lastCompletedVideoFrameRef.current);
+          lastCompletedVideoFrameRef.current = null;
           setCurrent(null);
           sponsorSwitchTimerRef.current = window.setTimeout(() => {
             sponsorSwitchTimerRef.current = null;
@@ -644,9 +747,13 @@ export function SponsorBudgetRotation({
           }, SPONSOR_CROSS_SPONSOR_VIDEO_RELEASE_MS);
           return;
         }
+        setSponsorSwitchHoldFrame(null);
+        lastCompletedVideoFrameRef.current = null;
         setCurrent(next);
         setSlideTick((t) => t + 1);
       } else {
+        setSponsorSwitchHoldFrame(null);
+        lastCompletedVideoFrameRef.current = null;
         setCurrent(null);
       }
     },
@@ -843,10 +950,11 @@ export function SponsorBudgetRotation({
   ]);
 
   const handleVideoEnded = useCallback(
-    (actualSec: number) => {
+    (actualSec: number, holdFrameDataUrl?: string | null) => {
       if (followMode) return;
       if (!isPlaybackOwner) return;
       if (!current || current.item.type !== "VIDEO") return;
+      lastCompletedVideoFrameRef.current = holdFrameDataUrl ?? null;
       const sec =
         Number.isFinite(actualSec) && actualSec > 0 ? actualSec : current.playSec;
       if (earlyEndedCommitTimerRef.current != null) return;
@@ -898,6 +1006,8 @@ export function SponsorBudgetRotation({
       setCurrent(null);
       setVideoProgressDurationMs(0);
       setSponsorSwitchReleaseUntilMs(0);
+      setSponsorSwitchHoldFrame(null);
+      lastCompletedVideoFrameRef.current = null;
       playbackProgressMsRef.current = 0;
       console.warn(
         `[sponsor] video-fout (${reason}) — ${SPONSOR_VIDEO_FAULT_PAUSE_MS / 1000}s pauze voor sponsorvideo-decode`,
@@ -1034,13 +1144,14 @@ export function SponsorBudgetRotation({
     if (!isPlaybackOwner) return;
     if (!playbackTelemetry || !current) return;
     if (lastPausedTelemetryRef.current === paused) return;
+    const activeTelemetryClip = telemetryClipRef.current;
+    if (!activeTelemetryClip || activeTelemetryClip.ended) return;
     const segmentKey = sponsorTelemetrySegmentKey(
       playbackTelemetry.matchId,
       playbackTelemetry.matchStatus,
       section,
     );
     if (!segmentKey) return;
-    const clipSessionId = stableClipSessionId(segmentKey, current);
     const positionMs = Math.max(0, playbackProgressMsRef.current);
     lastPausedTelemetryRef.current = paused;
     void reportSponsorClipStart({
@@ -1049,7 +1160,7 @@ export function SponsorBudgetRotation({
       sponsorId: current.sponsorId,
       mediaId: current.mediaId,
       expectedPlaySec: current.playSec,
-      clipSessionId,
+      clipSessionId: activeTelemetryClip.clipSessionId,
       startedAtMs: Date.now() - positionMs,
       playbackPositionMs: positionMs,
       paused,
@@ -1059,6 +1170,7 @@ export function SponsorBudgetRotation({
   useEffect(() => {
     if (!followMode) return;
     if (!followClip) {
+      followClipSessionRef.current = null;
       setCurrent(null);
       setVideoProgressDurationMs(0);
       return;
@@ -1089,8 +1201,20 @@ export function SponsorBudgetRotation({
       setCurrent(null);
       return;
     }
+    const nextFollowSession =
+      followClip.clipSessionId ??
+      `${followClip.sponsorId}-${followClip.mediaId}-${followClip.startedAtMs}`;
+    const followSessionChanged = followClipSessionRef.current !== nextFollowSession;
+    followClipSessionRef.current = nextFollowSession;
     setCurrent((prev) => {
-      if (prev && prev.sponsorId === sponsor.id && prev.mediaId === item.id) return prev;
+      if (
+        prev &&
+        prev.sponsorId === sponsor.id &&
+        prev.mediaId === item.id &&
+        !followSessionChanged
+      ) {
+        return prev;
+      }
       setSlideTick((t) => t + 1);
       return {
         sponsorId: sponsor.id,
@@ -1152,16 +1276,36 @@ export function SponsorBudgetRotation({
   const videoFaultPaused = !followMode && videoFaultPauseUntilMs > Date.now();
   const sponsorSwitchReleasing =
     !followMode && sponsorSwitchReleaseUntilMs > Date.now();
+  /**
+   * Bij video → video geven we Chromium bewust even tijd om de oude decoder vrij te
+   * maken. De normale fallback is hier het scorebord, maar dat veroorzaakt een felle
+   * scorebordflits tussen twee spots. Houd daarom het laatste videoframe vast (met
+   * zwart als veilige fallback) totdat de volgende video werkelijk speelt.
+   */
+  const mediaHandoffInProgress = sponsorSwitchReleasing && !current;
   const showBudgetFallback = followMode
     ? fallback != null &&
         (followClipExpired || (!followClip && !current && playedClipRef.current))
-    : fallback != null &&
+    : !mediaHandoffInProgress &&
+      fallback != null &&
         (((videoFaultPaused || sponsorSwitchReleasing) && !current) ||
           (!cycleBudgetForever && !current && playedClipRef.current));
 
   return (
     <div className="absolute inset-0 overflow-hidden bg-black contain-layout contain-paint">
-      {showBudgetFallback ? (
+      {mediaHandoffInProgress ? (
+        sponsorSwitchHoldFrame ? (
+          <img
+            src={sponsorSwitchHoldFrame}
+            alt=""
+            className="absolute inset-0 size-full bg-black"
+            style={{ objectFit: mediaObjectFit, objectPosition: "center" }}
+            aria-hidden
+          />
+        ) : (
+          <div className="absolute inset-0 bg-black" aria-hidden />
+        )
+      ) : showBudgetFallback ? (
         <div className="absolute inset-0 size-full">{fallback}</div>
       ) : current && !followClipExpired ? (
         <div
@@ -1178,6 +1322,7 @@ export function SponsorBudgetRotation({
               followMode && followClip ? Math.max(0, followElapsedMs) : undefined
             }
             onVideoEnded={handleVideoEnded}
+            onVideoPlaying={() => setSponsorSwitchHoldFrame(null)}
             onVideoPlaybackFault={followMode ? undefined : onBudgetVideoPlaybackFault}
             onVideoDurationMs={(ms) => {
               if (ms > 0) {
@@ -1202,6 +1347,15 @@ export function SponsorBudgetRotation({
       ) : (
         <div className="absolute inset-0 bg-black" />
       )}
+      {sponsorSwitchHoldFrame && current && current.item.type === "VIDEO" && (
+        <img
+          src={sponsorSwitchHoldFrame}
+          alt=""
+          className="pointer-events-none absolute inset-0 z-10 size-full bg-black"
+          style={{ objectFit: mediaObjectFit, objectPosition: "center" }}
+          aria-hidden
+        />
+      )}
       {showPreviewProgress && current && !followClipExpired && slideMs > 0 && (
         <PreviewSlideProgressBar
           elapsed01={followElapsed01 ?? slideElapsed}
@@ -1219,6 +1373,29 @@ function budgetFor(s: Sponsor, section: SponsorSection, matchStatus?: string): n
   return matchPlayBudgetSeconds(s, matchStatus);
 }
 
+/**
+ * Lichtgewicht stilstaand eindframe voor een naadloze video-overgang. De afbeelding
+ * blijft alleen tijdens de decoder-release in geheugen en wordt bij `playing` gewist.
+ */
+function captureVideoHoldFrame(video: HTMLVideoElement): string | null {
+  try {
+    const sourceWidth = video.videoWidth;
+    const sourceHeight = video.videoHeight;
+    if (sourceWidth <= 0 || sourceHeight <= 0 || video.readyState < 2) return null;
+    const width = Math.min(960, sourceWidth);
+    const height = Math.max(1, Math.round((sourceHeight / sourceWidth) * width));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { alpha: false });
+    if (!context) return null;
+    context.drawImage(video, 0, 0, width, height);
+    return canvas.toDataURL("image/jpeg", 0.82);
+  } catch {
+    return null;
+  }
+}
+
 function MediaRenderer({
   item,
   objectFit,
@@ -1227,6 +1404,7 @@ function MediaRenderer({
   syncPlaybackMs,
   committedPlaySec,
   onVideoEnded,
+  onVideoPlaying,
   onVideoPlaybackFault,
   onVideoDurationMs,
   onVideoProgressMs,
@@ -1239,7 +1417,9 @@ function MediaRenderer({
   syncPlaybackMs?: number;
   /** Geplande spotduur (s) — bij afwijkende browser-metadata toch volledige clip afwachten. */
   committedPlaySec?: number;
-  onVideoEnded: (actualSec: number) => void;
+  onVideoEnded: (actualSec: number, holdFrameDataUrl?: string | null) => void;
+  /** Nieuwe video speelt echt: het vastgehouden frame van de vorige mag verdwijnen. */
+  onVideoPlaying?: () => void;
   /** Decode-/netwerkfout: clip kan geen `ended` geven; ga door zonder volledige buffertime-out. */
   onVideoPlaybackFault?: (reason?: string) => void;
   onVideoDurationMs?: (ms: number) => void;
@@ -1449,7 +1629,7 @@ function MediaRenderer({
       clearTimeout(earlyEndHoldTimerRef.current);
       earlyEndHoldTimerRef.current = null;
     }
-    onVideoEnded(resolveBilledVideoSec(video));
+    onVideoEnded(resolveBilledVideoSec(video), captureVideoHoldFrame(video));
   };
 
   const holdEarlyEndedVideoUntilCommittedDuration = (
@@ -1469,7 +1649,7 @@ function MediaRenderer({
     onVideoProgressMs?.(catalogDur * 1000);
     earlyEndHoldTimerRef.current = window.setTimeout(() => {
       earlyEndHoldTimerRef.current = null;
-      onVideoEnded(catalogDur);
+      onVideoEnded(catalogDur, captureVideoHoldFrame(video));
     }, holdMs);
     return true;
   };
@@ -1512,6 +1692,7 @@ function MediaRenderer({
     muted: !(item.playAudio ?? false),
     playsInline: true,
     onPlaying: () => {
+      onVideoPlaying?.();
       if (syncPlaybackMs != null) return;
       if (firstPlayingAtRef.current == null) firstPlayingAtRef.current = Date.now();
     },
@@ -1585,7 +1766,7 @@ function MediaRenderer({
         if (falseEndedRetriesRef.current >= 2) {
           endedRef.current = true;
           onVideoProgressMs?.(catalogDur * 1000);
-          onVideoEnded(catalogDur);
+          onVideoEnded(catalogDur, captureVideoHoldFrame(v));
           falseEndedRetriesRef.current = 0;
           return;
         }

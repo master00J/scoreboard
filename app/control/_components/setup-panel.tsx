@@ -443,7 +443,7 @@ export function SetupPanel() {
                   </span>
                 ) : null}
                 <div className="text-xs text-muted-foreground ml-2">
-                  {m.homeScore} – {m.awayScore} · {tMatchStatus(t, m.status)}
+                  {m.homeScore} – {m.awayScore} · {tMatchStatus(t, m.status, m.sport)}
                   {m.kickoffAt ? (
                     <>
                       {" "}
@@ -1903,9 +1903,13 @@ export function MatchDialog({
   quickStart?: boolean;
 }) {
   const { t } = useTranslation();
+  const [step, setStep] = useState<1 | 2>(1);
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [sport, setSport] = useState<SportType>("FOOTBALL");
   const sportProfile = getSportProfile(sport);
+  const [periodMinutes, setPeriodMinutes] = useState(45);
+  const [servingStart, setServingStart] = useState<"home" | "away">("home");
+  const [technicalTimeouts, setTechnicalTimeouts] = useState(true);
   const [awayId, setAwayId] = useState(
     teams.find((team) => team.id !== homeTeam?.id)?.id ?? "",
   );
@@ -1921,6 +1925,13 @@ export function MatchDialog({
   const [activateAfterCreate, setActivateAfterCreate] = useState(true);
   const [startSponsorRotation, setStartSponsorRotation] = useState(true);
   const { data: mediaForMatch } = useApi<MediaItem[]>("/api/media");
+  const sponsorMediaAvailable = (mediaForMatch ?? []).some(
+    (item) => item.active && !item.hideFromLibrary && !!item.sponsorId,
+  );
+
+  useEffect(() => {
+    setPeriodMinutes(Math.max(0, Math.round(sportProfile.defaultPeriodDurationSec / 60)));
+  }, [sportProfile.defaultPeriodDurationSec]);
 
   async function onAwayLogo(file?: File, localPath?: string) {
     if (localPath) {
@@ -1993,6 +2004,22 @@ export function MatchDialog({
     return created.id;
   }
 
+  function continueToOptions() {
+    if (!homeTeam) {
+      toast({ title: t("setup.setHomeFirst"), variant: "error" });
+      return;
+    }
+    if (mode === "existing" && (!awayId || awayId === homeTeam.id)) {
+      toast({ title: t("setup.chooseOtherAway"), variant: "error" });
+      return;
+    }
+    if (mode === "new" && !awayName.trim()) {
+      toast({ title: t("setup.fillAwayName"), variant: "error" });
+      return;
+    }
+    setStep(2);
+  }
+
   async function save() {
     if (!homeTeam) {
       toast({ title: t("setup.setHomeFirst"), variant: "error" });
@@ -2016,7 +2043,10 @@ export function MatchDialog({
       homeTeamId: homeTeam.id,
       awayTeamId: resolvedAwayId,
       sport,
-      periodDurationSec: sportProfile.defaultPeriodDurationSec,
+      periodDurationSec:
+        sportProfile.timerMode === "NONE" ? 0 : Math.max(0, Math.round(Number(periodMinutes) * 60)),
+      servingSide: sportProfile.hasSets ? servingStart : null,
+      technicalTimeoutsEnabled: sportProfile.hasSets ? technicalTimeouts : true,
       kickoffAt: kickoffLocal.trim() ? localDatetimeToIso(kickoffLocal) : null,
       matchSponsorMediaId: matchSponsorMediaId.trim() ? matchSponsorMediaId : null,
       prematchSpreadWindowSec: prematchSec,
@@ -2044,6 +2074,8 @@ export function MatchDialog({
   }
 
   const selectableAwayTeams = teams.filter((team) => team.id !== homeTeam?.id);
+  const selectedAwayTeam = selectableAwayTeams.find((team) => team.id === awayId) ?? null;
+  const awayTeamLabel = mode === "new" ? awayName.trim() : selectedAwayTeam?.name;
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -2051,7 +2083,33 @@ export function MatchDialog({
         <DialogHeader>
           <DialogTitle>{quickStart ? t("shell.startNewMatch") : t("setup.newMatch")}</DialogTitle>
         </DialogHeader>
-        <div className="rounded-lg border border-border p-3">
+        <div className="grid grid-cols-2 gap-2" aria-label={t("setup.matchWizardProgress")}>
+          <button
+            type="button"
+            onClick={() => setStep(1)}
+            className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+              step === 1
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-muted/20 text-muted-foreground"
+            }`}
+          >
+            <span className="mr-2 inline-grid size-5 place-items-center rounded-full bg-primary text-[11px] font-black text-primary-foreground">1</span>
+            {t("setup.matchWizardTeams")}
+          </button>
+          <button
+            type="button"
+            onClick={() => step === 2 && setStep(2)}
+            className={`rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+              step === 2
+                ? "border-primary bg-primary/10 text-foreground"
+                : "border-border bg-muted/20 text-muted-foreground"
+            }`}
+          >
+            <span className="mr-2 inline-grid size-5 place-items-center rounded-full bg-secondary text-[11px] font-black text-foreground">2</span>
+            {t("setup.matchWizardStart")}
+          </button>
+        </div>
+        <div hidden={step !== 1} className="rounded-lg border border-border p-3">
           <Label>{t("setup.sport")}</Label>
           <Select
             value={sport}
@@ -2075,6 +2133,41 @@ export function MatchDialog({
               ? ` · ${t("setup.shotclock", { presets: sportProfile.shotClockPresets.join("/") })}`
               : ""}
           </p>
+          {sportProfile.timerMode !== "NONE" && (
+            <div className="mt-3 max-w-xs">
+              <Label htmlFor="period-minutes">{t("setup.periodMinutes")}</Label>
+              <Input
+                id="period-minutes"
+                type="number"
+                min={1}
+                max={90}
+                className="mt-1"
+                value={periodMinutes}
+                onChange={(e) => setPeriodMinutes(Number(e.target.value))}
+              />
+            </div>
+          )}
+          {sportProfile.hasSets && (
+            <div className="mt-3 space-y-2">
+              <Label>{t("setup.servingStart")}</Label>
+              <Select
+                className="mt-1 max-w-xs"
+                value={servingStart}
+                onChange={(e) => setServingStart(e.target.value as "home" | "away")}
+              >
+                <option value="home">{t("common.home")}</option>
+                <option value="away">{t("common.away")}</option>
+              </Select>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={technicalTimeouts}
+                  onChange={(e) => setTechnicalTimeouts(e.target.checked)}
+                />
+                {t("setup.technicalTimeouts")}
+              </label>
+            </div>
+          )}
         </div>
         {!homeTeam ? (
           <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
@@ -2082,7 +2175,7 @@ export function MatchDialog({
           </div>
         ) : (
           <div className="grid gap-4">
-            <div>
+            <div hidden={step !== 1}>
               <Label>{t("setup.homeTeam")}</Label>
               <div className="mt-2 flex items-center gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3">
                 {homeTeam.logoPath ? (
@@ -2109,7 +2202,7 @@ export function MatchDialog({
               </div>
             </div>
 
-            <div>
+            <div hidden={step !== 1}>
               <Label>{t("setup.awayTeam")}</Label>
               <div className="mt-2 flex gap-2">
                 <Button
@@ -2132,7 +2225,7 @@ export function MatchDialog({
             </div>
 
             {mode === "existing" ? (
-              <div>
+              <div hidden={step !== 1}>
                 <Label>{t("setup.selectAway")}</Label>
                 <Select value={awayId} onChange={(e) => setAwayId(e.target.value)}>
                   <option value="">{t("setup.chooseTeam")}</option>
@@ -2144,7 +2237,7 @@ export function MatchDialog({
                 </Select>
               </div>
             ) : (
-              <div className="grid gap-3">
+              <div hidden={step !== 1} className="grid gap-3">
                 <div>
                   <Label>{t("setup.awayTeam")}</Label>
                   <Input
@@ -2168,7 +2261,11 @@ export function MatchDialog({
                     placeholder="AJA"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <details className="group rounded-lg border border-border p-3">
+                  <summary className="cursor-pointer list-none text-sm font-medium">
+                    {t("setup.optionalTeamStyle")}
+                  </summary>
+                  <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border pt-3">
                   <div>
                     <Label>{t("setup.primaryColor")}</Label>
                     <div className="flex gap-2">
@@ -2199,8 +2296,8 @@ export function MatchDialog({
                       />
                     </div>
                   </div>
-                </div>
-                <div>
+                  </div>
+                  <div className="mt-3">
                   <Label>{t("setup.logo")}</Label>
                   <div className="flex items-center gap-3 flex-wrap">
                     {awayLogoPath && (
@@ -2232,11 +2329,33 @@ export function MatchDialog({
                     )}
                   </div>
                 </div>
+                </details>
               </div>
             )}
 
-            <div className="rounded-lg border border-border p-3 space-y-3">
-              <div className="text-sm font-semibold">{t("setup.scheduleTitle")}</div>
+            <div
+              hidden={step !== 2}
+              className="rounded-xl border border-primary/30 bg-primary/5 p-4 text-center"
+            >
+              <div className="text-[11px] font-bold uppercase tracking-widest text-primary">
+                {sportProfile.label}
+              </div>
+              <div className="mt-1 text-lg font-black">
+                {homeTeam.name} <span className="mx-2 text-muted-foreground">vs</span>{" "}
+                {awayTeamLabel || t("setup.awayTeam")}
+              </div>
+            </div>
+
+            <details hidden={step !== 2} className="group rounded-lg border border-border p-3">
+              <summary className="cursor-pointer list-none text-sm font-semibold text-foreground">
+                <span className="inline-flex w-full items-center justify-between gap-2">
+                  {t("setup.optionalPlanningTitle")}
+                  <span className="text-xs font-normal text-muted-foreground group-open:hidden">
+                    {t("setup.optionalPlanningClosed")}
+                  </span>
+                </span>
+              </summary>
+              <div className="mt-3 space-y-3 border-t border-border pt-3">
               <div>
                 <Label>{t("setup.plannedKickoff")}</Label>
                 <Input
@@ -2284,47 +2403,68 @@ export function MatchDialog({
                     ))}
                 </Select>
               </div>
-            </div>
+              </div>
+            </details>
 
             {quickStart && (
-              <div className="rounded-lg border border-border p-3 space-y-3">
+              <div hidden={step !== 2} className="rounded-lg border border-border p-3 space-y-3">
                 <div className="text-sm font-semibold">{t("setup.quickStartOptions")}</div>
-                <label className="flex items-start gap-2 text-sm cursor-pointer">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={activateAfterCreate}
-                    onChange={(e) => {
-                      setActivateAfterCreate(e.target.checked);
-                      if (!e.target.checked) setStartSponsorRotation(false);
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivateAfterCreate(true);
+                      setStartSponsorRotation(false);
                     }}
-                  />
-                  <span>
-                    <span className="font-medium">{t("setup.quickStartActivate")}</span>
-                    <span className="block text-xs text-muted-foreground mt-0.5">
-                      {t("setup.quickStartActivateHelp")}
+                    className={`rounded-lg border p-3 text-left transition-colors ${
+                      activateAfterCreate && !startSponsorRotation
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-background hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">{t("setup.startBoardOnly")}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {t("setup.startBoardOnlyHelp")}
                     </span>
-                  </span>
-                </label>
-                <label
-                  className={`flex items-start gap-2 text-sm ${
-                    activateAfterCreate ? "cursor-pointer" : "opacity-50 cursor-not-allowed"
-                  }`}
-                >
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    checked={startSponsorRotation}
-                    disabled={!activateAfterCreate}
-                    onChange={(e) => setStartSponsorRotation(e.target.checked)}
-                  />
-                  <span>
-                    <span className="font-medium">{t("setup.quickStartSponsors")}</span>
-                    <span className="block text-xs text-muted-foreground mt-0.5">
-                      {t("setup.quickStartSponsorsHelp")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!sponsorMediaAvailable}
+                    onClick={() => {
+                      setActivateAfterCreate(true);
+                      setStartSponsorRotation(true);
+                    }}
+                    className={`rounded-lg border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+                      activateAfterCreate && startSponsorRotation
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-background hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">{t("setup.startWithSponsors")}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {sponsorMediaAvailable
+                        ? t("setup.startWithSponsorsHelp")
+                        : t("setup.startWithSponsorsUnavailable")}
                     </span>
-                  </span>
-                </label>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActivateAfterCreate(false);
+                      setStartSponsorRotation(false);
+                    }}
+                    className={`rounded-lg border p-3 text-left transition-colors ${
+                      !activateAfterCreate
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-background hover:bg-muted/40"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">{t("setup.saveForLater")}</span>
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      {t("setup.saveForLaterHelp")}
+                    </span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -2333,9 +2473,24 @@ export function MatchDialog({
           <Button variant="outline" onClick={onClose}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={save} disabled={!homeTeam}>
-            {quickStart ? t("shell.startNewMatch") : t("common.create")}
-          </Button>
+          {step === 2 && (
+            <Button variant="ghost" onClick={() => setStep(1)}>
+              {t("setup.previousStep")}
+            </Button>
+          )}
+          {step === 1 ? (
+            <Button onClick={continueToOptions} disabled={!homeTeam}>
+              {t("setup.nextStep")}
+            </Button>
+          ) : (
+            <Button onClick={save} disabled={!homeTeam}>
+              {quickStart
+                ? activateAfterCreate
+                  ? t("setup.createAndStart")
+                  : t("setup.createForLater")
+                : t("common.create")}
+            </Button>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

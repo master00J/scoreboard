@@ -14,11 +14,11 @@ const STORAGE_KEY = "scoreboard_mobile_session_v1";
 const MATCH_STATUSES = ["SETUP", "PREMATCH", "FIRST_HALF", "HALF_TIME", "SECOND_HALF", "EXTRA_TIME", "FULL_TIME", "POST_MATCH"];
 const ARENACUE_LOGO_URI = "https://arenacue.be/assets/arenacue-icon.png";
 const SPORT_PROFILES = {
-  FOOTBALL: { label: "Voetbal", periodLabel: "Helft", periods: 2, timer: "up", score: "Goal", increments: [1], timeouts: 0, stat: null, shot: [] },
-  FUTSAL: { label: "Futsal", periodLabel: "Helft", periods: 2, timer: "down", score: "Goal", increments: [1], timeouts: 1, stat: "Teamfouten", shot: [] },
-  BASKETBALL: { label: "Basketbal", periodLabel: "Quarter", periods: 4, timer: "down", score: "Punten", increments: [1, 2, 3], timeouts: 3, stat: "Teamfouten", shot: [24, 14] },
-  VOLLEYBALL: { label: "Volleybal", periodLabel: "Set", periods: 5, timer: "none", score: "Punt", increments: [1], timeouts: 2, stat: null, shot: [] },
-  HOCKEY: { label: "Hockey", periodLabel: "Quarter", periods: 4, timer: "down", score: "Goal", increments: [1], timeouts: 0, stat: "Straffen", shot: [] },
+  FOOTBALL: { label: "Voetbal", periodLabel: "Helft", periods: 2, timer: "up", score: "Goal", increments: [1], timeouts: 0, stat: null, shot: [], cards: ["YELLOW", "RED"], presets: true, hasSets: false, penalty: [] },
+  FUTSAL: { label: "Futsal", periodLabel: "Helft", periods: 2, timer: "down", score: "Goal", increments: [1], timeouts: 1, stat: "Teamfouten", shot: [], cards: ["YELLOW", "RED"], presets: false, hasSets: false, penalty: [] },
+  BASKETBALL: { label: "Basketbal", periodLabel: "Quarter", periods: 4, timer: "down", score: "Punten", increments: [1, 2, 3], timeouts: 3, stat: "Teamfouten", shot: [24, 14], cards: [], presets: false, hasSets: false, penalty: [] },
+  VOLLEYBALL: { label: "Volleybal", periodLabel: "Set", periods: 5, timer: "none", score: "Punt", increments: [1], timeouts: 2, stat: null, shot: [], cards: [], presets: false, hasSets: true, penalty: [] },
+  HOCKEY: { label: "Hockey", periodLabel: "Quarter", periods: 4, timer: "down", score: "Goal", increments: [1], timeouts: 0, stat: "Straffen", shot: [], cards: ["GREEN", "YELLOW", "RED"], presets: false, hasSets: false, penalty: [120, 300] },
 };
 
 function sportProfile(sport) {
@@ -47,6 +47,17 @@ function computeShotClockSeconds(snapshot, nowMs = Date.now()) {
   const receivedAtMs = Number(snapshot._receivedAtMs ?? nowMs);
   const base = Number(snapshot.shotClockRemainingSec ?? snapshot.shotClockBaseSec ?? 0);
   const delta = snapshot.shotClockRunning ? (nowMs - receivedAtMs) / 1000 : 0;
+  return Math.max(0, base - delta);
+}
+
+function computePenaltySeconds(snapshot, side, nowMs = Date.now()) {
+  if (!snapshot) return 0;
+  const running = side === "home" ? snapshot.homePenaltyRunning : snapshot.awayPenaltyRunning;
+  const remainingKey = side === "home" ? "homePenaltyRemainingSec" : "awayPenaltyRemainingSec";
+  const baseKey = side === "home" ? "homePenaltyBaseSec" : "awayPenaltyBaseSec";
+  const receivedAtMs = Number(snapshot._receivedAtMs ?? nowMs);
+  const base = Number(snapshot[remainingKey] ?? snapshot[baseKey] ?? 0);
+  const delta = running ? (nowMs - receivedAtMs) / 1000 : 0;
   return Math.max(0, base - delta);
 }
 
@@ -701,6 +712,8 @@ export default function App() {
       ? Math.max(0, periodDurationSec - displayElapsed)
       : displayElapsed;
   const displayShotClock = computeShotClockSeconds(snapshot, nowMs);
+  const displayHomePenalty = computePenaltySeconds(snapshot, "home", nowMs);
+  const displayAwayPenalty = computePenaltySeconds(snapshot, "away", nowMs);
   const activeTeamSide = activeMatchDetails && selectedTeamId === activeMatchDetails.awayTeamId ? "away" : "home";
   const homeLabel = activeMatchDetails?.homeTeam?.name || activeMatch?.homeTeam?.name || "HOME";
   const awayLabel = activeMatchDetails?.awayTeam?.name || activeMatch?.awayTeam?.name || "AWAY";
@@ -1247,7 +1260,7 @@ export default function App() {
               </>
             )}
 
-            {activeSportProfile.label === "Volleybal" && (
+            {activeSportProfile.hasSets && (
               <>
                 <Text style={styles.subLabel}>Gewonnen sets</Text>
                 <View style={styles.row}>
@@ -1273,6 +1286,93 @@ export default function App() {
                       </View>
                     </View>
                   ))}
+                </View>
+                <Text style={styles.subLabel}>Service</Text>
+                <View style={styles.row}>
+                  <Pressable
+                    style={[
+                      styles.buttonSecondary,
+                      activeMatchDetails.servingSide === "home" ? styles.activeBorder : null,
+                    ]}
+                    onPress={() => sendCommand({ type: "sport:setServing", side: "home" })}
+                  >
+                    <Text style={styles.buttonText}>HOME serve</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.buttonSecondary,
+                      activeMatchDetails.servingSide === "away" ? styles.activeBorder : null,
+                    ]}
+                    onPress={() => sendCommand({ type: "sport:setServing", side: "away" })}
+                  >
+                    <Text style={styles.buttonText}>AWAY serve</Text>
+                  </Pressable>
+                </View>
+                {activeMatchDetails.status === "HALF_TIME" ? (
+                  <Pressable
+                    style={styles.button}
+                    onPress={() => sendCommand({ type: "sport:resumePlay" })}
+                  >
+                    <Text style={styles.buttonText}>Hervat set</Text>
+                  </Pressable>
+                ) : null}
+              </>
+            )}
+
+            {activeSportProfile.penalty.length > 0 && (
+              <>
+                <Text style={styles.subLabel}>Straftijd</Text>
+                <View style={styles.row}>
+                  <View style={styles.scoreSide}>
+                    <Text style={styles.scoreLabel}>HOME · {Math.ceil(displayHomePenalty)}s</Text>
+                    {activeSportProfile.penalty.map((seconds) => (
+                      <Pressable
+                        key={`home-pen-${seconds}`}
+                        style={styles.smallButton}
+                        onPress={() => sendCommand({ type: "penalty:start", side: "home", seconds })}
+                      >
+                        <Text style={styles.buttonTextSmall}>{Math.round(seconds / 60)}′</Text>
+                      </Pressable>
+                    ))}
+                    <Pressable
+                      style={styles.smallButton}
+                      onPress={() =>
+                        sendCommand({
+                          type: snapshot?.homePenaltyRunning ? "penalty:pause" : "penalty:clear",
+                          side: "home",
+                        })
+                      }
+                    >
+                      <Text style={styles.buttonTextSmall}>
+                        {snapshot?.homePenaltyRunning ? "Pauze" : "Reset"}
+                      </Text>
+                    </Pressable>
+                  </View>
+                  <View style={styles.scoreSide}>
+                    <Text style={styles.scoreLabel}>AWAY · {Math.ceil(displayAwayPenalty)}s</Text>
+                    {activeSportProfile.penalty.map((seconds) => (
+                      <Pressable
+                        key={`away-pen-${seconds}`}
+                        style={styles.smallButton}
+                        onPress={() => sendCommand({ type: "penalty:start", side: "away", seconds })}
+                      >
+                        <Text style={styles.buttonTextSmall}>{Math.round(seconds / 60)}′</Text>
+                      </Pressable>
+                    ))}
+                    <Pressable
+                      style={styles.smallButton}
+                      onPress={() =>
+                        sendCommand({
+                          type: snapshot?.awayPenaltyRunning ? "penalty:pause" : "penalty:clear",
+                          side: "away",
+                        })
+                      }
+                    >
+                      <Text style={styles.buttonTextSmall}>
+                        {snapshot?.awayPenaltyRunning ? "Pauze" : "Reset"}
+                      </Text>
+                    </Pressable>
+                  </View>
                 </View>
               </>
             )}
@@ -1306,8 +1406,10 @@ export default function App() {
           </View>
         )}
 
+        {activeSportProfile.presets || activeSportProfile.timer !== "none" ? (
         <View style={styles.card}>
           <Text style={styles.label}>Timer snel</Text>
+          {activeSportProfile.presets ? (
           <View style={styles.grid}>
             {[
               { preset: "FIRST_HALF", label: "1e 45'" },
@@ -1324,6 +1426,9 @@ export default function App() {
               </Pressable>
             ))}
           </View>
+          ) : null}
+          {activeSportProfile.timer !== "none" ? (
+          <>
           <View style={styles.row}>
             <Pressable
               style={styles.buttonSecondary}
@@ -1338,6 +1443,8 @@ export default function App() {
               <Text style={styles.buttonText}>−1 min klok</Text>
             </Pressable>
           </View>
+          {activeSportProfile.presets ? (
+          <>
           <Text style={styles.subLabel}>Blessuretijd (min)</Text>
           <View style={styles.row}>
             <TextInput
@@ -1363,7 +1470,12 @@ export default function App() {
               <Text style={styles.buttonText}>Uit</Text>
             </Pressable>
           </View>
+          </>
+          ) : null}
+          </>
+          ) : null}
         </View>
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.label}>Matchstatus</Text>
@@ -1491,6 +1603,8 @@ export default function App() {
                 </Pressable>
               </View>
 
+              {activeSportProfile.cards.length > 0 ? (
+              <>
               <Text style={styles.subLabel}>Kaart</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={styles.chipsRow}>
@@ -1509,6 +1623,18 @@ export default function App() {
                 </View>
               </ScrollView>
               <View style={styles.row}>
+                {activeSportProfile.cards.includes("GREEN") ? (
+                <Pressable
+                  style={[
+                    styles.buttonSecondary,
+                    selectedCardColor === "GREEN" ? styles.activeBorder : null,
+                  ]}
+                  onPress={() => setSelectedCardColor("GREEN")}
+                >
+                  <Text style={styles.buttonText}>Groen</Text>
+                </Pressable>
+                ) : null}
+                {activeSportProfile.cards.includes("YELLOW") ? (
                 <Pressable
                   style={[
                     styles.buttonSecondary,
@@ -1518,6 +1644,8 @@ export default function App() {
                 >
                   <Text style={styles.buttonText}>Geel</Text>
                 </Pressable>
+                ) : null}
+                {activeSportProfile.cards.includes("RED") ? (
                 <Pressable
                   style={[
                     styles.buttonSecondary,
@@ -1527,6 +1655,7 @@ export default function App() {
                 >
                   <Text style={styles.buttonText}>Rood</Text>
                 </Pressable>
+                ) : null}
                 <Pressable
                   style={styles.button}
                   onPress={() =>
@@ -1542,6 +1671,8 @@ export default function App() {
                   <Text style={styles.buttonText}>Geef kaart</Text>
                 </Pressable>
               </View>
+              </>
+              ) : null}
 
               <Text style={styles.subLabel}>Wissel</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>

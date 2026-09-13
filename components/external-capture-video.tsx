@@ -11,6 +11,9 @@ export function ExternalCaptureVideo({
   className = "",
   audio = false,
   preferHighRes = true,
+  onError,
+  onActive,
+  onEnded,
 }: {
   sourceId: string;
   className?: string;
@@ -18,8 +21,17 @@ export function ExternalCaptureVideo({
   audio?: boolean;
   /** Forceer HD-resolutie op cameras/capture-kaarten. Standaard aan. */
   preferHighRes?: boolean;
+  /** Capture kon niet starten (bron weg, geen rechten, driver bezet). */
+  onError?: (message: string) => void;
+  /** Stream loopt en levert beeld. */
+  onActive?: () => void;
+  /** Bron is tijdens de wedstrijd weggevallen (venster gesloten, kabel eruit). */
+  onEnded?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Callbacks via ref: anders herstart de stream bij elke parent-render.
+  const cbRef = useRef({ onError, onActive, onEnded });
+  cbRef.current = { onError, onActive, onEnded };
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -28,12 +40,25 @@ export function ExternalCaptureVideo({
     void (async () => {
       try {
         stream = await getCaptureStream(sourceId, { audio, preferHighRes });
-        if (cancelled || !videoRef.current) return;
+        if (cancelled || !videoRef.current) {
+          stream?.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        // Bron kan midden in de wedstrijd verdwijnen (venster dicht, HDMI eruit).
+        stream.getTracks().forEach((track) => {
+          track.addEventListener("ended", () => {
+            if (!cancelled) cbRef.current.onEnded?.();
+          });
+        });
         videoRef.current.srcObject = stream;
         videoRef.current.muted = !audio;
         await videoRef.current.play().catch(() => {});
+        if (!cancelled) cbRef.current.onActive?.();
       } catch (err) {
         console.error("[ExternalCaptureVideo]", err);
+        if (!cancelled) {
+          cbRef.current.onError?.(err instanceof Error ? err.message : String(err));
+        }
       }
     })();
 

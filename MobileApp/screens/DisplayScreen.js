@@ -27,6 +27,8 @@ export function DisplayScreen({
   activeMatchDetails,
   onStatus,
 }) {
+  const sport = String(activeMatchDetails?.sport || "FOOTBALL").toUpperCase();
+  const showTimerPresets = sport === "FOOTBALL";
   const homePlayers = activeMatchDetails?.homeTeam?.players ?? [];
   const awayPlayers = activeMatchDetails?.awayTeam?.players ?? [];
   const allPlayers = useMemo(
@@ -68,6 +70,7 @@ export function DisplayScreen({
         </Pressable>
       </View>
 
+      {showTimerPresets ? (
       <View style={styles.card}>
         <Text style={styles.label}>Timer presets</Text>
         <View style={styles.grid}>
@@ -81,6 +84,11 @@ export function DisplayScreen({
             </Pressable>
           ))}
         </View>
+      </View>
+      ) : null}
+      {sport !== "VOLLEYBALL" ? (
+      <View style={styles.card}>
+        <Text style={styles.label}>Timer</Text>
         <View style={styles.row}>
           <Pressable
             style={styles.buttonSecondary}
@@ -96,6 +104,7 @@ export function DisplayScreen({
           </Pressable>
         </View>
       </View>
+      ) : null}
 
       <View style={styles.card}>
         <Text style={styles.label}>Spelerintro (Start RAFC)</Text>

@@ -34,8 +34,8 @@ export type MatchStatusT = z.infer<typeof MatchStatus>;
 export const CommandSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("timer:start") }),
   z.object({ type: z.literal("timer:pause") }),
-  z.object({ type: z.literal("timer:adjust"), deltaSec: z.number().int() }),
-  z.object({ type: z.literal("timer:set"), seconds: z.number().int().nonnegative() }),
+  z.object({ type: z.literal("timer:adjust"), deltaSec: z.number().int().min(-7200).max(7200) }),
+  z.object({ type: z.literal("timer:set"), seconds: z.number().int().nonnegative().max(24 * 3600) }),
   z.object({
     type: z.literal("timer:preset"),
     preset: z.enum(["FIRST_HALF", "SECOND_HALF", "ET1", "ET2"]),
@@ -74,7 +74,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("score:adjust"),
     side: z.enum(["home", "away"]),
-    delta: z.number().int(),
+    delta: z.number().int().min(-99).max(99),
   }),
   z.object({
     type: z.literal("goal:prepare"),
@@ -107,10 +107,37 @@ export const CommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("sub:queueAdvance") }),
   z.object({
+    type: z.literal("sport:setServing"),
+    side: z.enum(["home", "away"]),
+  }),
+  z.object({ type: z.literal("sport:resumePlay") }),
+  z.object({
+    type: z.literal("timeout:start"),
+    side: z.enum(["home", "away", "technical"]),
+    /** Afwijkende duur (s); standaard uit het sportprofiel. */
+    seconds: z.number().int().min(5).max(600).optional(),
+    /** Ook de teamteller verhogen (standaard true voor home/away). */
+    countAgainstTeam: z.boolean().optional(),
+  }),
+  z.object({ type: z.literal("timeout:clear") }),
+  z.object({
+    type: z.literal("penalty:start"),
+    side: z.enum(["home", "away"]),
+    seconds: z.number().int().min(1).max(600),
+  }),
+  z.object({
+    type: z.literal("penalty:pause"),
+    side: z.enum(["home", "away"]),
+  }),
+  z.object({
+    type: z.literal("penalty:clear"),
+    side: z.enum(["home", "away"]),
+  }),
+  z.object({
     type: z.literal("card:trigger"),
     teamId: z.string(),
     playerId: z.string(),
-    color: z.enum(["YELLOW", "RED"]),
+    color: z.enum(["YELLOW", "RED", "GREEN"]),
   }),
   z.object({
     type: z.literal("display:setMode"),
@@ -130,6 +157,10 @@ export const CommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("display:setExternalCaptureToDisplay"),
+    enabled: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("display:setExternalCaptureAudio"),
     enabled: z.boolean(),
   }),
   z.object({ type: z.literal("display:requestSnapshot") }),

@@ -22,7 +22,7 @@ import {
 } from "@/lib/sponsor-live-roster";
 import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
 import { prematchRosterClockSec } from "@/lib/prematch-spread-timing";
-import { tMatchStatus } from "@/lib/i18n/t-phase";
+import { tMatchStatus, tSponsorBlock } from "@/lib/i18n/t-phase";
 
 function formatClock(sec: number): string {
   const t = Math.max(0, Math.round(Number(sec) || 0));
@@ -222,7 +222,7 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
             <p className="text-xs text-muted-foreground mt-1">
               {t("sponsors.matchPhase")}:{" "}
               <span className="text-foreground font-medium">
-                {tMatchStatus(t, activeMatch.status)}
+                {tMatchStatus(t, activeMatch.status, activeMatch.sport)}
               </span>
               {" · "}
               {t("sponsors.segmentSchedule")}:{" "}
@@ -249,9 +249,9 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
             <tr className="border-b border-border text-left text-muted-foreground">
               <th className="py-2 pr-2 font-medium">{t("sponsors.colSponsor")}</th>
               <th className={`py-2 px-1 font-medium ${cellClass("prematch")}`}>{t("phases.voor")}</th>
-              <th className={`py-2 px-1 font-medium ${cellClass("h1")}`}>{t("phases.h1")}</th>
-              <th className={`py-2 px-1 font-medium ${cellClass("h2")}`}>{t("phases.h2")}</th>
-              <th className={`py-2 px-1 font-medium ${cellClass("halftime")}`}>{t("phases.rust")}</th>
+              <th className={`py-2 px-1 font-medium ${cellClass("h1")}`}>{tSponsorBlock(t, activeMatch?.sport, "h1")}</th>
+              <th className={`py-2 px-1 font-medium ${cellClass("h2")}`}>{tSponsorBlock(t, activeMatch?.sport, "h2")}</th>
+              <th className={`py-2 px-1 font-medium ${cellClass("halftime")}`}>{tSponsorBlock(t, activeMatch?.sport, "halftime")}</th>
               <th className="py-2 pl-2 font-medium text-foreground">{t("sponsors.colNow")}</th>
             </tr>
           </thead>

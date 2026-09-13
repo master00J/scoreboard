@@ -44,6 +44,7 @@ import {
   type SponsorScheduleClock,
 } from "@/lib/sponsor-schedule-clock";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
+import { externalCaptureCoversDisplay } from "@/lib/sponsor-playback-interruption";
 
 export type SponsorPhaseHudModel =
   | { kind: "inactive" }
@@ -56,6 +57,15 @@ export type SponsorPhaseHudModel =
       sponsorClipProgress: number | null;
       nextSlotEtaSec: number | null;
       clipRemainingSec: number | null;
+      /**
+       * True wanneer de HUD "sponsor bezig" toont op basis van het eigen rooster, terwijl het
+       * stadionscherm die clip (nog) niet bevestigt via de telemetry-ledger. De voortgangsbalk
+       * is dan een voorspelling, geen meting — de UI moet dat eerlijk tonen i.p.v. een clip te
+       * suggereren die misschien nergens speelt.
+       */
+      playbackUnconfirmed?: boolean;
+      /** Rotatie staat stil doordat de externe capture het stadionscherm bedekt. */
+      coveredByCapture?: boolean;
       /**
        * Prematch met aftrap: seconden tot het sponsor-venster opent (kickoff − H).
        * HUD mag dan geen misleidende “volgende sponsor over 1 s” tonen op t=0 van de slotmap.
@@ -90,10 +100,14 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     skip: false,
   });
 
+  /** Externe capture bedekt het stadionscherm: rotatie pauzeert, budget loopt niet door. */
+  const captureCovers = externalCaptureCoversDisplay(state);
+
   /** Zelfde onderbrekings-set als `display/page.tsx` `sponsorInterrupted` (incl. geplande cue). */
   const sponsorInterrupted = useMemo(
     () =>
       activeScheduledCue != null ||
+      captureCovers ||
       mode === "GOAL" ||
       mode === "GOAL_INTRO_VIDEO" ||
       mode === "GOAL_PLAYER_VIDEO" ||
@@ -101,7 +115,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       mode === "CARD" ||
       mode === "HALFTIME" ||
       mode === "FULLTIME",
-    [activeScheduledCue, mode],
+    [activeScheduledCue, captureCovers, mode],
   );
 
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
@@ -583,6 +597,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       let sponsorClipProgress: number | null = null;
       let clipRemainingSec: number | null = null;
       let nextSlotEtaSec: number | null = null;
+      /** Bevestigt het stadionscherm de clip die de HUD voorspelt? */
+      let playbackConfirmed = false;
 
       if (ledgerMatchesSegment && match) {
         const acLive = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger!, now);
@@ -591,6 +607,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
           const totalSec = Math.max(0.1, acLive.expectedPlaySec || 0.1);
           sponsorClipProgress = Math.min(1, elapsedSec / totalSec);
           clipRemainingSec = Math.max(0, totalSec - elapsedSec);
+          playbackConfirmed = true;
         }
       } else {
         const hang = hangRef.current;
@@ -601,6 +618,12 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
           clipRemainingSec = Math.max(0, (hang.untilMs - now) / 1000);
         }
       }
+      /**
+       * Sponsorfase zonder bevestiging uit de ledger: het scherm speelt mogelijk niets.
+       * Tijdens een onderbreking (capture, goal, cue) is dat verwacht en geen storing.
+       */
+      const playbackUnconfirmed =
+        effectivePhase === "sponsor" && !playbackConfirmed && !sponsorInterrupted;
       if (effectivePhase === "scoreboard") {
         if (
           !cycleBudgetForever &&
@@ -650,6 +673,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         clipRemainingSec,
         prematchWindowOpensInSec: null,
         prematchTimelineComplete: false,
+        playbackUnconfirmed,
+        coveredByCapture: captureCovers,
       };
     }
 
@@ -658,7 +683,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       const t = mode === "SPONSOR_ROTATION" ? tLive : tInterruptFrozen.current;
       const section = sectionForStatus(match.status);
       return rosterFrom(
-        tMatchStatus(tUi, match.status),
+        tMatchStatus(tUi, match.status, match.sport),
         section,
         match.status,
         sponsorTelemetrySegmentKey(match.id, match.status, section),
@@ -791,5 +816,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     phaseTick,
     wallNowMs,
     tUi,
+    captureCovers,
+    sponsorInterrupted,
   ]);
 }

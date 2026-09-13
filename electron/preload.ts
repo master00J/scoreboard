@@ -32,6 +32,7 @@ const bridge: ElectronBridge = {
   getDisplaySnapshot: () => ipcRenderer.invoke("display:getSnapshot"),
   onDisplayState: (listener) => subscribe("display:state", listener),
   onTick: (listener) => subscribe("display:tick", listener),
+  onDisplayHorn: (listener) => subscribe("display:horn", listener),
   onSponsorLedger: (listener) =>
     subscribe<SponsorLedgerPayload | null>("display:sponsorLedger", listener),
   onDisplayError: (listener) => subscribe("display:error", listener),

@@ -9,10 +9,12 @@ export function CardMode({
   minute,
 }: {
   player: Player | null;
-  color: "YELLOW" | "RED";
+  color: "YELLOW" | "RED" | "GREEN";
   minute: number;
 }) {
-  const bg = color === "YELLOW" ? "#fbbf24" : "#dc2626";
+  const bg = color === "YELLOW" ? "#fbbf24" : color === "GREEN" ? "#22c55e" : "#dc2626";
+  const label =
+    color === "YELLOW" ? "Yellow card" : color === "GREEN" ? "Green card" : "Red card";
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -38,7 +40,7 @@ export function CardMode({
               className="uppercase tracking-[0.3em] text-white/40"
               style={{ fontSize: 36 }}
             >
-              {color === "YELLOW" ? "Yellow card" : "Red card"} · {minute}'
+              {label} · {minute}'
             </div>
             <div
               className="font-bold text-white/80 mt-2"

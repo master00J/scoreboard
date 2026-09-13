@@ -1,6 +1,6 @@
 import { app } from "electron";
 import { readStoredLicense } from "./license-service";
-import { computeElapsedSeconds, computeShotClockSeconds } from "../lib/timer";
+import { withClockTelemetry } from "../lib/clock-telemetry";
 
 type CloudRuntime = {
   apiRequest?: (request: {
@@ -51,34 +51,8 @@ function normalizeCloudBaseUrl(rawBaseUrl: string): string {
   return normalized;
 }
 
-function withTimerTelemetry(snapshot: unknown) {
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return snapshot;
-  const state = snapshot as {
-    timerRunning?: boolean;
-    timerStartedAt?: string | null;
-    timerBaseSec?: number;
-    shotClockRunning?: boolean;
-    shotClockStartedAt?: string | null;
-    shotClockBaseSec?: number;
-  };
-  return {
-    ...state,
-    timerElapsedSec: computeElapsedSeconds({
-      timerRunning: !!state.timerRunning,
-      timerStartedAt: state.timerStartedAt ?? null,
-      timerBaseSec: Number(state.timerBaseSec ?? 0),
-    }),
-    shotClockRemainingSec: computeShotClockSeconds({
-      shotClockRunning: !!state.shotClockRunning,
-      shotClockStartedAt: state.shotClockStartedAt ?? null,
-      shotClockBaseSec: Number(state.shotClockBaseSec ?? 0),
-    }),
-    timerElapsedAtMs: Date.now(),
-  };
-}
-
 async function withMobileMatchData(snapshot: unknown, runtime: CloudRuntime) {
-  const state = withTimerTelemetry(snapshot);
+  const state = withClockTelemetry(snapshot);
   if (!runtime.apiRequest || !state || typeof state !== "object" || Array.isArray(state)) {
     return state;
   }

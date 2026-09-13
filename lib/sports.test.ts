@@ -40,5 +40,12 @@ describe("multisport-profielen", () => {
     expect(getSportProfile("BASKETBALL").shotClockPresets).toEqual([24, 14]);
     expect(getSportProfile("FUTSAL").shotClockPresets).toEqual([]);
     expect(getSportProfile("VOLLEYBALL").timerMode).toBe("NONE");
+    expect(getSportProfile("VOLLEYBALL").clockVisibleOnDisplay).toBe(false);
+    expect(getSportProfile("VOLLEYBALL").timeoutLimitForPeriod(1)).toBe(2);
+    expect(getSportProfile("VOLLEYBALL").fieldPlayers).toBe(6);
+    expect(getSportProfile("VOLLEYBALL").supportsSubstitutions).toBe(true);
+    expect(getSportProfile("VOLLEYBALL").supportsGoalVisuals).toBe(false);
+    expect(getSportProfile("HOCKEY").cardColors).toEqual(["GREEN", "YELLOW", "RED"]);
+    expect(getSportProfile("BASKETBALL").supportsCards).toBe(false);
   });
 });

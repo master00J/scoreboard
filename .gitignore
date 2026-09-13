@@ -7,6 +7,9 @@ dist-*/
 server-dist/
 electron-dist/
 renderer-dist/
+web-demo-dist/
+dev-user-data/
+dev-launch.log
 data/*.db
 data/*.db-journal
 prisma-push-temp.db

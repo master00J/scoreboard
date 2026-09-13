@@ -6,7 +6,9 @@ import esbuild from "esbuild";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, "..");
-const outDir = path.join(root, "..", "Arenacue", "public", "scoreboard-app");
+const outDir = process.env.SCOREBOARD_WEB_DEMO_OUT_DIR
+  ? path.resolve(root, process.env.SCOREBOARD_WEB_DEMO_OUT_DIR)
+  : path.join(root, "web-demo-dist");
 const assetsDir = path.join(outDir, "assets");
 
 function run(command, args) {

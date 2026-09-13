@@ -9,7 +9,7 @@ import {
   mergeScoreboardTheme,
 } from "@/lib/scoreboard-theme";
 import { TeamLogo } from "./scoreboard-strip";
-import { getSportProfile, type SportProfile } from "@/lib/sports";
+import { SportMatchMeta, SportTeamExtras } from "./sport-score-extras";
 
 /**
  * Volledig scherm tijdens de match zonder sponsorpaneel: thuis links, uit rechts,
@@ -33,7 +33,6 @@ export function MatchScoreboardFull({
   theme?: ResolvedScoreboardTheme;
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
-  const profile = getSportProfile(match.sport);
 
   return (
     <motion.div
@@ -53,28 +52,24 @@ export function MatchScoreboardFull({
       <TeamSide
         team={match.homeTeam}
         score={match.homeScore}
-        timeouts={match.homeTimeouts}
-        fouls={match.homeFouls}
-        sets={match.homeSets}
-        profile={profile}
+        match={match}
+        side="home"
         theme={theme}
       />
       <CenterBlock
+        match={match}
         elapsed={elapsed}
         running={running}
         period={period}
         addedTime={addedTime}
         shotClock={shotClock}
-        showShotClock={profile.shotClockPresets.length > 0}
         theme={theme}
       />
       <TeamSide
         team={match.awayTeam}
         score={match.awayScore}
-        timeouts={match.awayTimeouts}
-        fouls={match.awayFouls}
-        sets={match.awaySets}
-        profile={profile}
+        match={match}
+        side="away"
         theme={theme}
       />
     </motion.div>
@@ -84,18 +79,14 @@ export function MatchScoreboardFull({
 function TeamSide({
   team,
   score,
-  timeouts,
-  fouls,
-  sets,
-  profile,
+  match,
+  side,
   theme,
 }: {
   team: Match["homeTeam"];
   score: number;
-  timeouts: number;
-  fouls: number;
-  sets: number;
-  profile: SportProfile;
+  match: Match;
+  side: "home" | "away";
   theme: ResolvedScoreboardTheme;
 }) {
   const nameEl = theme.fullShowTeamNames ? (
@@ -142,32 +133,26 @@ function TeamSide({
       }}
     >
       {stack}
-      {(profile.timeoutLimitForPeriod(1) > 0 || profile.statLabel || profile.hasSets) && (
-        <div className="flex flex-wrap items-center justify-center gap-3 text-center text-xl font-bold uppercase tracking-wider text-white/65">
-          {profile.hasSets && <span>Sets {sets}</span>}
-          {profile.timeoutLimitForPeriod(1) > 0 && <span>TO {timeouts}</span>}
-          {profile.statLabel && <span>{profile.statLabel} {fouls}</span>}
-        </div>
-      )}
+      <SportTeamExtras match={match} side={side} />
     </div>
   );
 }
 
 function CenterBlock({
+  match,
   elapsed,
   running,
   period,
   addedTime,
   shotClock,
-  showShotClock,
   theme,
 }: {
+  match: Match;
   elapsed: number;
   running: boolean;
   period: string;
   addedTime: number;
   shotClock: number;
-  showShotClock: boolean;
   theme: ResolvedScoreboardTheme;
 }) {
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
@@ -213,16 +198,7 @@ function CenterBlock({
           </div>
         )}
       </div>
-      {showShotClock && (
-        <div className="mt-2 rounded-xl border border-red-400/50 bg-red-600/15 px-6 py-3 text-center">
-          <div className="text-sm font-bold uppercase tracking-[0.3em] text-red-200/80">
-            Shotclock
-          </div>
-          <div className="mt-1 text-6xl font-black tabular-nums leading-none text-red-400">
-            {Math.ceil(shotClock)}
-          </div>
-        </div>
-      )}
+      <SportMatchMeta match={match} shotClock={shotClock} />
     </div>
   );
 }

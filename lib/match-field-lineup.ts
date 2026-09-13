@@ -31,7 +31,14 @@ export function applySubstitutionToFieldIds(
   playerOutId: string,
   playerInId: string,
 ): string[] {
-  const next = fieldIds.filter((id) => id !== playerOutId);
-  if (!next.includes(playerInId)) next.push(playerInId);
+  if (playerOutId === playerInId) return [...fieldIds];
+  const outIdx = fieldIds.indexOf(playerOutId);
+  if (outIdx === -1) return [...fieldIds];
+  const next = [...fieldIds];
+  const inIdx = next.indexOf(playerInId);
+  if (inIdx !== -1 && inIdx !== outIdx) next.splice(inIdx, 1);
+  const slot = next.indexOf(playerOutId);
+  if (slot === -1) return next;
+  next[slot] = playerInId;
   return next;
 }

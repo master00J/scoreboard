@@ -26,7 +26,7 @@ export function MatchLivePanel() {
   const [scoreModal, setScoreModal] = useState<null | "home" | "away">(null);
   const [subModal, setSubModal] = useState(false);
   const [lineupModal, setLineupModal] = useState(false);
-  const [cardModal, setCardModal] = useState<null | "YELLOW" | "RED">(null);
+  const [cardModal, setCardModal] = useState<null | "YELLOW" | "RED" | "GREEN">(null);
 
   useEffect(() => {
     reload();
@@ -34,14 +34,14 @@ export function MatchLivePanel() {
 
   if (!isFullMatch(match)) {
     return (
-      <div className="bg-card border border-border rounded-xl p-6 text-center text-muted-foreground">
+      <div className="rounded-xl border border-border bg-card p-4 text-center text-muted-foreground">
         {t("matchLive.noMatch")}
       </div>
     );
   }
 
   const profile = getSportProfile(match.sport);
-  const isGoalSport = profile.scoreLabel === "Goal";
+  const isGoalSport = profile.supportsGoalVisuals;
   const homeGoalVisualEnabled = isGoalSport && (settings?.goalVisualHomeEnabled ?? true);
   const awayGoalVisualEnabled = isGoalSport && (settings?.goalVisualAwayEnabled ?? false);
 
@@ -55,17 +55,17 @@ export function MatchLivePanel() {
   }
 
   return (
-    <div className="bg-card border border-border rounded-xl p-6 flex flex-col gap-4">
+    <div className="@container flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3">
       <div className="flex items-center justify-between">
         <div className="text-xs uppercase tracking-widest text-muted-foreground">
           {t("matchLive.title")}
         </div>
         <div className="text-xs text-muted-foreground">
-          {match.homeTeam.name} vs {match.awayTeam.name} · {tMatchStatus(t, match.status)}
+          {match.homeTeam.name} vs {match.awayTeam.name} · {tMatchStatus(t, match.status, match.sport)}
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-2">
         <SideControl
           side="home"
           team={match.homeTeam}
@@ -90,32 +90,50 @@ export function MatchLivePanel() {
 
       <SportLiveControls match={match} />
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-        <Button variant="secondary" onClick={() => setSubModal(true)}>
-          {t("matchLive.sub")}
-        </Button>
-        <Button variant="outline" onClick={() => setLineupModal(true)}>
-          {t("matchLive.lineup")}
-        </Button>
+      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-5">
+        {profile.supportsSubstitutions && (
+          <Button className="h-9 px-2 text-[11px]" variant="secondary" onClick={() => setSubModal(true)}>
+            {t("matchLive.sub")}
+          </Button>
+        )}
+        {profile.supportsSubstitutions && (
+          <Button className="h-9 px-2 text-[11px]" variant="outline" onClick={() => setLineupModal(true)}>
+            {t("matchLive.lineup")}
+          </Button>
+        )}
+        {profile.cardColors.includes("GREEN") && (
+          <Button
+            className="h-9 bg-green-500 px-2 text-[11px] text-black hover:bg-green-600"
+            onClick={() => setCardModal("GREEN")}
+          >
+            {t("matchLive.greenCard")}
+          </Button>
+        )}
+        {profile.cardColors.includes("YELLOW") && (
+          <Button
+            className="h-9 bg-amber-500 px-2 text-[11px] text-black hover:bg-amber-600"
+            onClick={() => setCardModal("YELLOW")}
+          >
+            {t("matchLive.yellowCard")}
+          </Button>
+        )}
+        {profile.cardColors.includes("RED") && (
+          <Button
+            className="h-9 bg-red-600 px-2 text-[11px] text-white hover:bg-red-700"
+            onClick={() => setCardModal("RED")}
+          >
+            {t("matchLive.redCard")}
+          </Button>
+        )}
         <Button
-          className="bg-amber-500 text-black hover:bg-amber-600"
-          onClick={() => setCardModal("YELLOW")}
-        >
-          {t("matchLive.yellowCard")}
-        </Button>
-        <Button
-          className="bg-red-600 hover:bg-red-700 text-white"
-          onClick={() => setCardModal("RED")}
-        >
-          {t("matchLive.redCard")}
-        </Button>
-        <Button
+          className="h-9 px-2 text-[11px]"
           variant="outline"
-          onClick={() =>
-            sendCommand({ type: "match:setStatus", status: "HALF_TIME" })
-          }
+          onClick={() => {
+            if (match.status === "HALF_TIME") void sendCommand({ type: "sport:resumePlay" });
+            else void sendCommand({ type: "match:setStatus", status: "HALF_TIME" });
+          }}
         >
-          {t("common.pause")}
+          {match.status === "HALF_TIME" ? t("matchLive.resumePlay") : t("common.pause")}
         </Button>
       </div>
 
@@ -179,7 +197,7 @@ function SideControl({
   const { t } = useTranslation();
   return (
     <div
-      className="rounded-lg p-4 border flex flex-col gap-3"
+      className="flex min-w-0 flex-col gap-1.5 rounded-lg border p-2.5"
       style={{ borderColor: team.primaryColor + "80" }}
     >
       <div className="flex items-center justify-between">
@@ -191,15 +209,15 @@ function SideControl({
         </div>
         <div className="text-xs text-muted-foreground truncate">{team.name}</div>
       </div>
-      <div className="text-center text-[88px] font-black tabular-nums leading-none">
+      <div className="text-center text-[clamp(3rem,10cqi,4.5rem)] font-black tabular-nums leading-none">
         {score}
       </div>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-1.5">
         {increments.map((points) => (
           <Button
             key={points}
-            size="lg"
-            className="min-w-24 flex-1 bg-green-500 hover:bg-green-600 text-black text-lg font-black"
+            size="sm"
+            className="h-10 min-w-16 flex-1 bg-green-500 px-2 text-sm font-black text-black hover:bg-green-600"
             onClick={() => onScoreClick(points)}
           >
             {scoreLabel === "Goal" && points === 1
@@ -212,7 +230,7 @@ function SideControl({
             )}
           </Button>
         ))}
-        <Button variant="outline" onClick={() => onAdjust(-1)}>
+        <Button className="h-10 px-3" size="sm" variant="outline" onClick={() => onAdjust(-1)}>
           {t("matchLive.minusOne")}
         </Button>
       </div>
@@ -353,17 +371,26 @@ function MatchFieldLineupDialog({
   const { t } = useTranslation();
   const maximumPlayers = getSportProfile(match.sport).fieldPlayers;
   const [saving, setSaving] = useState(false);
+  const [teamId, setTeamId] = useState<string>(match.homeTeamId);
   const [homeSel, setHomeSel] = useState<Set<string>>(() => {
     const ids = match.homeFieldPlayerIds;
     if (ids && ids.length > 0) return new Set(ids);
     return new Set(defaultFieldFromRoster(match.homeTeam.players ?? [], maximumPlayers));
   });
+  const [awaySel, setAwaySel] = useState<Set<string>>(() => {
+    const ids = match.awayFieldPlayerIds;
+    if (ids && ids.length > 0) return new Set(ids);
+    return new Set(defaultFieldFromRoster(match.awayTeam.players ?? [], maximumPlayers));
+  });
 
-  const roster = match.homeTeam.players ?? [];
-  const squad = roster.filter((p) => !p.isCoach).sort((a, b) => a.number - b.number);
+  const isHome = teamId === match.homeTeamId;
+  const team = isHome ? match.homeTeam : match.awayTeam;
+  const selected = isHome ? homeSel : awaySel;
+  const squad = (team.players ?? []).filter((p) => !p.isCoach).sort((a, b) => a.number - b.number);
 
   function togglePlayer(id: string) {
-    setHomeSel((prev) => {
+    const setSel = isHome ? setHomeSel : setAwaySel;
+    setSel((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else if (next.size < maximumPlayers) next.add(id);
@@ -372,7 +399,7 @@ function MatchFieldLineupDialog({
   }
 
   async function save() {
-    if (homeSel.size < 1 || homeSel.size > maximumPlayers) {
+    if (homeSel.size < 1 || homeSel.size > maximumPlayers || awaySel.size < 1 || awaySel.size > maximumPlayers) {
       toast({
         title: t("matchLive.lineupCountError", { n: maximumPlayers }),
         variant: "error",
@@ -386,6 +413,7 @@ function MatchFieldLineupDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           homeFieldPlayerIds: Array.from(homeSel),
+          awayFieldPlayerIds: Array.from(awaySel),
         }),
       });
       const body = (await res.json().catch(() => ({}))) as { error?: string };
@@ -409,12 +437,26 @@ function MatchFieldLineupDialog({
         <p className="text-xs text-muted-foreground mb-3">
           {t("matchLive.lineupHelp", { n: maximumPlayers })}
         </p>
+        <div className="flex gap-2 mb-3">
+          <Button
+            variant={isHome ? "default" : "outline"}
+            onClick={() => setTeamId(match.homeTeamId)}
+          >
+            {match.homeTeam.shortName} · {homeSel.size}/{maximumPlayers}
+          </Button>
+          <Button
+            variant={!isHome ? "default" : "outline"}
+            onClick={() => setTeamId(match.awayTeamId)}
+          >
+            {match.awayTeam.shortName} · {awaySel.size}/{maximumPlayers}
+          </Button>
+        </div>
         <div className="text-xs font-medium text-foreground mb-3">
-          {match.homeTeam.shortName} · {homeSel.size}/{maximumPlayers}
+          {team.shortName} · {selected.size}/{maximumPlayers}
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-[52vh] overflow-y-auto pr-1">
           {squad.map((p) => {
-            const on = homeSel.has(p.id);
+            const on = selected.has(p.id);
             return (
               <button
                 key={p.id}
@@ -479,13 +521,19 @@ function SubPicker({
         .sort((a, b) => a.number - b.number);
       return { onField: onFieldList, bench: benchList };
     }
-    return squadOnFieldAndBench(teamId, team.players ?? [], match.events);
+    return squadOnFieldAndBench(
+      teamId,
+      team.players ?? [],
+      match.events,
+      getSportProfile(match.sport).fieldPlayers,
+    );
   }, [
     teamId,
     team.players,
     match.homeFieldPlayerIds,
     match.awayFieldPlayerIds,
     match.events,
+    match.sport,
   ]);
 
   function addCurrentToQueue() {
@@ -637,7 +685,7 @@ function CardPicker({
   onClose,
 }: {
   match: Match;
-  color: "YELLOW" | "RED";
+  color: "YELLOW" | "RED" | "GREEN";
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -650,7 +698,11 @@ function CardPicker({
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>
-            {color === "YELLOW" ? t("matchLive.yellowCard") : t("matchLive.redCard")}
+            {color === "GREEN"
+              ? t("matchLive.greenCard")
+              : color === "YELLOW"
+                ? t("matchLive.yellowCard")
+                : t("matchLive.redCard")}
           </DialogTitle>
         </DialogHeader>
         <div className="flex gap-2 mb-4">

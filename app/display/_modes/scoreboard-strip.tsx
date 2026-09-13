@@ -12,6 +12,7 @@ import {
   mergeScoreboardTheme,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
+import { SportMatchMeta, SportTeamExtras } from "./sport-score-extras";
 
 export function ScoreboardStrip({
   match,
@@ -19,6 +20,7 @@ export function ScoreboardStrip({
   running,
   addedTime = 0,
   period,
+  shotClock = 0,
   theme: themeProp,
 }: {
   match: Match;
@@ -26,6 +28,7 @@ export function ScoreboardStrip({
   running: boolean;
   addedTime?: number;
   period?: string;
+  shotClock?: number;
   theme?: ResolvedScoreboardTheme;
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
@@ -58,6 +61,7 @@ export function ScoreboardStrip({
               {match.homeTeam.shortName || match.homeTeam.name}
             </div>
           ) : null}
+          <SportTeamExtras match={match} side="home" compact />
         </div>
         <div className="flex items-center gap-8 px-8 shrink-0">
           {theme.showScores ? (
@@ -96,6 +100,7 @@ export function ScoreboardStrip({
                 +{addedTime}
               </div>
             )}
+            <SportMatchMeta match={match} shotClock={shotClock} />
           </div>
           {theme.showScores ? (
             <div
@@ -107,6 +112,7 @@ export function ScoreboardStrip({
           ) : null}
         </div>
         <div className="flex items-center gap-5 flex-1 justify-end min-w-0">
+          <SportTeamExtras match={match} side="away" compact />
           {theme.fullShowTeamNames ? (
             <div
               className={`font-black leading-none truncate ${theme.fullTeamNameUppercase ? "uppercase" : ""}`}
@@ -129,6 +135,7 @@ export function StripScoreboardLayout({
   running,
   period,
   addedTime = 0,
+  shotClock = 0,
   theme: themeProp,
   children,
 }: {
@@ -162,6 +169,7 @@ export function StripScoreboardLayout({
         running={running}
         period={period}
         addedTime={addedTime}
+        shotClock={shotClock}
         theme={theme}
       />
     </div>

@@ -1,6 +1,7 @@
 import { computeElapsedSeconds, computeShotClockSeconds, pauseShotClockAt, runFrom, runShotClockFrom, stopAt } from "@/lib/timer";
 import { getSportProfile, lifecycleStatusForPeriod, normalizeSport, resetStatsForNewPeriod, resetTimeoutsForNewPeriod } from "@/lib/sports";
 import { CommandSchema, type Command } from "@/lib/validation/commands";
+import { captureOnBlackoutEnter, captureOnBlackoutExit } from "@/lib/external-capture-blackout";
 import type { CommandAck, DesktopApiRequest, DesktopApiResponse, ElectronBridge, SerializedDisplayState, TickPayload } from "@/lib/desktop-bridge";
 
 const CHANNEL = "arenacue-web-scoreboard";
@@ -211,8 +212,10 @@ function seed(): Store {
       addedTimeMinutes: 0,
       externalCaptureSourceId: null,
       externalCaptureToDisplay: false,
+      externalCaptureAudio: false,
       safeMode: false,
       blackoutResumeMode: null,
+      blackoutResumeCapture: false,
       updatedAt: nowIso(),
     },
     sponsorPlays: [],
@@ -323,7 +326,7 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   const pathname = url.pathname;
   const body = parseBody(req);
 
-  if (pathname === "/api/app/release") return json(200, { version: "0.1.13", notes: "" });
+  if (pathname === "/api/app/release") return json(200, { version: "0.1.22", notes: "" });
   if (pathname === "/api/settings" && method === "GET") return json(200, settingsJson());
   if (pathname === "/api/settings" && method === "PATCH") {
     store.settings = { ...store.settings, ...body };
@@ -665,15 +668,18 @@ function handleCommand(raw: Command): CommandAck {
         display.activePlayerId = cmd.meta?.activePlayerId ?? null;
         display.activeMediaId = cmd.meta?.activeMediaId ?? null;
         break;
-      case "display:blackout":
+      case "display:blackout": {
         if (display.mode === "BLACKOUT") {
           display.mode = display.blackoutResumeMode ?? "MATCH";
           display.blackoutResumeMode = null;
+          Object.assign(display, captureOnBlackoutExit(display));
         } else {
           display.blackoutResumeMode = display.mode;
           display.mode = "BLACKOUT";
+          Object.assign(display, captureOnBlackoutEnter(display));
         }
         break;
+      }
       case "display:setSafeMode":
         display.safeMode = false;
         break;
@@ -779,10 +785,20 @@ function handleCommand(raw: Command): CommandAck {
         break;
       case "display:setExternalCapture":
         display.externalCaptureSourceId = cmd.sourceId;
-        if (cmd.sourceId === null) display.externalCaptureToDisplay = false;
+        if (cmd.sourceId === null) {
+          display.externalCaptureToDisplay = false;
+          display.blackoutResumeCapture = false;
+        }
         break;
       case "display:setExternalCaptureToDisplay":
-        display.externalCaptureToDisplay = cmd.enabled;
+        if (display.mode === "BLACKOUT") {
+          display.blackoutResumeCapture = cmd.enabled;
+        } else {
+          display.externalCaptureToDisplay = cmd.enabled;
+        }
+        break;
+      case "display:setExternalCaptureAudio":
+        display.externalCaptureAudio = cmd.enabled;
         break;
       case "event:undo": {
         const event = store.events.find((e) => e.id === cmd.eventId);
@@ -841,7 +857,7 @@ export function installWebDemoBridge() {
     reportSponsorClipEnd: async () => ({ ok: true }),
     reportSponsorClipProgress: async () => ({ ok: true }),
     getSponsorLedgerSnapshot: async () => null,
-    getAppVersion: async () => "0.1.13-web",
+    getAppVersion: async () => "0.1.22-web",
     openExternalUrl: async (url) => {
       window.open(url, "_blank", "noopener,noreferrer");
       return { ok: true };

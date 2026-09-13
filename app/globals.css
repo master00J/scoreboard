@@ -56,6 +56,30 @@
     background: #000;
     min-height: 100vh;
   }
+
+  body:has([data-control-shell]) {
+    background:
+      radial-gradient(circle at 14% -10%, hsl(var(--primary) / 0.12), transparent 32rem),
+      radial-gradient(circle at 90% 0%, hsl(217 91% 60% / 0.08), transparent 28rem),
+      hsl(var(--background));
+  }
+
+  [data-control-shell] :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  [data-control-shell] ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  [data-control-shell] ::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background: hsl(var(--muted-foreground) / 0.28);
+    background-clip: padding-box;
+  }
 }
 
 .tabular-nums {

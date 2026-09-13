@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { useTranslation } from "react-i18next";
 import type { Player, Team } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
 
@@ -9,12 +10,18 @@ export function SubstitutionMode({
   playerIn,
   playerOut,
   minute,
+  showMinute = true,
 }: {
   team: Team | null;
   playerIn: Player | null;
   playerOut: Player | null;
   minute: number;
+  showMinute?: boolean;
 }) {
+  const { t } = useTranslation();
+  const heading = [t("matchLive.sub"), team?.name ?? "", showMinute ? `${minute}'` : ""]
+    .filter((part) => part.length > 0)
+    .join(" · ");
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -27,7 +34,7 @@ export function SubstitutionMode({
         className="uppercase tracking-[0.3em] text-white/40 mb-6 truncate px-10 text-center"
         style={{ fontSize: 40 }}
       >
-        Substitution · {team?.name ?? ""} · {minute}'
+        {heading}
       </div>
       <div className="flex max-w-full flex-wrap justify-center gap-10 px-6">
         <PlayerCard player={playerOut} label="OUT" color="#ef4444" arrow="↓" />

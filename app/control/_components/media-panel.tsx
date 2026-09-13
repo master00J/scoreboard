@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useApi } from "@/lib/use-api";
 import type { Match, MediaItem, Playlist, PlaylistSlot, ScheduledMediaCue, Sponsor } from "@/lib/types";
 import { useDisplayStore } from "@/lib/store";
@@ -28,6 +29,7 @@ import { toast } from "@/components/ui/toast";
 import { sendCommand } from "@/lib/use-socket";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
+import { buildRecurringCueTimes } from "@/lib/scheduled-media-recurrence";
 import {
   parseSponsorMediaPhaseTags,
   serializeSponsorMediaPhaseTags,
@@ -39,7 +41,10 @@ import {
   clampRepeat,
   parseSponsorPlaybackOrderJson,
   parseSponsorPlaybackRepeatsJson,
+  plannedSecondsForRepeats,
+  repeatCountForTargetSeconds,
 } from "@/lib/sponsor-playback-order";
+import { ChevronDown, Plus } from "lucide-react";
 
 const SCHEDULED_CUE_PHASES = ["FIRST_HALF", "SECOND_HALF", "EXTRA_TIME"] as const;
 
@@ -237,7 +242,7 @@ export function MediaPanel() {
         <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
           {t("media.introBody")}
         </p>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <div className="rounded-lg border border-border bg-background/60 p-3">
             <div className="text-xs font-semibold uppercase tracking-wide text-foreground">1. {t("media.tabSponsors")}</div>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -254,6 +259,12 @@ export function MediaPanel() {
             <div className="text-xs font-semibold uppercase tracking-wide text-foreground">3. {t("media.tabPlaylists")}</div>
             <p className="mt-1 text-xs text-muted-foreground">
               {t("media.stepPlaylistsHint")}
+            </p>
+          </div>
+          <div className="rounded-lg border border-border bg-background/60 p-3">
+            <div className="text-xs font-semibold uppercase tracking-wide text-foreground">4. {t("media.tabCues")}</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("media.stepAutomationHint")}
             </p>
           </div>
         </div>
@@ -447,10 +458,20 @@ function ScheduledCuesSection({
   onChange: () => void;
 }) {
   const { t } = useTranslation();
-  const activeMedia = media.filter((m) => m.active).sort((a, b) => a.title.localeCompare(b.title));
+  const activeMedia = media
+    .filter((m) => m.active)
+    .sort((a, b) => {
+      const sponsorDelta = Number(!!a.sponsorId) - Number(!!b.sponsorId);
+      return sponsorDelta || a.title.localeCompare(b.title);
+    });
+  const generalMedia = activeMedia.filter((m) => !m.sponsorId);
+  const sponsorMedia = activeMedia.filter((m) => !!m.sponsorId);
   const [mediaId, setMediaId] = useState(activeMedia[0]?.id ?? "");
   const [matchStatus, setMatchStatus] = useState<(typeof SCHEDULED_CUE_PHASES)[number]>("FIRST_HALF");
   const [timeText, setTimeText] = useState("12:00");
+  const [scheduleMode, setScheduleMode] = useState<"once" | "repeat">("once");
+  const [repeatEveryMin, setRepeatEveryMin] = useState("5");
+  const [repeatUntilText, setRepeatUntilText] = useState("40:00");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -463,19 +484,52 @@ function ScheduledCuesSection({
       toast({ title: t("media.cueInvalidInput"), variant: "error" });
       return;
     }
+    const triggerSeconds = [triggerSec];
+    if (scheduleMode === "repeat") {
+      const endSec = parseClockInput(repeatUntilText);
+      const recurringTimes =
+        endSec == null
+          ? []
+          : buildRecurringCueTimes(
+              triggerSec,
+              endSec,
+              Number(repeatEveryMin.replace(",", ".")),
+            );
+      if (recurringTimes.length === 0) {
+        toast({ title: t("media.cueRepeatInvalid"), variant: "error" });
+        return;
+      }
+      triggerSeconds.splice(0, triggerSeconds.length, ...recurringTimes);
+    }
     setSaving(true);
-    const res = await fetch("/api/scheduled-media-cues", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mediaId, matchStatus, triggerSec, enabled: true }),
-    });
+    let savedCount = 0;
+    for (const plannedTriggerSec of triggerSeconds) {
+      const res = await fetch("/api/scheduled-media-cues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mediaId,
+          matchStatus,
+          triggerSec: plannedTriggerSec,
+          enabled: true,
+        }),
+      });
+      if (!res.ok) break;
+      savedCount += 1;
+    }
     setSaving(false);
-    if (!res.ok) {
+    if (savedCount !== triggerSeconds.length) {
       toast({ title: t("media.cueSaveFailed"), variant: "error" });
+      if (savedCount > 0) onChange();
       return;
     }
     onChange();
-    toast({ title: t("media.cueAdded", { time: formatCueClock(triggerSec) }) });
+    toast({
+      title:
+        scheduleMode === "repeat"
+          ? t("media.cueSeriesAdded", { count: triggerSeconds.length })
+          : t("media.cueAdded", { time: formatCueClock(triggerSec) }),
+    });
   }
 
   async function patchCue(id: string, body: Record<string, unknown>) {
@@ -506,7 +560,27 @@ function ScheduledCuesSection({
         </p>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-[1fr_150px_120px_auto] md:items-end">
+      <div className="grid gap-3 rounded-xl border border-border bg-background/60 p-4">
+        <div className="inline-flex w-fit rounded-lg bg-muted p-1" role="group" aria-label={t("media.cueScheduleType")}>
+          <button
+            type="button"
+            aria-pressed={scheduleMode === "once"}
+            onClick={() => setScheduleMode("once")}
+            className={`h-8 rounded-md px-3 text-xs font-semibold ${scheduleMode === "once" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            {t("media.cueOnce")}
+          </button>
+          <button
+            type="button"
+            aria-pressed={scheduleMode === "repeat"}
+            onClick={() => setScheduleMode("repeat")}
+            className={`h-8 rounded-md px-3 text-xs font-semibold ${scheduleMode === "repeat" ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+          >
+            {t("media.cueRepeat")}
+          </button>
+        </div>
+
+      <div className={`grid gap-2 md:items-end ${scheduleMode === "repeat" ? "md:grid-cols-[minmax(220px,1fr)_150px_110px_110px_110px_auto]" : "md:grid-cols-[minmax(260px,1fr)_170px_140px_auto]"}`}>
         <label className="space-y-1 text-xs">
           <span className="text-muted-foreground">{t("media.cueMedia")}</span>
           <select
@@ -514,11 +588,24 @@ function ScheduledCuesSection({
             onChange={(e) => setMediaId(e.target.value)}
             className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
           >
-            {activeMedia.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.title} ({m.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")})
-              </option>
-            ))}
+            {generalMedia.length > 0 && (
+              <optgroup label={t("media.cueGeneralMediaGroup")}>
+                {generalMedia.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.title} ({m.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")})
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {sponsorMedia.length > 0 && (
+              <optgroup label={t("media.cueSponsorMediaGroup")}>
+                {sponsorMedia.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.sponsorName ? `${m.sponsorName} — ` : ""}{m.title}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </label>
         <label className="space-y-1 text-xs">
@@ -542,9 +629,41 @@ function ScheduledCuesSection({
             className="h-10"
           />
         </label>
+        {scheduleMode === "repeat" && (
+          <>
+            <label className="space-y-1 text-xs">
+              <span className="text-muted-foreground">{t("media.cueEveryMinutes")}</span>
+              <Input
+                type="number"
+                min={0.5}
+                step={0.5}
+                value={repeatEveryMin}
+                onChange={(e) => setRepeatEveryMin(e.target.value)}
+                className="h-10"
+              />
+            </label>
+            <label className="space-y-1 text-xs">
+              <span className="text-muted-foreground">{t("media.cueUntil")}</span>
+              <Input
+                value={repeatUntilText}
+                onChange={(e) => setRepeatUntilText(e.target.value)}
+                placeholder="40:00"
+                className="h-10"
+              />
+            </label>
+          </>
+        )}
         <Button type="button" onClick={() => void addCue()} disabled={saving || activeMedia.length === 0}>
-          {t("common.add")}
+          {saving
+            ? t("common.saving")
+            : scheduleMode === "repeat"
+              ? t("media.cueAddSeries")
+              : t("media.cueAddOnce")}
         </Button>
+      </div>
+        <p className="text-[11px] leading-snug text-muted-foreground">
+          {scheduleMode === "repeat" ? t("media.cueRepeatHelp") : t("media.cueOnceHelp")}
+        </p>
       </div>
 
       <div className="rounded-lg border border-border overflow-hidden">
@@ -866,6 +985,8 @@ function SponsorsSection({
     activeMatch?.halfBreakSec ?? 900,
   );
   const [newName, setNewName] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newlyCreatedId, setNewlyCreatedId] = useState<string | null>(null);
   const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
 
   useEffect(() => {
@@ -905,8 +1026,12 @@ function SponsorsSection({
         toast({ title: t("media.sponsorCreateFailed"), variant: "error" });
         return;
       }
+      const created = (await res.json()) as Sponsor;
+      setNewlyCreatedId(created.id);
       setNewName("");
+      setCreateOpen(false);
       reloadSponsors();
+      toast({ title: t("media.sponsorCreated"), variant: "success" });
     } finally {
       setAdding(false);
     }
@@ -921,39 +1046,66 @@ function SponsorsSection({
 
   return (
     <section className="bg-card border border-border rounded-xl p-6">
-      <div className="flex items-start justify-between gap-4 mb-4">
-        <div className="flex-1 min-w-0">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold">{t("media.title")}</h2>
-          <div className="mt-3 grid max-w-4xl gap-2 text-xs md:grid-cols-3">
-            <div className="rounded-lg border border-border bg-muted/25 p-3">
-              <div className="font-semibold text-foreground">{t("media.sponsorStep1Title")}</div>
-              <p className="mt-1 text-muted-foreground">{t("media.sponsorStep1Body")}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/25 p-3">
-              <div className="font-semibold text-foreground">{t("media.sponsorStep2Title")}</div>
-              <p className="mt-1 text-muted-foreground">{t("media.sponsorStep2Body")}</p>
-            </div>
-            <div className="rounded-lg border border-border bg-muted/25 p-3">
-              <div className="font-semibold text-foreground">{t("media.sponsorStep3Title")}</div>
-              <p className="mt-1 text-muted-foreground">{t("media.sponsorStep3Body")}</p>
-            </div>
+          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+            {t("media.sponsorSimpleIntro")}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2 text-xs">
+            {[t("media.sponsorFlowCreate"), t("media.sponsorFlowMedia"), t("media.sponsorFlowAirtime")].map(
+              (label, index) => (
+                <span key={label} className="inline-flex items-center gap-2 rounded-full border border-border bg-muted/25 px-3 py-1.5">
+                  <span className="grid size-5 place-items-center rounded-full bg-secondary font-black text-foreground">
+                    {index + 1}
+                  </span>
+                  {label}
+                </span>
+              ),
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0 relative z-10">
-          <Input
-            placeholder={t("media.newSponsorName")}
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void addSponsor();
-            }}
-            className="w-56"
-          />
-          <Button onClick={addSponsor} disabled={adding || !newName.trim()}>
-            {adding ? t("common.loading") : t("media.addSponsor")}
-          </Button>
-        </div>
+        <Button onClick={() => setCreateOpen(true)} className="shrink-0 gap-2">
+          <Plus className="size-4" />
+          {t("media.addSponsor")}
+        </Button>
       </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent size="sm">
+          <DialogHeader>
+            <DialogTitle>{t("media.createSponsorTitle")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">{t("media.createSponsorHelp")}</p>
+            <div>
+              <Label>{t("media.sponsorName")}</Label>
+              <Input
+                autoFocus
+                placeholder={t("media.newSponsorName")}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void addSponsor();
+                }}
+                className="mt-1"
+              />
+            </div>
+            <div className="rounded-lg border border-primary/25 bg-primary/5 p-3 text-xs text-muted-foreground">
+              <strong className="text-foreground">{t("media.afterSponsorCreateTitle")}</strong>
+              <span className="mt-1 block">{t("media.afterSponsorCreateHelp")}</span>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button onClick={addSponsor} disabled={adding || !newName.trim()}>
+              {adding ? t("common.loading") : t("media.createSponsorAction")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="flex flex-col gap-4 mt-6">
         {sponsors.length === 0 && (
@@ -972,6 +1124,7 @@ function SponsorsSection({
             prematchTimelineSec={elapsedSec}
             halftimeTSec={halftimeT}
             wallMs={wallMs}
+            initiallyExpanded={newlyCreatedId === s.id}
             onChange={() => {
               reloadSponsors();
               reloadMedia();
@@ -1012,6 +1165,7 @@ function SponsorCard({
   prematchTimelineSec,
   halftimeTSec,
   wallMs,
+  initiallyExpanded,
   onChange,
   onRemove,
 }: {
@@ -1024,6 +1178,7 @@ function SponsorCard({
   halftimeTSec: number;
   /** Muurklok voor telemetry (los van gepauzeerde wedstrijdtimer). */
   wallMs: number;
+  initiallyExpanded?: boolean;
   onChange: () => void;
   onRemove: () => void;
 }) {
@@ -1041,12 +1196,17 @@ function SponsorCard({
   const [imageSec, setImageSec] = useState(sponsor.imageDefaultSec);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [expanded, setExpanded] = useState(!!initiallyExpanded);
   const rosterCarryRef = useRef<RosterCarry | null>(null);
   const sponsorLedger = useDisplayStore((s) => s.sponsorLedger);
 
   useEffect(() => {
     rosterCarryRef.current = null;
   }, [activeMatch?.id, sponsor.id]);
+
+  useEffect(() => {
+    if (initiallyExpanded) setExpanded(true);
+  }, [initiallyExpanded]);
 
   /**
    * Server reset de telemetry-ledger bij fase-/timer-resets — dan ook hier de
@@ -1341,7 +1501,47 @@ function SponsorCard({
   }
 
   return (
-    <div className="rounded-lg border border-border p-4 bg-background flex flex-col gap-4">
+    <div className="rounded-xl border border-border bg-background p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={`size-2.5 rounded-full ${active ? "bg-green-500" : "bg-muted-foreground"}`} />
+            <h3 className="truncate font-semibold text-foreground">{sponsor.name}</h3>
+            <span className="rounded bg-secondary px-2 py-0.5 text-[10px] text-muted-foreground">
+              {active ? t("common.active") : t("common.inactive")}
+            </span>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {t("media.sponsorSummary", {
+              files: sponsorMedia.length,
+              time: formatMin(
+                sponsor.prematchSeconds +
+                  sponsorMatchBudgetTotal(sponsor) +
+                  sponsor.halftimeSeconds +
+                  (sponsor.postmatchSeconds ?? 0),
+              ),
+            })}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {isElectron && sponsorMedia.length === 0 && (
+            <Button size="sm" onClick={onUploadSponsorFiles} disabled={uploading}>
+              {uploading ? t("common.busy") : t("media.addFirstMedia")}
+            </Button>
+          )}
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-card px-3 text-xs font-semibold text-foreground hover:bg-muted"
+            aria-expanded={expanded}
+          >
+            {expanded ? t("media.closeSponsorSettings") : t("media.manageSponsor")}
+            <ChevronDown className={`size-4 transition-transform ${expanded ? "rotate-180" : ""}`} />
+          </button>
+        </div>
+      </div>
+      {expanded && (
+      <div className="mt-4 flex flex-col gap-4 border-t border-border pt-4">
       {liveRoster != null && (
         <div className="rounded-md border border-border/80 bg-muted/40 px-3 py-2 text-xs">
           <span className="font-medium text-foreground">{liveRoster.label}</span>
@@ -1562,10 +1762,10 @@ function SponsorCard({
                 <div className="text-muted-foreground">
                   {m.type} · {m.durationSec}s
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] text-muted-foreground shrink-0">×</span>
-                  <SponsorClipRepeatField
+                <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+                  <SponsorClipAirtimeField
                     mediaId={m.id}
+                    mediaDurationSec={m.durationSec}
                     serverRepeat={repeatMap[m.id] ?? 1}
                     onCommit={persistPlaybackRepeatsForMedia}
                   />
@@ -1624,45 +1824,77 @@ function SponsorCard({
           ))}
         </div>
       )}
+      </div>
+      )}
     </div>
   );
 }
 
-function SponsorClipRepeatField({
+function SponsorClipAirtimeField({
   mediaId,
+  mediaDurationSec,
   serverRepeat,
   onCommit,
 }: {
   mediaId: string;
+  mediaDurationSec: number;
   serverRepeat: number;
   onCommit: (mediaId: string, raw: number) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
-  const [local, setLocal] = useState(() => String(serverRepeat));
+  const plannedSeconds = plannedSecondsForRepeats(mediaDurationSec, serverRepeat);
+  const minutesText = (plannedSeconds / 60)
+    .toFixed(2)
+    .replace(/\.00$/, "")
+    .replace(/(\.\d)0$/, "$1");
+  const [local, setLocal] = useState(() => minutesText);
   useEffect(() => {
-    setLocal(String(serverRepeat));
-  }, [serverRepeat, mediaId]);
+    setLocal(minutesText);
+  }, [minutesText, mediaId]);
+
+  const commit = () => {
+    const minutes = Number(local.replace(",", "."));
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      setLocal(minutesText);
+      return;
+    }
+    const repeats = repeatCountForTargetSeconds(mediaDurationSec, minutes * 60);
+    const effectiveMinutes = plannedSecondsForRepeats(mediaDurationSec, repeats) / 60;
+    setLocal(
+      effectiveMinutes.toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1"),
+    );
+    void Promise.resolve(onCommit(mediaId, repeats));
+  };
+
   return (
-    <Input
-      type="number"
-      min={1}
-      max={20}
-      className="h-6 w-14 px-1 text-[10px]"
-      value={local}
-      onChange={(e) => setLocal(e.target.value)}
-      onBlur={() => {
-        const n = Number(local);
-        if (!Number.isFinite(n)) {
-          setLocal(String(serverRepeat));
-          return;
-        }
-        void Promise.resolve(onCommit(mediaId, n));
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-      title={t("media.repeatTitle")}
-    />
+    <div className="space-y-1.5">
+      <div className="text-[10px] font-medium text-foreground">
+        {t("media.clipAirtimePerRound")}
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Input
+          type="number"
+          min={Math.max(0.02, mediaDurationSec / 60)}
+          max={Math.max(10, (mediaDurationSec * 600) / 60)}
+          step="0.25"
+          className="h-7 min-w-0 flex-1 px-2 text-[10px]"
+          value={local}
+          onChange={(e) => setLocal(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          title={t("media.clipAirtimeTitle")}
+        />
+        <span className="shrink-0 text-[10px] text-muted-foreground">min</span>
+      </div>
+      <div className="text-[9px] leading-snug text-muted-foreground">
+        {t("media.clipAirtimeEffective", {
+          repeats: clampRepeat(serverRepeat),
+          time: formatMin(plannedSeconds),
+        })}
+      </div>
+    </div>
   );
 }
 

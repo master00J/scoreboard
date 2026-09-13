@@ -1,7 +1,7 @@
 import http from "http";
-import { randomBytes } from "crypto";
+import { randomBytes, randomInt, timingSafeEqual } from "crypto";
 import type { DesktopApiRequest } from "../lib/desktop-bridge";
-import { computeElapsedSeconds, computeShotClockSeconds } from "../lib/timer";
+import { withClockTelemetry } from "../lib/clock-telemetry";
 
 type BridgeRuntime = {
   apiRequest: (req: DesktopApiRequest) => Promise<{
@@ -30,18 +30,42 @@ export type MobileBridgeHandle = {
   stop: () => Promise<void>;
 };
 
+/** Auth/commando-body: klein. API-proxy (media-metadata, opstellingen): ruimer, maar begrensd. */
+const MAX_BODY_BYTES_SMALL = 64 * 1024;
+const MAX_BODY_BYTES_API = 8 * 1024 * 1024;
+
+class BodyTooLargeError extends Error {
+  constructor() {
+    super("Request body te groot.");
+    this.name = "BodyTooLargeError";
+  }
+}
+
 function parseJsonBody(raw: string): unknown {
   if (!raw.trim()) return {};
   return JSON.parse(raw);
 }
 
+/** Cryptografisch veilige 6-cijferige code (Math.random is voorspelbaar). */
 function randomPairingCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
+  return String(randomInt(100000, 1000000));
 }
 
 /** Minimaal 6 cijfers (operator); pairing blijft 6 cijfers. */
 function randomOperatorPin(): string {
-  return String(100000 + Math.floor(Math.random() * 900000));
+  return String(randomInt(100000, 1000000));
+}
+
+/** Vergelijking in constante tijd zodat de responstijd niets verraadt over het aantal juiste tekens. */
+function secretsEqual(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) {
+    // Toch een vergelijking uitvoeren zodat lengteverschil geen snellere afwijzing oplevert.
+    timingSafeEqual(b, b);
+    return false;
+  }
+  return timingSafeEqual(a, b);
 }
 
 function normalizeOperatorPinFromEnv(raw: string | undefined, log: (line: string) => void): string {
@@ -63,10 +87,19 @@ function parseBindHost(raw: string | undefined, log: (line: string) => void): st
   return "0.0.0.0";
 }
 
-function readBody(req: http.IncomingMessage): Promise<string> {
+function readBody(req: http.IncomingMessage, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    let total = 0;
+    req.on("data", (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > maxBytes) {
+        req.destroy();
+        reject(new BodyTooLargeError());
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
   });
@@ -82,32 +115,6 @@ function writeJson(
   res.end(JSON.stringify(payload));
 }
 
-function withTimerTelemetry(snapshot: unknown) {
-  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return snapshot;
-  const state = snapshot as {
-    timerRunning?: boolean;
-    timerStartedAt?: string | null;
-    timerBaseSec?: number;
-    shotClockRunning?: boolean;
-    shotClockStartedAt?: string | null;
-    shotClockBaseSec?: number;
-  };
-  return {
-    ...state,
-    timerElapsedSec: computeElapsedSeconds({
-      timerRunning: !!state.timerRunning,
-      timerStartedAt: state.timerStartedAt ?? null,
-      timerBaseSec: Number(state.timerBaseSec ?? 0),
-    }),
-    shotClockRemainingSec: computeShotClockSeconds({
-      shotClockRunning: !!state.shotClockRunning,
-      shotClockStartedAt: state.shotClockStartedAt ?? null,
-      shotClockBaseSec: Number(state.shotClockBaseSec ?? 0),
-    }),
-    timerElapsedAtMs: Date.now(),
-  };
-}
-
 export async function startMobileBridge(
   options: MobileBridgeOptions,
 ): Promise<MobileBridgeHandle> {
@@ -121,6 +128,8 @@ export async function startMobileBridge(
   const sessions = new Map<string, { expiresAtMs: number; role: SessionRole }>();
   const failedAttemptsByIp = new Map<string, number[]>();
   const failedOperatorPinByIp = new Map<string, number[]>();
+  const PAIRING_WINDOW_MS = 5 * 60 * 1000;
+  const OPERATOR_PIN_WINDOW_MS = 15 * 60 * 1000;
 
   function cleanupSessions() {
     const now = Date.now();
@@ -129,14 +138,24 @@ export async function startMobileBridge(
         sessions.delete(token);
       }
     }
+    // IP-tellers buiten hun venster opruimen zodat de maps niet onbeperkt groeien.
+    for (const [ip, arr] of failedAttemptsByIp.entries()) {
+      const recent = arr.filter((t) => now - t < PAIRING_WINDOW_MS);
+      if (recent.length === 0) failedAttemptsByIp.delete(ip);
+      else failedAttemptsByIp.set(ip, recent);
+    }
+    for (const [ip, arr] of failedOperatorPinByIp.entries()) {
+      const recent = arr.filter((t) => now - t < OPERATOR_PIN_WINDOW_MS);
+      if (recent.length === 0) failedOperatorPinByIp.delete(ip);
+      else failedOperatorPinByIp.set(ip, recent);
+    }
   }
 
   function isRateLimited(ip: string): boolean {
     const now = Date.now();
-    const windowMs = 5 * 60 * 1000;
     const maxAttempts = 8;
     const arr = failedAttemptsByIp.get(ip) ?? [];
-    const recent = arr.filter((t) => now - t < windowMs);
+    const recent = arr.filter((t) => now - t < PAIRING_WINDOW_MS);
     failedAttemptsByIp.set(ip, recent);
     return recent.length >= maxAttempts;
   }
@@ -156,10 +175,9 @@ export async function startMobileBridge(
   /** Strengere lockout na herhaald foute operator-PIN (pairing was wél correct). */
   function isOperatorPinLocked(ip: string): boolean {
     const now = Date.now();
-    const windowMs = 15 * 60 * 1000;
     const maxAttempts = 5;
     const arr = failedOperatorPinByIp.get(ip) ?? [];
-    const recent = arr.filter((t) => now - t < windowMs);
+    const recent = arr.filter((t) => now - t < OPERATOR_PIN_WINDOW_MS);
     failedOperatorPinByIp.set(ip, recent);
     return recent.length >= maxAttempts;
   }
@@ -214,13 +232,13 @@ export async function startMobileBridge(
           writeJson(res, 429, { ok: false, error: "Te veel foute pogingen, probeer later opnieuw." });
           return;
         }
-        const bodyText = await readBody(req);
+        const bodyText = await readBody(req, MAX_BODY_BYTES_SMALL);
         const body = parseJsonBody(bodyText) as {
           pairingCode?: string;
           role?: SessionRole;
           operatorPin?: string;
         };
-        if ((body.pairingCode ?? "").trim() !== pairingCode) {
+        if (!secretsEqual((body.pairingCode ?? "").trim(), pairingCode)) {
           registerFailedAttempt(remoteIp);
           writeJson(res, 401, { ok: false, error: "Onjuiste pairing code." });
           return;
@@ -234,7 +252,7 @@ export async function startMobileBridge(
             });
             return;
           }
-          if ((body.operatorPin ?? "").trim() !== operatorPin) {
+          if (!secretsEqual((body.operatorPin ?? "").trim(), operatorPin)) {
             registerOperatorPinFailedAttempt(remoteIp);
             writeJson(res, 401, { ok: false, error: "Onjuiste operator PIN." });
             return;
@@ -262,7 +280,7 @@ export async function startMobileBridge(
         writeJson(
           res,
           200,
-          withTimerTelemetry(
+          withClockTelemetry(
             snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)
               ? { ...snapshot, sponsorLedger: ledger }
               : snapshot,
@@ -276,7 +294,7 @@ export async function startMobileBridge(
           writeJson(res, 403, { error: "Operator rechten vereist." });
           return;
         }
-        const bodyText = await readBody(req);
+        const bodyText = await readBody(req, MAX_BODY_BYTES_SMALL);
         const body = parseJsonBody(bodyText) as { command?: unknown };
         const result = await options.runtime.runCommand(body.command);
         writeJson(res, 200, result);
@@ -288,7 +306,7 @@ export async function startMobileBridge(
           writeJson(res, 403, { error: "Operator rechten vereist voor mutaties." });
           return;
         }
-        const bodyText = req.method === "GET" ? "" : await readBody(req);
+        const bodyText = req.method === "GET" ? "" : await readBody(req, MAX_BODY_BYTES_API);
         const desktopPath = url.pathname.replace("/mobile", "");
         const response = await options.runtime.apiRequest({
           method: req.method,
@@ -303,9 +321,15 @@ export async function startMobileBridge(
 
       writeJson(res, 404, { error: "Not found" });
     } catch (error) {
-      writeJson(res, 500, {
-        error: error instanceof Error ? error.message : String(error),
-      });
+      if (error instanceof BodyTooLargeError) {
+        if (!res.headersSent) writeJson(res, 413, { error: error.message });
+        return;
+      }
+      if (!res.headersSent) {
+        writeJson(res, 500, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   });
 

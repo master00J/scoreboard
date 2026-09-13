@@ -9,8 +9,10 @@ import {
   slotStyle,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
+import { getSportProfile } from "@/lib/sports";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { TeamLogo } from "./scoreboard-strip";
+import { SportMatchMeta, SportTeamExtras } from "./sport-score-extras";
 
 export function CustomScoreboardLayout({
   match,
@@ -18,6 +20,7 @@ export function CustomScoreboardLayout({
   running,
   period,
   addedTime = 0,
+  shotClock = 0,
   theme: themeProp,
   children,
 }: {
@@ -42,17 +45,21 @@ export function CustomScoreboardLayout({
       <TeamChip
         team={match.homeTeam}
         score={match.homeScore}
+        match={match}
+        side="home"
         theme={theme}
         style={slotStyle(theme.slots.home)}
       />
       <TeamChip
         team={match.awayTeam}
         score={match.awayScore}
+        match={match}
+        side="away"
         theme={theme}
         style={slotStyle(theme.slots.away)}
       />
 
-      {theme.showClock || theme.fullShowPeriod ? (
+      {theme.showClock || theme.fullShowPeriod || getSportProfile(match.sport).hasSets || getSportProfile(match.sport).shotClockPresets.length > 0 ? (
         <div
           className="absolute z-20 box-border overflow-hidden"
           style={{ ...slotStyle(theme.slots.clock), containerType: "size" }}
@@ -89,6 +96,7 @@ export function CustomScoreboardLayout({
                 +{addedTime}
               </div>
             ) : null}
+            <SportMatchMeta match={match} shotClock={shotClock} />
           </div>
         </div>
       ) : null}
@@ -99,11 +107,15 @@ export function CustomScoreboardLayout({
 function TeamChip({
   team,
   score,
+  match,
+  side,
   theme,
   style,
 }: {
   team: Match["homeTeam"];
   score: number;
+  match: Match;
+  side: "home" | "away";
   theme: ResolvedScoreboardTheme;
   style: { left: string; top: string; width: string; height: string };
 }) {
@@ -149,6 +161,7 @@ function TeamChip({
             {score}
           </div>
         ) : null}
+        <SportTeamExtras match={match} side={side} compact />
       </div>
     </div>
   );

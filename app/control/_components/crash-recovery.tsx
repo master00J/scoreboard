@@ -21,6 +21,7 @@ export function CrashRecoveryBanner() {
     homeTeam: { name: string };
     awayTeam: { name: string };
     status: string;
+    sport?: string;
     homeScore: number;
     awayScore: number;
   } | null>(null);
@@ -51,7 +52,7 @@ export function CrashRecoveryBanner() {
         <div className="text-xs text-muted-foreground">
           {t("crash.body")}{" "}
           {match.homeTeam.name} vs {match.awayTeam.name} · {match.homeScore}–{match.awayScore} ·{" "}
-          {tMatchStatus(t, match.status)}
+          {tMatchStatus(t, match.status, match.sport)}
         </div>
       </div>
       <div className="flex gap-2">

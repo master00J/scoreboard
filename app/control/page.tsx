@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSocketSync, sendCommand, onDisplayError } from "@/lib/use-socket";
+import { useSocketSync, sendCommand, onDisplayError, onDisplayHorn } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
@@ -31,6 +31,18 @@ import { AppResourceMeter } from "./_components/app-resource-meter";
 import { MobileBridgeMenu } from "./_components/mobile-bridge-menu";
 import { useLicenseFeatures } from "@/lib/use-license-features";
 import { tMatchStatus } from "@/lib/i18n/t-phase";
+import {
+  FileBarChart,
+  Gauge,
+  Images,
+  MonitorUp,
+  Plus,
+  Radio,
+  Settings2,
+  Square,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 
 export default function ControlPage() {
   const { t } = useTranslation();
@@ -74,48 +86,89 @@ export default function ControlPage() {
     return onDisplayError(onErr);
   }, [t]);
 
+  // Zoemer uit de tick-loop (einde periode / shotclock / time-out) ook in het bedieningspaneel melden.
+  useEffect(() => {
+    return onDisplayHorn((p) => {
+      const title =
+        p.reason === "period_end"
+          ? t("timer.hornPeriodEnd")
+          : p.reason === "shot_clock"
+            ? t("timer.hornShotClock")
+            : t("timer.hornTimeoutEnd");
+      toast({ title, variant: p.reason === "period_end" ? "success" : "default" });
+    });
+  }, [t]);
+
   return (
     <LicenseActivationGate>
       <main
         data-control-shell
-        className="flex h-dvh w-full max-w-none flex-col overflow-hidden px-4 py-4 sm:px-6"
+        className="flex h-dvh w-full max-w-none flex-col overflow-hidden px-3 py-3 sm:px-5 sm:py-4"
       >
       <ToastViewport />
 
       <UpdateNudgeBanner />
 
-      <header className="mb-4 flex shrink-0 items-center justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-bold sm:text-3xl">{t("shell.title")}</h1>
-          <p className="truncate text-sm text-muted-foreground">
-            {!state?.matchId
-              ? t("shell.noActiveMatch")
-              : isFullMatch(match)
-                ? `${match.homeTeam.name} vs ${match.awayTeam.name} · ${match.status}`
-                : t("shell.matchLoading")}
-          </p>
+      <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/80 bg-card/80 px-3 py-3 shadow-lg shadow-black/10 backdrop-blur sm:px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/15">
+            <Gauge className="size-6" />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary">
+              {t("shell.title")}
+            </div>
+            {isFullMatch(match) ? (
+              <div className="flex min-w-0 items-baseline gap-2">
+                <h1 className="truncate text-base font-black sm:text-xl">
+                  {match.homeTeam.name}
+                  <span className="mx-2 font-mono text-primary tabular-nums">
+                    {match.homeScore} – {match.awayScore}
+                  </span>
+                  {match.awayTeam.name}
+                </h1>
+                <span className="hidden shrink-0 text-xs text-muted-foreground lg:inline">
+                  {tMatchStatus(t, match.status, match.sport)}
+                </span>
+              </div>
+            ) : (
+              <h1 className="truncate text-base font-black text-muted-foreground sm:text-xl">
+                {!state?.matchId ? t("shell.noActiveMatch") : t("shell.matchLoading")}
+              </h1>
+            )}
+          </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">
-          <AppResourceMeter />
-          <MobileBridgeMenu info={mobileBridge} />
-          <span className="flex items-center gap-2 text-xs">
-            <span
-              className={`h-3 w-3 rounded-full ${
-                connected ? "bg-green-500 animate-pulse-dot" : "bg-red-500"
-              }`}
-            />
-            {connected ? t("common.connected") : t("common.disconnected")}
-          </span>
-          <span className="px-2 py-1 rounded bg-secondary text-xs font-mono">
-            {t("shell.mode")}: {state?.mode ?? "…"}
-          </span>
-          <button
-            type="button"
-            onClick={() => void focusDisplayWindow()}
-            className="text-xs underline text-muted-foreground"
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <div className="hidden items-center gap-2 xl:flex">
+            <AppResourceMeter />
+            <MobileBridgeMenu info={mobileBridge} />
+          </div>
+          <span
+            className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold ${
+              connected
+                ? "border-green-500/30 bg-green-500/10 text-green-400"
+                : "border-red-500/30 bg-red-500/10 text-red-400"
+            }`}
           >
-            {t("shell.openDisplay")}
-          </button>
+            {connected ? <Wifi className="size-3.5" /> : <WifiOff className="size-3.5" />}
+            <span className="hidden sm:inline">
+              {connected ? t("common.connected") : t("common.disconnected")}
+            </span>
+          </span>
+          <span className="hidden h-8 items-center rounded-lg border border-border bg-background/70 px-2.5 text-xs font-mono text-muted-foreground md:inline-flex">
+            {t("shell.mode")}:
+            <strong className="ml-1 text-foreground">{state?.mode ?? "…"}</strong>
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-8 gap-2"
+            onClick={() => void focusDisplayWindow()}
+          >
+            <MonitorUp className="size-4" />
+            <span className="hidden sm:inline">{t("shell.openDisplay")}</span>
+          </Button>
         </div>
       </header>
 
@@ -124,29 +177,42 @@ export default function ControlPage() {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <TabsList>
-            <TabsTrigger value="match">{t("shell.tabMatch")}</TabsTrigger>
-            <TabsTrigger value="setup">{t("shell.tabSetup")}</TabsTrigger>
-            <TabsTrigger value="media">{t("shell.tabMedia")}</TabsTrigger>
-            <TabsTrigger value="reports">{t("shell.tabReports")}</TabsTrigger>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+          <TabsList className="h-auto max-w-full overflow-x-auto rounded-xl border border-border/70 bg-card/70 p-1">
+            <TabsTrigger value="match" className="h-10 gap-2 px-3 sm:px-4">
+              <Radio className="size-4" />
+              {t("shell.tabMatch")}
+            </TabsTrigger>
+            <TabsTrigger value="setup" className="h-10 gap-2 px-3 sm:px-4">
+              <Settings2 className="size-4" />
+              {t("shell.tabSetup")}
+            </TabsTrigger>
+            <TabsTrigger value="media" className="h-10 gap-2 px-3 sm:px-4">
+              <Images className="size-4" />
+              {t("shell.tabMedia")}
+            </TabsTrigger>
+            <TabsTrigger value="reports" className="h-10 gap-2 px-3 sm:px-4">
+              <FileBarChart className="size-4" />
+              {t("shell.tabReports")}
+            </TabsTrigger>
           </TabsList>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-10 border-primary/40 bg-primary/10 text-foreground hover:bg-primary/20"
-            onClick={() => setNewMatchOpen(true)}
-          >
-            {t("shell.startNewMatch")}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-10 border-destructive/40 text-foreground hover:bg-destructive/15"
-            disabled={!state?.matchId || !isFullMatch(match) || !!match.closedAt}
-            onClick={() => {
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              className="h-10 gap-2 px-3 sm:px-4"
+              onClick={() => setNewMatchOpen(true)}
+            >
+              <Plus className="size-4" />
+              {t("shell.startNewMatch")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-10 gap-2 border-destructive/30 px-3 text-muted-foreground hover:bg-destructive/15 hover:text-foreground"
+              disabled={!state?.matchId || !isFullMatch(match) || !!match.closedAt}
+              onClick={() => {
               if (!isFullMatch(match) || match.closedAt) {
                 toast({ title: t("shell.stopMatchNone"), variant: "error" });
                 return;
@@ -178,10 +244,12 @@ export default function ControlPage() {
                 await reloadMatch();
                 toast({ title: t("shell.stopMatchDone"), variant: "success" });
               })();
-            }}
-          >
-            {t("shell.stopMatch")}
-          </Button>
+              }}
+            >
+              <Square className="size-3.5" />
+              <span className="hidden sm:inline">{t("shell.stopMatch")}</span>
+            </Button>
+          </div>
         </div>
 
         <TabsContent value="match" forceMount className="min-h-0 overflow-hidden">
@@ -275,7 +343,7 @@ function MatchInfoCard({ match }: { match: Match | null }) {
       </p>
       <p className="text-xs text-muted-foreground">
         {t("shell.matchInfoPhaseHint")}{" "}
-        <span className="font-mono text-foreground">{tMatchStatus(t, match.status)}</span>
+        <span className="font-mono text-foreground">{tMatchStatus(t, match.status, match.sport)}</span>
       </p>
       <div className="border-t border-border pt-2 text-xs text-muted-foreground">
         Match ID: <span className="font-mono">{match.id.slice(0, 8)}</span>
