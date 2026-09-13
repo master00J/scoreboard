@@ -981,6 +981,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           </Button>
         ) : null}
       </section>
+      )}
 
       <section className="space-y-2 border-t border-border pt-4">
         <div className="text-xs font-medium text-foreground/90">{t("display.oneOffTitle")}</div>
@@ -1066,7 +1067,6 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           </Button>
         </div>
       </section>
-      )}
 
       {advancedOpen && isElectron && (
         <Button

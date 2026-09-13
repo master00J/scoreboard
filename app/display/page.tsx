@@ -104,6 +104,9 @@ import {
   externalCaptureCoversDisplay,
   isSponsorPlaybackInterrupted,
 } from "@/lib/sponsor-playback-interruption";
+import { tMatchPeriod } from "@/lib/i18n/t-phase";
+import { tBoard } from "@/lib/i18n/t-sport";
+import { useTranslation } from "react-i18next";
 
 /** Modes die naast het scorebord in het content-vlak staan (niet fullscreen over het canvas). */
 const LEFT_PANEL_INTERRUPT_MODES = new Set(["GOAL", "CARD"]);
@@ -467,13 +470,6 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     match?.currentPeriod ?? 1,
   );
   /** Sporten zonder wedstrijdklok (volleybal) tonen nooit een klok, ongeacht het thema. */
-  const liveTheme = useMemo<ResolvedScoreboardTheme>(
-    () =>
-      match && !resolveDisplayShowClock(match.sport, scoreboardTheme.showClock)
-        ? { ...scoreboardTheme, showClock: false }
-        : scoreboardTheme,
-    [match, scoreboardTheme],
-  );
   const currentMinute = Math.floor(elapsed / 60);
   const addedTimeMinutes = Math.max(0, state?.addedTimeMinutes ?? 0);
 

@@ -478,8 +478,11 @@ function ScheduledCuesSection({
   const [mediaQuery, setMediaQuery] = useState("");
 
   useEffect(() => {
-    if (pickedIds.length === 0 && activeMedia[0]) setPickedIds([activeMedia[0].id]);
-  }, [activeMedia, pickedIds.length]);
+    if (!mediaId && activeMedia[0]) setMediaId(activeMedia[0].id);
+  }, [activeMedia, mediaId]);
+
+  const pickedIds = mediaId ? [mediaId] : [];
+  const triggerSec = parseClockInput(timeText) ?? 0;
 
   useEffect(() => {
     const list = cues.filter((c) => cueRundownPhaseKey(c.matchStatus) === matchStatus);
@@ -499,6 +502,14 @@ function ScheduledCuesSection({
       const key = cueRundownPhaseKey(cue.matchStatus);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(cue);
+    }
+    return groups;
+  }, [cues]);
+
+  async function addCue() {
+    if (!mediaId || parseClockInput(timeText) == null) {
+      toast({ title: t("media.cueInvalidInput"), variant: "error" });
+      return;
     }
     const triggerSeconds = [triggerSec];
     if (scheduleMode === "repeat") {
@@ -546,6 +557,10 @@ function ScheduledCuesSection({
           ? t("media.cueSeriesAdded", { count: triggerSeconds.length })
           : t("media.cueAdded", { time: formatCueClock(triggerSec) }),
     });
+  }
+
+  async function addAtTime() {
+    await addCue();
   }
 
   async function patchCue(id: string, body: Record<string, unknown>) {
@@ -2295,6 +2310,21 @@ function formatCueClock(sec: number): string {
   const m = Math.floor(safe / 60);
   const s = safe % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function parseClockInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^\d+:\d{1,2}$/.test(trimmed)) {
+    const [mRaw, sRaw] = trimmed.split(":");
+    const m = Number(mRaw);
+    const s = Number(sRaw);
+    if (!Number.isFinite(m) || !Number.isFinite(s) || s < 0 || s > 59) return null;
+    return Math.max(0, Math.round(m * 60 + s));
+  }
+  const min = Number(trimmed.replace(",", "."));
+  if (!Number.isFinite(min) || min < 0) return null;
+  return Math.round(min * 60);
 }
 
 /** Afbeelding / afgeronde videoseconds voor opslag (1 … 600). */

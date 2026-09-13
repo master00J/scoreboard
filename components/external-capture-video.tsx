@@ -89,4 +89,4 @@ export function ExternalCaptureVideo({
       />
     </DisplayMediaStage>
   );
-});
+}

@@ -1436,34 +1436,6 @@
     "devtoolsDisplay": "DevTools (display)",
     "licenses": "Licenties en open source…"
   },
-  "sports": {
-    "FOOTBALL": "Voetbal",
-    "FUTSAL": "Futsal",
-    "BASKETBALL": "Basketbal",
-    "VOLLEYBALL": "Volleybal",
-    "HOCKEY": "Hockey",
-    "periodLabel": {
-      "FOOTBALL": "Helft",
-      "FUTSAL": "Helft",
-      "BASKETBALL": "Quarter",
-      "VOLLEYBALL": "Set",
-      "HOCKEY": "Quarter"
-    },
-    "statLabel": {
-      "FUTSAL": "Teamfouten",
-      "BASKETBALL": "Teamfouten",
-      "HOCKEY": "Straffen"
-    },
-    "scoreLabel": {
-      "FOOTBALL": "Goal",
-      "FUTSAL": "Goal",
-      "BASKETBALL": "Punten",
-      "VOLLEYBALL": "Punt",
-      "HOCKEY": "Goal"
-    },
-    "overtime": "Verlenging",
-    "overtimeN": "Verlenging {{n}}"
-  },
   "scoreboard": {
     "half1": "1E HELFT",
     "half2": "2E HELFT",
