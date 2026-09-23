@@ -61,19 +61,39 @@ export function isLivePlayingMatchStatus(status: string | undefined): boolean {
   );
 }
 
+/** Operatorvoorkeur «Scorebord + sponsors» vs. alleen scorebord. */
+export function preferredLiveDisplayMode(
+  preferSponsorRotation: boolean | number | null | undefined,
+): "MATCH" | "SPONSOR_ROTATION" {
+  return preferSponsorRotation === false || preferSponsorRotation === 0 ? "MATCH" : "SPONSOR_ROTATION";
+}
+
 /** Wat het display toont als een eenmalige clip stopt of blackout afloopt. */
 export function programmedDisplayMode(opts: {
   matchStatus?: string | null;
   automaticSponsorsAllowed?: boolean;
+  preferSponsorRotation?: boolean | number | null;
 }): "IDLE" | "MATCH" | "SPONSOR_ROTATION" {
   if (!opts.matchStatus) return "IDLE";
-  if (
-    (opts.automaticSponsorsAllowed ?? true) &&
-    isLivePlayingMatchStatus(opts.matchStatus)
-  ) {
-    return "SPONSOR_ROTATION";
-  }
-  return "MATCH";
+  if (!(opts.automaticSponsorsAllowed ?? true)) return "MATCH";
+  return preferredLiveDisplayMode(opts.preferSponsorRotation ?? true);
+}
+
+/**
+ * Stilstaande klok aan het begin van een speelhelft: volledig scorebord, geen sponsorclips
+ * tot de operator op Start drukt.
+ */
+export function periodStartHoldsFullScoreboard(opts: {
+  matchStatus?: string | null;
+  halfElapsedSec: number;
+  timerRunning: boolean;
+  /** Volleybal e.d.: set starten ís de start, geen aparte wedstrijdklok. */
+  wallClockPlay?: boolean;
+}): boolean {
+  if (opts.wallClockPlay) return false;
+  if (!isLivePlayingMatchStatus(opts.matchStatus ?? undefined)) return false;
+  if (opts.timerRunning) return false;
+  return opts.halfElapsedSec < 0.75;
 }
 
 /** Max. tijd dat een eenmalige clip op het scherm mag blijven (eind + hang-vangnet). */

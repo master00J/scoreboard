@@ -11,6 +11,7 @@ import {
   type SyntheticEvent,
 } from "react";
 import { DisplayMediaStage } from "@/components/display-media-stage";
+import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import type { MediaItem, Sponsor, SponsorSection } from "@/lib/types";
 import type { DisplayMediaDiagnosticPayload } from "@/lib/desktop-bridge";
@@ -51,7 +52,8 @@ type Plan = {
 const SPONSOR_VIDEO_FAULT_PAUSE_MS = 20_000;
 const SPONSOR_MEDIA_FAULT_COOLDOWN_MS = 5 * 60_000;
 const SPONSOR_CROSS_SPONSOR_VIDEO_RELEASE_MS = 1_200;
-const sponsorBudgetPlaybackOwners = new Map<string, string>();
+const SPONSOR_PLAYBACK_OWNER_STALE_MS = 4_000;
+const sponsorBudgetPlaybackOwners = new Map<string, { ownerId: string; heartbeatMs: number }>();
 let sponsorBudgetPlaybackOwnerSeq = 0;
 
 /**
@@ -134,6 +136,7 @@ export function SponsorBudgetRotation({
   restartCurrentOnResume = false,
   matchSponsorMediaId = null,
   matchSponsorMedia = null,
+  budgetSeconds = null,
 }: {
   sponsors: Sponsor[];
   section: SponsorSection;
@@ -143,6 +146,8 @@ export function SponsorBudgetRotation({
   /** Wedstrijd → Aftrap: vaste matchsponsor-clip in prematch (niet hele sponsor-medialijst). */
   matchSponsorMediaId?: string | null;
   matchSponsorMedia?: MediaItem | null;
+  /** Window-engine (volleybal): overschrijft sectie-budgetten uit sportBudgetsJson. */
+  budgetSeconds?: ((sponsor: Sponsor) => number) | null;
   /** Embedded control-preview: volg alleen de ledger, nooit een eigen rotatie (die mist verbruikte budget-ticks). */
   followPlayback?: boolean;
   /** Preview volgt exact de actieve clip van het hoofdscherm (via sponsor-ledger). */
@@ -195,20 +200,25 @@ export function SponsorBudgetRotation({
     }
 
     const claimIfAvailable = () => {
-      const currentOwner = sponsorBudgetPlaybackOwners.get(playbackOwnerKey);
-      if (!currentOwner) {
-        sponsorBudgetPlaybackOwners.set(playbackOwnerKey, ownerId);
+      const now = Date.now();
+      const current = sponsorBudgetPlaybackOwners.get(playbackOwnerKey);
+      if (
+        !current ||
+        current.ownerId === ownerId ||
+        now - current.heartbeatMs > SPONSOR_PLAYBACK_OWNER_STALE_MS
+      ) {
+        sponsorBudgetPlaybackOwners.set(playbackOwnerKey, { ownerId, heartbeatMs: now });
         setIsPlaybackOwner(true);
         return;
       }
-      setIsPlaybackOwner(currentOwner === ownerId);
+      setIsPlaybackOwner(false);
     };
 
     claimIfAvailable();
     const id = window.setInterval(claimIfAvailable, 750);
     return () => {
       window.clearInterval(id);
-      if (sponsorBudgetPlaybackOwners.get(playbackOwnerKey) === ownerId) {
+      if (sponsorBudgetPlaybackOwners.get(playbackOwnerKey)?.ownerId === ownerId) {
         sponsorBudgetPlaybackOwners.delete(playbackOwnerKey);
       }
     };
@@ -233,12 +243,17 @@ export function SponsorBudgetRotation({
     },
     [section, matchStatus, matchSponsorMediaId, matchSponsorMedia, sponsorIdFilter],
   );
+  const budgetFn = useCallback(
+    (s: Sponsor) =>
+      budgetSeconds ? budgetSeconds(s) : budgetFor(s, section, matchStatus),
+    [section, matchStatus, budgetSeconds],
+  );
   const activeSponsors = useMemo(() => {
     let list = sponsors.filter((s) => {
       const sectionMedia = rotationMediaForSponsor(s);
       return (
         s.active &&
-        budgetFor(s, section, matchStatus) > 0 &&
+        budgetFn(s) > 0 &&
         sectionMedia.length > 0
       );
     });
@@ -259,7 +274,7 @@ export function SponsorBudgetRotation({
       list = list.filter((s) => s.id === sponsorIdFilter);
     }
     return list;
-  }, [sponsors, section, matchStatus, sponsorIdFilter, followMode, followClip?.sponsorId, rotationMediaForSponsor]);
+  }, [sponsors, section, matchStatus, sponsorIdFilter, followMode, followClip?.sponsorId, rotationMediaForSponsor, budgetFn]);
 
   const [cycleId, setCycleId] = useState(0);
   const [slideTick, setSlideTick] = useState(0);
@@ -305,6 +320,8 @@ export function SponsorBudgetRotation({
   } | null>(null);
   const lastPausedTelemetryRef = useRef<boolean | null>(null);
   const lastProgressReportMsRef = useRef(0);
+  const pausedRef = useRef(!!paused);
+  pausedRef.current = !!paused;
   const visibleClipKeyRef = useRef<string | null>(null);
   const visibleClipElapsedMsRef = useRef(0);
   const visibleClipRunStartedAtMsRef = useRef<number | null>(null);
@@ -330,14 +347,14 @@ export function SponsorBudgetRotation({
           const sectionMedia = rotationMediaForSponsor(s);
           return (
             s.active &&
-            budgetFor(s, section, matchStatus) > 0 &&
+            budgetFn(s) > 0 &&
             sectionMedia.length > 0
           );
         })
         .map((s) => s.id)
         .sort()
         .join("|"),
-    [sponsors, section, matchStatus, rotationMediaForSponsor, matchSponsorMediaId],
+    [sponsors, section, matchStatus, rotationMediaForSponsor, matchSponsorMediaId, budgetFn],
   );
 
   /**
@@ -413,11 +430,6 @@ export function SponsorBudgetRotation({
   useEffect(() => {
     completedScheduledSponsorSlotRef.current = null;
   }, [sponsorIdFilter]);
-
-  const budgetFn = useCallback(
-    (s: Sponsor) => budgetFor(s, section, matchStatus),
-    [section, matchStatus],
-  );
 
   const availableMediaForSponsor = useCallback(
     (sponsor: Sponsor, now: number) => {
@@ -1317,7 +1329,7 @@ export function SponsorBudgetRotation({
           (!cycleBudgetForever && !current && playedClipRef.current));
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black contain-layout contain-paint">
+    <div className="absolute inset-0 overflow-hidden bg-black">
       {mediaHandoffInProgress ? (
         sponsorSwitchHoldFrame ? (
           <img
@@ -1744,7 +1756,6 @@ function MediaRenderer({
   };
 
   const videoProps = {
-    ref: videoRef,
     src,
     autoPlay: !paused,
     loop: false,
@@ -1883,8 +1894,9 @@ function MediaRenderer({
       <DisplayMediaStage>
         <div className="absolute inset-0 flex items-center justify-center bg-black">
           {item.type === "VIDEO" ? (
-            <video
+            <DisplayVideo
               key={`${item.id}-${src}`}
+              ref={videoRef}
               {...videoProps}
               preload={syncPlaybackMs != null ? "metadata" : "auto"}
               className="max-h-full max-w-full"
@@ -1906,8 +1918,9 @@ function MediaRenderer({
   if (item.type === "VIDEO") {
     return (
       <DisplayMediaStage>
-        <video
+        <DisplayVideo
           key={`${item.id}-${src}`}
+          ref={videoRef}
           {...videoProps}
           preload={syncPlaybackMs != null ? "metadata" : "auto"}
           style={DISPLAY_COVER_MEDIA_STYLE}

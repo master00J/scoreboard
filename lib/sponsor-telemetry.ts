@@ -126,6 +126,16 @@ export function sponsorTelemetryActiveClipElapsedSec(
   return Math.max(0, (nowMs - activeClip.startedAtMs) / 1000);
 }
 
+export function sponsorLedgerMatchesSegment(
+  match: { id: string; status?: string } | null | undefined,
+  section: SponsorSection,
+  ledger: SponsorLedgerPayload | null | undefined,
+): boolean {
+  if (!match || !ledger) return false;
+  const key = sponsorTelemetrySegmentKey(match.id, match.status, section);
+  return key != null && ledger.matchId === match.id && ledger.segmentKey === key;
+}
+
 /** Totale geschatte verbruikte seconden inclusief lopende clip (display-sync). */
 export function sponsorTelemetryConsumedSec(
   ledger: SponsorLedgerPayload,

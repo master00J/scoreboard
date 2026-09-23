@@ -44,6 +44,16 @@ export function useSocketSync(skip: boolean = false) {
       const offState = api.onDisplayState((state) => setState(state));
       const offTick = api.onTick((tick) => setTick(tick));
       const offLedger = api.onSponsorLedger((ledger) => setSponsorLedger(ledger));
+      cleanup = () => {
+        offState();
+        offTick();
+        offLedger();
+        setConnected(false);
+      };
+      if (cancelled) {
+        cleanup();
+        return;
+      }
 
       try {
         const snapshot = await api.getDisplaySnapshot();
@@ -63,13 +73,6 @@ export function useSocketSync(skip: boolean = false) {
           console.error("[use-socket] snapshot failed", err);
         }
       }
-
-      cleanup = () => {
-        offState();
-        offTick();
-        offLedger();
-        setConnected(false);
-      };
     })();
 
     return () => {
@@ -120,7 +123,9 @@ export function onDisplayHorn(listener: (payload: HornPayload) => void) {
   };
 }
 
-export function onDisplayError(listener: (payload: { message: string }) => void) {
+export function onDisplayError(
+  listener: (payload: { message: string; code?: string; params?: Record<string, string | number> }) => void,
+) {
   let active = true;
   let unsubscribe: (() => void) | null = null;
   void (async () => {

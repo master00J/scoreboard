@@ -21,7 +21,7 @@ export function computeElapsedSeconds(state: {
   if (!state.timerRunning || started == null) {
     return Math.max(0, state.timerBaseSec);
   }
-  const diffSec = (now - started) / 1000;
+  const diffSec = Math.max(0, (now - started) / 1000);
   return Math.max(0, state.timerBaseSec + diffSec);
 }
 
@@ -136,6 +136,22 @@ export function runShotClockFrom(seconds: number, now: Date = new Date()) {
   };
 }
 
+/** Zichtbare shotclock (lopend of gepauzeerd op een waarde). */
+export function presentShotClock(seconds: number, running: boolean, now: Date = new Date()) {
+  return {
+    ...(running ? runShotClockFrom(seconds, now) : pauseShotClockAt(seconds)),
+    shotClockOff: false,
+  };
+}
+
+/** FIBA: shotclock uit, geen cijfer op het scherm. */
+export function suppressShotClock() {
+  return {
+    ...pauseShotClockAt(0),
+    shotClockOff: true,
+  };
+}
+
 export function computePenaltySeconds(state: CountdownState, now: number = Date.now()): number {
   return computeCountdownSeconds(state, now);
 }
@@ -207,6 +223,7 @@ export function runTimeoutFrom(side: TimeoutSide, seconds: number, now: Date = n
     timeoutStartedAt: sec > 0 ? now : null,
     timeoutBaseSec: sec,
     timeoutSide: sec > 0 ? side : null,
+    timeoutWarnSent: false,
   };
 }
 
@@ -216,6 +233,39 @@ export function clearTimeoutClock() {
     timeoutStartedAt: null,
     timeoutBaseSec: 0,
     timeoutSide: null,
+    timeoutWarnSent: false,
+  };
+}
+
+export function computeBreakSeconds(state: {
+  breakRunning: boolean;
+  breakStartedAt: Date | string | null;
+  breakBaseSec: number;
+}, now: number = Date.now()): number {
+  return computeCountdownSeconds(
+    { running: state.breakRunning, startedAt: state.breakStartedAt, baseSec: state.breakBaseSec },
+    now,
+  );
+}
+
+export function runBreakFrom(seconds: number, warnAt30: boolean, now: Date = new Date()) {
+  const sec = toClockSeconds(seconds);
+  return {
+    breakRunning: sec > 0,
+    breakStartedAt: sec > 0 ? now : null,
+    breakBaseSec: sec,
+    breakWarnArmed: warnAt30 && sec > 30,
+    breakWarnSent: false,
+  };
+}
+
+export function clearBreakClock() {
+  return {
+    breakRunning: false,
+    breakStartedAt: null,
+    breakBaseSec: 0,
+    breakWarnArmed: false,
+    breakWarnSent: false,
   };
 }
 
@@ -226,6 +276,10 @@ export type SerializedDisplayState = Omit<
   | "homePenaltyStartedAt"
   | "awayPenaltyStartedAt"
   | "timeoutStartedAt"
+  | "breakStartedAt"
+  | "liveWallCueOrigin"
+  | "preMatchStartedAt"
+  | "postMatchStartedAt"
   | "updatedAt"
 > & {
   timerStartedAt: string | null;
@@ -233,6 +287,10 @@ export type SerializedDisplayState = Omit<
   homePenaltyStartedAt: string | null;
   awayPenaltyStartedAt: string | null;
   timeoutStartedAt: string | null;
+  breakStartedAt: string | null;
+  liveWallCueOrigin: string | null;
+  preMatchStartedAt: string | null;
+  postMatchStartedAt: string | null;
   updatedAt: string;
   /** Alleen runtime: na sport:setPeriod, tot timer:start. Niet in Prisma. */
   sponsorPeriodBreakPending?: boolean;
@@ -244,10 +302,6 @@ function isoOrNull(value: Date | string | null | undefined): string | null {
 }
 
 export function serializeDisplayState(s: DisplayState): SerializedDisplayState {
-  const row = s as DisplayState & {
-    postMatchStartedAt?: Date | null;
-    preMatchStartedAt?: Date | null;
-  };
   return {
     ...s,
     timerStartedAt: isoOrNull(s.timerStartedAt),
@@ -255,6 +309,10 @@ export function serializeDisplayState(s: DisplayState): SerializedDisplayState {
     homePenaltyStartedAt: isoOrNull(s.homePenaltyStartedAt),
     awayPenaltyStartedAt: isoOrNull(s.awayPenaltyStartedAt),
     timeoutStartedAt: isoOrNull(s.timeoutStartedAt),
+    breakStartedAt: isoOrNull(s.breakStartedAt),
+    liveWallCueOrigin: isoOrNull(s.liveWallCueOrigin),
+    preMatchStartedAt: isoOrNull(s.preMatchStartedAt),
+    postMatchStartedAt: isoOrNull(s.postMatchStartedAt),
     updatedAt: s.updatedAt.toISOString(),
   };
 }

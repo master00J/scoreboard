@@ -3,7 +3,9 @@ import fs from "fs";
 import path from "path";
 import { prisma } from "../lib/prisma";
 import {
+  clearBreakClock,
   clearTimeoutClock,
+  computeBreakSeconds,
   computeElapsedSeconds,
   computePenaltySeconds,
   computeShotClockSeconds,
@@ -11,20 +13,30 @@ import {
   pausePenaltyAt,
   pauseShotClockAt,
   penaltyStateFor,
+  runBreakFrom,
   runFrom,
   runShotClockFrom,
   serializeDisplayState,
   stopAt,
 } from "../lib/timer";
 import {
+  basketballIntervalBreak,
   formatSportClock,
   getSportProfile,
   normalizeSport,
   periodDurationSecFor,
   sportPeriodLabel,
 } from "../lib/sports";
-import { normalizeVolleyballFormat, parseSetHistory } from "../lib/volleyball";
+import { normalizeVolleyballFormat, normalizeVolleyballMatchRules, parseTechnicalTimeoutScores, parseSetHistory } from "../lib/volleyball";
 import { checkpointSqlite, ensureSqliteSchema } from "../server/db-init";
+import {
+  emptyLiveWallCueClock,
+  isPostMatchCuePhase,
+  isPrematchCuePhase,
+  liveWallCueClockFromPersisted,
+  liveWallCuePersistPatch,
+  nextLiveWallCueClock,
+} from "../lib/scheduled-media-cue";
 import { CommandSchema, type Command } from "../lib/validation/commands";
 import type {
   CommandAck,
@@ -45,6 +57,7 @@ import {
   builtInTemplateRows,
   sanitizeTemplateThemeJson,
 } from "../lib/scoreboard-templates";
+import { isCommandUserError } from "../lib/command-user-error";
 import { handleCommand } from "../server/handlers";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
@@ -734,13 +747,75 @@ async function touchState() {
   });
 }
 
-/** Bij app-opstart niet automatisch opnieuw sponsorrotatie starten uit de vorige sessie. */
+/** Bij herstart: als een volleybalset al loopt zonder opgeslagen cue-klok, start vanaf nu. */
+async function seedLiveWallCueClockIfMissing(): Promise<void> {
+  const state = await getStateRow();
+  if (!state.matchId) return;
+  if (state.liveWallCueOrigin != null || state.liveWallCueBlock != null) return;
+  const match = await prisma.match.findUnique({
+    where: { id: state.matchId },
+    select: { id: true, status: true, sport: true },
+  });
+  if (!match) return;
+  const clock = nextLiveWallCueClock(
+    liveWallCueClockFromPersisted({
+      matchId: state.matchId,
+      block: state.liveWallCueBlock,
+      origin: state.liveWallCueOrigin,
+      frozenSec: state.liveWallCueFrozenSec,
+    }),
+    {
+      matchId: match.id,
+      status: match.status,
+      timerMode: getSportProfile(match.sport).timerMode,
+      nowMs: Date.now(),
+    },
+  );
+  if (clock.block == null && clock.originMs == null) return;
+  await prisma.displayState.update({
+    where: { id: 1 },
+    data: liveWallCuePersistPatch(clock),
+  });
+}
+
+/** Bij herstart: time-cues Voor/Na wedstrijd mogen niet op 0:00 blijven hangen. */
+async function seedCuePhaseClocksIfMissing(): Promise<void> {
+  const state = await getStateRow();
+  if (!state.matchId) return;
+  const match = await prisma.match.findUnique({
+    where: { id: state.matchId },
+    select: { status: true },
+  });
+  if (!match) return;
+  const now = new Date();
+  const data: { preMatchStartedAt?: Date; postMatchStartedAt?: Date } = {};
+  if (isPrematchCuePhase(match.status) && state.preMatchStartedAt == null) {
+    data.preMatchStartedAt = now;
+  }
+  if (isPostMatchCuePhase(match.status) && state.postMatchStartedAt == null) {
+    data.postMatchStartedAt = now;
+  }
+  if (Object.keys(data).length === 0) return;
+  await prisma.displayState.update({ where: { id: 1 }, data });
+}
+
+/** Bij app-opstart laatste Scorebord+sponsors-voorkeur herstellen; geen eenmalige clips. */
 async function resetAutoSponsorModeOnStartup(): Promise<void> {
   const state = await getStateRow();
+  let matchStatus: string | null = null;
+  if (state.matchId) {
+    const match = await prisma.match.findUnique({
+      where: { id: state.matchId },
+      select: { status: true },
+    });
+    matchStatus = match?.status ?? null;
+  }
   const patch = startupDisplayStatePatch({
     matchId: state.matchId,
     mode: state.mode,
     activeMediaId: state.activeMediaId,
+    preferSponsorRotation: state.preferSponsorRotation,
+    matchStatus,
   });
   if (!patch) return;
   await prisma.displayState.update({
@@ -748,9 +823,14 @@ async function resetAutoSponsorModeOnStartup(): Promise<void> {
     data: {
       mode: patch.mode,
       activeMediaId: patch.activeMediaId,
+      activePlayerId: null,
+      activeGoalScorerId: null,
+      activeCardColor: null,
+      activeSubInId: null,
+      activeSubOutId: null,
+      substitutionQueueJson: "[]",
     },
   });
-  resetSponsorLedger();
 }
 
 /** Display loskoppelen wanneer een wedstrijd wordt afgesloten of verwijderd. */
@@ -777,6 +857,9 @@ async function detachDisplayStateForMatchId(matchId: string): Promise<void> {
       ...pausePenaltyAt("home", 0),
       ...pausePenaltyAt("away", 0),
       ...clearTimeoutClock(),
+      ...liveWallCuePersistPatch(emptyLiveWallCueClock()),
+      preMatchStartedAt: null,
+      postMatchStartedAt: null,
     },
   });
   resetSponsorLedger();
@@ -805,6 +888,12 @@ async function repairOrphanDisplayMatchId(): Promise<void> {
       timerRunning: false,
       timerStartedAt: null,
       timerBaseSec: 0,
+      ...pausePenaltyAt("home", 0),
+      ...pausePenaltyAt("away", 0),
+      ...clearTimeoutClock(),
+      ...liveWallCuePersistPatch(emptyLiveWallCueClock()),
+      preMatchStartedAt: null,
+      postMatchStartedAt: null,
     },
   });
   resetSponsorLedger();
@@ -857,6 +946,9 @@ type TickMatchInfo = {
   sport: string;
   currentPeriod: number;
   periodDurationSec: number;
+  halfBreakSec: number;
+  shortBreakSec: number;
+  status: string;
 };
 
 let tickMatchCache: { key: string; match: TickMatchInfo | null } | null = null;
@@ -868,7 +960,15 @@ async function tickMatchInfo(state: DisplayStateRow): Promise<TickMatchInfo | nu
   if (tickMatchCache && tickMatchCache.key === key) return tickMatchCache.match;
   const match = await prisma.match.findUnique({
     where: { id: state.matchId },
-    select: { id: true, sport: true, currentPeriod: true, periodDurationSec: true },
+    select: {
+      id: true,
+      sport: true,
+      currentPeriod: true,
+      periodDurationSec: true,
+      halfBreakSec: true,
+      shortBreakSec: true,
+      status: true,
+    },
   });
   tickMatchCache = { key, match };
   return match;
@@ -909,7 +1009,7 @@ function startTickLoop() {
       if (Math.abs(jumpMs) > 1000) {
         const anyRunning =
           state.timerRunning || state.shotClockRunning || state.homePenaltyRunning ||
-          state.awayPenaltyRunning || state.timeoutRunning;
+          state.awayPenaltyRunning || state.timeoutRunning || state.breakRunning;
         requireOpts().log(`[clock-guard] systeemklok sprong ${Math.round(jumpMs)} ms${anyRunning ? " — lopende klokken opnieuw verankerd" : ""}`);
         if (anyRunning) {
           // Elke lopende klok krijgt de waarde van vóór de sprong (elapsed op basis van de tijd vóór de sprong)
@@ -929,6 +1029,10 @@ function startTickLoop() {
           if (state.timeoutRunning) {
             const rem = computeTimeoutSeconds(state, before);
             Object.assign(data, { timeoutStartedAt: new Date(now), timeoutBaseSec: rem });
+          }
+          if (state.breakRunning) {
+            const rem = computeBreakSeconds(state, before);
+            Object.assign(data, { breakStartedAt: new Date(now), breakBaseSec: rem });
           }
           state = await prisma.displayState.update({ where: { id: 1 }, data });
           mutated = true;
@@ -953,6 +1057,8 @@ function startTickLoop() {
                   Object.assign(data, pausePenaltyAt("away", computePenaltySeconds(penaltyStateFor(state, "away"), now)));
                 }
               }
+              const interval = basketballIntervalBreak(match);
+              if (interval) Object.assign(data, runBreakFrom(interval.seconds, interval.warnAt30));
               state = await prisma.displayState.update({ where: { id: 1 }, data });
               mutated = true;
               broadcastHorn("period_end");
@@ -984,13 +1090,41 @@ function startTickLoop() {
         });
         mutated = true;
       }
-      if (state.timeoutRunning && computeTimeoutSeconds(state, now) <= 0) {
-        state = await prisma.displayState.update({
-          where: { id: 1 },
-          data: clearTimeoutClock(),
-        });
-        mutated = true;
-        broadcastHorn("timeout_end");
+      if (state.timeoutRunning) {
+        const timeoutLeft = computeTimeoutSeconds(state, now);
+        if (timeoutLeft <= 0) {
+          state = await prisma.displayState.update({
+            where: { id: 1 },
+            data: clearTimeoutClock(),
+          });
+          mutated = true;
+          broadcastHorn("timeout_end");
+        } else if (!state.timeoutWarnSent && state.timeoutBaseSec - timeoutLeft >= 50) {
+          state = await prisma.displayState.update({
+            where: { id: 1 },
+            data: { timeoutWarnSent: true },
+          });
+          mutated = true;
+          broadcastHorn("timeout_warning");
+        }
+      }
+      if (state.breakRunning) {
+        const breakLeft = computeBreakSeconds(state, now);
+        if (breakLeft <= 0) {
+          state = await prisma.displayState.update({
+            where: { id: 1 },
+            data: clearBreakClock(),
+          });
+          mutated = true;
+          broadcastHorn("break_end");
+        } else if (state.breakWarnArmed && !state.breakWarnSent && breakLeft <= 30) {
+          state = await prisma.displayState.update({
+            where: { id: 1 },
+            data: { breakWarnSent: true },
+          });
+          mutated = true;
+          broadcastHorn("break_warning");
+        }
       }
 
       if (mutated) {
@@ -1002,7 +1136,8 @@ function startTickLoop() {
         state.shotClockRunning ||
         state.homePenaltyRunning ||
         state.awayPenaltyRunning ||
-        state.timeoutRunning;
+        state.timeoutRunning ||
+        state.breakRunning;
       if (!clocksLive && now - lastTickBroadcastAt < 2000) return;
       const tick: TickPayload = {
         elapsed: computeElapsedSeconds(state),
@@ -1033,6 +1168,8 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   await migrateAppSettingsLiveCycleFromLegacy();
   await repairOrphanDisplayMatchId();
   await resetAutoSponsorModeOnStartup();
+  await seedLiveWallCueClockIfMissing();
+  await seedCuePhaseClocksIfMissing();
   startTickLoop();
   await prepareRiskyVideosInBackground();
   await broadcastDisplayState();
@@ -1772,6 +1909,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         matchSponsorMediaId?: string | null;
         halfDurationSec?: number;
         halfBreakSec?: number;
+        shortBreakSec?: number;
         sport?: string;
         periodDurationSec?: number;
         servingSide?: "home" | "away" | null;
@@ -1779,20 +1917,41 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         setsToWin?: number;
         pointsToWinSet?: number;
         pointsToWinDecider?: number;
+        winBy?: number;
+        technicalTimeoutScoresJson?: string | null;
+        technicalTimeoutScores?: number[] | string | null;
+        technicalTimeoutDurationSec?: number;
+        timeoutsPerSet?: number;
+        timeoutDurationSec?: number;
         prematchSpreadWindowSec?: number | null;
       };
       const sport = normalizeSport(body.sport);
       const sportProfile = getSportProfile(sport);
-      const volleyFormat = normalizeVolleyballFormat({
+      const volleyRules = normalizeVolleyballMatchRules({
         setsToWin: body.setsToWin,
         pointsToWinSet: body.pointsToWinSet,
         pointsToWinDecider: body.pointsToWinDecider,
+        winBy: body.winBy,
+        technicalTimeoutsEnabled: body.technicalTimeoutsEnabled === true,
+        technicalTimeoutScores: body.technicalTimeoutScores ?? undefined,
+        technicalTimeoutScoresJson: body.technicalTimeoutScoresJson,
+        technicalTimeoutDurationSec: body.technicalTimeoutDurationSec,
+        timeoutsPerSet: body.timeoutsPerSet,
+        timeoutDurationSec: body.timeoutDurationSec,
+        setBreakSec: body.halfBreakSec,
       });
       const breakSecRaw = Number(body.halfBreakSec);
       const halfBreakSec =
         Number.isFinite(breakSecRaw) && breakSecRaw > 0
-          ? Math.min(3600, Math.max(60, Math.floor(breakSecRaw)))
-          : sportProfile.breakDurationSec;
+          ? Math.min(3600, Math.max(30, Math.floor(breakSecRaw)))
+          : sportProfile.hasSets
+            ? volleyRules.setBreakSec
+            : sportProfile.breakDurationSec;
+      const shortBreakRaw = Number(body.shortBreakSec);
+      const shortBreakSec =
+        Number.isFinite(shortBreakRaw) && shortBreakRaw > 0
+          ? Math.min(3600, Math.max(30, Math.floor(shortBreakRaw)))
+          : sportProfile.shortBreakDurationSec;
       let sponsorId: string | null = null;
       if (typeof body.matchSponsorMediaId === "string" && body.matchSponsorMediaId.length > 0) {
         const mi = await prisma.mediaItem.findUnique({ where: { id: body.matchSponsorMediaId } });
@@ -1824,10 +1983,15 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
               : "home"
             : null,
           setHistoryJson: sportProfile.hasSets ? "[]" : null,
-          technicalTimeoutsEnabled: sportProfile.hasSets && body.technicalTimeoutsEnabled === true,
-          setsToWin: volleyFormat.setsToWin,
-          pointsToWinSet: volleyFormat.pointsToWinSet,
-          pointsToWinDecider: volleyFormat.pointsToWinDecider,
+          technicalTimeoutsEnabled: sportProfile.hasSets && volleyRules.technicalTimeoutsEnabled,
+          technicalTimeoutScoresJson: JSON.stringify(volleyRules.technicalTimeoutScores),
+          technicalTimeoutDurationSec: volleyRules.technicalTimeoutDurationSec,
+          timeoutsPerSet: volleyRules.timeoutsPerSet,
+          timeoutDurationSec: volleyRules.timeoutDurationSec,
+          setsToWin: volleyRules.setsToWin,
+          pointsToWinSet: volleyRules.pointsToWinSet,
+          pointsToWinDecider: volleyRules.pointsToWinDecider,
+          winBy: volleyRules.winBy,
           periodDurationSec:
             typeof body.periodDurationSec === "number" && body.periodDurationSec >= 0
               ? Math.floor(body.periodDurationSec)
@@ -1837,6 +2001,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
               ? Math.floor(body.periodDurationSec)
               : (body.halfDurationSec ?? sportProfile.defaultPeriodDurationSec),
           halfBreakSec,
+          shortBreakSec,
         },
         include: { homeTeam: true, awayTeam: true, matchSponsorMedia: true },
       });
@@ -1926,7 +2091,16 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           data.setFirstServer = profile.hasSets ? "home" : null;
           data.setHistoryJson = profile.hasSets ? "[]" : null;
           data.technicalTimeoutsEnabled = false;
+          data.technicalTimeoutScoresJson = "[8,16]";
+          data.technicalTimeoutDurationSec = 60;
+          data.timeoutsPerSet = 2;
+          data.timeoutDurationSec = 30;
+          data.winBy = 2;
           data.halfBreakSec = profile.breakDurationSec;
+          data.shortBreakSec = profile.shortBreakDurationSec;
+          data.possessionArrow = null;
+          data.homeLateTimeouts = 0;
+          data.awayLateTimeouts = 0;
         }
         if (typeof body.periodDurationSec === "number" && Number.isFinite(body.periodDurationSec)) {
           const periodSec = Math.max(0, Math.min(24 * 60 * 60, Math.floor(body.periodDurationSec)));
@@ -1934,21 +2108,44 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           if (periodSec > 0) data.halfDurationSec = periodSec;
         }
         if (typeof body.halfBreakSec === "number" && Number.isFinite(body.halfBreakSec)) {
-          data.halfBreakSec = Math.max(60, Math.min(3600, Math.floor(body.halfBreakSec)));
+          data.halfBreakSec = Math.max(30, Math.min(3600, Math.floor(body.halfBreakSec)));
+        }
+        if (typeof body.shortBreakSec === "number" && Number.isFinite(body.shortBreakSec)) {
+          data.shortBreakSec = Math.max(30, Math.min(3600, Math.floor(body.shortBreakSec)));
         }
         if (typeof body.technicalTimeoutsEnabled === "boolean") {
           data.technicalTimeoutsEnabled = body.technicalTimeoutsEnabled;
         }
-        if ("setsToWin" in body || "pointsToWinSet" in body || "pointsToWinDecider" in body) {
+        if ("setsToWin" in body || "pointsToWinSet" in body || "pointsToWinDecider" in body || "winBy" in body) {
           const fmt = normalizeVolleyballFormat({
             setsToWin: typeof body.setsToWin === "number" ? body.setsToWin : cur.setsToWin,
             pointsToWinSet: typeof body.pointsToWinSet === "number" ? body.pointsToWinSet : cur.pointsToWinSet,
             pointsToWinDecider:
               typeof body.pointsToWinDecider === "number" ? body.pointsToWinDecider : cur.pointsToWinDecider,
+            winBy: typeof body.winBy === "number" ? body.winBy : cur.winBy,
           });
           data.setsToWin = fmt.setsToWin;
           data.pointsToWinSet = fmt.pointsToWinSet;
           data.pointsToWinDecider = fmt.pointsToWinDecider;
+          data.winBy = fmt.winBy;
+        }
+        if (typeof body.timeoutsPerSet === "number" && Number.isFinite(body.timeoutsPerSet)) {
+          data.timeoutsPerSet = normalizeVolleyballMatchRules({ timeoutsPerSet: body.timeoutsPerSet }).timeoutsPerSet;
+        }
+        if (typeof body.timeoutDurationSec === "number" && Number.isFinite(body.timeoutDurationSec)) {
+          data.timeoutDurationSec = normalizeVolleyballMatchRules({
+            timeoutDurationSec: body.timeoutDurationSec,
+          }).timeoutDurationSec;
+        }
+        if (typeof body.technicalTimeoutDurationSec === "number" && Number.isFinite(body.technicalTimeoutDurationSec)) {
+          data.technicalTimeoutDurationSec = normalizeVolleyballMatchRules({
+            technicalTimeoutDurationSec: body.technicalTimeoutDurationSec,
+          }).technicalTimeoutDurationSec;
+        }
+        if ("technicalTimeoutScoresJson" in body || "technicalTimeoutScores" in body) {
+          data.technicalTimeoutScoresJson = JSON.stringify(
+            parseTechnicalTimeoutScores(body.technicalTimeoutScoresJson ?? body.technicalTimeoutScores),
+          );
         }
         if (body.servingSide === "home" || body.servingSide === "away") {
           data.servingSide = body.servingSide;
@@ -2451,6 +2648,7 @@ function commandResetsSponsorTelemetry(cmd: Command): boolean {
     case "match:setStatus":
     case "match:setActive":
     case "timer:preset":
+    case "sport:setPeriod":
       return true;
     case "timer:set":
       return cmd.seconds === 0;
@@ -2483,6 +2681,11 @@ export async function runCommand(input: Command): Promise<CommandAck> {
       }
       return result;
     } catch (err) {
+      if (isCommandUserError(err)) {
+        requireOpts().log(`[command] ${err.code}`);
+        sendControl("display:error", { message: err.code, code: err.code, params: err.params });
+        return { ok: false, error: err.code, code: err.code, params: err.params };
+      }
       const message = err instanceof Error ? err.message : String(err);
       requireOpts().log(`[command] ${message}`);
       sendControl("display:error", { message });

@@ -4,10 +4,17 @@ import { fileURLToPath } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Laadt `.env.signing` in process.env zonder bestaande vars te overschrijven. */
-export function loadSigningEnv() {
-  const file = path.join(root, ".env.signing");
-  if (!existsSync(file)) return;
+function signingEnvCandidates() {
+  const extra = process.env.ARENA_CUE_SIGNING_ENV?.trim();
+  return [
+    extra,
+    path.join(root, ".env.signing"),
+    // Lokale sibling-repo waar Azure Trusted Signing al is geconfigureerd.
+    path.join(root, "..", "..", "scoreboard", ".env.signing"),
+  ].filter(Boolean);
+}
+
+function applySigningEnvFile(file) {
   const text = readFileSync(file, "utf8");
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
@@ -20,6 +27,16 @@ export function loadSigningEnv() {
       value = value.slice(1, -1);
     }
     if (key && process.env[key] == null) process.env[key] = value;
+  }
+}
+
+/** Laadt `.env.signing` in process.env zonder bestaande vars te overschrijven. */
+export function loadSigningEnv() {
+  for (const file of signingEnvCandidates()) {
+    if (existsSync(file)) {
+      applySigningEnvFile(file);
+      return;
+    }
   }
 }
 

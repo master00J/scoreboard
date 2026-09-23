@@ -23,6 +23,7 @@ import {
 import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
 import { prematchRosterClockSec } from "@/lib/prematch-spread-timing";
 import { tMatchStatus, tSponsorBlock } from "@/lib/i18n/t-phase";
+import { useResolvedSponsorWindow } from "@/lib/use-resolved-sponsor-window";
 
 function formatClock(sec: number): string {
   const t = Math.max(0, Math.round(Number(sec) || 0));

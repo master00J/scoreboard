@@ -3,6 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { getCaptureStream } from "@/lib/get-desktop-capture-stream";
 import { DisplayMediaStage } from "@/components/display-media-stage";
+import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 
 export type ExternalCaptureVideoHandle = {
@@ -79,7 +80,7 @@ export function ExternalCaptureVideo({
 
   return (
     <DisplayMediaStage>
-      <video
+      <DisplayVideo
         ref={videoRef}
         muted={!audio}
         playsInline

@@ -12,22 +12,28 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   ChevronDown,
+  ChevronsUpDown,
   GripVertical,
   LayoutDashboard,
+  Minus,
   PanelRightOpen,
+  Plus,
   SlidersHorizontal,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import DisplayPage from "@/app/display/page";
+import { useDisplayPreviewPlayback } from "@/lib/use-display-preview-playback";
 import {
   DEFAULT_MATCH_TAB_LAYOUT,
+  clampPanelHeight,
   isMatchTabPanelId,
   moveMatchTabPanel,
+  nudgeColumnPair,
   resolveHydratedMatchTabLayout,
   sanitizeMatchTabLayout,
   saveMatchTabLayout,
   type MatchTabColumn,
+  type MatchTabColumnWeights,
   type MatchTabLayoutState,
   type MatchTabPanelId,
 } from "@/lib/control-match-layout";
@@ -57,6 +63,23 @@ function reorderBefore(
   return rest;
 }
 
+type PanelDragPayload = { id: MatchTabPanelId; column: MatchTabColumn };
+
+let activePanelDrag: PanelDragPayload | null = null;
+
+function isMatchTabColumn(x: unknown): x is MatchTabColumn {
+  return x === "left" || x === "center" || x === "right";
+}
+
+function writePanelDrag(e: DragEvent, payload: PanelDragPayload) {
+  activePanelDrag = payload;
+  const raw = JSON.stringify(payload);
+  e.dataTransfer.setData("application/x-stadium-panel", payload.id);
+  e.dataTransfer.setData("application/x-stadium-column", payload.column);
+  e.dataTransfer.setData("text/plain", raw);
+  e.dataTransfer.effectAllowed = "move";
+}
+
 function readPanelDrag(e: DragEvent): PanelDragPayload | null {
   const raw = e.dataTransfer.getData("text/plain");
   if (raw) {
@@ -73,6 +96,11 @@ function readPanelDrag(e: DragEvent): PanelDragPayload | null {
   return activePanelDrag;
 }
 
+/** Zet `dragged` op index 0 (ook bij slepen naar andere kolom). */
+function insertFirst(order: MatchTabPanelId[], dragged: MatchTabPanelId): MatchTabPanelId[] {
+  return [dragged, ...order.filter((x) => x !== dragged)];
+}
+
 /** Zet `dragged` als laatste module in de gekozen kolom. */
 function insertLast(order: MatchTabPanelId[], dragged: MatchTabPanelId): MatchTabPanelId[] {
   return [...order.filter((x) => x !== dragged), dragged];
@@ -83,6 +111,64 @@ function colToKey(column: "left" | "center" | "right"): keyof Pick<
   "orderLeft" | "orderCenter" | "orderRight"
 > {
   return column === "left" ? "orderLeft" : column === "center" ? "orderCenter" : "orderRight";
+}
+
+function ColumnResizeHandle({
+  label,
+  leftCol,
+  rightCol,
+  weights,
+  setLayout,
+  emphasized = false,
+}: {
+  label: string;
+  leftCol: MatchTabColumn;
+  rightCol: MatchTabColumn;
+  weights: MatchTabColumnWeights;
+  setLayout: Dispatch<SetStateAction<MatchTabLayoutState>>;
+  emphasized?: boolean;
+}) {
+  const dragRef = useRef<{ startX: number; width: number; start: MatchTabColumnWeights } | null>(null);
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={label}
+      title={label}
+      className={cn(
+        "relative z-10 flex w-2 cursor-col-resize items-stretch justify-center",
+        emphasized && "bg-primary/10",
+      )}
+      onPointerDown={(e) => {
+        e.preventDefault();
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        const grid = e.currentTarget.parentElement;
+        dragRef.current = {
+          startX: e.clientX,
+          width: Math.max(1, grid?.getBoundingClientRect().width ?? 1),
+          start: { ...weights },
+        };
+      }}
+      onPointerMove={(e) => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        const dPct = ((e.clientX - drag.startX) / drag.width) * 100;
+        setLayout((prev) => ({
+          ...prev,
+          columnWeights: nudgeColumnPair(drag.start, leftCol, rightCol, dPct),
+        }));
+      }}
+      onPointerUp={() => {
+        dragRef.current = null;
+      }}
+      onPointerCancel={() => {
+        dragRef.current = null;
+      }}
+    >
+      <span className="my-6 w-1 rounded-full bg-primary/50 hover:bg-primary" />
+    </div>
+  );
 }
 
 function ColumnTopDropZone({
@@ -183,6 +269,10 @@ function LayoutPanelWrapper({
   const { t } = useTranslation();
   const collapsed = !!layout.collapsed[id];
   const title = t(`panels.${id}`);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const heightDragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const minHeight = layout.panelHeights?.[id];
+  const fillHeight = Boolean(minHeight);
 
   const onDragStart = (e: DragEvent) => {
     writePanelDrag(e, { id, column });
@@ -216,6 +306,24 @@ function LayoutPanelWrapper({
       collapsed: { ...p.collapsed, [id]: !p.collapsed[id] },
     }));
 
+  const applyHeight = (value: number) =>
+    setLayout((prev) => ({
+      ...prev,
+      panelHeights: { ...prev.panelHeights, [id]: clampPanelHeight(value) },
+    }));
+
+  const currentBodyHeight = () =>
+    minHeight ?? bodyRef.current?.getBoundingClientRect().height ?? 280;
+
+  const bumpHeight = (delta: number) => applyHeight(currentBodyHeight() + delta);
+
+  const clearHeight = () =>
+    setLayout((prev) => {
+      const next = { ...prev.panelHeights };
+      delete next[id];
+      return { ...prev, panelHeights: next };
+    });
+
   return (
     <div
       className="flex min-w-0 flex-col gap-1"
@@ -236,6 +344,39 @@ function LayoutPanelWrapper({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-foreground/80 flex-1 truncate">
           {title}
         </span>
+        {editable && (
+          <div className="flex shrink-0 items-center rounded-md border border-border bg-background/70">
+            <button
+              type="button"
+              className="grid size-7 place-items-center rounded-l-md text-foreground hover:bg-muted"
+              onClick={() => bumpHeight(-60)}
+              aria-label={t("shell.panelShorter")}
+              title={t("shell.panelShorter")}
+            >
+              <Minus className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              className="grid size-7 place-items-center text-foreground hover:bg-muted"
+              onClick={() => bumpHeight(60)}
+              aria-label={t("shell.panelTaller")}
+              title={t("shell.panelTaller")}
+            >
+              <Plus className="size-3.5" />
+            </button>
+            {minHeight ? (
+              <button
+                type="button"
+                className="grid h-7 place-items-center px-1.5 text-[10px] font-semibold text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={clearHeight}
+                aria-label={t("shell.resetPanelHeight")}
+                title={t("shell.resetPanelHeight")}
+              >
+                {Math.round(minHeight)}
+              </button>
+            ) : null}
+          </div>
+        )}
         <button
           type="button"
           className="p-1 rounded hover:bg-muted shrink-0 text-foreground"
@@ -246,33 +387,109 @@ function LayoutPanelWrapper({
           <ChevronDown className={cn("size-4 transition-transform", collapsed && "-rotate-90")} />
         </button>
       </div>
-      {!collapsed && <div className="min-w-0">{children}</div>}
+      {(!collapsed || id === "preview") && (
+        <div
+          ref={bodyRef}
+          className={cn("min-w-0", fillHeight && "flex min-h-0 flex-col")}
+          aria-hidden={collapsed}
+          style={
+            collapsed
+              ? { height: 0, overflow: "hidden", opacity: 0, pointerEvents: "none" }
+              : minHeight
+                ? { minHeight }
+                : undefined
+          }
+        >
+          <div className={cn(fillHeight && "min-h-0 flex-1")}>{children}</div>
+        </div>
+      )}
+      {editable && !collapsed && (
+        <button
+          type="button"
+          className="flex h-4 w-full cursor-ns-resize items-center justify-center rounded-md border border-dashed border-primary/35 bg-primary/10 text-primary hover:bg-primary/20"
+          aria-label={t("shell.resizePanel")}
+          title={t("shell.resizePanel")}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+            heightDragRef.current = {
+              startY: e.clientY,
+              startH: currentBodyHeight(),
+            };
+          }}
+          onPointerMove={(e) => {
+            const drag = heightDragRef.current;
+            if (!drag) return;
+            applyHeight(drag.startH + (e.clientY - drag.startY));
+          }}
+          onPointerUp={() => {
+            heightDragRef.current = null;
+          }}
+          onPointerCancel={() => {
+            heightDragRef.current = null;
+          }}
+          onDoubleClick={clearHeight}
+        >
+          <ChevronsUpDown className="size-3.5" />
+        </button>
+      )}
     </div>
   );
 }
 
 function LivePreviewPanel({
-  embedInControl,
   active = true,
 }: {
   embedInControl?: boolean;
   active?: boolean;
 }) {
   const { t } = useTranslation();
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const { stream, jpeg } = useDisplayPreviewPlayback(active);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.srcObject = stream;
+    if (stream) void el.play().catch(() => {});
+    return () => {
+      el.srcObject = null;
+    };
+  }, [stream]);
+
   return (
-    <div className="w-full shrink-0 overflow-hidden rounded-xl border border-border bg-card">
-      <div className="flex items-center justify-between border-b border-border bg-secondary/50 px-4 py-2">
+    <div className="flex h-full min-h-[14rem] w-full shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-card">
+      <div className="flex shrink-0 items-center justify-between border-b border-border bg-secondary/50 px-4 py-2">
         <div className="text-xs uppercase tracking-widest text-muted-foreground">
           {t("shell.livePreview")}
         </div>
         <div className="text-xs text-muted-foreground">1920 × 1080</div>
       </div>
-      {/* Volle kolombreedte (16:9); kolom scrollt als de preview hoog wordt */}
-      <div className="relative aspect-video w-full bg-black">
+      <div className="relative min-h-[12rem] w-full flex-1 bg-black" style={{ aspectRatio: "16 / 9" }}>
         {active ? (
-          <DisplayPage embedInControl={embedInControl} />
+          <>
+            <video
+              ref={videoRef}
+              className="absolute inset-0 h-full w-full object-contain"
+              muted
+              autoPlay
+              playsInline
+              disablePictureInPicture
+              style={{ opacity: stream ? 1 : 0 }}
+            />
+            {!stream && jpeg ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={jpeg} alt="" className="absolute inset-0 h-full w-full object-contain" />
+            ) : null}
+            {!stream && !jpeg ? (
+              <div className="absolute inset-0 grid place-items-center px-4 text-center text-[11px] text-white/40">
+                {t("shell.previewLoading")}
+              </div>
+            ) : null}
+          </>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-sm text-white/45">
+          <div className="absolute inset-0 grid place-items-center px-4 text-center text-[11px] text-white/40">
             {t("shell.previewPaused")}
           </div>
         )}
@@ -372,6 +589,7 @@ export function MatchTabGrid({
   const [workspaceMode, setWorkspaceMode] = useState<"live" | "customize">("live");
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [advancedPanel, setAdvancedPanel] = useState<MatchTabPanelId>("event-log");
+  const [wideWorkspace, setWide] = useState(false);
   const saveDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const layoutRef = useRef(layout);
   const hydratedRef = useRef(false);
@@ -388,6 +606,14 @@ export function MatchTabGrid({
     }
     setLayout(initial);
     setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1280px)");
+    const sync = () => setWide(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
   }, []);
 
   useEffect(() => {
@@ -525,19 +751,42 @@ export function MatchTabGrid({
           </div>
         ) : (
           <div className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2 px-1">
-            <p className="max-w-2xl text-[11px] text-muted-foreground">{t("shell.layoutHint")}</p>
-            <button
-              type="button"
-              onClick={resetLayout}
-              className="shrink-0 text-xs font-medium text-primary hover:underline"
-            >
-              {t("shell.resetLayout")}
-            </button>
+            <p className="max-w-3xl text-[11px] text-muted-foreground">{t("shell.layoutHint")}</p>
+            <div className="flex items-center gap-3">
+              {wideWorkspace && (
+                <span className="hidden text-[10px] tabular-nums text-muted-foreground sm:inline">
+                  {t("shell.columnWidths", {
+                    left: Math.round(layout.columnWeights.left),
+                    center: Math.round(layout.columnWeights.center),
+                    right: Math.round(layout.columnWeights.right),
+                  })}
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={resetLayout}
+                className="shrink-0 text-xs font-medium text-primary hover:underline"
+              >
+                {t("shell.resetLayout")}
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 overflow-y-auto xl:grid-cols-[minmax(390px,0.92fr)_minmax(300px,0.68fr)_minmax(460px,1.1fr)] xl:overflow-hidden">
+      <div
+        className={cn(
+          "grid min-h-0 min-w-0 flex-1 overflow-y-auto",
+          wideWorkspace ? "overflow-hidden" : "grid-cols-1 gap-3",
+        )}
+        style={
+          wideWorkspace
+            ? {
+                gridTemplateColumns: `${layout.columnWeights.left}fr 10px ${layout.columnWeights.center}fr 10px ${layout.columnWeights.right}fr`,
+              }
+            : undefined
+        }
+      >
         <Column
           column="left"
           order={layout.orderLeft}
@@ -546,6 +795,16 @@ export function MatchTabGrid({
           panels={panels}
           editable={workspaceMode === "customize"}
         />
+        {wideWorkspace && (
+          <ColumnResizeHandle
+            label={t("shell.resizeColumn")}
+            leftCol="left"
+            rightCol="center"
+            weights={layout.columnWeights}
+            setLayout={setLayout}
+            emphasized={workspaceMode === "customize"}
+          />
+        )}
         <Column
           column="center"
           order={layout.orderCenter}
@@ -554,6 +813,16 @@ export function MatchTabGrid({
           panels={panels}
           editable={workspaceMode === "customize"}
         />
+        {wideWorkspace && (
+          <ColumnResizeHandle
+            label={t("shell.resizeColumn")}
+            leftCol="center"
+            rightCol="right"
+            weights={layout.columnWeights}
+            setLayout={setLayout}
+            emphasized={workspaceMode === "customize"}
+          />
+        )}
         <Column
           column="right"
           order={layout.orderRight}

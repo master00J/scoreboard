@@ -10,6 +10,9 @@ import {
   cueIsDueAtElapsed,
   cueLeftClockWindow,
   cuePhaseMatches,
+  cueUsesLiveWallClock,
+  liveWallCueClockFromPersisted,
+  liveWallCueElapsedSec,
   cueWindowExpired,
   isPostMatchCuePhase,
   isPrematchCuePhase,
@@ -19,6 +22,7 @@ import {
   rundownCycleSec,
   wrapRundownElapsed,
 } from "@/lib/scheduled-media-cue";
+import { getSportProfile } from "@/lib/sports";
 
 type Options = {
   match: Match | null;
@@ -76,10 +80,45 @@ export function useScheduledMediaCueActive({
 
   const usesPostMatchClock = isPostMatchCuePhase(match?.status);
   const usesPrematchClock = isPrematchCuePhase(match?.status);
+  const usesLiveWallClock = cueUsesLiveWallClock(
+    match?.status,
+    match ? getSportProfile(match.sport).timerMode : null,
+  );
+  const holdLiveWallOnBreak =
+    !!match &&
+    getSportProfile(match.sport).timerMode === "NONE" &&
+    match.status === "HALF_TIME";
+  const persistedLiveWallClock = liveWallCueClockFromPersisted({
+    matchId: match?.id ?? null,
+    block: state?.liveWallCueBlock,
+    origin: state?.liveWallCueOrigin,
+    frozenSec: state?.liveWallCueFrozenSec,
+  });
+
+  useEffect(() => {
+    if (skip || !(usesLiveWallClock || holdLiveWallOnBreak)) {
+      if (!usesPrematchClock && !usesPostMatchClock) setWallPhaseElapsed(0);
+      return;
+    }
+    const tick = () => setWallPhaseElapsed(liveWallCueElapsedSec(persistedLiveWallClock, Date.now()));
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => window.clearInterval(id);
+  }, [
+    skip,
+    usesLiveWallClock,
+    holdLiveWallOnBreak,
+    usesPrematchClock,
+    usesPostMatchClock,
+    persistedLiveWallClock.matchId,
+    persistedLiveWallClock.block,
+    persistedLiveWallClock.originMs,
+    persistedLiveWallClock.frozenSec,
+  ]);
 
   useEffect(() => {
     if (skip || !usesPostMatchClock) {
-      if (!usesPrematchClock) setWallPhaseElapsed(0);
+      if (!usesPrematchClock && !usesLiveWallClock && !holdLiveWallOnBreak) setWallPhaseElapsed(0);
       return;
     }
     const tick = () =>
@@ -87,12 +126,12 @@ export function useScheduledMediaCueActive({
     tick();
     const id = window.setInterval(tick, 250);
     return () => window.clearInterval(id);
-  }, [skip, match?.id, match?.status, usesPostMatchClock, usesPrematchClock, state?.postMatchStartedAt]);
+  }, [skip, match?.id, match?.status, usesPostMatchClock, usesPrematchClock, usesLiveWallClock, holdLiveWallOnBreak, state?.postMatchStartedAt]);
 
   useEffect(() => {
     if (skip || !usesPrematchClock) {
       setPrematchGate({ beforeWindow: false, pastKickoff: false });
-      if (!usesPostMatchClock) setWallPhaseElapsed(0);
+      if (!usesPostMatchClock && !usesLiveWallClock && !holdLiveWallOnBreak) setWallPhaseElapsed(0);
       return;
     }
     const tick = () => {
@@ -119,10 +158,15 @@ export function useScheduledMediaCueActive({
     cycleSec,
     usesPrematchClock,
     usesPostMatchClock,
+    usesLiveWallClock,
+    holdLiveWallOnBreak,
     state?.preMatchStartedAt,
   ]);
 
-  const cueElapsed = usesPostMatchClock || usesPrematchClock ? wallPhaseElapsed : elapsed;
+  const cueElapsed =
+    usesPostMatchClock || usesPrematchClock || usesLiveWallClock || holdLiveWallOnBreak
+      ? wallPhaseElapsed
+      : elapsed;
   const prematchBlocked = usesPrematchClock && (prematchGate.beforeWindow || prematchGate.pastKickoff);
   const playhead = wrapRundownElapsed(cueElapsed, cycleSec, rundownLoops);
   const scheduledCueCycle = rundownCycleIndex(cueElapsed, cycleSec, rundownLoops);
@@ -131,10 +175,14 @@ export function useScheduledMediaCueActive({
     if (skip) return;
     let cancelled = false;
     fetch("/api/scheduled-media-cues")
-      .then((r) => r.json())
-      .then((list: ScheduledMediaCue[]) => {
+      .then(async (r) => {
+        const body = await r.json().catch(() => null);
+        if (!r.ok || !Array.isArray(body)) return [];
+        return body as ScheduledMediaCue[];
+      })
+      .then((list) => {
         if (cancelled) return;
-        setScheduledCues(list ?? []);
+        setScheduledCues(list);
       })
       .catch(() => setScheduledCues([]));
     return () => {
@@ -150,28 +198,37 @@ export function useScheduledMediaCueActive({
     }
     const prev = lastScheduledCueClockRef.current;
     const matchId = match?.id ?? null;
-    const status = cueClockPhaseKey(match?.status);
-    if (prev.matchId !== matchId || prev.status !== status || elapsed < prev.elapsed - 1) {
+    const status = cueClockPhaseKey(
+      holdLiveWallOnBreak ? (persistedLiveWallClock.block ?? match?.status) : match?.status,
+    );
+    if (prev.matchId !== matchId || prev.status !== status || cueElapsed < prev.elapsed - 1) {
       firedScheduledCueKeysRef.current.clear();
       setActiveScheduledCue(null);
     }
-    lastScheduledCueClockRef.current = { matchId, status, elapsed };
-  }, [skip, match?.id, match?.status, elapsed]);
+    lastScheduledCueClockRef.current = { matchId, status, elapsed: cueElapsed };
+  }, [skip, match?.id, match?.status, cueElapsed, holdLiveWallOnBreak, persistedLiveWallClock.block]);
 
   useEffect(() => {
     if (skip) return;
     if (!state || !match || mode === "BLACKOUT") return;
-    if (mode !== "SPONSOR_ROTATION") {
-      if (activeScheduledCue) setActiveScheduledCue(null);
+    const liveProgramMode =
+      mode === "SPONSOR_ROTATION" ||
+      (usesLiveWallClock && mode === "MATCH") ||
+      (holdLiveWallOnBreak && (mode === "HALFTIME" || mode === "MATCH"));
+    if (!liveProgramMode) {
+      if (activeScheduledCue && !holdLiveWallOnBreak) setActiveScheduledCue(null);
       return;
     }
+    if (holdLiveWallOnBreak) return;
     if (prematchBlocked) return;
     if (activeScheduledCue) return;
     const due = scheduledCues
       .filter((cue) => {
         if (!cue.enabled || !cue.media?.active || !cuePhaseMatches(cue.matchStatus, match.status)) return false;
         if (!cueIsDueAtElapsed(cue, playhead)) return false;
-        if (!cueHasClockWindow(cue) && !(state.timerRunning ?? false)) return false;
+        if (!cueHasClockWindow(cue) && !(state.timerRunning ?? false) && !usesLiveWallClock) {
+          return false;
+        }
         return true;
       })
       .sort((a, b) => a.triggerSec - b.triggerSec);
@@ -195,6 +252,8 @@ export function useScheduledMediaCueActive({
     scheduledCues,
     state,
     prematchBlocked,
+    usesLiveWallClock,
+    holdLiveWallOnBreak,
   ]);
 
   useEffect(() => {
@@ -218,7 +277,9 @@ export function useScheduledMediaCueActive({
     if (skip) return;
     if (!activeScheduledCue || activeScheduledCue.media.type !== "IMAGE") return;
     if (cueHasClockWindow(activeScheduledCue)) return;
-    const ms = Math.max(1500, Math.max(1, activeScheduledCue.media.durationSec) * 1000);
+    const dur = activeScheduledCue.media.durationSec;
+    const sec = typeof dur === "number" && Number.isFinite(dur) && dur > 0 ? dur : 10;
+    const ms = Math.max(1500, sec * 1000);
     const id = window.setTimeout(() => setActiveScheduledCue(null), ms);
     return () => window.clearTimeout(id);
   }, [skip, activeScheduledCue]);

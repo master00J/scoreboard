@@ -135,7 +135,10 @@ export function AssetHealthCheck() {
     setRiskIds([]);
     try {
       const res = await fetch("/api/media");
-      const all = ((await res.json()) as MediaItem[]).filter((m) => m.active);
+      const payload = await res.json().catch(() => null);
+      const all = (res.ok && Array.isArray(payload) ? (payload as MediaItem[]) : []).filter(
+        (m) => m.active,
+      );
       setProgress({ done: 0, total: all.length });
       const results: CheckRow[] = [];
       // Sequentieel om browser-resources niet te overspoelen

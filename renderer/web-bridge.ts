@@ -1,5 +1,6 @@
-﻿import { computeElapsedSeconds, computeShotClockSeconds, pauseShotClockAt, runFrom, runShotClockFrom, stopAt } from "@/lib/timer";
-import { getSportProfile, lifecycleStatusForPeriod, normalizeSport, resetStatsForNewPeriod, resetTimeoutsForNewPeriod } from "@/lib/sports";
+﻿import { computeElapsedSeconds, computeShotClockSeconds, pauseShotClockAt, presentShotClock, runFrom, stopAt, suppressShotClock } from "@/lib/timer";
+import { getSportProfile, lifecycleStatusForPeriod, newShotClockSuppressed, normalizeSport, resetStatsForNewPeriod, resetTimeoutsForNewPeriod, sportClockSeconds } from "@/lib/sports";
+import { normalizeVolleyballMatchRules } from "@/lib/volleyball";
 import { uiLocaleFromSearch } from "@/lib/i18n/locales";
 import { DEFAULT_LIVESTREAM_SETTINGS, DEFAULT_LIVESTREAM_STATUS, mergeLivestreamSettings } from "@/lib/livestream";
 import { CommandSchema, type Command } from "@/lib/validation/commands";
@@ -221,6 +222,12 @@ function seed(): Store {
       safeMode: false,
       blackoutResumeMode: null,
       blackoutResumeCapture: false,
+      preferSponsorRotation: true,
+      liveWallCueBlock: null,
+      liveWallCueOrigin: null,
+      liveWallCueFrozenSec: 0,
+      preMatchStartedAt: null,
+      postMatchStartedAt: null,
       updatedAt: nowIso(),
     },
     sponsorPlays: [],
@@ -275,6 +282,7 @@ function serializeDisplay(): SerializedDisplayState {
     ...d,
     timerStartedAt: asIso(d.timerStartedAt),
     shotClockStartedAt: asIso(d.shotClockStartedAt),
+    liveWallCueOrigin: asIso(d.liveWallCueOrigin),
     postMatchStartedAt: asIso(d.postMatchStartedAt),
     preMatchStartedAt: asIso(d.preMatchStartedAt),
     updatedAt: asIso(d.updatedAt) ?? nowIso(),
@@ -347,7 +355,7 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   const pathname = url.pathname;
   const body = parseBody(req);
 
-  if (pathname === "/api/app/release") return json(200, { version: "0.1.23", notes: "" });
+  if (pathname === "/api/app/release") return json(200, { version: "0.1.27", notes: "" });
   if (pathname === "/api/settings" && method === "GET") return json(200, settingsJson());
   if (pathname === "/api/settings" && method === "PATCH") {
     store.settings = { ...store.settings, ...body };
@@ -414,6 +422,19 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   if (pathname === "/api/matches" && method === "POST") {
     const sport = normalizeSport(body.sport);
     const profile = getSportProfile(sport);
+    const volleyRules = normalizeVolleyballMatchRules({
+      setsToWin: body.setsToWin,
+      pointsToWinSet: body.pointsToWinSet,
+      pointsToWinDecider: body.pointsToWinDecider,
+      winBy: body.winBy,
+      technicalTimeoutsEnabled: body.technicalTimeoutsEnabled === true,
+      technicalTimeoutScores: body.technicalTimeoutScores,
+      technicalTimeoutScoresJson: body.technicalTimeoutScoresJson,
+      technicalTimeoutDurationSec: body.technicalTimeoutDurationSec,
+      timeoutsPerSet: body.timeoutsPerSet,
+      timeoutDurationSec: body.timeoutDurationSec,
+      setBreakSec: body.halfBreakSec,
+    });
     const match = {
       id: id("m"),
       homeTeamId: body.homeTeamId,
@@ -421,7 +442,7 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
       kickoffAt: body.kickoffAt ?? null,
       matchSponsorMediaId: body.matchSponsorMediaId ?? null,
       halfDurationSec: body.halfDurationSec ?? profile.defaultPeriodDurationSec,
-      halfBreakSec: body.halfBreakSec ?? 900,
+      halfBreakSec: body.halfBreakSec ?? (profile.hasSets ? volleyRules.setBreakSec : profile.breakDurationSec),
       sport,
       currentPeriod: 1,
       periodDurationSec: body.periodDurationSec ?? profile.defaultPeriodDurationSec,
@@ -431,6 +452,18 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
       awayFouls: 0,
       homeSets: 0,
       awaySets: 0,
+      servingSide: profile.hasSets ? (body.servingSide === "away" ? "away" : "home") : null,
+      setFirstServer: profile.hasSets ? (body.servingSide === "away" ? "away" : "home") : null,
+      setHistoryJson: profile.hasSets ? "[]" : null,
+      setsToWin: volleyRules.setsToWin,
+      pointsToWinSet: volleyRules.pointsToWinSet,
+      pointsToWinDecider: volleyRules.pointsToWinDecider,
+      winBy: volleyRules.winBy,
+      technicalTimeoutsEnabled: profile.hasSets && volleyRules.technicalTimeoutsEnabled,
+      technicalTimeoutScoresJson: JSON.stringify(volleyRules.technicalTimeoutScores),
+      technicalTimeoutDurationSec: volleyRules.technicalTimeoutDurationSec,
+      timeoutsPerSet: volleyRules.timeoutsPerSet,
+      timeoutDurationSec: volleyRules.timeoutDurationSec,
       prematchSpreadWindowSec: body.prematchSpreadWindowSec ?? 0,
       status: "SETUP",
       homeScore: 0,
@@ -593,6 +626,9 @@ function handleCommand(raw: Command): CommandAck {
       case "timer:start": {
         const elapsed = computeElapsedSeconds(display);
         Object.assign(display, runFrom(elapsed));
+        if (match && (match.status === "FIRST_HALF" || match.status === "SECOND_HALF" || match.status === "EXTRA_TIME") && display.mode === "MATCH") {
+          display.mode = display.preferSponsorRotation === false ? "MATCH" : "SPONSOR_ROTATION";
+        }
         sponsorPeriodBreakPending = false;
         break;
       }
@@ -620,7 +656,10 @@ function handleCommand(raw: Command): CommandAck {
           ET2: { sec: 105 * 60, status: "EXTRA_TIME" },
         };
         const p = presets[cmd.preset];
-        Object.assign(display, stopAt(p.sec), { addedTimeMinutes: 0 });
+        Object.assign(display, stopAt(p.sec), {
+          addedTimeMinutes: 0,
+          mode: display.preferSponsorRotation === false ? "MATCH" : "SPONSOR_ROTATION",
+        });
         updateMatch({ status: p.status });
         sponsorPeriodBreakPending = false;
         break;
@@ -631,20 +670,40 @@ function handleCommand(raw: Command): CommandAck {
       case "shotclock:start": {
         const profile = getSportProfile(match?.sport);
         const remaining = computeShotClockSeconds(display);
-        Object.assign(display, runShotClockFrom(remaining > 0 ? remaining : profile.shotClockPresets[0] ?? 24));
+        const fresh = !!display.shotClockOff || remaining <= 0;
+        const gameLeft = match
+          ? sportClockSeconds(match.sport, computeElapsedSeconds(display), match.periodDurationSec, match.currentPeriod)
+          : 999;
+        if (fresh && newShotClockSuppressed(match?.sport, gameLeft)) {
+          Object.assign(display, suppressShotClock());
+          break;
+        }
+        Object.assign(display, presentShotClock(fresh ? profile.shotClockPresets[0] ?? 24 : remaining, true));
         break;
       }
       case "shotclock:pause":
-        Object.assign(display, pauseShotClockAt(computeShotClockSeconds(display)));
+        Object.assign(display, { ...pauseShotClockAt(computeShotClockSeconds(display)), shotClockOff: !!display.shotClockOff });
         break;
       case "shotclock:reset": {
         const profile = getSportProfile(match?.sport);
         const seconds = cmd.seconds ?? profile.shotClockPresets[0] ?? 24;
-        Object.assign(display, display.shotClockRunning ? runShotClockFrom(seconds) : pauseShotClockAt(seconds));
+        const gameLeft = match
+          ? sportClockSeconds(match.sport, computeElapsedSeconds(display), match.periodDurationSec, match.currentPeriod)
+          : 999;
+        if (newShotClockSuppressed(match?.sport, gameLeft)) {
+          Object.assign(display, suppressShotClock());
+          break;
+        }
+        Object.assign(display, presentShotClock(seconds, !!display.shotClockRunning));
         break;
       }
       case "shotclock:set":
-        Object.assign(display, display.shotClockRunning ? runShotClockFrom(cmd.seconds) : pauseShotClockAt(cmd.seconds));
+        Object.assign(display, presentShotClock(cmd.seconds, !!display.shotClockRunning && cmd.seconds > 0));
+        break;
+      case "sport:setPossession":
+        if (match && getSportProfile(match.sport).supportsPossessionArrow) {
+          updateMatch({ possessionArrow: cmd.side });
+        }
         break;
       case "match:setActive":
         display.matchId = cmd.matchId;
@@ -655,6 +714,21 @@ function handleCommand(raw: Command): CommandAck {
         updateMatch({ status: cmd.status });
         if (cmd.status === "HALF_TIME" || cmd.status === "FULL_TIME" || cmd.status === "POST_MATCH") {
           Object.assign(display, stopAt(computeElapsedSeconds(display)));
+        }
+        if (
+          cmd.status === "FIRST_HALF" ||
+          cmd.status === "SECOND_HALF" ||
+          cmd.status === "EXTRA_TIME"
+        ) {
+          display.mode = display.preferSponsorRotation === false ? "MATCH" : "SPONSOR_ROTATION";
+        } else if (
+          cmd.status === "HALF_TIME" ||
+          cmd.status === "PREMATCH" ||
+          cmd.status === "SETUP" ||
+          cmd.status === "FULL_TIME" ||
+          cmd.status === "POST_MATCH"
+        ) {
+          display.mode = "MATCH";
         }
         if (
           cmd.status === "HALF_TIME" ||
@@ -686,7 +760,7 @@ function handleCommand(raw: Command): CommandAck {
           ...(resetStatsForNewPeriod(sport, match.currentPeriod, cmd.period) ? { homeFouls: 0, awayFouls: 0 } : {}),
         });
         Object.assign(display, stopAt(profile.timerMode === "COUNT_UP" ? Math.max(0, (cmd.period - 1) * match.periodDurationSec) : 0), {
-          mode: "MATCH",
+          mode: display.preferSponsorRotation === false ? "MATCH" : "SPONSOR_ROTATION",
           addedTimeMinutes: 0,
         });
         if (cmd.period !== prevPeriod && sport !== "FOOTBALL") {
@@ -723,6 +797,9 @@ function handleCommand(raw: Command): CommandAck {
         display.mode = cmd.mode;
         display.activePlayerId = cmd.meta?.activePlayerId ?? null;
         display.activeMediaId = cmd.meta?.activeMediaId ?? null;
+        if (cmd.meta?.persistSponsorPreference === true && (cmd.mode === "SPONSOR_ROTATION" || cmd.mode === "MATCH")) {
+          display.preferSponsorRotation = cmd.mode === "SPONSOR_ROTATION";
+        }
         break;
       case "display:blackout": {
         if (display.mode === "BLACKOUT") {
@@ -746,7 +823,7 @@ function handleCommand(raw: Command): CommandAck {
         display.activeGoalScorerId = null;
         break;
       case "goal:cancel":
-        display.mode = "SPONSOR_ROTATION";
+        display.mode = display.preferSponsorRotation === false ? "MATCH" : "SPONSOR_ROTATION";
         display.activeMediaId = null;
         display.activeGoalScorerId = null;
         break;
@@ -913,7 +990,7 @@ export function installWebDemoBridge() {
     reportSponsorClipEnd: async () => ({ ok: true }),
     reportSponsorClipProgress: async () => ({ ok: true }),
     getSponsorLedgerSnapshot: async () => null,
-    getAppVersion: async () => "0.1.23-web",
+    getAppVersion: async () => "0.1.27-web",
     openExternalUrl: async (url) => {
       window.open(url, "_blank", "noopener,noreferrer");
       return { ok: true };
@@ -953,6 +1030,9 @@ export function installWebDemoBridge() {
     exportVenueBackup: async () => ({ ok: false, canceled: true }),
     getMatchTabLayoutSnapshot: () => window.localStorage.getItem("arenacue_match_tab_layout"),
     persistMatchTabLayout: (value) => window.localStorage.setItem("arenacue_match_tab_layout", value),
+    setDisplayPreviewCapture: () => undefined,
+    onDisplayPreviewFrame: () => () => undefined,
+    getDisplayPreviewCaptureIds: async () => null,
     reportDisplayPlaybackContext: () => undefined,
     reportDisplayMediaDiagnostic: () => undefined,
     getLivestreamSettings: async () => ({ ...webLivestreamSettings }),

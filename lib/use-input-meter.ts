@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { isSourceAudioDevice, isWasapiAudioDevice } from "@/lib/livestream";
+import { isSourceAudioDevice, isWasapiAudioDevice } from "./livestream";
 
 export type InputMeterReading = {
   peak: number;

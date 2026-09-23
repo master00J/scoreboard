@@ -3,6 +3,13 @@ import {
   cueEndSec,
   cueIsDueAtElapsed,
   cuePhaseMatches,
+  cueUsesLiveWallClock,
+  emptyLiveWallCueClock,
+  liveWallCueElapsedSec,
+  liveWallCueClockFromPersisted,
+  liveWallCuePersistPatch,
+  nextLiveWallCueClock,
+  sponsorPlayWallElapsedSec,
   cueWindowExpired,
   nextRundownWindow,
   computePrematchRundownClock,
@@ -42,6 +49,82 @@ describe("scheduled media cue window", () => {
     expect(cuePhaseMatches("FULL_TIME", "POST_MATCH")).toBe(true);
     expect(cuePhaseMatches("POST_MATCH", "FIRST_HALF")).toBe(false);
     expect(cuePhaseMatches("FIRST_HALF", "FIRST_HALF")).toBe(true);
+  });
+
+  it("pauzeert de volleybal-cueklok in de setbreak en telt daarna door", () => {
+    let clock = emptyLiveWallCueClock();
+    clock = nextLiveWallCueClock(clock, {
+      matchId: "m1",
+      status: "FIRST_HALF",
+      timerMode: "NONE",
+      nowMs: 1_000_000,
+    });
+    expect(liveWallCueElapsedSec(clock, 1_000_000 + 120_000)).toBe(120);
+    clock = nextLiveWallCueClock(clock, {
+      matchId: "m1",
+      status: "HALF_TIME",
+      timerMode: "NONE",
+      nowMs: 1_000_000 + 120_000,
+    });
+    expect(liveWallCueElapsedSec(clock, 1_000_000 + 180_000)).toBe(120);
+    clock = nextLiveWallCueClock(clock, {
+      matchId: "m1",
+      status: "FIRST_HALF",
+      timerMode: "NONE",
+      nowMs: 1_000_000 + 180_000,
+    });
+    expect(liveWallCueElapsedSec(clock, 1_000_000 + 210_000)).toBe(150);
+    clock = nextLiveWallCueClock(clock, {
+      matchId: "m1",
+      status: "SECOND_HALF",
+      timerMode: "NONE",
+      nowMs: 1_000_000 + 210_000,
+    });
+    expect(liveWallCueElapsedSec(clock, 1_000_000 + 210_000)).toBe(0);
+  });
+
+  it("rondt een opgeslagen cue-klok hetzelfde af als de live-teller", () => {
+    const origin = new Date(1_700_000_000_000);
+    const clock = liveWallCueClockFromPersisted({
+      matchId: "m1",
+      block: "FIRST_HALF",
+      origin,
+      frozenSec: 0,
+    });
+    expect(liveWallCueElapsedSec(clock, origin.getTime() + 45_000)).toBe(45);
+    const patch = liveWallCuePersistPatch(clock);
+    expect(patch.liveWallCueBlock).toBe("FIRST_HALF");
+    expect(patch.liveWallCueOrigin?.getTime()).toBe(origin.getTime());
+  });
+
+  it("gebruikt wandklok voor live volleybal-cues", () => {
+    expect(cueUsesLiveWallClock("FIRST_HALF", "NONE")).toBe(true);
+    expect(cueUsesLiveWallClock("SECOND_HALF", "NONE")).toBe(true);
+    expect(cueUsesLiveWallClock("PREMATCH", "NONE")).toBe(false);
+    expect(cueUsesLiveWallClock("FIRST_HALF", "COUNT_UP")).toBe(false);
+  });
+
+  it("deelt de volleybal-wandklok tussen HUD en LED", () => {
+    const origin = new Date(1_000_000);
+    expect(
+      sponsorPlayWallElapsedSec({
+        state: {
+          matchId: "m1",
+          liveWallCueBlock: "FIRST_HALF",
+          liveWallCueOrigin: origin,
+          liveWallCueFrozenSec: 0,
+        },
+        localEpochMs: 0,
+        nowMs: origin.getTime() + 45_000,
+      }),
+    ).toBe(45);
+    expect(
+      sponsorPlayWallElapsedSec({
+        state: null,
+        localEpochMs: 1_000,
+        nowMs: 4_000,
+      }),
+    ).toBe(3);
   });
 
   it("koppelt prematch-cues aan Setup én Voor wedstrijd", () => {

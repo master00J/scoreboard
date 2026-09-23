@@ -44,6 +44,19 @@ describe("layout-templates bevatten alleen vormgeving", () => {
     expect(next.sponsorRepeatBudgetCycles).toBe(false);
   });
 
+  it("behoudt scorebord-achtergronden bij een layoutwissel", () => {
+    const current = JSON.stringify({
+      leftBarWidthPx: 240,
+      fullBackgroundPath: "D:/led/full.png",
+      leftFrameBackgroundPath: "/uploads/l-bar.webp",
+    });
+    const template = JSON.stringify({ layoutMode: "left-l", leftBarWidthPx: 320 });
+    const next = JSON.parse(applyTemplateToThemeJson(current, template));
+    expect(next.layoutMode).toBe("left-l");
+    expect(next.fullBackgroundPath).toBe("D:/led/full.png");
+    expect(next.leftFrameBackgroundPath).toBe("/uploads/l-bar.webp");
+  });
+
   it("sanitize bewaart alleen bekende thema-keys", () => {
     const raw = JSON.stringify({ leftBarWidthPx: 300, onzin: 42, sponsorRepeatBudgetCycles: true });
     const clean = JSON.parse(sanitizeTemplateThemeJson(raw));

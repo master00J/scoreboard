@@ -53,24 +53,97 @@ describe("startupDisplayStatePatch", () => {
     ).toEqual({ mode: "BLACKOUT", activeMediaId: null });
   });
 
-  it("zet sponsorrotatie met wedstrijd terug naar MATCH i.p.v. opnieuw te starten", () => {
+  it("houdt scorebord + sponsors tijdens een speelhelft", () => {
     expect(
       startupDisplayStatePatch({
         matchId: "match-1",
         mode: "SPONSOR_ROTATION",
-        activeMediaId: "clip-5",
+        activeMediaId: null,
+        preferSponsorRotation: true,
+        matchStatus: "FIRST_HALF",
       }),
-    ).toEqual({ mode: "MATCH", activeMediaId: null });
+    ).toBeNull();
   });
 
-  it("laat een lopende MATCH ongemoeid", () => {
+  it("herstelt scorebord + sponsors als de vorige sessie naar MATCH was gezet", () => {
     expect(
       startupDisplayStatePatch({
         matchId: "match-1",
         mode: "MATCH",
         activeMediaId: null,
+        preferSponsorRotation: true,
+        matchStatus: "FIRST_HALF",
+      }),
+    ).toEqual({ mode: "SPONSOR_ROTATION", activeMediaId: null });
+  });
+
+  it("houdt alleen-scorebord als de operator dat koos", () => {
+    expect(
+      startupDisplayStatePatch({
+        matchId: "match-1",
+        mode: "MATCH",
+        activeMediaId: null,
+        preferSponsorRotation: false,
+        matchStatus: "FIRST_HALF",
       }),
     ).toBeNull();
+  });
+
+  it("wist een losse clip en gaat terug naar de voorkeur", () => {
+    expect(
+      startupDisplayStatePatch({
+        matchId: "match-1",
+        mode: "SPONSOR",
+        activeMediaId: "clip-5",
+        preferSponsorRotation: true,
+        matchStatus: "FIRST_HALF",
+      }),
+    ).toEqual({ mode: "SPONSOR_ROTATION", activeMediaId: null });
+  });
+
+  it("houdt rust-sponsors als de operator scorebord + sponsors koos", () => {
+    expect(
+      startupDisplayStatePatch({
+        matchId: "match-1",
+        mode: "SPONSOR_ROTATION",
+        activeMediaId: null,
+        preferSponsorRotation: true,
+        matchStatus: "HALF_TIME",
+      }),
+    ).toBeNull();
+  });
+
+  it("wist een highlight tijdens rust en gaat terug naar de rotatie", () => {
+    expect(
+      startupDisplayStatePatch({
+        matchId: "match-1",
+        mode: "SPONSOR",
+        activeMediaId: "clip-highlight",
+        preferSponsorRotation: true,
+        matchStatus: "HALF_TIME",
+      }),
+    ).toEqual({ mode: "SPONSOR_ROTATION", activeMediaId: null });
+  });
+
+  it("wist een achtergebleven goal- of kaartoverlay na herstart", () => {
+    expect(
+      startupDisplayStatePatch({
+        matchId: "match-1",
+        mode: "GOAL_PLAYER_VIDEO",
+        activeMediaId: "clip-goal",
+        preferSponsorRotation: true,
+        matchStatus: "FIRST_HALF",
+      }),
+    ).toEqual({ mode: "SPONSOR_ROTATION", activeMediaId: null });
+    expect(
+      startupDisplayStatePatch({
+        matchId: "match-1",
+        mode: "CARD",
+        activeMediaId: null,
+        preferSponsorRotation: false,
+        matchStatus: "FIRST_HALF",
+      }),
+    ).toEqual({ mode: "MATCH", activeMediaId: null });
   });
 });
 

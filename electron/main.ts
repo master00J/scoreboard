@@ -151,6 +151,7 @@ function videoDecodeFallbackFlagPath(): string {
 }
 
 function videoDecodeFallbackEnabled(): boolean {
+  if (process.env.STADIUM_ENABLE_ACCELERATED_VIDEO_DECODE === "1") return false;
   if (process.env.STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE === "1") return true;
   try {
     return fs.existsSync(videoDecodeFallbackFlagPath());
@@ -173,14 +174,20 @@ function enableVideoDecodeFallbackFlag(reason: string): void {
 }
 
 /**
- * Workaround bij sommige Windows GPU-drivers: hardware-videodecode rendert een zwarte
- * laag terwijl de rest van de UI (score) wel zichtbaar blijft. Zet vóór app-start:
- * `STADIUM_DISABLE_ACCELERATED_VIDEO_DECODE=1` — dan valt decode terug op software
- * (meer CPU; HEVC kan in de browser ontbreken — liever clips als H.264).
+ * Windows Direct Composition legt hardware-video in een aparte overlay-plane.
+ * Naast HTML (L-frame scorebord) wordt dat vlak zwart; fullscreen-video blijft zichtbaar.
+ * Canvas-compositing in de renderer vangt dit ook op; deze flag voorkomt de overlay-plane.
+ */
+if (process.platform === "win32") {
+  app.commandLine.appendSwitch("disable-direct-composition-video-overlays");
+  console.log("[electron] disable-direct-composition-video-overlays actief");
+}
+
+/**
+ * Alleen op verzoek of na GPU-crash-vlag: software-decode (zwaarder op CPU).
  */
 if (videoDecodeFallbackEnabled()) {
   app.commandLine.appendSwitch("disable-accelerated-video-decode");
-  // bootLog not yet on disk path until configure — console is enough for early startup.
   console.log("[electron] disable-accelerated-video-decode actief");
 }
 
@@ -208,6 +215,9 @@ let browserInteractWindow: BrowserWindow | null = null;
 let mediaSourceWindow: BrowserWindow | null = null;
 let gpuCrashStreak = 0;
 let lastGpuCrashAt = 0;
+let displayPreviewCaptureUsers = 0;
+let displayPreviewTimer: ReturnType<typeof setInterval> | null = null;
+let displayPreviewBusy = false;
 /** True na bevestigde afsluiting of fatale fout — slaat de quit-waarschuwing over. */
 let allowQuitWithoutConfirm = false;
 
@@ -437,6 +447,7 @@ process.on("uncaughtException", (error) => {
 });
 
 app.on("will-quit", () => {
+  stopDisplayPreviewCapture();
   flushBootLogSync();
 });
 
@@ -1137,8 +1148,7 @@ function wireDisplayWindow(win: BrowserWindow) {
     if (!win.isDestroyed()) win.webContents.reloadIgnoringCache();
   });
   win.webContents.on("unresponsive", () => {
-    bootLog(`[display] renderer unresponsive -> reload${bootPlaybackContextSuffix()}`);
-    if (!win.isDestroyed()) win.webContents.reloadIgnoringCache();
+    bootLog(`[display] renderer unresponsive (geen auto-reload)${bootPlaybackContextSuffix()}`);
   });
   win.on("closed", () => {
     if (displayWindow === win) displayWindow = null;
@@ -1193,6 +1203,47 @@ function wireDisplayMonitorTracking() {
   screen.on("display-metrics-changed", relayout);
 }
 
+function stopDisplayPreviewCapture() {
+  if (displayPreviewTimer) {
+    clearInterval(displayPreviewTimer);
+    displayPreviewTimer = null;
+  }
+}
+
+function setDisplayPreviewCaptureEnabled(on: boolean) {
+  displayPreviewCaptureUsers = Math.max(0, displayPreviewCaptureUsers + (on ? 1 : -1));
+  if (displayPreviewCaptureUsers > 0) startDisplayPreviewCapture();
+  else stopDisplayPreviewCapture();
+}
+
+async function pushDisplayPreviewFrame() {
+  if (displayPreviewBusy) return;
+  const win = displayWindow;
+  const ctrl = controlWindow;
+  if (!win || win.isDestroyed() || !ctrl || ctrl.isDestroyed()) return;
+  displayPreviewBusy = true;
+  try {
+    const image = await win.webContents.capturePage();
+    if (image.isEmpty()) return;
+    const size = image.getSize();
+    const resized = size.width > 1920 ? image.resize({ width: 1920, quality: "best" }) : image;
+    const jpeg = resized.toJPEG(90);
+    ctrl.webContents.send("display:livePreviewFrame", `data:image/jpeg;base64,${jpeg.toString("base64")}`);
+  } catch {
+    /* ignore */
+  } finally {
+    displayPreviewBusy = false;
+  }
+}
+
+function startDisplayPreviewCapture() {
+  if (displayPreviewTimer) return;
+  displayPreviewTimer = setInterval(() => {
+    void pushDisplayPreviewFrame();
+  }, 125);
+  void pushDisplayPreviewFrame();
+}
+
 function createWindows() {
   const preload = path.join(__dirname, "preload.js");
 
@@ -1229,11 +1280,7 @@ function createWindows() {
     }
   });
   controlWindow.webContents.on("unresponsive", () => {
-    bootLog(`[control] renderer unresponsive -> reload${bootPlaybackContextSuffix()}`);
-    const win = controlWindow;
-    if (win && !win.isDestroyed()) {
-      win.webContents.reloadIgnoringCache();
-    }
+    bootLog(`[control] renderer unresponsive (geen auto-reload)${bootPlaybackContextSuffix()}`);
   });
   if (IS_DEV && process.env.OPEN_DEVTOOLS_ON_START === "1") {
     controlWindow.webContents.openDevTools({ mode: "detach" });
@@ -1706,9 +1753,38 @@ function registerIpc() {
       cmd?.mode === "SPONSOR_ROTATION" &&
       licenseSvc.readStoredLicense(desktopContext.userDataDir)?.features?.automatic_sponsor_rotation === false
     ) {
-      return { ok: false, error: "Automatische sponsorrotatie is niet beschikbaar in dit licentieplan." };
+      const payload = { message: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
+      if (controlWindow && !controlWindow.isDestroyed()) {
+        controlWindow.webContents.send("display:error", payload);
+      }
+      return { ok: false, error: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
     }
     return runtime.runCommand(cmd);
+  });
+
+  ipcMain.on("control:setDisplayPreviewCapture", (event, enabled: unknown) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || !controlWindow || win.id !== controlWindow.id) return;
+    setDisplayPreviewCaptureEnabled(Boolean(enabled));
+  });
+
+  ipcMain.handle("display:getPreviewCaptureIds", (event) => {
+    if (!controlWindow || event.sender !== controlWindow.webContents) return null;
+    if (!displayWindowAlive() || !displayWindow) return null;
+    let tabId: string | null = null;
+    let windowId: string | null = null;
+    try {
+      tabId = displayWindow.webContents.getMediaSourceId(event.sender);
+    } catch {
+      tabId = null;
+    }
+    try {
+      windowId = displayWindow.getMediaSourceId();
+    } catch {
+      windowId = null;
+    }
+    if (!tabId && !windowId) return null;
+    return { tabId, windowId };
   });
 
   ipcMain.handle("display:getSnapshot", async () => {
@@ -2100,6 +2176,9 @@ if (!gotLock) {
         }
       });
 
+      if (process.platform === "win32") {
+        bootLog("[gpu] Direct Composition video-overlays uit (scorebord + video)");
+      }
       if (videoDecodeFallbackEnabled()) {
         bootLog("[gpu-fallback] hardware video decode uitgeschakeld voor deze sessie");
       }

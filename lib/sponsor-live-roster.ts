@@ -7,6 +7,12 @@ import {
   sponsorScreenSecondsConsumed,
   sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
+import {
+  activeSponsorsForWindow,
+  buildWindowSponsorSlotMap,
+  resolveSponsorWindow,
+  sponsorWindowBudgetSeconds,
+} from "@/lib/sponsor-windows";
 
 /**
  * Ruw rooster: slots + budget (zonder correctie bij tussentijdse budgetwijziging).
@@ -24,7 +30,31 @@ export function sponsorLiveProgressFromRosterRaw(
   prematchTimelineSec: number,
 ): { label: string; slotsUsed: number; budget: number; carryKey: string } | null {
   const status = match.status;
+  const window = resolveSponsorWindow({ match, timerRunning: true });
   if (status === "FIRST_HALF" || status === "SECOND_HALF" || status === "EXTRA_TIME") {
+    if (!window.footballEngine) {
+      const active = activeSponsorsForWindow(allSponsors, window, match.sport);
+      if (!active.some((s) => s.id === sponsor.id)) return null;
+      const map = buildWindowSponsorSlotMap(allSponsors, window, match);
+      const t = matchPlayRosterSeconds;
+      const budget = sponsorWindowBudgetSeconds(sponsor, window, match.sport);
+      const slotsUsed = sponsorScreenSecondsConsumed(
+        map,
+        allSponsors,
+        window.section,
+        window.mediaStatus,
+        t,
+        sponsor.id,
+      );
+      const label =
+        status === "FIRST_HALF"
+          ? "1e helft (rooster)"
+          : status === "SECOND_HALF"
+            ? "2e helft (rooster)"
+            : "Verlenging (rooster)";
+      const carryKey = `${match.id}:match:${status}:${sponsor.id}`;
+      return { label, slotsUsed, budget, carryKey };
+    }
     const section = "match" as const;
     const active = activeSponsorsForSection(allSponsors, section, status);
     if (!active.some((s) => s.id === sponsor.id)) return null;
@@ -50,6 +80,24 @@ export function sponsorLiveProgressFromRosterRaw(
     return { label, slotsUsed, budget, carryKey };
   }
   if (status === "HALF_TIME") {
+    if (!window.footballEngine) {
+      const active = activeSponsorsForWindow(allSponsors, window, match.sport);
+      if (!active.some((s) => s.id === sponsor.id)) return null;
+      const map = buildWindowSponsorSlotMap(allSponsors, window, match);
+      const t = halftimeTSec % Math.max(1, map.length);
+      const budget = sponsorWindowBudgetSeconds(sponsor, window, match.sport);
+      const slotsUsed = sponsorScreenSecondsConsumed(
+        map,
+        allSponsors,
+        window.section,
+        window.mediaStatus,
+        t,
+        sponsor.id,
+      );
+      const carryKey = `${match.id}:halftime:${sponsor.id}`;
+      const label = "Rust (rooster)";
+      return { label, slotsUsed, budget, carryKey };
+    }
     const section = "halftime" as const;
     const active = activeSponsorsForSection(allSponsors, section);
     if (!active.some((s) => s.id === sponsor.id)) return null;

@@ -3,9 +3,11 @@ import { applySponsorSpreadTick } from "./sponsor-spread-tick";
 import { streamSponsorInterrupted, streamSponsorTimelineSeconds } from "./stream-sponsor-schedule";
 
 describe("streamSponsorInterrupted", () => {
-  it("bevriest bij goal/kaart/wissel, niet bij rust", () => {
+  it("bevriest bij goal, quick button en intro, niet bij rust", () => {
     expect(streamSponsorInterrupted("GOAL")).toBe(true);
     expect(streamSponsorInterrupted("CARD")).toBe(true);
+    expect(streamSponsorInterrupted("SPONSOR")).toBe(true);
+    expect(streamSponsorInterrupted("TEAM_INTRO")).toBe(true);
     expect(streamSponsorInterrupted("HALFTIME")).toBe(false);
     expect(streamSponsorInterrupted("FULLTIME")).toBe(false);
   });

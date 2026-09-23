@@ -3,9 +3,16 @@ import {
   activeSponsorsForSection,
   sponsorScreenSecondsConsumed,
   sponsorSectionBudgetSeconds,
+  type SponsorBudgetResolver,
 } from "./sponsor-distribution";
+import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 import type { SponsorLedgerPayload } from "./sponsor-telemetry";
 import { sponsorTelemetryConsumedSec } from "./sponsor-telemetry";
+
+export type SponsorSpreadPhaseView = {
+  phase: "scoreboard" | "sponsor";
+  sponsorFilterId: string | null;
+};
 
 /** Eerste/tweede helft / verlenging: sponsor-slides naast scorebord; rust en voor/na: fullscreen. */
 export function sponsorRotationBesideScoreboard(status: string | undefined): boolean {
@@ -50,10 +57,13 @@ export function sponsorBesideShowsPanel(
   match: Match,
   sponsors: Sponsor[],
   playlists: Record<PlaylistSlot, Playlist | null>,
+  hasBudgetSponsors?: boolean,
 ): boolean {
   if (!sponsorRotationBesideScoreboard(match.status)) return false;
   const section = sectionForStatus(match.status);
-  if (hasSponsorsForSection(sponsors, section, match.status)) return true;
+  const hasBudget =
+    hasBudgetSponsors ?? hasSponsorsForSection(sponsors, section, match.status);
+  if (hasBudget) return true;
   const pl = playlists.PREMATCH ?? playlists.IDLE;
   return pl?.items?.some((i) => i.media.active) ?? false;
 }
@@ -63,9 +73,11 @@ export function sponsorHalftimeShowsPanel(
   match: Match,
   sponsors: Sponsor[],
   playlists: Record<PlaylistSlot, Playlist | null>,
+  hasBudgetSponsors?: boolean,
 ): boolean {
   if (match.status !== "HALF_TIME") return false;
-  if (hasSponsorsForSection(sponsors, "halftime")) return true;
+  const hasBudget = hasBudgetSponsors ?? hasSponsorsForSection(sponsors, "halftime");
+  if (hasBudget) return true;
   const pl = playlists.HALFTIME ?? playlists.IDLE;
   return pl?.items?.some((i) => i.media.active) ?? false;
 }
@@ -81,6 +93,11 @@ const SCORE_FRAME_EXCLUSIVE_FULLSCREEN = new Set([
   "GOAL_INTRO_VIDEO",
   "GOAL_PLAYER_VIDEO",
 ]);
+
+/** Team-/spelerintro en andere fullscreen-modi mogen niet onder de live L-balk verdwijnen. */
+export function isExclusiveFullscreenDisplayMode(mode: string): boolean {
+  return SCORE_FRAME_EXCLUSIVE_FULLSCREEN.has(mode);
+}
 
 /**
  * L-balk / strip / custom-frame alleen als er écht een paneel naast hoort.
@@ -120,6 +137,24 @@ export function shouldShowFullScreenMatchBoard(
     if (!sponsorBesideShowsPanel(match, sponsors, playlists)) return true;
   }
   return false;
+}
+
+/**
+ * L-frame met sponsor/media alleen zichtbaar als er nu een clip of overlay is.
+ * Anders het volledige scorebord — niet een leeg mediavak naast de L-kolom.
+ */
+export function liveSponsorBesideVisible(opts: {
+  mounted: boolean;
+  phase: "scoreboard" | "sponsor";
+  interruptOverlay: boolean;
+  previewFollowClip: boolean;
+  scheduledCue: boolean;
+  exclusiveFullscreen?: boolean;
+}): boolean {
+  if (!opts.mounted) return false;
+  if (opts.exclusiveFullscreen) return false;
+  if (opts.interruptOverlay || opts.previewFollowClip || opts.scheduledCue) return true;
+  return opts.phase === "sponsor";
 }
 
 export function pickSponsorPlaylist(
@@ -162,12 +197,20 @@ export function allActiveSponsorSectionBudgetsExhausted(
   sponsorLedger: SponsorLedgerPayload | null | undefined,
   ledgerMatchesSegment: boolean,
   nowMs: number,
+  budgetOf?: SponsorBudgetResolver,
 ): boolean {
-  const active = activeSponsorsForSection(sponsors, section, matchStatus);
+  const budgetFn =
+    budgetOf ?? ((s: Sponsor) => sponsorSectionBudgetSeconds(s, section, matchStatus));
+  const active = sponsors.filter(
+    (s) =>
+      s.active &&
+      budgetFn(s) > 0 &&
+      (s.media?.some((m) => m.active && mediaAllowedForSponsorPhase(m, section, matchStatus)) ?? false),
+  );
   if (active.length === 0) return true;
 
   for (const sponsor of active) {
-    const budget = sponsorSectionBudgetSeconds(sponsor, section, matchStatus);
+    const budget = budgetFn(sponsor);
     const consumedSlot = sponsorScreenSecondsConsumed(
       slotMap,
       sponsors,
@@ -184,4 +227,63 @@ export function allActiveSponsorSectionBudgetsExhausted(
     if (consumed < budget) return false;
   }
   return true;
+}
+
+/**
+ * HUD én LED: als het geplande schermbudget op is (en we niet oneindig herhalen),
+ * geen nieuwe sponsorclips meer — ook niet als de slotmap of ledger nog een hang toont.
+ */
+export function applySponsorBudgetCapToSpreadPhase(
+  base: SponsorSpreadPhaseView,
+  opts: {
+    cycleBudgetForever: boolean;
+    sponsors: Sponsor[];
+    section: SponsorSection;
+    matchStatus: string | undefined;
+    slotMap: (string | null)[];
+    slotT: number;
+    sponsorLedger: SponsorLedgerPayload | null | undefined;
+    ledgerMatchesSegment: boolean;
+    nowMs: number;
+    budgetOf?: SponsorBudgetResolver;
+  },
+): SponsorSpreadPhaseView {
+  if (opts.cycleBudgetForever) return base;
+  if (
+    allActiveSponsorSectionBudgetsExhausted(
+      opts.sponsors,
+      opts.section,
+      opts.matchStatus,
+      opts.slotMap,
+      opts.slotT,
+      opts.sponsorLedger,
+      opts.ledgerMatchesSegment,
+      opts.nowMs,
+      opts.budgetOf,
+    )
+  ) {
+    return { phase: "scoreboard", sponsorFilterId: null };
+  }
+  if (base.phase !== "sponsor" || !base.sponsorFilterId) return base;
+  const sponsor = opts.sponsors.find((s) => s.id === base.sponsorFilterId);
+  if (!sponsor) return base;
+  const budget = opts.budgetOf
+    ? opts.budgetOf(sponsor)
+    : sponsorSectionBudgetSeconds(sponsor, opts.section, opts.matchStatus);
+  const consumedSlot = sponsorScreenSecondsConsumed(
+    opts.slotMap,
+    opts.sponsors,
+    opts.section,
+    opts.matchStatus,
+    opts.slotT,
+    sponsor.id,
+  );
+  const consumedTelem =
+    opts.ledgerMatchesSegment && opts.sponsorLedger
+      ? sponsorTelemetryConsumedSec(opts.sponsorLedger, sponsor.id, opts.nowMs)
+      : consumedSlot;
+  if (budget > 0 && Math.max(consumedSlot, consumedTelem) >= budget) {
+    return { phase: "scoreboard", sponsorFilterId: null };
+  }
+  return base;
 }

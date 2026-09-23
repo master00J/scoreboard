@@ -11,7 +11,7 @@ export function TeamIntroMode({ match }: { match: Match }) {
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.6 }}
-      className="absolute inset-0 flex items-center justify-center"
+      className="absolute inset-0 z-[40] flex items-center justify-center"
       style={{
         background: `linear-gradient(135deg, ${match.homeTeam.primaryColor} 0%, #0b0c10 50%, ${match.awayTeam.primaryColor} 100%)`,
       }}

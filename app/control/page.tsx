@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { translateCommandError } from "@/lib/i18n/command-error";
 import { useSocketSync, sendCommand, onDisplayError, onDisplayHorn } from "@/lib/use-socket";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
@@ -82,8 +83,12 @@ export default function ControlPage() {
 
   // Surface server error toasts
   useEffect(() => {
-    const onErr = (p: { message: string }) => {
-      toast({ title: t("shell.commandFailed"), description: p.message, variant: "error" });
+    const onErr = (p: { message: string; code?: string; params?: Record<string, string | number> }) => {
+      toast({
+        title: t("shell.commandFailed"),
+        description: translateCommandError(t, p),
+        variant: "error",
+      });
     };
     return onDisplayError(onErr);
   }, [t]);
@@ -96,7 +101,13 @@ export default function ControlPage() {
           ? t("timer.hornPeriodEnd")
           : p.reason === "shot_clock"
             ? t("timer.hornShotClock")
-            : t("timer.hornTimeoutEnd");
+            : p.reason === "timeout_warning"
+              ? t("timer.hornTimeoutWarning")
+              : p.reason === "break_warning"
+                ? t("timer.hornBreakWarning")
+                : p.reason === "break_end"
+                  ? t("timer.hornBreakEnd")
+                  : t("timer.hornTimeoutEnd");
       toast({ title, variant: p.reason === "period_end" ? "success" : "default" });
     });
   }, [t]);
@@ -278,11 +289,11 @@ export default function ControlPage() {
           />
         </TabsContent>
 
-        <TabsContent value="setup" forceMount className="min-h-0 overflow-y-auto">
+        <TabsContent value="setup" className="min-h-0 overflow-y-auto">
           <SetupPanel />
         </TabsContent>
 
-        <TabsContent value="media" forceMount className="min-h-0 overflow-y-auto">
+        <TabsContent value="media" className="min-h-0 overflow-y-auto">
           <MediaPanel />
         </TabsContent>
 
@@ -319,6 +330,7 @@ export default function ControlPage() {
               await sendCommand({
                 type: "display:setMode",
                 mode: sponsorsOk ? "SPONSOR_ROTATION" : "MATCH",
+                meta: { persistSponsorPreference: true },
               });
               setActiveTab("match");
               toast({

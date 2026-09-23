@@ -3,6 +3,7 @@
 import { Fragment } from "react";
 import { StableClockText } from "@/components/stable-clock-text";
 import type { Match } from "@/lib/types";
+import { mediaUrl } from "@/lib/media-url";
 import {
   type ResolvedScoreboardTheme,
   frameGradientCss,
@@ -10,7 +11,8 @@ import {
 } from "@/lib/scoreboard-theme";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { TeamLogo } from "./scoreboard-strip";
-import { SportMatchMeta, SportTeamExtras } from "./sport-score-extras";
+import { ShotClockReadout, SportMatchMeta, SportTeamExtras, sportHasTeamExtras, useShotClockOff } from "./sport-score-extras";
+import { formatSportClock, getSportProfile } from "@/lib/sports";
 
 /**
  * Vast 1920×1080-layout tijdens actieve match / sponsor naast scorebord.
@@ -41,6 +43,7 @@ export function LeftScoreboardLayout({
   const barW = theme.leftBarWidthPx;
   const barH = theme.bottomBarHeightPx;
   const grad = frameGradientCss(theme);
+  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath);
 
   return (
     <div
@@ -55,6 +58,13 @@ export function LeftScoreboardLayout({
         className="absolute bottom-0 z-0"
         style={{ left: barW, right: 0, height: barH, background: grad }}
       />
+      {frameSrc ? (
+        <img
+          src={frameSrc}
+          alt=""
+          className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-cover"
+        />
+      ) : null}
 
       <div
         className="absolute z-20 flex flex-col"
@@ -141,6 +151,7 @@ function TeamBlock({
   side: "home" | "away";
   theme: ResolvedScoreboardTheme;
 }) {
+  const profile = getSportProfile(match.sport);
   const showExtras = sportHasTeamExtras(profile.id);
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 py-4">
@@ -174,7 +185,7 @@ function TeamBlock({
         {score}
       </div>
       ) : null}
-      <SportTeamExtras match={match} side={side} compact />
+      <SportTeamExtras match={match} side={side} fontSize={Math.max(28, theme.leftPeriodPx + 14)} />
     </div>
   );
 }
@@ -197,6 +208,7 @@ function TimerBlock({
   theme: ResolvedScoreboardTheme;
 }) {
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
+  const showShot = getSportProfile(match.sport).shotClockPresets.length > 0 && !useShotClockOff();
   return (
     <div
       className="flex shrink-0 flex-col items-center justify-center"
@@ -236,6 +248,11 @@ function TimerBlock({
           </div>
         )}
       </div>
+      {showShot ? (
+        <div className="mt-2 w-[88%]" style={{ height: Math.round(theme.leftTimerPx * 1.35) }}>
+          <ShotClockReadout seconds={shotClock} fontSize={Math.round(theme.leftTimerPx * 0.95)} />
+        </div>
+      ) : null}
       <SportMatchMeta match={match} shotClock={shotClock} />
     </div>
   );

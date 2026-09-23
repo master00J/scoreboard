@@ -9,9 +9,12 @@ import {
 const OVERLAY_SLOTS = SLOT_PRESETS.find((p) => p.id === "overlay")!.slots;
 const TOP_BAR_SLOTS = SLOT_PRESETS.find((p) => p.id === "topBar")!.slots;
 const FULL_BLEED_SLOTS = {
-  home: { x: 3, y: 72, w: 18, h: 24 },
-  away: { x: 79, y: 72, w: 18, h: 24 },
+  home: { x: 3, y: 72, w: 18, h: 14 },
+  homeScore: { x: 3, y: 86, w: 18, h: 10 },
+  away: { x: 79, y: 72, w: 18, h: 14 },
+  awayScore: { x: 79, y: 86, w: 18, h: 10 },
   clock: { x: 38, y: 78, w: 24, h: 18 },
+  shotClock: { x: 38, y: 62, w: 24, h: 14 },
   sponsor: { x: 0, y: 0, w: 100, h: 100 },
 };
 
@@ -38,6 +41,9 @@ const VISUAL_THEME_KEYS = Object.keys(DEFAULT_SCOREBOARD_THEME) as (keyof Resolv
 
 /** Keys die in dezelfde JSON zitten maar géén layout zijn — nooit in een template. */
 export const NON_VISUAL_THEME_KEYS = ["sponsorRepeatBudgetCycles"] as const;
+
+/** Venue-beelden: blijven staan bij een layoutwissel, tenzij de template zelf een pad zet. */
+const VENUE_BACKGROUND_KEYS = ["fullBackgroundPath", "leftFrameBackgroundPath"] as const;
 
 function parseThemeJson(raw: string | null | undefined): ScoreboardTheme {
   if (!raw || typeof raw !== "string" || !raw.trim()) return {};
@@ -72,6 +78,11 @@ export function applyTemplateToThemeJson(
   const next: Record<string, unknown> = { ...extractVisualTheme(templateThemeJson) };
   for (const key of NON_VISUAL_THEME_KEYS) {
     if (current[key] !== undefined) next[key] = current[key];
+  }
+  for (const key of VENUE_BACKGROUND_KEYS) {
+    const fromTemplate = typeof next[key] === "string" ? next[key].trim() : "";
+    const fromCurrent = typeof current[key] === "string" ? current[key].trim() : "";
+    if (!fromTemplate && fromCurrent) next[key] = fromCurrent;
   }
   return JSON.stringify(next);
 }
@@ -175,9 +186,12 @@ export const BUILT_IN_TEMPLATES: BuiltIn[] = [
     theme: {
       layoutMode: "custom",
       slots: {
-        home: { x: 4, y: 80, w: 14, h: 16 },
-        away: { x: 82, y: 80, w: 14, h: 16 },
+        home: { x: 4, y: 80, w: 14, h: 10 },
+        homeScore: { x: 4, y: 90, w: 14, h: 8 },
+        away: { x: 82, y: 80, w: 14, h: 10 },
+        awayScore: { x: 82, y: 90, w: 14, h: 8 },
         clock: { x: 42, y: 82, w: 16, h: 14 },
+        shotClock: { x: 60, y: 82, w: 16, h: 14 },
         sponsor: { x: 0, y: 0, w: 100, h: 100 },
       },
       fullShowPeriod: false,

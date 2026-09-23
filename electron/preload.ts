@@ -58,6 +58,11 @@ const bridge: ElectronBridge = {
   persistMatchTabLayout: (json: string) => {
     ipcRenderer.sendSync("control:persistMatchTabLayout", json);
   },
+  setDisplayPreviewCapture: (enabled: boolean) => {
+    ipcRenderer.send("control:setDisplayPreviewCapture", Boolean(enabled));
+  },
+  onDisplayPreviewFrame: (listener) => subscribe("display:livePreviewFrame", listener),
+  getDisplayPreviewCaptureIds: () => ipcRenderer.invoke("display:getPreviewCaptureIds"),
   reportDisplayPlaybackContext: (payload) => {
     ipcRenderer.send("display:playbackContext", payload);
   },

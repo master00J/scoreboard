@@ -22,8 +22,19 @@ const SPONSOR_PLAYBACK_INTERRUPTION_MODES: ReadonlySet<DisplayModeT> = new Set([
   "CUSTOM",
 ]);
 
+/**
+ * Speelhelft L-frame: deze modi blijven boven de gemounte (gepauzeerde) rotatie liggen.
+ * SPONSOR (quick button / één clip) hoort daarbij — anders blijft alleen de rotatie zichtbaar.
+ */
+export function isBesideInterruptOverlay(
+  mode: DisplayModeT | string,
+  hasActiveMedia: boolean,
+): boolean {
+  return mode === "GOAL" || mode === "CARD" || (mode === "SPONSOR" && hasActiveMedia);
+}
+
 export function isSponsorPlaybackInterrupted(
-  mode: DisplayModeT,
+  mode: DisplayModeT | string,
   hasScheduledMediaCue: boolean,
   /**
    * Externe capture staat fullscreen op het stadionscherm: de sponsorrotatie draait
@@ -31,12 +42,24 @@ export function isSponsorPlaybackInterrupted(
    * geen budget of proof-of-play-impressie verbruiken zolang het beeld bedekt is.
    */
   externalCaptureCoversDisplay = false,
+  /** Time-out-klok loopt: wedstrijdmoment, geen sponsortijd. */
+  timeoutCoversDisplay = false,
 ): boolean {
   return (
     hasScheduledMediaCue ||
     externalCaptureCoversDisplay ||
-    SPONSOR_PLAYBACK_INTERRUPTION_MODES.has(mode)
+    timeoutCoversDisplay ||
+    SPONSOR_PLAYBACK_INTERRUPTION_MODES.has(mode as DisplayModeT)
   );
+}
+
+/** Time-out-overlay is actief (geen blackout). */
+export function timeoutCoversDisplay(state: {
+  timeoutRunning?: boolean | null;
+  mode?: string | null;
+} | null | undefined): boolean {
+  if (!state) return false;
+  return !!state.timeoutRunning && state.mode !== "BLACKOUT";
 }
 
 /** Bedekt de externe capture nu het stadionscherm? (BLACKOUT wint: dan staat het scherm zwart.) */

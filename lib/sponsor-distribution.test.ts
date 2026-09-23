@@ -3,7 +3,10 @@ import type { MediaItem, Sponsor } from "./types";
 import {
   buildSponsorAppearancePlan,
   buildSponsorSlotMap,
+  buildSponsorSecondQueue,
+  MAX_SPONSOR_SECOND_QUEUE,
   sectionSpreadClock,
+  sectionPlayheadExhausted,
   holdSecondsCappedBySlotRun,
   postmatchSpreadTimelineSeconds,
   resolveSponsorSpreadPhase,
@@ -109,6 +112,12 @@ describe("rustklok stopt in plaats van te wrappen", () => {
     expect(sectionSpreadClock(900, 900, true)).toEqual({ t: 0, timelineComplete: false });
     expect(sectionSpreadClock(1050, 900, true)).toEqual({ t: 150, timelineComplete: false });
   });
+
+  it("gebruikt de bevroren speelkop, niet de ruwe wandtijd", () => {
+    expect(sectionPlayheadExhausted(50, 60)).toBe(false);
+    expect(sectionPlayheadExhausted(60, 60)).toBe(true);
+    expect(sectionPlayheadExhausted(90, 60, true)).toBe(false);
+  });
 });
 
 describe("na-wedstrijd sectie", () => {
@@ -193,5 +202,22 @@ describe("resolveSponsorSpreadPhase — gap na hang", () => {
     expect(next.phase).toBe("sponsor");
     expect(next.sponsorFilterId).toBe("sp");
     expect(hangRef.current?.sponsorId).toBe("sp");
+  });
+});
+
+describe("buildSponsorSecondQueue", () => {
+  it("stopt bij het veiligheidsplafond", () => {
+    const huge = {
+      id: "sp",
+      name: "Huge",
+      active: true,
+      prematchSeconds: MAX_SPONSOR_SECOND_QUEUE + 5_000,
+      halftimeSeconds: 0,
+      matchSeconds: 0,
+      imageDefaultSec: 10,
+      media: [media("1", 10)],
+    } as Sponsor;
+    const q = buildSponsorSecondQueue([huge], "prematch");
+    expect(q.length).toBe(MAX_SPONSOR_SECOND_QUEUE);
   });
 });

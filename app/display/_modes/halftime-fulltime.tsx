@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
 import type { Match } from "@/lib/types";
 import { getSportProfile, sportBreakLabel } from "@/lib/sports";
+import { tSportBreakLabel } from "@/lib/i18n/t-phase";
 import { formatSetHistory } from "@/lib/volleyball";
 
 export function HalfTimeMode({ match }: { match: Match }) {

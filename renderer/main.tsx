@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { useEffect, useState } from "react";
+import { Component, useEffect, useState, type ErrorInfo, type ReactNode } from "react";
 import ControlPage from "@/app/control/page";
 import DisplayPage from "@/app/display/page";
 import StreamProgramPage from "@/app/stream/page";
@@ -221,9 +221,47 @@ function Root() {
 
 installDesktopFetchShim();
 
+class RendererErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  state: { error: Error | null } = { error: null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[renderer] crash", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            minHeight: "100vh",
+            padding: 24,
+            color: "#fecaca",
+            background: "#09090b",
+            fontFamily: "Segoe UI, sans-serif",
+          }}
+        >
+          <h1 style={{ fontSize: 20, marginBottom: 12 }}>Stadium Scoreboard crashte</h1>
+          <pre style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "#f4f4f5" }}>
+            {this.state.error.stack || this.state.error.message}
+          </pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 const root = document.getElementById("root");
 if (!root) {
   throw new Error("Renderer root not found");
 }
 
-createRoot(root).render(<Root />);
+createRoot(root).render(
+  <RendererErrorBoundary>
+    <Root />
+  </RendererErrorBoundary>,
+);

@@ -16,13 +16,31 @@ const ARENACUE_LOGO_URI = "https://arenacue.be/assets/arenacue-icon.png";
 const SPORT_PROFILES = {
   FOOTBALL: { label: "Voetbal", periodLabel: "Helft", periods: 2, timer: "up", score: "Goal", increments: [1], timeouts: 0, stat: null, shot: [], cards: ["YELLOW", "RED"], presets: true, hasSets: false, penalty: [] },
   FUTSAL: { label: "Futsal", periodLabel: "Helft", periods: 2, timer: "down", score: "Goal", increments: [1], timeouts: 1, stat: "Teamfouten", shot: [], cards: ["YELLOW", "RED"], presets: false, hasSets: false, penalty: [] },
-  BASKETBALL: { label: "Basketbal", periodLabel: "Quarter", periods: 4, timer: "down", score: "Punten", increments: [1, 2, 3], timeouts: 3, stat: "Teamfouten", shot: [24, 14], cards: [], presets: false, hasSets: false, penalty: [] },
+  BASKETBALL: { label: "Basketbal", periodLabel: "Quarter", periods: 4, maxOvertime: 5, timer: "down", score: "Punten", increments: [1, 2, 3], timeouts: 2, foulBonusFrom: 4, stat: "Teamfouten", shot: [24, 14], cards: [], presets: false, hasSets: false, penalty: [] },
   VOLLEYBALL: { label: "Volleybal", periodLabel: "Set", periods: 5, timer: "none", score: "Punt", increments: [1], timeouts: 2, stat: null, shot: [], cards: [], presets: false, hasSets: true, penalty: [] },
   HOCKEY: { label: "Hockey", periodLabel: "Quarter", periods: 4, timer: "down", score: "Goal", increments: [1], timeouts: 0, stat: "Straffen", shot: [], cards: ["GREEN", "YELLOW", "RED"], presets: false, hasSets: false, penalty: [120, 300] },
 };
 
 function sportProfile(sport) {
   return SPORT_PROFILES[String(sport || "FOOTBALL").toUpperCase()] || SPORT_PROFILES.FOOTBALL;
+}
+
+function timeoutLimitFor(profile, period) {
+  const p = Math.floor(Number(period) || 1);
+  if (profile.shot?.length) {
+    if (p > profile.periods) return 1;
+    return p <= 2 ? 2 : 3;
+  }
+  return profile.timeouts || 0;
+}
+
+function formatShotClock(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  if (value < 5) {
+    const tenths = Math.ceil(value * 10 - 1e-9);
+    return `${Math.floor(tenths / 10)}.${tenths % 10}`;
+  }
+  return String(Math.ceil(value - 1e-9));
 }
 
 function fullName(player) {
@@ -1198,17 +1216,45 @@ export default function App() {
                   </Text>
                 </Pressable>
               ))}
+              {activeSportProfile.maxOvertime > 0 && Number(activeMatchDetails.currentPeriod ?? 1) < activeSportProfile.periods + activeSportProfile.maxOvertime ? (
+                <Pressable
+                  style={styles.smallButton}
+                  onPress={() => {
+                    const current = Number(activeMatchDetails.currentPeriod ?? 1);
+                    const next = current > activeSportProfile.periods ? current + 1 : activeSportProfile.periods + 1;
+                    sendCommand({ type: "sport:setPeriod", period: next });
+                  }}
+                >
+                  <Text style={styles.buttonTextSmall}>
+                    {Number(activeMatchDetails.currentPeriod ?? 1) > activeSportProfile.periods
+                      ? `OT ${Number(activeMatchDetails.currentPeriod) - activeSportProfile.periods + 1}`
+                      : "Verlenging"}
+                  </Text>
+                </Pressable>
+              ) : null}
             </View>
 
-            {activeSportProfile.timeouts > 0 && (
+            {timeoutLimitFor(activeSportProfile, activeMatchDetails.currentPeriod) > 0 && (
               <>
-                <Text style={styles.subLabel}>Time-outs gebruikt</Text>
+                <Text style={styles.subLabel}>
+                  Time-outs · max {timeoutLimitFor(activeSportProfile, activeMatchDetails.currentPeriod)}
+                  {activeSportProfile.shot?.length && Number(activeMatchDetails.currentPeriod) === 4
+                    ? " · laatste 2:00 max 2"
+                    : ""}
+                </Text>
                 <View style={styles.row}>
-                  {["home", "away"].map((side) => (
+                  {["home", "away"].map((side) => {
+                    const used = Number(activeMatchDetails[side === "home" ? "homeTimeouts" : "awayTimeouts"] ?? 0);
+                    const limit = timeoutLimitFor(activeSportProfile, activeMatchDetails.currentPeriod);
+                    const lateUsed = Number(activeMatchDetails[side === "home" ? "homeLateTimeouts" : "awayLateTimeouts"] ?? 0);
+                    const inLate = activeSportProfile.shot?.length && Number(activeMatchDetails.currentPeriod) === 4 && displayMatchClock <= 120;
+                    const blocked = used >= limit || (inLate && lateUsed >= 2);
+                    return (
                     <View key={`timeout-${side}`} style={styles.scoreSide}>
                       <Text style={styles.scoreLabel}>{side === "home" ? "HOME" : "AWAY"}</Text>
                       <Text style={styles.scoreNumber}>
-                        {Number(activeMatchDetails[side === "home" ? "homeTimeouts" : "awayTimeouts"] ?? 0)}
+                        {used}/{limit}
+                        {inLate ? ` · 2:00 ${lateUsed}/2` : ""}
                       </Text>
                       <View style={styles.row}>
                         <Pressable
@@ -1219,13 +1265,17 @@ export default function App() {
                         </Pressable>
                         <Pressable
                           style={styles.smallButton}
-                          onPress={() => sendCommand({ type: "sport:statAdjust", stat: "timeout", side, delta: 1 })}
+                          disabled={blocked}
+                          onPress={() => {
+                            if (!blocked) sendCommand({ type: "sport:statAdjust", stat: "timeout", side, delta: 1 });
+                          }}
                         >
                           <Text style={styles.buttonTextSmall}>+</Text>
                         </Pressable>
                       </View>
                     </View>
-                  ))}
+                    );
+                  })}
                 </View>
               </>
             )}
@@ -1239,6 +1289,10 @@ export default function App() {
                       <Text style={styles.scoreLabel}>{side === "home" ? "HOME" : "AWAY"}</Text>
                       <Text style={styles.scoreNumber}>
                         {Number(activeMatchDetails[side === "home" ? "homeFouls" : "awayFouls"] ?? 0)}
+                        {activeSportProfile.foulBonusFrom &&
+                        Number(activeMatchDetails[side === "home" ? "homeFouls" : "awayFouls"] ?? 0) >= activeSportProfile.foulBonusFrom
+                          ? " BONUS"
+                          : ""}
                       </Text>
                       <View style={styles.row}>
                         <Pressable
@@ -1379,7 +1433,29 @@ export default function App() {
 
             {activeSportProfile.shot.length > 0 && (
               <>
-                <Text style={styles.subLabel}>Shotclock · {Math.ceil(displayShotClock)}s</Text>
+                <Text style={styles.subLabel}>Volgend balbezit</Text>
+                <View style={styles.row}>
+                  <Pressable
+                    style={[styles.buttonSecondary, activeMatchDetails.possessionArrow === "home" ? styles.activeBorder : null]}
+                    onPress={() => sendCommand({ type: "sport:setPossession", side: "home" })}
+                  >
+                    <Text style={styles.buttonText}>◀ HOME</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.buttonSecondary, activeMatchDetails.possessionArrow === "away" ? styles.activeBorder : null]}
+                    onPress={() => sendCommand({ type: "sport:setPossession", side: "away" })}
+                  >
+                    <Text style={styles.buttonText}>AWAY ▶</Text>
+                  </Pressable>
+                </View>
+              </>
+            )}
+
+            {activeSportProfile.shot.length > 0 && (
+              <>
+                <Text style={styles.subLabel}>
+                  Shotclock · {snapshot?.shotClockOff ? "UIT" : `${formatShotClock(displayShotClock)}s`}
+                </Text>
                 <View style={styles.row}>
                   <Pressable
                     style={styles.button}

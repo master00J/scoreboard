@@ -2,12 +2,15 @@ import type { Sponsor, SponsorSection } from "./types";
 import {
   getSportProfile,
   lifecycleStatusForPeriod,
+  matchBreakDurationSec,
   normalizeSport,
   SPORT_TYPES,
   type SportType,
 } from "./sports";
 import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 import {
+  activeSponsorsForSection,
+  buildSponsorSlotMap,
   halfWindowElapsed,
   matchPlayBudgetSeconds,
   postmatchSpreadTimelineSeconds,
@@ -46,6 +49,7 @@ export type SponsorMatchClock = {
   halfDurationSec: number;
   periodDurationSec: number;
   halfBreakSec: number;
+  shortBreakSec?: number | null;
   prematchSpreadWindowSec?: number | null;
 };
 
@@ -220,8 +224,17 @@ export function shouldUsePeriodBreak(input: {
   if (normalizeSport(input.sport) === "FOOTBALL") return false;
   if (getSportProfile(input.sport).timerMode === "NONE") return false;
   if (input.layoutId === "two_blocks") return false;
-  if (input.status !== "FIRST_HALF" && input.status !== "SECOND_HALF") return false;
+  if (input.status !== "FIRST_HALF" && input.status !== "SECOND_HALF" && input.status !== "EXTRA_TIME") return false;
   return !input.timerRunning && !!input.periodBreakPending;
+}
+
+function pausedIntervalSeconds(match: SponsorMatchClock, endedPeriod: number): number {
+  return matchBreakDurationSec({
+    sport: match.sport,
+    currentPeriod: endedPeriod,
+    halfBreakSec: match.halfBreakSec,
+    shortBreakSec: match.shortBreakSec,
+  });
 }
 
 export function resolveSponsorWindow(input: {
@@ -274,23 +287,11 @@ export function resolveSponsorWindow(input: {
       section: "halftime",
       matchStatus: status,
       clock: "wall",
-      H: Math.max(60, input.match.halfBreakSec),
+      H: pausedIntervalSeconds(input.match, period),
       footballEngine: false,
       mediaStatus: undefined,
     };
   }
-  if (status === "EXTRA_TIME") {
-    return {
-      id: "extraTime",
-      section: "match",
-      matchStatus: status,
-      clock: "football_half",
-      H: Math.max(60, input.match.halfDurationSec),
-      footballEngine: false,
-      mediaStatus: status,
-    };
-  }
-
   if (
     shouldUsePeriodBreak({
       sport,
@@ -305,9 +306,20 @@ export function resolveSponsorWindow(input: {
       section: "halftime",
       matchStatus: "HALF_TIME",
       clock: "wall",
-      H: Math.max(60, input.match.halfBreakSec),
+      H: pausedIntervalSeconds(input.match, Math.max(1, period - 1)),
       footballEngine: false,
       mediaStatus: undefined,
+    };
+  }
+  if (status === "EXTRA_TIME") {
+    return {
+      id: "extraTime",
+      section: "match",
+      matchStatus: status,
+      clock: "football_half",
+      H: Math.max(60, input.match.halfDurationSec),
+      footballEngine: false,
+      mediaStatus: status,
     };
   }
 
@@ -369,6 +381,21 @@ export function blockAccumulatedElapsed(input: {
   return completed * periodSec + Math.max(0, input.elapsedSec);
 }
 
+/**
+ * Mag het sponsorrooster / de clip-playback de wedstrijdklok volgen?
+ * Volleybal (wandklok) heeft geen Start-knop: SET 1 = spelen, dus nooit bevriezen.
+ * Voetbal blijft aan de timer gekoppeld (pauze = stil).
+ */
+export function sponsorMatchClockFrozen(
+  window: Pick<ResolvedSponsorWindow, "footballEngine" | "clock"> | null | undefined,
+  timerRunning: boolean,
+): boolean {
+  if (!window) return !timerRunning;
+  if (window.footballEngine) return !timerRunning;
+  if (window.clock === "wall") return false;
+  return !timerRunning;
+}
+
 export function windowPlayElapsed(input: {
   window: ResolvedSponsorWindow;
   elapsedSec: number;
@@ -400,6 +427,36 @@ export function windowPlayElapsed(input: {
   }
   const cap = Math.max(1, w.H);
   return Math.min(Math.max(0, input.wallElapsedSec), cap - 1);
+}
+
+/**
+ * Speeltijd voor de sponsor-slotklok. Wandklok wordt niet op H−1 gekapt, zodat
+ * overlays (quick button, goal, cue) de resterende budgettijd niet “opeten”:
+ * de freeze-klok kan daarna nog `timelineSec` bereiken en netjes stoppen.
+ */
+export function windowScheduleElapsed(
+  input: Parameters<typeof windowPlayElapsed>[0],
+): number {
+  if (input.window.clock === "wall") return Math.max(0, input.wallElapsedSec);
+  return windowPlayElapsed(input);
+}
+
+/**
+ * Volleybal e.d.: de slotmap is maar `timelineSec` lang. Geef hier de
+ * **bevroren speelkop** (`sponsorScheduleTime`), niet de ruwe wandklok —
+ * anders tellen highlights/time-outs mee en start het laatste slot opnieuw
+ * terwijl de HUD “geen slots meer” toont, of stopt de rotatie te vroeg.
+ */
+export function sponsorWallPlayTimelineComplete(opts: {
+  clock: SponsorClockKind;
+  section: string;
+  cycleBudgetForever: boolean;
+  wallElapsedSec: number;
+  timelineSec: number;
+}): boolean {
+  if (opts.clock !== "wall" || opts.section !== "match") return false;
+  if (opts.cycleBudgetForever) return false;
+  return opts.wallElapsedSec >= Math.max(1, opts.timelineSec);
 }
 
 export function parseSportBudgetsJson(raw: string | null | undefined): SportBudgetsMap {
@@ -479,6 +536,42 @@ export function activeSponsorsForWindow(
   );
 }
 
+export function sponsorWindowBudgetResolver(
+  window: Pick<ResolvedSponsorWindow, "id" | "section" | "matchStatus" | "footballEngine">,
+  sport: unknown,
+): (sponsor: Sponsor) => number {
+  return (sponsor) => sponsorWindowBudgetSeconds(sponsor, window, sport);
+}
+
+export function hasSponsorsForSectionOrWindow(
+  sponsors: Sponsor[],
+  section: SponsorSection,
+  matchStatus: string | undefined,
+  window: Pick<ResolvedSponsorWindow, "id" | "section" | "matchStatus" | "footballEngine" | "mediaStatus"> | null | undefined,
+  sport: unknown,
+): boolean {
+  if (window && window.section === section) {
+    return activeSponsorsForWindow(sponsors, window, sport).length > 0;
+  }
+  return activeSponsorsForSection(sponsors, section, matchStatus).length > 0;
+}
+
+export function buildWindowSponsorSlotMap(
+  sponsors: Sponsor[],
+  window: ResolvedSponsorWindow,
+  match: SponsorMatchClock,
+): (string | null)[] {
+  const active = activeSponsorsForWindow(sponsors, window, match.sport);
+  const H = windowTimelineSeconds(window, match, sponsors);
+  return buildSponsorSlotMap(
+    active,
+    window.section,
+    H,
+    window.mediaStatus,
+    sponsorWindowBudgetResolver(window, match.sport),
+  );
+}
+
 export function windowTimelineSeconds(
   window: ResolvedSponsorWindow,
   match: SponsorMatchClock,
@@ -487,7 +580,7 @@ export function windowTimelineSeconds(
   if (window.footballEngine && window.section === "match") {
     return Math.max(60, match.halfDurationSec);
   }
-  if (window.section === "halftime") return Math.max(60, match.halfBreakSec);
+  if (window.section === "halftime") return Math.max(60, window.H || match.halfBreakSec);
   if (window.section === "prematch") return prematchSpreadTimelineSeconds(match, sponsors);
   if (window.section === "postmatch") return postmatchSpreadTimelineSeconds(sponsors);
   if (window.clock === "wall") {

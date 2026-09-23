@@ -14,6 +14,7 @@ import { squadOnFieldAndBench } from "@/lib/match-squad";
 import { toast } from "@/components/ui/toast";
 import { getSportProfile } from "@/lib/sports";
 import { tMatchStatus } from "@/lib/i18n/t-phase";
+import { tScoreLabel } from "@/lib/i18n/t-sport";
 import { SportLiveControls } from "./sport-live-controls";
 
 export function MatchLivePanel() {
@@ -76,7 +77,8 @@ export function MatchLivePanel() {
           team={match.homeTeam}
           score={match.homeScore}
           goalVisualEnabled={homeGoalVisualEnabled}
-          scoreLabel={profile.scoreLabel}
+          scoreLabel={tScoreLabel(t, match.sport)}
+          supportsGoalVisuals={profile.supportsGoalVisuals}
           increments={profile.scoreIncrements}
           onScoreClick={(points) => void handleScoreClick("home", points)}
           onAdjust={(d) => sendCommand({ type: "score:adjust", side: "home", delta: d })}
@@ -86,7 +88,8 @@ export function MatchLivePanel() {
           team={match.awayTeam}
           score={match.awayScore}
           goalVisualEnabled={awayGoalVisualEnabled}
-          scoreLabel={profile.scoreLabel}
+          scoreLabel={tScoreLabel(t, match.sport)}
+          supportsGoalVisuals={profile.supportsGoalVisuals}
           increments={profile.scoreIncrements}
           onScoreClick={(points) => void handleScoreClick("away", points)}
           onAdjust={(d) => sendCommand({ type: "score:adjust", side: "away", delta: d })}
@@ -179,6 +182,7 @@ function SideControl({
   score,
   goalVisualEnabled,
   scoreLabel,
+  supportsGoalVisuals,
   increments,
   onScoreClick,
   onAdjust,
@@ -188,6 +192,7 @@ function SideControl({
   score: number;
   goalVisualEnabled: boolean;
   scoreLabel: string;
+  supportsGoalVisuals: boolean;
   increments: number[];
   onScoreClick: (points: number) => void;
   onAdjust: (delta: number) => void;
@@ -218,10 +223,10 @@ function SideControl({
             className="h-10 min-w-16 flex-1 bg-green-500 px-2 text-sm font-black text-black hover:bg-green-600"
             onClick={() => onScoreClick(points)}
           >
-            {scoreLabel === "Goal" && points === 1
+            {supportsGoalVisuals && points === 1
               ? t("matchLive.goalPlus")
               : `${scoreLabel.toUpperCase()} +${points}`}
-            {scoreLabel === "Goal" && points === 1 && (
+            {supportsGoalVisuals && points === 1 && (
               <span className="block text-[10px] font-semibold opacity-75">
                 {goalVisualEnabled ? t("matchLive.withVisual") : t("matchLive.scoreOnly")}
               </span>

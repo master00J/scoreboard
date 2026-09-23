@@ -72,13 +72,15 @@ export type TickPayload = {
 
 /** Zoemer-event vanuit de main-process tick-loop (einde periode, shotclock op nul, einde time-out). */
 export type HornPayload = {
-  reason: "period_end" | "shot_clock" | "timeout_end";
+  reason: "period_end" | "shot_clock" | "timeout_end" | "timeout_warning" | "break_warning" | "break_end";
   atMs: number;
 };
 
 export type CommandAck = {
   ok: boolean;
   error?: string;
+  code?: string;
+  params?: Record<string, string | number>;
   /** Niet-fataal; wordt als toast naar control gestuurd (bijv. overgeslagen wissel in de rij). */
   warning?: string;
   result?: unknown;
@@ -199,7 +201,7 @@ export type ElectronBridge = {
   /** Zoemer (einde periode / shotclock / time-out); optioneel voor oudere bridges. */
   onDisplayHorn?: (listener: (payload: HornPayload) => void) => () => void;
   onSponsorLedger: (listener: (ledger: SponsorLedgerPayload | null) => void) => () => void;
-  onDisplayError: (listener: (payload: { message: string }) => void) => () => void;
+  onDisplayError: (listener: (payload: { message: string; code?: string; params?: Record<string, string | number> }) => void) => () => void;
   focusDisplayWindow: () => Promise<void>;
   reloadDisplayWindow: () => Promise<{ ok: boolean }>;
   /** Proof-of-play: sla renderer-gegenereerde PDF of Excel op (save dialog). */
@@ -237,6 +239,13 @@ export type ElectronBridge = {
   getMatchTabLayoutSnapshot: () => string | null;
   /** Schrijft dezelfde JSON naar userData (sync IPC). */
   persistMatchTabLayout: (json: string) => void;
+  setDisplayPreviewCapture?: (enabled: boolean) => void;
+  onDisplayPreviewFrame?: (listener: (jpeg: string) => void) => () => void;
+  /** Tab-loopback + venster-id van het LED, voor live 1080p-preview zonder tweede file-decoder. */
+  getDisplayPreviewCaptureIds?: () => Promise<{
+    tabId: string | null;
+    windowId: string | null;
+  } | null>;
   /**
    * Alleen stadionscherm: meldt welke clip/modus speelt zodat boot.log bij OOM/GPU-crash context heeft.
    * Geen-op bij control-ingebouwde preview (`followPlayback` / `showPreviewProgress`).

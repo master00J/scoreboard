@@ -3,6 +3,7 @@ import {
   postmatchSpreadTimelineSeconds,
   prematchSpreadTimelineSeconds,
 } from "./sponsor-distribution";
+import { isSponsorPlaybackInterrupted } from "./sponsor-playback-interruption";
 
 export function streamSponsorTimelineSeconds(
   section: SponsorSection,
@@ -15,13 +16,11 @@ export function streamSponsorTimelineSeconds(
   return postmatchSpreadTimelineSeconds(sponsors);
 }
 
-/** Overlay die de LED-sponsors bevriest — niet rust/einde, die ís de stream-break. */
+/**
+ * Overlay die de stream-sponsors bevriest (goal, quick button, intro, blackout).
+ * Rust/einde ís het stream-programma, geen korte onderbreking.
+ */
 export function streamSponsorInterrupted(mode: string | undefined): boolean {
-  return (
-    mode === "GOAL" ||
-    mode === "GOAL_INTRO_VIDEO" ||
-    mode === "GOAL_PLAYER_VIDEO" ||
-    mode === "SUBSTITUTION" ||
-    mode === "CARD"
-  );
+  if (mode === "HALFTIME" || mode === "FULLTIME") return false;
+  return isSponsorPlaybackInterrupted(mode ?? "IDLE", false);
 }

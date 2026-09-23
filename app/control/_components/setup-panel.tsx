@@ -22,6 +22,8 @@ import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
 import { SetupDisplayCanvasSection } from "./setup-display-canvas";
 import { AssetHealthCheck } from "./asset-health-check";
 import { getSportProfile, SPORT_TYPES, type SportType } from "@/lib/sports";
+import { DEFAULT_VOLLEYBALL_RULES, type VolleyballMatchRules } from "@/lib/volleyball";
+import { VolleyballRulesFields } from "./volleyball-rules-form";
 import {
   parseSponsorLayoutsJson,
   resolveSponsorLayoutId,
@@ -266,6 +268,7 @@ export function SetupPanel() {
                       src={mediaUrl(settings.goalIntroVideoPath)}
                       muted
                       controls
+                      preload="none"
                       className="w-full rounded bg-black aspect-video"
                     />
                     <div className="text-[11px] text-muted-foreground truncate" title={settings.goalIntroVideoPath}>
@@ -1272,6 +1275,7 @@ function PlayerDialog({
                   src={mediaUrl(lineupVideoPath)}
                   muted
                   controls
+                  preload="none"
                   className="w-full max-w-md rounded bg-black aspect-video"
                 />
               ) : (
@@ -1328,6 +1332,7 @@ function PlayerDialog({
                   key={goalMediaId}
                   src={videoMedia.find((m) => m.id === goalMediaId)?.path}
                   muted
+                  preload="none"
                   className="w-full h-full object-cover"
                 />
               </div>
@@ -1884,6 +1889,7 @@ function BulkVisualsDialog({
                 src={mediaUrl(selectedFile)}
                 muted
                 controls
+                preload="none"
                 className="h-24 rounded bg-black"
               />
             ) : (
@@ -1978,9 +1984,12 @@ export function MatchDialog({
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [sport, setSport] = useState<SportType>("FOOTBALL");
   const sportProfile = getSportProfile(sport);
+  const startEvent = sportStartEventVars(t, sport);
   const [periodMinutes, setPeriodMinutes] = useState(45);
+  const [breakMinutes, setBreakMinutes] = useState(15);
+  const [shortBreakMinutes, setShortBreakMinutes] = useState(2);
   const [servingStart, setServingStart] = useState<"home" | "away">("home");
-  const [technicalTimeouts, setTechnicalTimeouts] = useState(true);
+  const [vbRules, setVbRules] = useState<VolleyballMatchRules>(DEFAULT_VOLLEYBALL_RULES);
   const [awayId, setAwayId] = useState(
     teams.find((team) => team.id !== homeTeam?.id)?.id ?? "",
   );
@@ -2002,7 +2011,10 @@ export function MatchDialog({
 
   useEffect(() => {
     setPeriodMinutes(Math.max(0, Math.round(sportProfile.defaultPeriodDurationSec / 60)));
-  }, [sportProfile.defaultPeriodDurationSec]);
+    setBreakMinutes(Math.max(1, Math.round(sportProfile.breakDurationSec / 60)));
+    setShortBreakMinutes(Math.max(1, Math.round(sportProfile.shortBreakDurationSec / 60)));
+    if (sport === "VOLLEYBALL") setVbRules(DEFAULT_VOLLEYBALL_RULES);
+  }, [sport, sportProfile.defaultPeriodDurationSec, sportProfile.breakDurationSec, sportProfile.shortBreakDurationSec]);
 
   async function onAwayLogo(file?: File, localPath?: string) {
     if (localPath) {
@@ -2112,18 +2124,39 @@ export function MatchDialog({
 
     const periodMin = Number(periodMinutes);
     const breakMin = Number(breakMinutes);
+    const shortMin = Number(shortBreakMinutes);
+    const splitBreaks =
+      sportProfile.mainBreakAfterPeriod != null &&
+      sportProfile.shortBreakDurationSec !== sportProfile.breakDurationSec;
     const payload: Record<string, unknown> = {
       homeTeamId: homeTeam.id,
       awayTeamId: resolvedAwayId,
       sport,
       periodDurationSec:
-        sportProfile.timerMode === "NONE" ? 0 : Math.max(0, Math.round(Number(periodMinutes) * 60)),
+        sportProfile.timerMode === "NONE" ? 0 : Math.max(0, Math.round(periodMin * 60)),
       servingSide: sportProfile.hasSets ? servingStart : null,
-      technicalTimeoutsEnabled: sportProfile.hasSets ? technicalTimeouts : true,
       kickoffAt: kickoffLocal.trim() ? localDatetimeToIso(kickoffLocal) : null,
       matchSponsorMediaId: matchSponsorMediaId.trim() ? matchSponsorMediaId : null,
       prematchSpreadWindowSec: prematchSec,
     };
+    if (sportProfile.hasSets) {
+      payload.setsToWin = vbRules.setsToWin;
+      payload.pointsToWinSet = vbRules.pointsToWinSet;
+      payload.pointsToWinDecider = vbRules.pointsToWinDecider;
+      payload.winBy = vbRules.winBy;
+      payload.technicalTimeoutsEnabled = vbRules.technicalTimeoutsEnabled;
+      payload.technicalTimeoutScoresJson = JSON.stringify(vbRules.technicalTimeoutScores);
+      payload.technicalTimeoutDurationSec = vbRules.technicalTimeoutDurationSec;
+      payload.timeoutsPerSet = vbRules.timeoutsPerSet;
+      payload.timeoutDurationSec = vbRules.timeoutDurationSec;
+      payload.halfBreakSec = vbRules.setBreakSec;
+    } else if (Number.isFinite(breakMin) && breakMin > 0) {
+      payload.halfBreakSec = Math.round(breakMin * 60);
+      payload.shortBreakSec =
+        splitBreaks && Number.isFinite(shortMin) && shortMin > 0
+          ? Math.round(shortMin * 60)
+          : Math.round(breakMin * 60);
+    }
 
     const res = await fetch("/api/matches", {
       method: "POST",
@@ -2152,7 +2185,7 @@ export function MatchDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent size={quickStart ? "lg" : "md"}>
+      <DialogContent size={quickStart || sportProfile.hasSets ? "lg" : "md"}>
         <DialogHeader>
           <DialogTitle>{quickStart ? t("shell.startNewMatch") : t("setup.newMatch")}</DialogTitle>
         </DialogHeader>
@@ -2226,26 +2259,49 @@ export function MatchDialog({
               />
             </div>
           )}
-          {sportProfile.hasSets && (
-            <div className="mt-3 space-y-2">
-              <Label>{t("setup.servingStart")}</Label>
-              <Select
-                className="mt-1 max-w-xs"
-                value={servingStart}
-                onChange={(e) => setServingStart(e.target.value as "home" | "away")}
-              >
-                <option value="home">{t("common.home")}</option>
-                <option value="away">{t("common.away")}</option>
-              </Select>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={technicalTimeouts}
-                  onChange={(e) => setTechnicalTimeouts(e.target.checked)}
+          {sportProfile.timerMode !== "NONE" && !sportProfile.hasSets && (
+            <div className="mt-3 grid max-w-md grid-cols-2 gap-3">
+              {sportProfile.mainBreakAfterPeriod != null &&
+              sportProfile.shortBreakDurationSec !== sportProfile.breakDurationSec ? (
+                <div>
+                  <Label htmlFor="short-break-minutes">{t("setup.shortBreakMinutes")}</Label>
+                  <Input
+                    id="short-break-minutes"
+                    type="number"
+                    min={1}
+                    max={30}
+                    className="mt-1"
+                    value={shortBreakMinutes}
+                    onChange={(e) => setShortBreakMinutes(Number(e.target.value))}
+                  />
+                </div>
+              ) : null}
+              <div>
+                <Label htmlFor="break-minutes">
+                  {sportProfile.mainBreakAfterPeriod != null &&
+                  sportProfile.shortBreakDurationSec !== sportProfile.breakDurationSec
+                    ? t("setup.mainBreakMinutes")
+                    : t("setup.breakMinutes")}
+                </Label>
+                <Input
+                  id="break-minutes"
+                  type="number"
+                  min={1}
+                  max={60}
+                  className="mt-1"
+                  value={breakMinutes}
+                  onChange={(e) => setBreakMinutes(Number(e.target.value))}
                 />
-                {t("setup.technicalTimeouts")}
-              </label>
+              </div>
             </div>
+          )}
+          {sportProfile.hasSets && (
+            <VolleyballRulesFields
+              rules={vbRules}
+              onChange={setVbRules}
+              servingStart={servingStart}
+              onServingStartChange={setServingStart}
+            />
           )}
         </div>
         {!homeTeam ? (

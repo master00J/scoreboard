@@ -13,12 +13,32 @@ export type MatchTabPanelId =
 
 export type MatchTabColumn = "left" | "center" | "right";
 
+export type MatchTabColumnWeights = {
+  left: number;
+  center: number;
+  right: number;
+};
+
 export type MatchTabLayoutState = {
   orderLeft: MatchTabPanelId[];
   orderCenter: MatchTabPanelId[];
   orderRight: MatchTabPanelId[];
   collapsed: Partial<Record<MatchTabPanelId, boolean>>;
+  columnWeights: MatchTabColumnWeights;
+  panelHeights: Partial<Record<MatchTabPanelId, number>>;
 };
+
+/** Ongeveer de oude grid: 0.92fr / 0.68fr / 1.1fr. */
+export const DEFAULT_COLUMN_WEIGHTS: MatchTabColumnWeights = {
+  left: 34,
+  center: 25,
+  right: 41,
+};
+
+export const MIN_COLUMN_WEIGHT = 18;
+export const MAX_COLUMN_WEIGHT = 64;
+export const MIN_PANEL_HEIGHT = 140;
+export const MAX_PANEL_HEIGHT = 1400;
 
 const STORAGE_KEY = "stadium-control-match-tab-layout-v1";
 
@@ -35,6 +55,8 @@ const LEGACY_DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
   orderCenter: ["preview", "match-live", "event-log"],
   orderRight: ["match-info"],
   collapsed: {},
+  columnWeights: { ...DEFAULT_COLUMN_WEIGHTS },
+  panelHeights: {},
 };
 
 export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
@@ -49,6 +71,8 @@ export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
   ],
   orderRight: ["preview", "display", "match-info"],
   collapsed: {},
+  columnWeights: { ...DEFAULT_COLUMN_WEIGHTS },
+  panelHeights: {},
 };
 
 const ALL_PANEL_IDS: MatchTabPanelId[] = [
@@ -67,6 +91,68 @@ const ALL_PANEL_IDS: MatchTabPanelId[] = [
 
 export function isMatchTabPanelId(x: unknown): x is MatchTabPanelId {
   return typeof x === "string" && (ALL_PANEL_IDS as string[]).includes(x);
+}
+
+function finiteNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+export function normalizeColumnWeights(raw?: Partial<MatchTabColumnWeights> | null): MatchTabColumnWeights {
+  const left = Math.max(0, finiteNumber(raw?.left, DEFAULT_COLUMN_WEIGHTS.left));
+  const center = Math.max(0, finiteNumber(raw?.center, DEFAULT_COLUMN_WEIGHTS.center));
+  const right = Math.max(0, finiteNumber(raw?.right, DEFAULT_COLUMN_WEIGHTS.right));
+  const sum = left + center + right;
+  if (sum <= 0) return { ...DEFAULT_COLUMN_WEIGHTS };
+  let nextLeft = Math.round((left / sum) * 100);
+  let nextCenter = Math.round((center / sum) * 100);
+  let nextRight = 100 - nextLeft - nextCenter;
+  const clampCol = (n: number) => Math.min(MAX_COLUMN_WEIGHT, Math.max(MIN_COLUMN_WEIGHT, n));
+  nextLeft = clampCol(nextLeft);
+  nextCenter = clampCol(nextCenter);
+  nextRight = clampCol(nextRight);
+  const clampedSum = nextLeft + nextCenter + nextRight;
+  if (clampedSum === 100) return { left: nextLeft, center: nextCenter, right: nextRight };
+  const scale = 100 / clampedSum;
+  nextLeft = Math.round(nextLeft * scale);
+  nextCenter = Math.round(nextCenter * scale);
+  nextRight = 100 - nextLeft - nextCenter;
+  return {
+    left: clampCol(nextLeft),
+    center: clampCol(nextCenter),
+    right: Math.max(MIN_COLUMN_WEIGHT, 100 - clampCol(nextLeft) - clampCol(nextCenter)),
+  };
+}
+
+export function nudgeColumnPair(
+  weights: MatchTabColumnWeights,
+  grow: MatchTabColumn,
+  shrink: MatchTabColumn,
+  dPct: number,
+): MatchTabColumnWeights {
+  const next = { ...normalizeColumnWeights(weights) };
+  if (grow === shrink || !Number.isFinite(dPct) || dPct === 0) return next;
+  const nextGrow = Math.min(MAX_COLUMN_WEIGHT, Math.max(MIN_COLUMN_WEIGHT, next[grow] + dPct));
+  const wanted = nextGrow - next[grow];
+  const nextShrink = Math.min(MAX_COLUMN_WEIGHT, Math.max(MIN_COLUMN_WEIGHT, next[shrink] - wanted));
+  const applied = next[shrink] - nextShrink;
+  next[grow] = Math.round((next[grow] + applied) * 10) / 10;
+  next[shrink] = Math.round(nextShrink * 10) / 10;
+  return normalizeColumnWeights(next);
+}
+
+export function sanitizePanelHeights(raw: unknown): Partial<Record<MatchTabPanelId, number>> {
+  if (!raw || typeof raw !== "object") return {};
+  const out: Partial<Record<MatchTabPanelId, number>> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!isMatchTabPanelId(key) || typeof value !== "number" || !Number.isFinite(value)) continue;
+    out[key] = Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, Math.round(value)));
+  }
+  return out;
+}
+
+export function clampPanelHeight(value: number): number {
+  if (!Number.isFinite(value)) return MIN_PANEL_HEIGHT;
+  return Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, Math.round(value)));
 }
 
 function normalizeSavedOrder(saved: unknown): MatchTabPanelId[] {
@@ -118,6 +204,8 @@ function appendMissingPanels(layout: MatchTabLayoutState): MatchTabLayoutState {
     orderCenter: [...layout.orderCenter],
     orderRight: [...layout.orderRight],
     collapsed: layout.collapsed,
+    columnWeights: normalizeColumnWeights(layout.columnWeights),
+    panelHeights: sanitizePanelHeights(layout.panelHeights),
   };
   for (const id of ALL_PANEL_IDS) {
     if (seen.has(id)) continue;
@@ -192,6 +280,8 @@ export function parseMatchTabLayoutJson(raw: string | null): MatchTabLayoutState
       orderCenter,
       orderRight,
       collapsed,
+      columnWeights: normalizeColumnWeights(p.columnWeights),
+      panelHeights: sanitizePanelHeights(p.panelHeights),
     });
     if (layoutOrdersEqual(parsed, LEGACY_DEFAULT_MATCH_TAB_LAYOUT)) {
       return { ...DEFAULT_MATCH_TAB_LAYOUT, collapsed: parsed.collapsed };

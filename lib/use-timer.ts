@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useDisplayStore } from "@/lib/store";
 import {
+  computeBreakSeconds,
   computePenaltySeconds,
   computeShotClockSeconds,
   computeTimeoutSeconds,
@@ -64,6 +65,21 @@ export function useLivePenaltySeconds(side: "home" | "away"): number {
           startedAt: state.awayPenaltyStartedAt,
           baseSec: state.awayPenaltyBaseSec,
         },
+    now,
+  );
+}
+
+/** Resterende seconden van de lopende periodepauze (0 als er geen loopt). */
+export function useLiveBreakSeconds(): number {
+  const state = useDisplayStore((s) => s.state);
+  const now = useNowEvery100ms();
+  if (!state?.breakRunning) return 0;
+  return computeBreakSeconds(
+    {
+      breakRunning: state.breakRunning,
+      breakStartedAt: state.breakStartedAt,
+      breakBaseSec: state.breakBaseSec,
+    },
     now,
   );
 }

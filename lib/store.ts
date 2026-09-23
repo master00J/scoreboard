@@ -4,6 +4,17 @@ import { create } from "zustand";
 import type { DisplayStatePayload, TickPayload } from "./desktop-bridge";
 import type { SponsorLedgerPayload } from "./sponsor-telemetry";
 
+function isStaleDisplayState(
+  incoming: DisplayStatePayload | null,
+  current: DisplayStatePayload | null,
+): boolean {
+  if (!incoming?.updatedAt || !current?.updatedAt) return false;
+  const prev = Date.parse(current.updatedAt);
+  const next = Date.parse(incoming.updatedAt);
+  if (!Number.isFinite(prev) || !Number.isFinite(next)) return false;
+  return next < prev;
+}
+
 type Store = {
   state: DisplayStatePayload | null;
   tick: TickPayload | null;
@@ -26,13 +37,16 @@ export const useDisplayStore = create<Store>((set) => ({
   goalPickerSide: null,
   goalPickerDismissed: false,
   setState: (s) =>
-    set((prev) => ({
-      state: s,
-      goalPickerDismissed:
-        prev.state?.mode === "GOAL_INTRO_VIDEO" && s?.mode !== "GOAL_INTRO_VIDEO"
-          ? false
-          : prev.goalPickerDismissed,
-    })),
+    set((prev) => {
+      if (isStaleDisplayState(s, prev.state)) return prev;
+      return {
+        state: s,
+        goalPickerDismissed:
+          prev.state?.mode === "GOAL_INTRO_VIDEO" && s?.mode !== "GOAL_INTRO_VIDEO"
+            ? false
+            : prev.goalPickerDismissed,
+      };
+    }),
   setTick: (t) => set({ tick: t }),
   setSponsorLedger: (l) => set({ sponsorLedger: l }),
   setConnected: (c) => set({ connected: c }),

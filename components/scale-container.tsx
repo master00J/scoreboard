@@ -114,6 +114,7 @@ export function ScaleContainer({
     </div>
   ) : null;
 
+  const useZoom = Math.abs(scale - 1) > 0.002;
   const scaledLogical = (
     <div
       style={{
@@ -127,8 +128,7 @@ export function ScaleContainer({
         style={{
           width,
           height,
-          transform: `scale(${scale})`,
-          transformOrigin: "0 0",
+          ...(useZoom ? { zoom: scale } : {}),
           position: "absolute",
           left: 0,
           top: 0,

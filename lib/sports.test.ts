@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   describePeriod,
+  basketballIntervalBreak,
+  basketballLateTimeoutBlocked,
+  breakWarnsAtThirtySeconds,
+  formatShotClock,
   formatSportClock,
   getSportProfile,
   lifecycleStatusForPeriod,
@@ -12,7 +16,10 @@ import {
   resetTimeoutsForNewPeriod,
   sportClockSeconds,
   sportMaxPeriod,
+  sportMaxPeriodForMatch,
   sportPeriodLabel,
+  timeoutDurationSecForMatch,
+  timeoutLimitForMatch,
 } from "./sports";
 
 describe("multisport-profielen", () => {
@@ -91,12 +98,67 @@ describe("multisport-profielen", () => {
     expect(formatSportClock("BASKETBALL", 61)).toBe("01:01");
   });
 
+  it("toont shotclock-tienden onder 5 seconden", () => {
+    expect(formatShotClock(24)).toBe("24");
+    expect(formatShotClock(5)).toBe("5");
+    expect(formatShotClock(4.2)).toBe("4.2");
+    expect(formatShotClock(0.3)).toBe("0.3");
+    expect(formatShotClock(0.21)).toBe("0.3");
+    expect(formatShotClock(0.2)).toBe("0.2");
+    expect(formatShotClock(0.1)).toBe("0.1");
+    expect(formatShotClock(0.05)).toBe("0.1");
+    expect(formatShotClock(0)).toBe("0.0");
+  });
+
+  it("beperkt Q4-time-outs in de laatste twee minuten en waarschuwt alleen vóór Q2, Q4 en OT", () => {
+    expect(basketballLateTimeoutBlocked({
+      sport: "BASKETBALL",
+      period: 4,
+      gameClockRemainingSec: 120,
+      lateTimeoutsUsed: 2,
+    })).toBe(true);
+    expect(basketballLateTimeoutBlocked({
+      sport: "BASKETBALL",
+      period: 4,
+      gameClockRemainingSec: 121,
+      lateTimeoutsUsed: 2,
+    })).toBe(false);
+    expect(basketballLateTimeoutBlocked({
+      sport: "BASKETBALL",
+      period: 5,
+      gameClockRemainingSec: 30,
+      lateTimeoutsUsed: 0,
+    })).toBe(false);
+    expect(breakWarnsAtThirtySeconds("BASKETBALL", 1)).toBe(true);
+    expect(breakWarnsAtThirtySeconds("BASKETBALL", 2)).toBe(false);
+    expect(breakWarnsAtThirtySeconds("BASKETBALL", 3)).toBe(true);
+    expect(breakWarnsAtThirtySeconds("BASKETBALL", 4)).toBe(true);
+    expect(breakWarnsAtThirtySeconds("BASKETBALL", 5)).toBe(true);
+    expect(basketballIntervalBreak({ sport: "BASKETBALL", currentPeriod: 1, halfBreakSec: 900, shortBreakSec: 120 })).toEqual({
+      seconds: 120,
+      warnAt30: true,
+    });
+    expect(basketballIntervalBreak({ sport: "BASKETBALL", currentPeriod: 2, halfBreakSec: 900, shortBreakSec: 120 })).toEqual({
+      seconds: 900,
+      warnAt30: false,
+    });
+    expect(basketballIntervalBreak({ sport: "FOOTBALL", currentPeriod: 1, halfBreakSec: 900 })).toBeNull();
+  });
+
   it("kiest de pauzeduur per soort pauze", () => {
     expect(matchBreakDurationSec({ sport: "BASKETBALL", currentPeriod: 1, halfBreakSec: 900 })).toBe(120);
     expect(matchBreakDurationSec({ sport: "BASKETBALL", currentPeriod: 2, halfBreakSec: 900 })).toBe(900);
     expect(matchBreakDurationSec({ sport: "FOOTBALL", currentPeriod: 1, halfBreakSec: 600 })).toBe(600);
     expect(matchBreakDurationSec({ sport: "VOLLEYBALL", currentPeriod: 3, halfBreakSec: 180 })).toBe(180);
+    expect(matchBreakDurationSec({ sport: "VOLLEYBALL", currentPeriod: 1, halfBreakSec: 120 })).toBe(120);
     expect(matchBreakDurationSec({ sport: "HOCKEY", currentPeriod: 3, halfBreakSec: 600 })).toBe(120);
+  });
+
+  it("beperkt volleybal-sets tot het gekozen best-of", () => {
+    expect(sportMaxPeriodForMatch({ sport: "VOLLEYBALL" })).toBe(5);
+    expect(sportMaxPeriodForMatch({ sport: "VOLLEYBALL", setsToWin: 2 })).toBe(3);
+    expect(timeoutLimitForMatch({ sport: "VOLLEYBALL", currentPeriod: 1, timeoutsPerSet: 1 })).toBe(1);
+    expect(timeoutDurationSecForMatch({ sport: "VOLLEYBALL", timeoutDurationSec: 45 })).toBe(45);
   });
 
   it("activeert alleen bij basketbal een shotclock", () => {

@@ -77,5 +77,10 @@ export function needsStadiumTranscode(info: VideoProbeInfo): boolean {
 }
 
 export function isDisplayPlaybackRisk(reason: StadiumTranscodeReason | string | null | undefined): boolean {
-  return reason === "unsupported_codec" || reason === "pixel_format" || reason === "high_fps";
+  return (
+    reason === "unsupported_codec" ||
+    reason === "pixel_format" ||
+    reason === "high_fps" ||
+    reason === "ffmpeg_missing"
+  );
 }

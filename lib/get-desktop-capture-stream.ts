@@ -16,6 +16,25 @@ export async function getDesktopCaptureStream(sourceId: string): Promise<MediaSt
   return navigator.mediaDevices.getUserMedia(constraints);
 }
 
+/** Loopback van een andere WebContents (`webContents.getMediaSourceId`). */
+export async function getTabCaptureStream(sourceId: string): Promise<MediaStream> {
+  const constraints = {
+    audio: false,
+    video: {
+      mandatory: {
+        chromeMediaSource: "tab",
+        chromeMediaSourceId: sourceId,
+        minWidth: 1280,
+        maxWidth: 1920,
+        minHeight: 720,
+        maxHeight: 1080,
+        maxFrameRate: 30,
+      },
+    },
+  } as unknown as MediaStreamConstraints;
+  return navigator.mediaDevices.getUserMedia(constraints);
+}
+
 const CAMERA_PREFIX = "camera:";
 
 /** Bron-id uit UI: desktopCapturer-id óf `camera:${deviceId}` voor webcam / capturekaart. */

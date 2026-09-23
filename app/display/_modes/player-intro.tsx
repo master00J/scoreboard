@@ -2,8 +2,10 @@
 
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { DisplayVideo } from "@/components/display-video";
 import type { Player, Team } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
+import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import {
   reportDisplayMediaDiagnostic,
   videoElementDiagnosticFields,
@@ -28,6 +30,8 @@ export function PlayerIntroMode({
     return () => clearTimeout(t);
   }, [lineupSrc, player.id]);
 
+  useEffect(() => () => releaseHtmlVideoElement(lineupVideoRef.current), []);
+
   if (lineupSrc) {
     return (
       <motion.div
@@ -35,7 +39,7 @@ export function PlayerIntroMode({
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
         transition={{ duration: 0.4 }}
-        className="absolute inset-0 bg-black overflow-hidden"
+        className="absolute inset-0 z-[40] bg-black overflow-hidden"
       >
         <AnimatePresence mode="wait">
           <motion.div
@@ -46,11 +50,12 @@ export function PlayerIntroMode({
             className="absolute inset-0"
           >
             {/* Geen tekst-overlay: staat in de custom lineup-video. Één keer afspelen, laatste frame blijft staan. */}
-            <video
+            <DisplayVideo
               ref={lineupVideoRef}
               key={`${player.id}-${lineupSrc}`}
               src={lineupSrc}
               className="absolute inset-0 h-full w-full object-cover"
+              style={{ objectFit: "cover" }}
               muted
               playsInline
               loop={false}
@@ -121,7 +126,7 @@ export function PlayerIntroMode({
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.4 }}
-      className="absolute inset-0 flex items-center justify-center"
+      className="absolute inset-0 z-[40] flex items-center justify-center"
       style={{
         background: `linear-gradient(135deg, ${team.primaryColor} 0%, #050607 100%)`,
       }}

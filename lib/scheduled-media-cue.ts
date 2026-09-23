@@ -40,6 +40,144 @@ export function isPrematchCuePhase(status: string | null | undefined): boolean {
   return status != null && PREMATCH_STATUSES.has(status);
 }
 
+/** Live set/kwart zonder wedstrijdklok: cues volgen de wandklok vanaf set-start. */
+export function cueUsesLiveWallClock(
+  status: string | null | undefined,
+  timerMode: string | null | undefined,
+): boolean {
+  if (timerMode !== "NONE") return false;
+  return status === "FIRST_HALF" || status === "SECOND_HALF" || status === "EXTRA_TIME";
+}
+
+export type LiveWallCueClock = {
+  matchId: string | null;
+  block: string | null;
+  originMs: number | null;
+  frozenSec: number;
+};
+
+export function emptyLiveWallCueClock(): LiveWallCueClock {
+  return { matchId: null, block: null, originMs: null, frozenSec: 0 };
+}
+
+/**
+ * Wandklok voor volleybal-cues: telt tijdens Sets 1–3 / 4–5, pauzeert in setbreak,
+ * reset bij een nieuw blok of een nieuwe wedstrijd.
+ */
+export function nextLiveWallCueClock(
+  clock: LiveWallCueClock,
+  opts: {
+    matchId: string | null;
+    status: string | null | undefined;
+    timerMode: string | null | undefined;
+    nowMs: number;
+  },
+): LiveWallCueClock {
+  const running = cueUsesLiveWallClock(opts.status, opts.timerMode);
+  const status = opts.status ?? null;
+
+  if (opts.matchId !== clock.matchId) {
+    return {
+      matchId: opts.matchId,
+      block: running ? status : null,
+      originMs: running ? opts.nowMs : null,
+      frozenSec: 0,
+    };
+  }
+
+  if (running) {
+    if (clock.block !== status) {
+      return { matchId: opts.matchId, block: status, originMs: opts.nowMs, frozenSec: 0 };
+    }
+    if (clock.originMs == null) {
+      return {
+        ...clock,
+        originMs: opts.nowMs - Math.max(0, clock.frozenSec) * 1000,
+      };
+    }
+    return clock;
+  }
+
+  if (status === "HALF_TIME") {
+    if (clock.originMs == null) return clock;
+    return {
+      ...clock,
+      originMs: null,
+      frozenSec: Math.max(0, (opts.nowMs - clock.originMs) / 1000),
+    };
+  }
+
+  return emptyLiveWallCueClock();
+}
+
+export function liveWallCueElapsedSec(clock: LiveWallCueClock, nowMs: number): number {
+  if (clock.originMs == null) return Math.max(0, clock.frozenSec);
+  return Math.max(0, (nowMs - clock.originMs) / 1000);
+}
+
+/**
+ * Sponsorrooster op volleybal (geen wedstrijdklok): zelfde speelkop als time-cues.
+ * HUD, live-preview en LED-scherm moeten dezelfde seconden zien, anders zegt de HUD
+ * “geen slots meer” terwijl het scherm nog clips start op een eigen lokale epoch.
+ */
+export function sponsorPlayWallElapsedSec(opts: {
+  state: {
+    matchId?: string | null;
+    liveWallCueBlock?: string | null;
+    liveWallCueOrigin?: string | Date | null;
+    liveWallCueFrozenSec?: number | null;
+  } | null | undefined;
+  localEpochMs: number | null;
+  nowMs: number;
+}): number {
+  const persisted = opts.state?.liveWallCueOrigin != null || (opts.state?.liveWallCueFrozenSec ?? 0) > 0;
+  if (persisted) {
+    return liveWallCueElapsedSec(
+      liveWallCueClockFromPersisted({
+        matchId: opts.state?.matchId ?? null,
+        block: opts.state?.liveWallCueBlock,
+        origin: opts.state?.liveWallCueOrigin,
+        frozenSec: opts.state?.liveWallCueFrozenSec,
+      }),
+      opts.nowMs,
+    );
+  }
+  if (opts.localEpochMs == null) return 0;
+  return Math.max(0, (opts.nowMs - opts.localEpochMs) / 1000);
+}
+
+export function liveWallCueClockFromPersisted(opts: {
+  matchId: string | null;
+  block: string | null | undefined;
+  origin: Date | string | null | undefined;
+  frozenSec: number | null | undefined;
+}): LiveWallCueClock {
+  const originMs =
+    opts.origin == null
+      ? null
+      : opts.origin instanceof Date
+        ? opts.origin.getTime()
+        : Date.parse(String(opts.origin));
+  return {
+    matchId: opts.matchId,
+    block: opts.block ?? null,
+    originMs: originMs != null && Number.isFinite(originMs) ? originMs : null,
+    frozenSec: typeof opts.frozenSec === "number" && Number.isFinite(opts.frozenSec) ? opts.frozenSec : 0,
+  };
+}
+
+export function liveWallCuePersistPatch(clock: LiveWallCueClock): {
+  liveWallCueBlock: string | null;
+  liveWallCueOrigin: Date | null;
+  liveWallCueFrozenSec: number;
+} {
+  return {
+    liveWallCueBlock: clock.block,
+    liveWallCueOrigin: clock.originMs != null ? new Date(clock.originMs) : null,
+    liveWallCueFrozenSec: clock.frozenSec,
+  };
+}
+
 /** Eén klok-fase voor fired-keys (Setup+Voor wedstrijd, Einde+Na wedstrijd). */
 export function cueClockPhaseKey(status: string | null | undefined): string | null {
   if (status == null) return null;

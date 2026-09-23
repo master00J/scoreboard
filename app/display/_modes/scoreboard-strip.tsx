@@ -5,14 +5,14 @@ import { motion } from "framer-motion";
 import type { Match } from "@/lib/types";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { StableClockText } from "@/components/stable-clock-text";
-import { formatSportClock } from "@/lib/sports";
+import { formatSportClock, getSportProfile } from "@/lib/sports";
 import { mediaUrl } from "@/lib/media-url";
 import {
   frameGradientCss,
   mergeScoreboardTheme,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
-import { SportMatchMeta, SportTeamExtras } from "./sport-score-extras";
+import { ShotClockReadout, SportMatchMeta, SportTeamExtras, useShotClockOff } from "./sport-score-extras";
 
 export function ScoreboardStrip({
   match,
@@ -35,7 +35,11 @@ export function ScoreboardStrip({
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
+  const shotOff = useShotClockOff();
+  const showShot = getSportProfile(match.sport).shotClockPresets.length > 0 && !shotOff;
+  const extrasPx = Math.max(30, Math.round(theme.stripScorePx * 0.32));
   const offscreen = placement === "top" ? -theme.stripHeightPx : theme.stripHeightPx;
+  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath);
   return (
     <motion.div
       key={`scoreboard-strip-${placement}`}
@@ -47,6 +51,13 @@ export function ScoreboardStrip({
       style={{ height: theme.stripHeightPx, fontFamily: theme.fontFamily }}
     >
       <div className="absolute inset-0" style={{ background: frameGradientCss(theme) }} />
+      {frameSrc ? (
+        <img
+          src={frameSrc}
+          alt=""
+          className="pointer-events-none absolute inset-0 h-full w-full object-cover"
+        />
+      ) : null}
       <div
         className={placement === "top" ? "absolute inset-x-0 bottom-0 h-[6px]" : "absolute inset-x-0 top-0 h-[6px]"}
         style={{
@@ -64,7 +75,7 @@ export function ScoreboardStrip({
               {match.homeTeam.shortName || match.homeTeam.name}
             </div>
           ) : null}
-          <SportTeamExtras match={match} side="home" compact />
+          <SportTeamExtras match={match} side="home" fontSize={extrasPx} />
         </div>
         <div className="flex items-center gap-8 px-8 shrink-0">
           {theme.showScores ? (
@@ -105,6 +116,11 @@ export function ScoreboardStrip({
             )}
             <SportMatchMeta match={match} shotClock={shotClock} />
           </div>
+          {showShot ? (
+            <div className="shrink-0" style={{ width: Math.round(theme.stripTimerPx * 2.3), height: "86%" }}>
+              <ShotClockReadout seconds={shotClock} fontSize={Math.round(theme.stripTimerPx * 0.92)} />
+            </div>
+          ) : null}
           {theme.showScores ? (
             <div
               className="font-black tabular-nums leading-none"
@@ -115,7 +131,7 @@ export function ScoreboardStrip({
           ) : null}
         </div>
         <div className="flex items-center gap-5 flex-1 justify-end min-w-0">
-          <SportTeamExtras match={match} side="away" compact />
+          <SportTeamExtras match={match} side="away" fontSize={extrasPx} />
           {theme.fullShowTeamNames ? (
             <div
               className={`font-black leading-none truncate ${theme.fullTeamNameUppercase ? "uppercase" : ""}`}

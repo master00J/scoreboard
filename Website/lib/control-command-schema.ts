@@ -80,7 +80,7 @@ export const ControlCommandSchema = z.discriminatedUnion("type", [
       .object({
         activePlayerId: z.string().nullable().optional(),
         activeMediaId: z.string().nullable().optional(),
-        note: z.string().nullable().optional(),
+        persistSponsorPreference: z.boolean().optional(),
       })
       .optional(),
   }),

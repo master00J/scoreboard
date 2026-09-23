@@ -2,6 +2,21 @@ import type { Sponsor, SponsorSection } from "./types";
 import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 import { buildSponsorRotationMediaList } from "./sponsor-playback-order";
 
+/** Optionele budgetbron voor venster-engines (volleybal `sportBudgetsJson.play`, …). */
+export type SponsorBudgetResolver = (sponsor: Sponsor) => number;
+
+function resolveSectionBudget(
+  sponsor: Sponsor,
+  section: SponsorSection,
+  matchStatus: string | undefined,
+  budgetOf?: SponsorBudgetResolver,
+): number {
+  return budgetOf ? budgetOf(sponsor) : sponsorSectionBudgetSeconds(sponsor, section, matchStatus);
+}
+
+/** Hard plafond: voorkomt een oneindige round-robin bij absurde budgetten. */
+export const MAX_SPONSOR_SECOND_QUEUE = 24 * 60 * 60;
+
 /** Schermtijd tijdens speelhelft: aparte budgets, anders legacy `matchSeconds` voor beide. */
 export function matchPlayBudgetSeconds(s: Sponsor, matchStatus: string | undefined): number {
   const first = Math.max(0, s.matchFirstHalfSeconds ?? 0);
@@ -111,6 +126,16 @@ export function sectionSpreadClock(
   if (loopForever) return { t: elapsed % H, timelineComplete: false };
   if (elapsed >= H) return { t: H - 1, timelineComplete: true };
   return { t: elapsed, timelineComplete: false };
+}
+
+/** Rust/postmatch: speelkop (na freeze) heeft de geboekte tijdlijn opgebruikt. */
+export function sectionPlayheadExhausted(
+  playT: number,
+  timelineLenSec: number,
+  loopForever = false,
+): boolean {
+  if (loopForever) return false;
+  return playT >= Math.max(1, Math.floor(timelineLenSec));
 }
 
 /**
@@ -394,14 +419,16 @@ export function buildSponsorSecondQueue(
   active: Sponsor[],
   section: SponsorSection,
   matchStatus?: string,
+  budgetOf?: SponsorBudgetResolver,
 ): string[] {
   const pool = active.map((s) => ({
     id: s.id,
-    left: sponsorSectionBudgetSeconds(s, section, matchStatus),
+    left: resolveSectionBudget(s, section, matchStatus, budgetOf),
   }));
   const q: string[] = [];
   let k = 0;
   for (;;) {
+    if (q.length >= MAX_SPONSOR_SECOND_QUEUE) break;
     const alive = pool.filter((p) => p.left > 0);
     if (alive.length === 0) break;
     const idx = k % pool.length;
@@ -441,10 +468,11 @@ export function buildSponsorAppearancePlan(
   active: Sponsor[],
   section: SponsorSection,
   matchStatus?: string,
+  budgetOf?: SponsorBudgetResolver,
 ): SponsorAppearancePlan[] {
   return active
     .map((s) => {
-      const budget = sponsorSectionBudgetSeconds(s, section, matchStatus);
+      const budget = resolveSectionBudget(s, section, matchStatus, budgetOf);
       const fallbackSec = Math.max(1, Math.ceil(maxClipSecondsForSponsor(s, section, matchStatus)));
       const rotation = sponsorRotationClipSeconds(s, section, matchStatus).map((sec) =>
         Math.max(1, Math.ceil(sec)),
@@ -506,10 +534,11 @@ export function buildSponsorSlotMap(
   section: SponsorSection,
   H: number,
   matchStatus?: string,
+  budgetOf?: SponsorBudgetResolver,
 ): (string | null)[] {
   const Hc = Math.max(1, Math.floor(H));
   const map: (string | null)[] = Array(Hc).fill(null);
-  const plan = buildSponsorAppearancePlan(active, section, matchStatus);
+  const plan = buildSponsorAppearancePlan(active, section, matchStatus, budgetOf);
   if (plan.length === 0) return map;
 
   const planById = new Map(plan.map((p) => [p.id, p]));

@@ -17,7 +17,11 @@ const PROFILES = {
 for (const [id, profile] of Object.entries(PROFILES)) {
   profile.id = id;
   profile.timeoutLimitForPeriod = id === "BASKETBALL"
-    ? (period) => finite(period, 1) <= 2 ? 2 : 3
+    ? (period) => {
+        const p = finite(period, 1);
+        if (p > 4) return 1;
+        return p <= 2 ? 2 : 3;
+      }
     : () => profile.timeouts;
   Object.freeze(profile.increments);
   Object.freeze(profile.shot);

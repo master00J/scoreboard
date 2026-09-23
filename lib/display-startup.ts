@@ -1,8 +1,25 @@
+import { programmedDisplayMode } from "./live-cycle-settings";
+
+const TRANSIENT_OVERLAY_MODES = new Set([
+  "GOAL",
+  "GOAL_INTRO_VIDEO",
+  "GOAL_PLAYER_VIDEO",
+  "CARD",
+  "PLAYER_INTRO",
+  "TEAM_INTRO",
+  "SUBSTITUTION",
+  "HALFTIME",
+  "FULLTIME",
+  "CUSTOM",
+]);
+
 /** DisplayState-velden die bij app-start mogen worden teruggedraaid. */
 export type StartupDisplayState = {
   matchId: string | null;
   mode: string;
   activeMediaId: string | null;
+  preferSponsorRotation?: boolean | number | null;
+  matchStatus?: string | null;
 };
 
 export type StartupDisplayPatch = {
@@ -11,8 +28,9 @@ export type StartupDisplayPatch = {
 };
 
 /**
- * Bij opstart nooit automatisch opnieuw sponsorclips of andere media starten
- * uit de vorige sessie. Zonder wedstrijd blijft alleen IDLE of BLACKOUT staan.
+ * Bij opstart geen eenmalige clips of overlays hervatten. Scorebord + sponsors
+ * vs. alleen scorebord volgt de laatste operatorvoorkeur in élke wedstrijdfase
+ * (ook rust / prematch), zodat highlights de rotatie niet uitzetten.
  */
 export function startupDisplayStatePatch(
   state: StartupDisplayState,
@@ -22,8 +40,20 @@ export function startupDisplayStatePatch(
     if (state.mode === mode && !state.activeMediaId) return null;
     return { mode, activeMediaId: null };
   }
-  if (state.mode === "SPONSOR_ROTATION" || state.mode === "SPONSOR") {
-    return { mode: "MATCH", activeMediaId: null };
+
+  const wanted = programmedDisplayMode({
+    matchStatus: state.matchStatus,
+    preferSponsorRotation: state.preferSponsorRotation,
+  });
+
+  if (state.mode === "SPONSOR" || TRANSIENT_OVERLAY_MODES.has(state.mode)) {
+    return { mode: wanted, activeMediaId: null };
   }
+
+  if (state.mode === "SPONSOR_ROTATION" || state.mode === "MATCH") {
+    if (state.mode === wanted && !state.activeMediaId) return null;
+    return { mode: wanted, activeMediaId: null };
+  }
+
   return null;
 }

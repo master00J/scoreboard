@@ -93,6 +93,7 @@ describe("stadiumTranscodeReason", () => {
 
   it("onderscheidt een echt afspeelrisico van een probe-fout", () => {
     expect(isDisplayPlaybackRisk("high_fps")).toBe(true);
+    expect(isDisplayPlaybackRisk("ffmpeg_missing")).toBe(true);
     expect(isDisplayPlaybackRisk("ok")).toBe(false);
     expect(isDisplayPlaybackRisk("probe_failed")).toBe(false);
   });

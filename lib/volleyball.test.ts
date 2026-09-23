@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   applyVolleyballScoreDelta,
+  DEFAULT_VOLLEYBALL_RULES,
+  matchVolleyballPresetId,
   parseSetHistory,
+  parseTechnicalTimeoutScores,
   rallyWinnersFromEvents,
   servingAfterRemovingLastRally,
+  VOLLEYBALL_PRESETS,
   volleyballSetWinner,
   type Side,
   type VolleyballLive,
@@ -99,6 +103,28 @@ describe("volleybal-setregels", () => {
       { technicalTimeoutsEnabled: true },
     );
     expect(deciding.technicalTimeout).toBe(false);
+  });
+
+  it("gebruikt custom TTO-scores in plaats van 8 en 16", () => {
+    const atTen = applyVolleyballScoreDelta({ ...base, homeScore: 9, awayScore: 4 }, "home", 1, {
+      technicalTimeoutsEnabled: true,
+      technicalTimeoutScores: [10],
+    });
+    expect(atTen.technicalTimeout).toBe(true);
+
+    const atEight = applyVolleyballScoreDelta({ ...base, homeScore: 7, awayScore: 4 }, "home", 1, {
+      technicalTimeoutsEnabled: true,
+      technicalTimeoutScores: [10],
+    });
+    expect(atEight.technicalTimeout).toBe(false);
+  });
+
+  it("herkent FIVB-preset vs TTO-preset", () => {
+    expect(matchVolleyballPresetId(DEFAULT_VOLLEYBALL_RULES)).toBe("indoor");
+    expect(matchVolleyballPresetId(VOLLEYBALL_PRESETS.indoor_tto)).toBe("indoor_tto");
+    expect(matchVolleyballPresetId(VOLLEYBALL_PRESETS.italy_serie_a_men)).toBe("italy_serie_a_men");
+    expect(parseTechnicalTimeoutScores("8, 16")).toEqual([8, 16]);
+    expect(parseTechnicalTimeoutScores("10")).toEqual([10]);
   });
 
   it("maakt een setwinst ongedaan vanaf 0–0 met −1", () => {

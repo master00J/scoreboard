@@ -25,6 +25,8 @@ import {
   type RosterCarry,
 } from "@/lib/sponsor-live-roster";
 import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
+import { tMatchStatus } from "@/lib/i18n/t-phase";
+import { getSportProfile } from "@/lib/sports";
 import { toast } from "@/components/ui/toast";
 import { sendCommand } from "@/lib/use-socket";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
@@ -44,7 +46,21 @@ import {
   plannedSecondsForRepeats,
   repeatCountForTargetSeconds,
 } from "@/lib/sponsor-playback-order";
-import { ChevronDown, Plus } from "lucide-react";
+import { ChevronDown, Film, Plus } from "lucide-react";
+import type { TFunction } from "i18next";
+import { isDisplayPlaybackRisk } from "@/lib/media-playback-compat";
+import { cueRundownPhaseKey, restackRundownWindows } from "@/lib/scheduled-media-cue";
+import { getSportProfile, normalizeSport, SPORT_TYPES, type SportType } from "@/lib/sports";
+import {
+  mergeSportBudgetsJson,
+  parseSponsorLayoutsJson,
+  parseSportBudgetsJson,
+  resolveSponsorLayoutId,
+  sportSponsorWindows,
+  usesFootballSponsorEngine,
+  windowLabel,
+  type SponsorWindowId,
+} from "@/lib/sponsor-windows";
 
 type PlaybackInspect = {
   reason?: string;
@@ -441,6 +457,7 @@ export function MediaPanel() {
           <ScheduledCuesSection
             media={libraryMedia}
             cues={scheduledCues}
+            sport={activeMatch?.sport}
             onChange={reloadScheduledCues}
           />
         </TabsContent>
@@ -452,13 +469,16 @@ export function MediaPanel() {
 function ScheduledCuesSection({
   media,
   cues,
+  sport,
   onChange,
 }: {
   media: MediaItem[];
   cues: ScheduledMediaCue[];
+  sport?: string | null;
   onChange: () => void;
 }) {
   const { t } = useTranslation();
+  const wallClockCues = sport ? getSportProfile(sport).timerMode === "NONE" : false;
   const activeMedia = media
     .filter((m) => m.active)
     .sort((a, b) => {
@@ -470,12 +490,13 @@ function ScheduledCuesSection({
   const [mediaId, setMediaId] = useState(activeMedia[0]?.id ?? "");
   const [matchStatus, setMatchStatus] = useState<(typeof SCHEDULED_CUE_PHASES)[number]>("FIRST_HALF");
   const [timeText, setTimeText] = useState("12:00");
+  const [startSec, setStartSec] = useState(0);
+  const [endSec, setEndSec] = useState(15);
   const [scheduleMode, setScheduleMode] = useState<"once" | "repeat">("once");
   const [repeatEveryMin, setRepeatEveryMin] = useState("5");
   const [repeatUntilText, setRepeatUntilText] = useState("40:00");
   const [saving, setSaving] = useState(false);
   const [loopRundown, setLoopRundown] = useState(false);
-  const [mediaQuery, setMediaQuery] = useState("");
 
   useEffect(() => {
     if (!mediaId && activeMedia[0]) setMediaId(activeMedia[0].id);
@@ -488,12 +509,6 @@ function ScheduledCuesSection({
     const list = cues.filter((c) => cueRundownPhaseKey(c.matchStatus) === matchStatus);
     setLoopRundown(list.some((c) => c.loop));
   }, [cues, matchStatus]);
-
-  const filteredMedia = useMemo(() => {
-    const q = mediaQuery.trim().toLowerCase();
-    if (!q) return activeMedia;
-    return activeMedia.filter((m) => m.title.toLowerCase().includes(q));
-  }, [activeMedia, mediaQuery]);
 
   const phaseCues = useMemo(() => {
     const groups = new Map<string, ScheduledMediaCue[]>();
@@ -560,7 +575,33 @@ function ScheduledCuesSection({
   }
 
   async function addAtTime() {
-    await addCue();
+    if (!mediaId) {
+      toast({ title: t("media.cueInvalidInput"), variant: "error" });
+      return;
+    }
+    if (!(endSec > startSec)) {
+      toast({ title: t("media.cueRepeatInvalid"), variant: "error" });
+      return;
+    }
+    setSaving(true);
+    const res = await fetch("/api/scheduled-media-cues", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mediaId,
+        matchStatus,
+        triggerSec: startSec,
+        endSec,
+        enabled: true,
+      }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      toast({ title: t("media.cueSaveFailed"), variant: "error" });
+      return;
+    }
+    onChange();
+    toast({ title: t("media.cueAdded", { time: formatCueClock(startSec) }) });
   }
 
   async function patchCue(id: string, body: Record<string, unknown>) {
@@ -639,7 +680,7 @@ function ScheduledCuesSection({
       <div>
         <h2 className="text-lg font-semibold">{t("media.tabCues")}</h2>
         <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
-          {t("media.cuesHelp")}
+          {t(wallClockCues ? "media.cuesHelpNoClock" : "media.cuesHelp")}
         </p>
       </div>
 
@@ -699,18 +740,19 @@ function ScheduledCuesSection({
             className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
           >
             {SCHEDULED_CUE_PHASES.map((p) => (
-              <option key={p} value={p}>{t(`phases.${p}`)}</option>
+              <option key={p} value={p}>{tMatchStatus(t, p, sport) || t(`phases.${p}`)}</option>
             ))}
           </select>
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-muted-foreground">{t("media.cueTime")}</span>
+          <span className="text-muted-foreground">
+            {wallClockCues ? t("media.cueTimeSinceStart") : t("media.cueTime")}
+          </span>
           <Input
-            type="search"
-            placeholder={t("media.cueSearchPlaceholder")}
-            value={mediaQuery}
-            onChange={(e) => setMediaQuery(e.target.value)}
-            className="h-9"
+            value={timeText}
+            onChange={(e) => setTimeText(e.target.value)}
+            placeholder="5:00"
+            className="h-10"
           />
         </label>
         {scheduleMode === "repeat" && (
@@ -746,7 +788,11 @@ function ScheduledCuesSection({
         </Button>
       </div>
         <p className="text-[11px] leading-snug text-muted-foreground">
-          {scheduleMode === "repeat" ? t("media.cueRepeatHelp") : t("media.cueOnceHelp")}
+          {wallClockCues
+            ? t("media.cueOnceHelpNoClock")
+            : scheduleMode === "repeat"
+              ? t("media.cueRepeatHelp")
+              : t("media.cueOnceHelp")}
         </p>
       </div>
 
@@ -783,7 +829,7 @@ function ScheduledCuesSection({
                 <div className="space-y-1 bg-secondary/50 px-3 py-2">
                   <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold">
                     <span>
-                      {t(`phases.${phase}`)} · {t("media.cueRundownCount", { count: list.length })}
+                      {tMatchStatus(t, phase, sport) || t(`phases.${phase}`)} · {t("media.cueRundownCount", { count: list.length })}
                     </span>
                     <label className="flex items-center gap-1.5 font-normal">
                       <input
@@ -798,6 +844,10 @@ function ScheduledCuesSection({
                   {phase === "PREMATCH" ? (
                     <p className="text-[11px] font-normal text-muted-foreground">
                       {t("media.cuePrematchKickoffHint")}
+                    </p>
+                  ) : wallClockCues && (phase === "FIRST_HALF" || phase === "SECOND_HALF") ? (
+                    <p className="text-[11px] font-normal text-muted-foreground">
+                      {t("media.cueWallClockHint")}
                     </p>
                   ) : null}
                 </div>
@@ -918,7 +968,9 @@ function MediaCard({
     <div className="rounded-lg border border-border overflow-hidden bg-background">
       <div className="aspect-video bg-black flex items-center justify-center overflow-hidden">
         {item.type === "VIDEO" ? (
-          <video src={mediaUrl(item.path)} muted className="w-full h-full object-cover" />
+          <div className="flex h-full w-full items-center justify-center bg-zinc-950">
+            <Film className="size-8 text-white/35" aria-hidden />
+          </div>
         ) : (
           <img src={mediaUrl(item.path)} alt="" className="w-full h-full object-cover" />
         )}
@@ -1955,7 +2007,9 @@ function SponsorCard({
                 }}
               >
                 {m.type === "VIDEO" ? (
-                  <video src={mediaUrl(m.path)} muted className="w-full h-full object-cover pointer-events-none" />
+                  <div className="flex h-full w-full items-center justify-center bg-zinc-950 pointer-events-none">
+                    <Film className="size-8 text-white/35" aria-hidden />
+                  </div>
                 ) : (
                   <img src={mediaUrl(m.path)} alt="" className="w-full h-full object-cover pointer-events-none" />
                 )}

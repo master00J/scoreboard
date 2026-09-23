@@ -12,7 +12,7 @@ import {
   lookupSponsorAtSecond,
   prematchSpreadClock,
   resolveSponsorSpreadPhase,
-  sectionSpreadClock,
+  sectionPlayheadExhausted,
   type SponsorPhaseHangRef,
 } from "@/lib/sponsor-distribution";
 import { sectionForStatus } from "@/lib/sponsor-display-helpers";
@@ -23,11 +23,26 @@ import {
   type SponsorScheduleClock,
 } from "@/lib/sponsor-schedule-clock";
 import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
+import { periodStartHoldsFullScoreboard } from "@/lib/live-cycle-settings";
 import {
   streamSponsorInterrupted,
   streamSponsorTimelineSeconds,
 } from "@/lib/stream-sponsor-schedule";
+import { useResolvedSponsorWindow } from "@/lib/use-resolved-sponsor-window";
+import {
+  sponsorMatchClockFrozen,
+  sponsorWallPlayTimelineComplete,
+  windowScheduleElapsed,
+  windowTimelineSeconds,
+  buildWindowSponsorSlotMap,
+} from "@/lib/sponsor-windows";
+import { sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
+import { getSportProfile } from "@/lib/sports";
 import type { Match, ScheduledMediaCue, Sponsor, SponsorSection } from "@/lib/types";
+import {
+  externalCaptureCoversDisplay,
+  timeoutCoversDisplay,
+} from "@/lib/sponsor-playback-interruption";
 
 export type StreamSponsorSlotView = {
   sponsors: Sponsor[];
@@ -70,14 +85,32 @@ export function useStreamSponsorSlot(match: Match | null): StreamSponsorSlotView
     };
   }, []);
 
-  const section = sectionForStatus(match?.status);
-  const overlayInterrupt = streamSponsorInterrupted(mode) || activeScheduledCue != null;
-  const matchClockFrozen = section === "match" && !(state?.timerRunning ?? false);
-  const interrupted = overlayInterrupt || matchClockFrozen;
-  const timelineH = useMemo(
-    () => streamSponsorTimelineSeconds(section, match, sponsors),
-    [section, match?.halfDurationSec, match?.halfBreakSec, match?.prematchSpreadWindowSec, sponsors],
+  const timerRunning = state?.timerRunning ?? false;
+  const sponsorWindow = useResolvedSponsorWindow(
+    match,
+    timerRunning,
+    !!state?.sponsorPeriodBreakPending,
+    null,
   );
+  const section = sectionForStatus(match?.status);
+  const overlayInterrupt =
+    streamSponsorInterrupted(mode) ||
+    activeScheduledCue != null ||
+    externalCaptureCoversDisplay(state) ||
+    timeoutCoversDisplay(state);
+  const matchClockFrozen = sponsorMatchClockFrozen(sponsorWindow, timerRunning);
+  const interrupted = overlayInterrupt || matchClockFrozen;
+  const timelineH = useMemo(() => {
+    if (match && sponsorWindow && (section === "match" || sponsorWindow.section === section)) {
+      return windowTimelineSeconds(sponsorWindow, match, sponsors);
+    }
+    return streamSponsorTimelineSeconds(section, match, sponsors);
+  }, [
+    section,
+    match,
+    sponsorWindow,
+    sponsors,
+  ]);
 
   const hangRef = useRef<SponsorPhaseHangRef["current"]>(null);
   const clockRef = useRef<SponsorScheduleClock>(createSponsorScheduleClock());
@@ -93,9 +126,12 @@ export function useStreamSponsorSlot(match: Match | null): StreamSponsorSlotView
   }, [match?.id, match?.status, section]);
 
   const slotMap = useMemo(() => {
+    if (match && sponsorWindow && (section === "match" || sponsorWindow.section === section)) {
+      return buildWindowSponsorSlotMap(sponsors, sponsorWindow, match);
+    }
     const active = activeSponsorsForSection(sponsors, section, match?.status);
     return buildSponsorSlotMap(active, section, timelineH, match?.status);
-  }, [sponsors, section, match?.status, timelineH]);
+  }, [sponsors, section, match, timelineH, sponsorWindow]);
 
   useEffect(() => {
     if (!match || slotMap.length === 0) {
@@ -106,33 +142,68 @@ export function useStreamSponsorSlot(match: Match | null): StreamSponsorSlotView
     const nextId = applySponsorSpreadTick(tickCacheRef, tickKey, () => {
       const key = `${match.id}:${match.status}:${section}`;
       let rawT = 0;
-      let complete = false;
 
       if (section === "match") {
-        rawT = halfWindowElapsed(elapsed, match.status, match.halfDurationSec);
+        rawT = sponsorWindow
+          ? windowScheduleElapsed({
+              window: sponsorWindow,
+              elapsedSec: elapsed,
+              status: match.status,
+              halfDurationSec: match.halfDurationSec,
+              periodDurationSec: match.periodDurationSec,
+              currentPeriod: match.currentPeriod,
+              periodCount: getSportProfile(match.sport).periodCount,
+              wallElapsedSec: sponsorPlayWallElapsedSec({
+                state,
+                localEpochMs: epochRef.current,
+                nowMs: now,
+              }),
+            })
+          : halfWindowElapsed(elapsed, match.status, match.halfDurationSec);
+        if (
+          periodStartHoldsFullScoreboard({
+            matchStatus: match.status,
+            halfElapsedSec: rawT,
+            timerRunning,
+            wallClockPlay:
+              !!sponsorWindow && !sponsorWindow.footballEngine && sponsorWindow.clock === "wall",
+          })
+        ) {
+          hangRef.current = null;
+          return null;
+        }
       } else if (section === "prematch") {
         const timing = computePrematchSpreadTiming(match, sponsors, now, epochRef.current);
         if (timing.beforeWindow || timing.timelineComplete || !timing.rosterRunning) {
           hangRef.current = null;
           return null;
         }
-        const clock = prematchSpreadClock(timing.elapsedSec, timing.timelineLenSec);
-        rawT = clock.t;
-        complete = clock.timelineComplete;
+        rawT = prematchSpreadClock(timing.elapsedSec, timing.timelineLenSec).t;
       } else {
         const origin = epochRef.current ?? now;
-        const spread = sectionSpreadClock((now - origin) / 1000, timelineH, false);
-        rawT = spread.t;
-        complete = spread.timelineComplete;
-      }
-
-      if (complete) {
-        hangRef.current = null;
-        return null;
+        rawT = (now - origin) / 1000;
       }
 
       const t = sponsorScheduleTime(clockRef, key, rawT, interrupted, timelineH);
       if (clockRef.current.hardReset) hangRef.current = null;
+      if (
+        section === "match" &&
+        sponsorWindow &&
+        sponsorWallPlayTimelineComplete({
+          clock: sponsorWindow.clock,
+          section: sponsorWindow.section,
+          cycleBudgetForever: false,
+          wallElapsedSec: t,
+          timelineSec: timelineH,
+        })
+      ) {
+        hangRef.current = null;
+        return null;
+      }
+      if (section !== "match" && section !== "prematch" && sectionPlayheadExhausted(t, timelineH, false)) {
+        hangRef.current = null;
+        return null;
+      }
       const raw = lookupSponsorAtSecond(slotMap, t);
       const resolved = resolveSponsorSpreadPhase(raw, sponsors, section, match.status, now, hangRef, {
         slotMap,
@@ -143,7 +214,22 @@ export function useStreamSponsorSlot(match: Match | null): StreamSponsorSlotView
       return resolved.sponsorFilterId;
     });
     setCurrentId((prev) => (prev === nextId ? prev : nextId));
-  }, [match, slotMap, sponsors, section, elapsed, now, interrupted, timelineH]);
+  }, [
+    match,
+    slotMap,
+    sponsors,
+    section,
+    elapsed,
+    now,
+    interrupted,
+    timelineH,
+    sponsorWindow,
+    timerRunning,
+    state?.matchId,
+    state?.liveWallCueOrigin,
+    state?.liveWallCueBlock,
+    state?.liveWallCueFrozenSec,
+  ]);
 
   const current = useMemo(
     () => (currentId ? (sponsors.find((s) => s.id === currentId) ?? null) : null),

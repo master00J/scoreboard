@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppSettings, Team } from "@/lib/types";
+import { isElectron, selectFilesViaDialog } from "@/lib/electron";
+import { mediaUrl } from "@/lib/media-url";
 import {
   SCOREBOARD_LAYOUT_MODES,
   TEAM_STACK_ORDERS,
@@ -30,6 +32,81 @@ const FONT_PRESETS = [
   { id: "condensed", value: '"Roboto Condensed", "Arial Narrow", Arial, sans-serif' },
   { id: "mono", value: 'ui-monospace, "Cascadia Mono", Consolas, monospace' },
 ] as const;
+
+function ThemeBackgroundField({
+  label,
+  help,
+  value,
+  onChange,
+}: {
+  label: string;
+  help: string;
+  value: string;
+  onChange: (path: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [uploading, setUploading] = useState(false);
+  const src = mediaUrl(value);
+
+  async function pickElectron() {
+    const paths = await selectFilesViaDialog({
+      title: label,
+      filters: [{ name: t("setup.filterImage"), extensions: ["png", "jpg", "jpeg", "webp"] }],
+    });
+    if (paths[0]) onChange(paths[0]);
+  }
+
+  async function onFile(file: File) {
+    setUploading(true);
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/upload", { method: "POST", body: fd });
+    setUploading(false);
+    if (!res.ok) {
+      toast({ title: t("setup.uploadFailed"), variant: "error" });
+      return;
+    }
+    const data = (await res.json()) as { path?: string };
+    if (data.path?.trim()) onChange(data.path.trim());
+  }
+
+  return (
+    <div>
+      <Label>{label}</Label>
+      <p className="mt-1 text-xs text-muted-foreground">{help}</p>
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        {src ? (
+          <img src={src} alt="" className="h-16 w-28 rounded border border-border object-cover" />
+        ) : (
+          <div className="grid h-16 w-28 place-items-center rounded border border-dashed border-border text-[11px] text-muted-foreground">
+            {t("setup.themeBackgroundNone")}
+          </div>
+        )}
+        {isElectron ? (
+          <Button type="button" variant="outline" size="sm" onClick={() => void pickElectron()}>
+            {t("common.chooseFile")}
+          </Button>
+        ) : (
+          <Input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void onFile(file);
+            }}
+          />
+        )}
+        {uploading ? <span className="text-xs text-muted-foreground">{t("common.uploading")}</span> : null}
+        {value ? (
+          <Button type="button" variant="ghost" size="sm" onClick={() => onChange("")}>
+            {t("common.remove")}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 function swapOrder(order: LeftStripSegment[], i: number, seg: LeftStripSegment): LeftStripSegment[] {
   const o = [...order];
@@ -224,6 +301,27 @@ export function SetupScoreboardThemeSection({
           awayTeam={awayTeam}
           surface={surface}
         />
+      </div>
+
+      <div className="mb-6 space-y-4 rounded-lg border border-border p-4">
+        <div>
+          <div className="font-semibold text-sm">{t("setup.themeBackgroundsTitle")}</div>
+          <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{t("setup.themeBackgroundsHelp")}</p>
+        </div>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <ThemeBackgroundField
+            label={t("setup.themeFullBackground")}
+            help={t("setup.themeFullBackgroundHelp")}
+            value={draft.fullBackgroundPath}
+            onChange={(path) => setDraft((d) => ({ ...d, fullBackgroundPath: path }))}
+          />
+          <ThemeBackgroundField
+            label={t("setup.themeLBackground")}
+            help={t("setup.themeLBackgroundHelp")}
+            value={draft.leftFrameBackgroundPath}
+            onChange={(path) => setDraft((d) => ({ ...d, leftFrameBackgroundPath: path }))}
+          />
+        </div>
       </div>
 
       <div className="mb-6 space-y-3 rounded-lg border border-border p-4">

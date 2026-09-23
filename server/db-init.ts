@@ -193,6 +193,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("DisplayState", "externalCaptureAudio", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "blackoutResumeCapture", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "safeMode", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "preferSponsorRotation", "BOOLEAN NOT NULL DEFAULT 1");
   await addColumnIfMissing("DisplayState", "blackoutResumeMode", "TEXT");
   await addColumnIfMissing("DisplayState", "addedTimeMinutes", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing(
@@ -200,6 +201,11 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
     "substitutionQueueJson",
     `TEXT NOT NULL DEFAULT '[]'`,
   );
+  await addColumnIfMissing("DisplayState", "liveWallCueBlock", "TEXT");
+  await addColumnIfMissing("DisplayState", "liveWallCueOrigin", "DATETIME");
+  await addColumnIfMissing("DisplayState", "liveWallCueFrozenSec", "REAL NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "preMatchStartedAt", "DATETIME");
+  await addColumnIfMissing("DisplayState", "postMatchStartedAt", "DATETIME");
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "ScoreboardTemplate" (
     "id" TEXT NOT NULL PRIMARY KEY,
@@ -227,6 +233,11 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("MediaItem", "playAudio", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("MediaItem", "sponsorPhaseTagsJson", "TEXT");
   await addColumnIfMissing("MediaItem", "hideFromLibrary", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("MediaItem", "playbackWarning", "TEXT");
+  await addColumnIfMissing("MediaItem", "quickLaunch", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("ScheduledMediaCue", "endSec", "INTEGER");
+  await addColumnIfMissing("ScheduledMediaCue", "loop", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("AppSettings", "sponsorLayoutsJson", "TEXT");
   await addColumnIfMissing("Match", "homeFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "awayFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "matchSponsorMediaId", "TEXT");
@@ -237,6 +248,10 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("Match", "periodDurationSec", "INTEGER NOT NULL DEFAULT 2700");
   await addColumnIfMissing("Match", "homeTimeouts", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Match", "awayTimeouts", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "homeLateTimeouts", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "awayLateTimeouts", "INTEGER NOT NULL DEFAULT 0");
+  await addColumnIfMissing("Match", "possessionArrow", "TEXT");
+  await addColumnIfMissing("Match", "shortBreakSec", "INTEGER NOT NULL DEFAULT 120");
   await addColumnIfMissing("Match", "homeFouls", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Match", "awayFouls", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Match", "homeSets", "INTEGER NOT NULL DEFAULT 0");
@@ -248,12 +263,18 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("Match", "setsToWin", "INTEGER NOT NULL DEFAULT 3");
   await addColumnIfMissing("Match", "pointsToWinSet", "INTEGER NOT NULL DEFAULT 25");
   await addColumnIfMissing("Match", "pointsToWinDecider", "INTEGER NOT NULL DEFAULT 15");
+  await addColumnIfMissing("Match", "winBy", "INTEGER NOT NULL DEFAULT 2");
+  await addColumnIfMissing("Match", "technicalTimeoutScoresJson", `TEXT NOT NULL DEFAULT '[8,16]'`);
+  await addColumnIfMissing("Match", "technicalTimeoutDurationSec", "INTEGER NOT NULL DEFAULT 60");
+  await addColumnIfMissing("Match", "timeoutsPerSet", "INTEGER NOT NULL DEFAULT 2");
+  await addColumnIfMissing("Match", "timeoutDurationSec", "INTEGER NOT NULL DEFAULT 30");
   await addColumnIfMissing("MatchEvent", "period", "INTEGER");
   await addColumnIfMissing("MatchEvent", "clockSec", "REAL");
   await addColumnIfMissing("MatchEvent", "metaJson", "TEXT");
   await addColumnIfMissing("DisplayState", "shotClockRunning", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "shotClockStartedAt", "DATETIME");
   await addColumnIfMissing("DisplayState", "shotClockBaseSec", "REAL NOT NULL DEFAULT 24");
+  await addColumnIfMissing("DisplayState", "shotClockOff", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "activeCardColor", "TEXT");
   await addColumnIfMissing("DisplayState", "homePenaltyRunning", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "homePenaltyStartedAt", "DATETIME");
@@ -265,6 +286,12 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("DisplayState", "timeoutStartedAt", "DATETIME");
   await addColumnIfMissing("DisplayState", "timeoutBaseSec", "REAL NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "timeoutSide", "TEXT");
+  await addColumnIfMissing("DisplayState", "timeoutWarnSent", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "breakRunning", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "breakStartedAt", "DATETIME");
+  await addColumnIfMissing("DisplayState", "breakBaseSec", "REAL NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "breakWarnArmed", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "breakWarnSent", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("Sponsor", "firstHalfScoreboardSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "firstHalfSponsorSec", "INTEGER");
   await addColumnIfMissing("Sponsor", "halftimeScoreboardSec", "INTEGER");
@@ -276,6 +303,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("Sponsor", "postmatchSeconds", "INTEGER NOT NULL DEFAULT 0");
   await addColumnIfMissing("Sponsor", "sponsorPlaybackOrderJson", "TEXT");
   await addColumnIfMissing("Sponsor", "sponsorPlaybackRepeatsJson", "TEXT");
+  await addColumnIfMissing("Sponsor", "sportBudgetsJson", "TEXT");
   await migrateSponsorMatchHalfFromLegacy();
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPlayLog" (

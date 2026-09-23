@@ -3,12 +3,13 @@ import type { DisplayState, Match } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import type { Db } from "./db";
 import type { Command } from "../lib/validation/commands";
-import { programmedDisplayMode } from "../lib/live-cycle-settings";
+import { isLivePlayingMatchStatus, preferredLiveDisplayMode, programmedDisplayMode } from "../lib/live-cycle-settings";
 import {
   captureOnBlackoutEnter,
   captureOnBlackoutExit,
 } from "../lib/external-capture-blackout";
 import {
+  clearBreakClock,
   clearTimeoutClock,
   computeElapsedSeconds,
   computePenaltySeconds,
@@ -17,36 +18,55 @@ import {
   pausePenaltyAt,
   pauseShotClockAt,
   penaltyStateFor,
+  presentShotClock,
+  runBreakFrom,
   runFrom,
   runPenaltyFrom,
-  runShotClockFrom,
   runTimeoutFrom,
   stopAt,
+  suppressShotClock,
   type TimeoutSide,
 } from "../lib/timer";
 import {
+  basketballIntervalBreak,
+  basketballLateTimeoutBlocked,
+  basketballLateTimeoutCounts,
+  BASKETBALL_Q4_LATE_TIMEOUT_MAX,
   getSportProfile,
   isOvertimePeriod,
   lifecycleStatusForPeriod,
+  newShotClockSuppressed,
   normalizeSport,
   periodDurationSecFor,
   periodForLifecycleStatus,
   resetStatsForNewPeriod,
   resetTimeoutsForNewPeriod,
   sportClockSeconds,
-  sportMaxPeriod,
+  sportMaxPeriodForMatch,
   sportPeriodLabel,
+  technicalTimeoutDurationSecForMatch,
+  timeoutDurationSecForMatch,
+  timeoutLimitForMatch,
   type SportProfile,
 } from "../lib/sports";
+import {
+  isPostMatchCuePhase,
+  isPrematchCuePhase,
+  liveWallCueClockFromPersisted,
+  liveWallCuePersistPatch,
+  nextLiveWallCueClock,
+} from "../lib/scheduled-media-cue";
 import {
   applyVolleyballScoreDelta,
   normalizeServingSide,
   normalizeVolleyballFormat,
   parseSetHistory,
   rallyWinnersFromEvents,
+  volleyballRulesFromMatch,
   type Side,
   type VolleyballLive,
 } from "../lib/volleyball";
+import { CommandUserError } from "../lib/command-user-error";
 import type { SubPair } from "./match-lineup";
 import {
   applySubToFieldRoster,
@@ -56,6 +76,23 @@ import {
 } from "./match-lineup";
 
 export type CommandResult = { ok: true; warning?: string; result?: unknown } | { ok: false; error: string };
+
+function cmdErr(code: string, params?: Record<string, string | number>): never {
+  throw new CommandUserError(code, params);
+}
+
+function gameClockRemainingSec(
+  match: { sport: string; periodDurationSec: number; currentPeriod: number },
+  s: DisplayState,
+  now = Date.now(),
+): number {
+  return sportClockSeconds(
+    match.sport,
+    computeElapsedSeconds(s, now),
+    match.periodDurationSec,
+    match.currentPeriod,
+  );
+}
 
 type StateUpdate = Parameters<Db["displayState"]["update"]>[0]["data"];
 type MatchUpdate = Parameters<Db["match"]["update"]>[0]["data"];
@@ -75,13 +112,50 @@ async function getState(db: Db): Promise<DisplayState> {
 }
 
 async function updateState(db: Db, data: StateUpdate): Promise<DisplayState> {
+  await getState(db);
   return db.displayState.update({ where: { id: 1 }, data });
 }
 
+function liveWallPatchFor(
+  s: DisplayState,
+  match: { id: string; status: string; sport: string } | null,
+  nowMs = Date.now(),
+): ReturnType<typeof liveWallCuePersistPatch> {
+  return liveWallCuePersistPatch(
+    nextLiveWallCueClock(
+      liveWallCueClockFromPersisted({
+        matchId: s.matchId,
+        block: s.liveWallCueBlock,
+        origin: s.liveWallCueOrigin,
+        frozenSec: s.liveWallCueFrozenSec,
+      }),
+      {
+        matchId: match?.id ?? null,
+        status: match?.status ?? null,
+        timerMode: match ? getSportProfile(match.sport).timerMode : null,
+        nowMs,
+      },
+    ),
+  );
+}
+
+function cuePhaseClockPatch(
+  s: DisplayState,
+  nextStatus: string | null | undefined,
+  now = new Date(),
+): { preMatchStartedAt: Date | null; postMatchStartedAt: Date | null } {
+  const pre = isPrematchCuePhase(nextStatus);
+  const post = isPostMatchCuePhase(nextStatus);
+  return {
+    preMatchStartedAt: pre ? (s.preMatchStartedAt ?? now) : null,
+    postMatchStartedAt: post ? (s.postMatchStartedAt ?? now) : null,
+  };
+}
+
 async function requireActiveMatch(db: Db, s: DisplayState): Promise<Match> {
-  if (!s.matchId) throw new Error("No active match");
+  if (!s.matchId) cmdErr("noActiveMatch");
   const match = await db.match.findUnique({ where: { id: s.matchId } });
-  if (!match) throw new Error("Match not found");
+  if (!match) cmdErr("matchNotFound");
   return match;
 }
 
@@ -166,16 +240,16 @@ async function validateSubPair(db: Db, matchId: string, pair: SubPair) {
       awayTeam: { include: { players: true } },
     },
   });
-  if (!m) throw new Error("Match not found");
+  if (!m) cmdErr("matchNotFound");
   const team =
     pair.teamId === m.homeTeamId ? m.homeTeam : pair.teamId === m.awayTeamId ? m.awayTeam : null;
-  if (!team) throw new Error("Team hoort niet bij deze wedstrijd");
+  if (!team) cmdErr("teamNotInMatch");
   const ids = new Set((team.players ?? []).map((p) => p.id));
   if (!ids.has(pair.playerInId) || !ids.has(pair.playerOutId)) {
-    throw new Error("Speler hoort niet bij het gekozen team");
+    cmdErr("playerNotOnTeam");
   }
   if (pair.playerInId === pair.playerOutId) {
-    throw new Error("Zelfde speler kan niet in- en uitwisselen");
+    cmdErr("samePlayerInOut");
   }
 }
 
@@ -279,9 +353,9 @@ function resumePenaltiesWithTimer(s: DisplayState, profile: SportProfile | null,
   return data;
 }
 
-/** Behoud een live-modus (scorebord of scorebord + sponsors); overlays vallen terug op MATCH. */
-function liveModeAfterPeriodChange(mode: string): string {
-  return mode === "SPONSOR_ROTATION" || mode === "MATCH" ? mode : "MATCH";
+/** Behoud overlay-modi niet; speelhelft volgt de laatste Scorebord+sponsors-voorkeur. */
+function liveModeAfterPeriodChange(preferSponsorRotation: boolean | number | null | undefined): "MATCH" | "SPONSOR_ROTATION" {
+  return preferredLiveDisplayMode(preferSponsorRotation);
 }
 
 /** Klokstand (verstreken s) bij het begin van een periode. */
@@ -306,12 +380,19 @@ async function applyPeriodChange(
 ): Promise<void> {
   const sport = normalizeSport(match.sport);
   const profile = getSportProfile(sport);
-  if (nextPeriod < 1 || nextPeriod > sportMaxPeriod(sport)) {
-    const ot = profile.overtimeDurationSec > 0 ? ` (+${profile.maxOvertimePeriods} verlenging)` : "";
-    throw new Error(`${profile.label} heeft ${profile.periodCount} reguliere periodes${ot}.`);
+  const maxPeriod = sportMaxPeriodForMatch(match);
+  if (nextPeriod < 1 || nextPeriod > maxPeriod) {
+    if (profile.overtimeDurationSec > 0) {
+      cmdErr("periodRangeOvertime", {
+        sport,
+        count: profile.periodCount,
+        overtimeN: profile.maxOvertimePeriods,
+      });
+    }
+    cmdErr("periodRange", { sport, count: profile.hasSets ? maxPeriod : profile.periodCount });
   }
   if (isOvertimePeriod(sport, nextPeriod) && profile.overtimeDurationSec <= 0) {
-    throw new Error(`${profile.label} kent geen verlenging.`);
+    cmdErr("noOvertime", { sport });
   }
 
   const data: MatchUpdate = {
@@ -321,6 +402,8 @@ async function applyPeriodChange(
   if (resetTimeoutsForNewPeriod(sport, match.currentPeriod, nextPeriod)) {
     data.homeTimeouts = 0;
     data.awayTimeouts = 0;
+    data.homeLateTimeouts = 0;
+    data.awayLateTimeouts = 0;
   }
   if (resetStatsForNewPeriod(sport, match.currentPeriod, nextPeriod)) {
     data.homeFouls = 0;
@@ -328,7 +411,7 @@ async function applyPeriodChange(
   }
   if (profile.hasSets && nextPeriod !== match.currentPeriod) {
     if (match.homeScore !== 0 || match.awayScore !== 0) {
-      throw new Error("Sluit de set via de punten (of −1). De setknop springt niet midden in een set.");
+      cmdErr("setJumpBlocked");
     }
     data.homeScore = 0;
     data.awayScore = 0;
@@ -338,9 +421,12 @@ async function applyPeriodChange(
   await updateState(db, {
     ...stopAt(periodStartElapsedSec(profile, match, nextPeriod)),
     ...pauseShotClockAt(profile.shotClockPresets[0] ?? 0),
+    shotClockOff: false,
     ...clearTimeoutClock(),
-    mode: liveModeAfterPeriodChange(s.mode),
+    mode: liveModeAfterPeriodChange(s.preferSponsorRotation),
     addedTimeMinutes: 0,
+    ...liveWallPatchFor(s, { id: match.id, sport: match.sport, status: data.status as string }),
+    ...cuePhaseClockPatch(s, data.status as string),
   });
   await logMatchEvent(db, match.id, {
     type: "PERIOD",
@@ -355,14 +441,21 @@ function currentMinute(elapsedSec: number) {
   return Math.floor(elapsedSec / 60);
 }
 
-async function defaultResumeModeAfterBlackout(db: Db, matchId: string | null): Promise<string> {
+async function defaultResumeModeAfterBlackout(
+  db: Db,
+  matchId: string | null,
+  preferSponsorRotation?: boolean | number | null,
+): Promise<string> {
   if (!matchId) return "IDLE";
   const m = await db.match.findUnique({
     where: { id: matchId },
     select: { status: true },
   });
   if (!m) return "IDLE";
-  return programmedDisplayMode({ matchStatus: m.status });
+  return programmedDisplayMode({
+    matchStatus: m.status,
+    preferSponsorRotation,
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -381,23 +474,48 @@ async function startTimeoutClock(
   let counted = false;
   let from = 0;
   let to = 0;
+  let countsAsLate = false;
 
   if (side !== "technical" && opts.countAgainstTeam) {
-    const limit = profile.timeoutLimitForPeriod(match.currentPeriod);
-    if (limit <= 0) throw new Error(`Time-outs zijn niet actief voor ${profile.label}.`);
+    const limit = timeoutLimitForMatch(match);
+    if (limit <= 0) cmdErr("timeoutsNotActive", { sport: match.sport });
     const column = side === "home" ? "homeTimeouts" : "awayTimeouts";
     from = match[column];
     if (from >= limit) {
-      throw new Error(`Time-outlimiet bereikt (${limit}) voor deze periode.`);
+      cmdErr("timeoutLimit", { limit });
     }
+    const remainingClock = sportClockSeconds(
+      match.sport,
+      computeElapsedSeconds(s, now.getTime()),
+      match.periodDurationSec,
+      match.currentPeriod,
+    );
+    const lateColumn = side === "home" ? "homeLateTimeouts" : "awayLateTimeouts";
+    const lateUsed = match[lateColumn] ?? 0;
+    if (
+      basketballLateTimeoutBlocked({
+        sport: match.sport,
+        period: match.currentPeriod,
+        gameClockRemainingSec: remainingClock,
+        lateTimeoutsUsed: lateUsed,
+      })
+    ) {
+      cmdErr("timeoutLateLimit", { limit: BASKETBALL_Q4_LATE_TIMEOUT_MAX });
+    }
+    countsAsLate = basketballLateTimeoutCounts(match.sport, match.currentPeriod, remainingClock);
     to = from + 1;
-    await db.match.update({ where: { id: match.id }, data: { [column]: to } });
+    await db.match.update({
+      where: { id: match.id },
+      data: { [column]: to, ...(countsAsLate ? { [lateColumn]: lateUsed + 1 } : {}) },
+    });
     counted = true;
   }
 
   const seconds =
     opts.seconds ??
-    (side === "technical" ? TECHNICAL_TIMEOUT_SEC : profile.timeoutDurationSec || TECHNICAL_TIMEOUT_SEC);
+    (side === "technical"
+      ? technicalTimeoutDurationSecForMatch(match)
+      : timeoutDurationSecForMatch(match) || TECHNICAL_TIMEOUT_SEC);
 
   // Een time-out betekent dode tijd: wedstrijdklok (en wat daaraan hangt) stopt.
   await updateState(db, {
@@ -412,7 +530,7 @@ async function startTimeoutClock(
     period: ctx.period,
     clockSec: ctx.clockSec,
     teamId: side === "home" ? match.homeTeamId : side === "away" ? match.awayTeamId : undefined,
-    meta: counted ? { stat: "timeout", side, from, to, seconds } : { side, seconds },
+    meta: counted ? { stat: "timeout", side, from, to, seconds, late: countsAsLate } : { side, seconds },
     note: counted ? `${from} -> ${to}` : `${seconds}s`,
   });
   return { counted, from, to };
@@ -444,6 +562,7 @@ function volleyballFormatFromMatch(m: Match) {
     setsToWin: m.setsToWin,
     pointsToWinSet: m.pointsToWinSet,
     pointsToWinDecider: m.pointsToWinDecider,
+    winBy: m.winBy,
   });
 }
 
@@ -469,13 +588,15 @@ async function applyVolleyballDelta(
     });
     rallyWinnersInSet = rallyWinnersFromEvents(events, m);
   }
+  const rules = volleyballRulesFromMatch(m);
   const next = applyVolleyballScoreDelta(live, side, delta, {
-    technicalTimeoutsEnabled: m.technicalTimeoutsEnabled === true,
-    format: volleyballFormatFromMatch(m),
+    technicalTimeoutsEnabled: rules.technicalTimeoutsEnabled,
+    technicalTimeoutScores: rules.technicalTimeoutScores,
+    format: rules,
     rallyWinnersInSet,
   });
   if (next.rejected === "match_over") {
-    throw new Error("De wedstrijd is afgelopen (sets gewonnen). Gebruik −1 om de laatste set te heropenen.");
+    cmdErr("matchOverSets");
   }
   await db.match.update({
     where: { id: m.id },
@@ -516,20 +637,23 @@ async function applyVolleyballDelta(
     });
   }
 
+  const nextMatch = { id: m.id, sport: m.sport, status: next.status };
   const stateData: StateUpdate = {
     mode: next.matchOver
       ? "FULLTIME"
       : next.setJustWon
         ? "HALFTIME"
         : s.mode === "HALFTIME"
-          ? "MATCH"
+          ? liveModeAfterPeriodChange(s.preferSponsorRotation)
           : s.mode === "FULLTIME" && !next.matchOver
             ? "MATCH"
             : s.mode,
+    ...liveWallPatchFor(s, nextMatch),
+    ...cuePhaseClockPatch(s, next.status),
   };
   if (next.setJustWon || delta < 0) Object.assign(stateData, clearTimeoutClock());
   if (next.technicalTimeout) {
-    Object.assign(stateData, runTimeoutFrom("technical", TECHNICAL_TIMEOUT_SEC));
+    Object.assign(stateData, runTimeoutFrom("technical", rules.technicalTimeoutDurationSec));
   }
   await updateState(db, stateData);
 }
@@ -541,7 +665,7 @@ async function applyVolleyballDelta(
 async function applySubstitutionPairs(db: Db, pairs: SubPair[]) {
   if (pairs.length === 0) return;
   const s = await getState(db);
-  if (!s.matchId) throw new Error("No active match");
+  if (!s.matchId) cmdErr("noActiveMatch");
   await ensureDefaultMatchFieldLineups(s.matchId, db);
 
   for (const p of pairs) await validateSubPair(db, s.matchId, p);
@@ -593,17 +717,21 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       if (match && profile?.timerMode === "COUNT_DOWN") {
         const duration = periodDurationSecFor(match.sport, match.currentPeriod, match.periodDurationSec);
         if (duration > 0 && elapsed >= duration) {
-          throw new Error("De periode is voorbij (00:00). Kies de volgende periode of stel de tijd in.");
+          cmdErr("periodOver");
         }
       }
       if (profile?.timerMode === "NONE") {
-        throw new Error(`${profile.label} heeft geen wedstrijdklok.`);
+        cmdErr("noMatchClock", { sport: profile.id });
       }
       await updateState(db, {
         ...runFrom(elapsed, now),
         ...resumePenaltiesWithTimer(s, profile, now),
-        // Spel hervat = time-out voorbij.
+        // Spel hervat = time-out en periodepauze voorbij.
         ...(s.timeoutRunning ? clearTimeoutClock() : {}),
+        ...clearBreakClock(),
+        ...(match && isLivePlayingMatchStatus(match.status) && s.mode === "MATCH"
+          ? { mode: liveModeAfterPeriodChange(s.preferSponsorRotation) }
+          : {}),
       });
       return { ok: true };
     }
@@ -654,7 +782,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const match = await requireActiveMatch(db, s);
       const profile = getSportProfile(match.sport);
       if (profile.timerMode === "NONE") {
-        throw new Error(`${profile.label} heeft geen wedstrijdklok.`);
+        cmdErr("noMatchClock", { sport: profile.id });
       }
       const secondHalfStart = profile.periodCount <= 2 ? 2 : Math.ceil(profile.periodCount / 2) + 1;
       const target =
@@ -677,18 +805,23 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const match = await requireActiveMatch(db, s);
       const profile = getSportProfile(match.sport);
       if (profile.shotClockPresets.length === 0) {
-        throw new Error(`Shotclock is niet beschikbaar voor ${profile.label}.`);
+        cmdErr("shotClockUnavailable", { sport: match.sport });
       }
       const remaining = computeShotClockSeconds(s);
+      const fresh = s.shotClockOff || remaining <= 0;
+      if (fresh && newShotClockSuppressed(match.sport, gameClockRemainingSec(match, s))) {
+        await updateState(db, suppressShotClock());
+        return { ok: true };
+      }
       await updateState(
         db,
-        runShotClockFrom(remaining > 0 ? remaining : profile.shotClockPresets[0]!),
+        presentShotClock(fresh ? profile.shotClockPresets[0]! : remaining, true),
       );
       return { ok: true };
     }
     case "shotclock:pause": {
       const s = await getState(db);
-      await updateState(db, pauseShotClockAt(computeShotClockSeconds(s)));
+      await updateState(db, { ...pauseShotClockAt(computeShotClockSeconds(s)), shotClockOff: s.shotClockOff });
       return { ok: true };
     }
     case "shotclock:reset": {
@@ -697,22 +830,18 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const profile = getSportProfile(match.sport);
       const seconds = cmd.seconds ?? profile.shotClockPresets[0] ?? 24;
       if (!profile.shotClockPresets.includes(seconds)) {
-        throw new Error(`Shotclock ${seconds}s is niet beschikbaar voor ${profile.label}.`);
+        cmdErr("shotClockPresetInvalid", { sport: match.sport, seconds });
       }
-      await updateState(
-        db,
-        s.shotClockRunning ? runShotClockFrom(seconds) : pauseShotClockAt(seconds),
-      );
+      if (newShotClockSuppressed(match.sport, gameClockRemainingSec(match, s))) {
+        await updateState(db, suppressShotClock());
+        return { ok: true };
+      }
+      await updateState(db, presentShotClock(seconds, s.shotClockRunning));
       return { ok: true };
     }
     case "shotclock:set": {
       const s = await getState(db);
-      await updateState(
-        db,
-        s.shotClockRunning
-          ? runShotClockFrom(cmd.seconds)
-          : pauseShotClockAt(cmd.seconds),
-      );
+      await updateState(db, presentShotClock(cmd.seconds, s.shotClockRunning && cmd.seconds > 0));
       return { ok: true };
     }
     case "penalty:start": {
@@ -720,10 +849,10 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const match = await requireActiveMatch(db, s);
       const profile = getSportProfile(match.sport);
       if (profile.penaltyClockPresets.length === 0) {
-        throw new Error(`Straftijd is niet actief voor ${profile.label}.`);
+        cmdErr("penaltyNotActive", { sport: match.sport });
       }
       if (!profile.penaltyClockPresets.includes(cmd.seconds)) {
-        throw new Error(`Straftijd ${cmd.seconds}s is niet beschikbaar voor ${profile.label}.`);
+        cmdErr("penaltyPresetInvalid", { sport: match.sport, seconds: cmd.seconds });
       }
       // Straftijd volgt de wedstrijdklok: staat die stil, dan start de straftijd pas mee bij "Start".
       const startsNow = !profile.penaltyFollowsClock || s.timerRunning;
@@ -747,7 +876,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const s = await getState(db);
       const match = await requireActiveMatch(db, s);
       if (s.timeoutRunning && computeTimeoutSeconds(s) > 0) {
-        throw new Error("Er loopt al een time-out. Beëindig die eerst.");
+        cmdErr("timeoutAlreadyRunning");
       }
       await startTimeoutClock(db, s, match, cmd.side, {
         seconds: cmd.seconds,
@@ -760,28 +889,35 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       return { ok: true };
     }
     case "match:setActive": {
+      const s = await getState(db);
       let shotClockBaseSec = 0;
+      let liveMatch: { id: string; status: string; sport: string } | null = null;
       if (cmd.matchId != null) {
         const m = await db.match.findUnique({
           where: { id: cmd.matchId },
-          select: { closedAt: true, sport: true },
+          select: { id: true, closedAt: true, sport: true, status: true },
         });
         if (m?.closedAt) {
-          throw new Error(
-            "Deze wedstrijd is afgesloten (rapportage bewaard). Heropen in Setup → Matches of kies een andere wedstrijd.",
-          );
+          cmdErr("matchClosed");
         }
         shotClockBaseSec = getSportProfile(m?.sport).shotClockPresets[0] ?? 0;
+        if (m) liveMatch = { id: m.id, status: m.status, sport: m.sport };
       }
+      const phaseClockSource =
+        cmd.matchId === s.matchId ? s : { ...s, preMatchStartedAt: null, postMatchStartedAt: null };
       await updateState(db, {
         matchId: cmd.matchId,
         addedTimeMinutes: 0,
         shotClockRunning: false,
         shotClockStartedAt: null,
         shotClockBaseSec,
+        shotClockOff: false,
+        ...clearBreakClock(),
         ...pausePenaltyAt("home", 0),
         ...pausePenaltyAt("away", 0),
         ...clearTimeoutClock(),
+        ...liveWallPatchFor(s, liveMatch),
+        ...cuePhaseClockPatch(phaseClockSource, liveMatch?.status ?? null),
       });
       return { ok: true };
     }
@@ -794,12 +930,14 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
           // Voetbalflow en mobiel sturen alleen een status: periode meezetten zodat het display klopt.
           const period = periodForLifecycleStatus(match.sport, cmd.status, match.currentPeriod);
           const profile = getSportProfile(match.sport);
-          if (period !== match.currentPeriod && period <= sportMaxPeriod(match.sport) &&
+          if (period !== match.currentPeriod && period <= sportMaxPeriodForMatch(match) &&
               (!isOvertimePeriod(match.sport, period) || profile.overtimeDurationSec > 0)) {
             data.currentPeriod = period;
             if (resetTimeoutsForNewPeriod(match.sport, match.currentPeriod, period)) {
               data.homeTimeouts = 0;
               data.awayTimeouts = 0;
+              data.homeLateTimeouts = 0;
+              data.awayLateTimeouts = 0;
             }
             if (resetStatsForNewPeriod(match.sport, match.currentPeriod, period)) {
               data.homeFouls = 0;
@@ -813,12 +951,32 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
         const pausesClock =
           cmd.status === "HALF_TIME" ||
           cmd.status === "FULL_TIME" ||
-          cmd.status === "POST_MATCH";
+          cmd.status === "POST_MATCH" ||
+          cmd.status === "PREMATCH" ||
+          cmd.status === "SETUP";
+        const nextMode = isLivePlayingMatchStatus(cmd.status)
+          ? liveModeAfterPeriodChange(s.preferSponsorRotation)
+          : "MATCH";
+        const interval = cmd.status === "HALF_TIME" ? basketballIntervalBreak(match) : null;
+        const clearInterval =
+          cmd.status === "FULL_TIME" ||
+          cmd.status === "POST_MATCH" ||
+          cmd.status === "PREMATCH" ||
+          cmd.status === "SETUP";
+        const breakPatch =
+          interval && !s.breakRunning
+            ? runBreakFrom(interval.seconds, interval.warnAt30)
+            : clearInterval
+              ? clearBreakClock()
+              : {};
         await updateState(db, {
-          mode: s.mode,
+          mode: nextMode,
           addedTimeMinutes: 0,
           ...(pausesClock ? pauseClocksWithTimer(s, profile) : {}),
           ...clearTimeoutClock(),
+          ...breakPatch,
+          ...liveWallPatchFor(s, { id: match.id, sport: match.sport, status: cmd.status }),
+          ...cuePhaseClockPatch(s, cmd.status),
         });
       }
       return { ok: true };
@@ -829,6 +987,17 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       await applyPeriodChange(db, s, match, cmd.period);
       return { ok: true };
     }
+    case "sport:setPossession": {
+      const s = await getState(db);
+      const match = await requireActiveMatch(db, s);
+      const profile = getSportProfile(match.sport);
+      if (!profile.supportsPossessionArrow) {
+        cmdErr("possessionNotActive", { sport: match.sport });
+      }
+      await db.match.update({ where: { id: match.id }, data: { possessionArrow: cmd.side } });
+      await updateState(db, { mode: s.mode });
+      return { ok: true };
+    }
     case "sport:statAdjust": {
       const s = await getState(db);
       const match = await requireActiveMatch(db, s);
@@ -836,11 +1005,11 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const sidePrefix = cmd.side === "home" ? "home" : "away";
 
       if (cmd.stat === "timeout") {
-        const limit = profile.timeoutLimitForPeriod(match.currentPeriod);
-        if (limit <= 0) throw new Error(`Time-outs zijn niet actief voor ${profile.label}.`);
+        const limit = timeoutLimitForMatch(match);
+        if (limit <= 0) cmdErr("timeoutsNotActive", { sport: match.sport });
         if (cmd.delta > 0) {
           if (s.timeoutRunning && computeTimeoutSeconds(s) > 0) {
-            throw new Error("Er loopt al een time-out. Beëindig die eerst.");
+            cmdErr("timeoutAlreadyRunning");
           }
           await startTimeoutClock(db, s, match, cmd.side, { countAgainstTeam: true });
           return { ok: true };
@@ -848,7 +1017,23 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
         const column = `${sidePrefix}Timeouts` as "homeTimeouts" | "awayTimeouts";
         const current = match[column];
         const next = Math.max(0, Math.min(limit, current + cmd.delta));
-        await db.match.update({ where: { id: match.id }, data: { [column]: next } });
+        const lateColumn = `${sidePrefix}LateTimeouts` as "homeLateTimeouts" | "awayLateTimeouts";
+        let lateNext = match[lateColumn] ?? 0;
+        if (next < current) {
+          const teamId = cmd.side === "home" ? match.homeTeamId : match.awayTeamId;
+          const lastTimeout = await db.matchEvent.findFirst({
+            where: { matchId: match.id, type: "TIMEOUT", teamId },
+            orderBy: { createdAt: "desc" },
+          });
+          const lastMeta = parseEventMeta(lastTimeout?.metaJson);
+          if (lastMeta.late === true && Number(lastMeta.to) > Number(lastMeta.from)) {
+            lateNext = Math.max(0, lateNext - 1);
+          }
+        }
+        await db.match.update({
+          where: { id: match.id },
+          data: { [column]: next, ...(lateNext !== (match[lateColumn] ?? 0) ? { [lateColumn]: lateNext } : {}) },
+        });
         await updateState(db, {
           mode: s.mode,
           ...(s.timeoutRunning && s.timeoutSide === cmd.side ? clearTimeoutClock() : {}),
@@ -870,11 +1055,11 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       let max = 99;
       if (cmd.stat === "foul") {
         if (!profile.statLabel) {
-          throw new Error(`Fouten/straffen zijn niet actief voor ${profile.label}.`);
+          cmdErr("foulsNotActive", { sport: match.sport });
         }
         column = `${sidePrefix}Fouls` as typeof column;
       } else {
-        if (!profile.hasSets) throw new Error(`Setstanden zijn niet actief voor ${profile.label}.`);
+        if (!profile.hasSets) cmdErr("setsNotActive", { sport: match.sport });
         column = `${sidePrefix}Sets` as typeof column;
         max = volleyballFormatFromMatch(match).setsToWin;
       }
@@ -888,16 +1073,23 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
         cmd.stat === "set" && setsToWin > 0 && (homeSets >= setsToWin || awaySets >= setsToWin);
       const reopened =
         cmd.stat === "set" && match.status === "FULL_TIME" && !matchOverSets;
+      const nextStatus = matchOverSets
+        ? "FULL_TIME"
+        : reopened
+          ? lifecycleStatusForPeriod(match.sport, match.currentPeriod)
+          : match.status;
       await db.match.update({
         where: { id: match.id },
         data: {
           [column]: next,
           ...(matchOverSets ? { status: "FULL_TIME" } : {}),
-          ...(reopened ? { status: lifecycleStatusForPeriod(match.sport, match.currentPeriod) } : {}),
+          ...(reopened ? { status: nextStatus } : {}),
         },
       });
       await updateState(db, {
         mode: matchOverSets ? "FULLTIME" : reopened && s.mode === "FULLTIME" ? "MATCH" : s.mode,
+        ...liveWallPatchFor(s, { id: match.id, sport: match.sport, status: nextStatus }),
+        ...cuePhaseClockPatch(s, nextStatus),
       });
       const ctx = eventClockContext(s, match);
       await logMatchEvent(db, match.id, {
@@ -915,7 +1107,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const s = await getState(db);
       const match = await requireActiveMatch(db, s);
       if (!getSportProfile(match.sport).hasSets) {
-        throw new Error("Service is alleen actief voor volleybal.");
+        cmdErr("serviceVolleyballOnly");
       }
       const data: MatchUpdate = { servingSide: cmd.side };
       // Bij 0–0 bepaalt de operator (toss) wie de set opent; dat is meteen de eerste server van de set.
@@ -929,7 +1121,13 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const match = await requireActiveMatch(db, s);
       const status = lifecycleStatusForPeriod(match.sport, match.currentPeriod);
       await db.match.update({ where: { id: match.id }, data: { status } });
-      await updateState(db, { mode: liveModeAfterPeriodChange(s.mode), ...clearTimeoutClock() });
+      const liveMatch = { id: match.id, sport: match.sport, status };
+      await updateState(db, {
+        mode: liveModeAfterPeriodChange(s.preferSponsorRotation),
+        ...clearTimeoutClock(),
+        ...liveWallPatchFor(s, liveMatch),
+        ...cuePhaseClockPatch(s, status),
+      });
       return { ok: true };
     }
     case "score:set": {
@@ -987,7 +1185,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       // Start the goal celebration sequence: play a generic "goal" video
       // fullscreen while the operator is picking the scorer.
       const s = await getState(db);
-      if (!s.matchId) throw new Error("No active match");
+      if (!s.matchId) cmdErr("noActiveMatch");
       if (!(await goalVisualEnabledForSide(db, cmd.side))) {
         return { ok: true };
       }
@@ -1018,8 +1216,9 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       return { ok: true, result: { visual: true } };
     }
     case "goal:cancel": {
+      const s = await getState(db);
       await updateState(db, {
-        mode: "SPONSOR_ROTATION",
+        mode: liveModeAfterPeriodChange(s.preferSponsorRotation),
         activeMediaId: null,
         activeGoalScorerId: null,
       });
@@ -1102,7 +1301,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
 
       if (queue.length === 0 || !s.matchId) {
         await updateState(db, {
-          mode: "SPONSOR_ROTATION",
+          mode: liveModeAfterPeriodChange(s.preferSponsorRotation),
           activeSubInId: null,
           activeSubOutId: null,
           substitutionQueueJson: "[]",
@@ -1154,7 +1353,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       }
 
       await updateState(db, {
-        mode: "SPONSOR_ROTATION",
+        mode: liveModeAfterPeriodChange(s.preferSponsorRotation),
         activeSubInId: null,
         activeSubOutId: null,
         substitutionQueueJson: "[]",
@@ -1169,7 +1368,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const match = await requireActiveMatch(db, s);
       const profile = getSportProfile(match.sport);
       if (!profile.supportsCards || !profile.cardColors.includes(cmd.color)) {
-        throw new Error(`Kaarten van type ${cmd.color} zijn niet actief voor ${profile.label}.`);
+        cmdErr("cardsNotActive", { sport: match.sport, color: cmd.color });
       }
       const ctx = eventClockContext(s, match);
       const eventType =
@@ -1216,10 +1415,17 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const s = await getState(db);
       const enteringBlackout = cmd.mode === "BLACKOUT" && s.mode !== "BLACKOUT";
       const leavingBlackout = s.mode === "BLACKOUT" && cmd.mode !== "BLACKOUT";
+      const persistPreference =
+        cmd.meta?.persistSponsorPreference === true &&
+        (cmd.mode === "SPONSOR_ROTATION" || cmd.mode === "MATCH");
       await updateState(db, {
         mode: cmd.mode,
         activePlayerId: cmd.meta?.activePlayerId ?? null,
         activeMediaId: cmd.meta?.activeMediaId ?? null,
+        ...(cmd.mode === "CARD" ? {} : { activeCardColor: null }),
+        ...(persistPreference
+          ? { preferSponsorRotation: cmd.mode === "SPONSOR_ROTATION" }
+          : {}),
         blackoutResumeMode:
           cmd.mode === "BLACKOUT"
             ? s.mode === "BLACKOUT"
@@ -1236,7 +1442,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const s = await getState(db);
       if (s.mode === "BLACKOUT") {
         const resume =
-          s.blackoutResumeMode ?? (await defaultResumeModeAfterBlackout(db, s.matchId));
+          s.blackoutResumeMode ?? (await defaultResumeModeAfterBlackout(db, s.matchId, s.preferSponsorRotation));
         // Capture die vóór de blackout live stond komt terug (blackout is een pauze, geen stop).
         await updateState(db, {
           mode: resume,
@@ -1285,7 +1491,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
     }
     case "event:undo": {
       const ev = await db.matchEvent.findUnique({ where: { id: cmd.eventId } });
-      if (!ev) throw new Error("Event not found");
+      if (!ev) cmdErr("eventNotFound");
       const m = await db.match.findUnique({ where: { id: ev.matchId } });
       const meta = parseEventMeta(ev.metaJson);
       const ds = await getState(db);
@@ -1312,7 +1518,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
               orderBy: { createdAt: "desc" },
             });
             if (!latest || latest.id !== ev.id) {
-              throw new Error("Bij volleybal kan alleen het laatste punt ongedaan gemaakt worden (of gebruik −1).");
+              cmdErr("volleyballUndoLastOnly");
             }
             const side = metaSide ?? (ev.teamId === m.homeTeamId ? "home" : "away");
             // Terug naar de stand vóór dit punt: bij een setwinst staat de stand op 0–0 en rolt −1 de set terug.

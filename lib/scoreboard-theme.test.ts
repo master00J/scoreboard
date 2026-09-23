@@ -25,7 +25,7 @@ describe("scoreboard theme personalization", () => {
     expect(theme.slots.sponsor.w).toBeGreaterThan(20);
   });
 
-  it("bewaart vrije plaatsing", () => {
+  it("bewaart vrije plaatsing en splitst oude teamvakken in logo + score", () => {
     const theme = mergeScoreboardTheme(
       JSON.stringify({
         layoutMode: "custom",
@@ -33,8 +33,24 @@ describe("scoreboard theme personalization", () => {
       }),
     );
     expect(scoreboardUsesCustom(theme)).toBe(true);
-    expect(theme.slots.home).toEqual({ x: 5, y: 5, w: 20, h: 30 });
+    expect(theme.slots.home.x).toBe(5);
+    expect(theme.slots.home.y).toBe(5);
+    expect(theme.slots.home.h).toBeLessThan(30);
+    expect(theme.slots.homeScore.y).toBeGreaterThanOrEqual(theme.slots.home.y + theme.slots.home.h);
     expect(theme.slots.sponsor.w).toBeGreaterThan(8);
+  });
+
+  it("houdt aparte scorevakken zoals opgeslagen", () => {
+    const theme = mergeScoreboardTheme(
+      JSON.stringify({
+        slots: {
+          home: { x: 5, y: 5, w: 20, h: 22 },
+          homeScore: { x: 6, y: 40, w: 18, h: 12 },
+        },
+      }),
+    );
+    expect(theme.slots.home).toEqual({ x: 5, y: 5, w: 20, h: 22 });
+    expect(theme.slots.homeScore).toEqual({ x: 6, y: 40, w: 18, h: 12 });
   });
 
   it("leest een opgeslagen layoutMode", () => {
@@ -85,9 +101,32 @@ describe("scoreboard theme personalization", () => {
     const theme = mergeScoreboardTheme(
       JSON.stringify({ fullSlots: { home: { x: 10, y: 10, w: 25, h: 40 } } }),
     );
-    expect(theme.fullSlots.home).toEqual({ x: 10, y: 10, w: 25, h: 40 });
+    expect(theme.fullSlots.home).toEqual({ x: 10, y: 10, w: 25, h: 27 });
+    expect(theme.fullSlots.homeScore.y).toBeGreaterThanOrEqual(theme.fullSlots.home.y + theme.fullSlots.home.h);
     expect(theme.fullSlots.clock.w).toBeGreaterThan(8);
     expect(theme.fullSlots.away.x).toBeGreaterThan(0);
+  });
+
+  it("bewaart achtergrondpaden voor fullscreen en L-balk", () => {
+    const theme = mergeScoreboardTheme(
+      JSON.stringify({
+        fullBackgroundPath: "D:/led/full.png",
+        leftFrameBackgroundPath: "/uploads/l-bar.webp",
+      }),
+    );
+    expect(theme.fullBackgroundPath).toBe("D:/led/full.png");
+    expect(theme.leftFrameBackgroundPath).toBe("/uploads/l-bar.webp");
+  });
+
+  it("negeert lege of ongeldige achtergrondpaden", () => {
+    const theme = mergeScoreboardTheme(
+      JSON.stringify({
+        fullBackgroundPath: "  ",
+        leftFrameBackgroundPath: "line\nbreak",
+      }),
+    );
+    expect(theme.fullBackgroundPath).toBe("");
+    expect(theme.leftFrameBackgroundPath).toBe("");
   });
 
   it("houdt custom-vakken bij freeform-edit", () => {
@@ -101,7 +140,9 @@ describe("scoreboard theme personalization", () => {
     const edit = themeForFreeformEdit(theme);
     expect(edit.layoutMode).toBe("custom");
     expect(edit.contentAreaBg).toBe("#111111");
-    expect(edit.slots.home).toEqual({ x: 8, y: 8, w: 20, h: 30 });
+    expect(edit.slots.home.x).toBe(8);
+    expect(edit.slots.home.y).toBe(8);
+    expect(edit.slots.homeScore.y).toBeGreaterThanOrEqual(edit.slots.home.y + edit.slots.home.h);
   });
 
   it("L-frame wint alleen in auto als de runtime dat vraagt", () => {

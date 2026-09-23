@@ -4,8 +4,8 @@ export type LeftStripSegment = "home" | "timer" | "away";
 
 export type ScoreboardLayoutMode = "auto" | "custom" | "left-l" | "full" | "bottom-strip";
 
-export type LayoutSlotId = "home" | "away" | "clock" | "sponsor";
-export type FullSlotId = "home" | "away" | "clock";
+export type FullSlotId = "home" | "homeScore" | "away" | "awayScore" | "clock" | "shotClock";
+export type LayoutSlotId = FullSlotId | "sponsor";
 
 /** Positie op het LED-canvas, in procent (0–100). Onafhankelijk van resolutie. */
 export type LayoutSlot = { x: number; y: number; w: number; h: number };
@@ -13,8 +13,16 @@ export type LayoutSlot = { x: number; y: number; w: number; h: number };
 export type ScoreboardSlots = Record<LayoutSlotId, LayoutSlot>;
 export type FullScoreboardSlots = Record<FullSlotId, LayoutSlot>;
 
-export const LAYOUT_SLOT_IDS: LayoutSlotId[] = ["home", "away", "clock", "sponsor"];
-export const FULL_SLOT_IDS: FullSlotId[] = ["home", "away", "clock"];
+export const LAYOUT_SLOT_IDS: LayoutSlotId[] = [
+  "home",
+  "homeScore",
+  "away",
+  "awayScore",
+  "clock",
+  "shotClock",
+  "sponsor",
+];
+export const FULL_SLOT_IDS: FullSlotId[] = ["home", "homeScore", "away", "awayScore", "clock", "shotClock"];
 
 /**
  * Op een 16:9-LED-canvas is een vak 16:9 wanneer breedte% === hoogte%.
@@ -55,17 +63,23 @@ export function slotIsSixteenByNine(slot: LayoutSlot): boolean {
 }
 
 export const DEFAULT_SLOTS: ScoreboardSlots = {
-  home: { x: 2, y: 6, w: 18, h: 42 },
+  home: { x: 2, y: 6, w: 18, h: 28 },
+  homeScore: { x: 2, y: 35, w: 18, h: 12 },
   clock: { x: 38, y: 4, w: 24, h: 20 },
-  away: { x: 80, y: 6, w: 18, h: 42 },
+  shotClock: { x: 63, y: 4, w: 16, h: 20 },
+  away: { x: 80, y: 6, w: 18, h: 28 },
+  awayScore: { x: 80, y: 35, w: 18, h: 12 },
   sponsor: { x: 22, y: 26, w: 56, h: 56 },
 };
 
 /** Standaardpositie van het volledige scorebord (geen sponsorvak). */
 export const DEFAULT_FULL_SLOTS: FullScoreboardSlots = {
-  home: { x: 2, y: 16, w: 30, h: 68 },
+  home: { x: 5, y: 14, w: 26, h: 44 },
+  homeScore: { x: 5, y: 60, w: 26, h: 16 },
   clock: { x: 34, y: 22, w: 32, h: 56 },
-  away: { x: 68, y: 16, w: 30, h: 68 },
+  shotClock: { x: 34, y: 80, w: 32, h: 16 },
+  away: { x: 69, y: 14, w: 26, h: 44 },
+  awayScore: { x: 69, y: 60, w: 26, h: 16 },
 };
 
 export const SLOT_PRESETS: { id: string; slots: ScoreboardSlots }[] = [
@@ -73,18 +87,24 @@ export const SLOT_PRESETS: { id: string; slots: ScoreboardSlots }[] = [
   {
     id: "leftBar",
     slots: {
-      home: { x: 0, y: 0, w: 16, h: 36 },
-      clock: { x: 0, y: 36, w: 16, h: 22 },
-      away: { x: 0, y: 58, w: 16, h: 42 },
+      home: { x: 0, y: 0, w: 16, h: 24 },
+      homeScore: { x: 0, y: 24, w: 16, h: 12 },
+      clock: { x: 0, y: 36, w: 16, h: 12 },
+      shotClock: { x: 0, y: 48, w: 16, h: 10 },
+      away: { x: 0, y: 58, w: 16, h: 26 },
+      awayScore: { x: 0, y: 84, w: 16, h: 16 },
       sponsor: largestSixteenByNineSlot({ x: 16, y: 0, w: 84, h: 100 }),
     },
   },
   {
     id: "topBar",
     slots: {
-      home: { x: 0, y: 0, w: 28, h: 18 },
-      clock: { x: 38, y: 0, w: 24, h: 18 },
-      away: { x: 72, y: 0, w: 28, h: 18 },
+      home: { x: 0, y: 0, w: 16, h: 18 },
+      homeScore: { x: 16, y: 0, w: 12, h: 18 },
+      clock: { x: 28, y: 0, w: 18, h: 18 },
+      shotClock: { x: 46, y: 0, w: 16, h: 18 },
+      awayScore: { x: 72, y: 0, w: 12, h: 18 },
+      away: { x: 84, y: 0, w: 16, h: 18 },
       sponsor: largestSixteenByNineSlot({ x: 0, y: 18, w: 100, h: 82 }),
     },
   },
@@ -92,9 +112,12 @@ export const SLOT_PRESETS: { id: string; slots: ScoreboardSlots }[] = [
     id: "bottomBar",
     slots: {
       sponsor: largestSixteenByNineSlot({ x: 0, y: 0, w: 100, h: 78 }),
-      home: { x: 0, y: 78, w: 28, h: 22 },
-      clock: { x: 38, y: 78, w: 24, h: 22 },
-      away: { x: 72, y: 78, w: 28, h: 22 },
+      home: { x: 0, y: 78, w: 16, h: 22 },
+      homeScore: { x: 16, y: 78, w: 12, h: 22 },
+      clock: { x: 28, y: 78, w: 18, h: 22 },
+      shotClock: { x: 46, y: 78, w: 16, h: 22 },
+      awayScore: { x: 72, y: 78, w: 12, h: 22 },
+      away: { x: 84, y: 78, w: 16, h: 22 },
     },
   },
 ];
@@ -127,6 +150,10 @@ export type ScoreboardTheme = {
   frameColorBot?: string;
   /** Achtergrond contentvlak (rechts) */
   contentAreaBg?: string;
+  /** Beeld achter het volledige 16:9-scorebord (leeg = alleen kleuren). */
+  fullBackgroundPath?: string;
+  /** Beeld op de L-balk tijdens de wedstrijd (leeg = frame-gradient). */
+  leftFrameBackgroundPath?: string;
   /** CSS font-family stack */
   fontFamily?: string;
   /** Volgorde blokken in linkerkolom */
@@ -194,6 +221,8 @@ export type ResolvedScoreboardTheme = Required<
     | "frameColorMid"
     | "frameColorBot"
     | "contentAreaBg"
+    | "fullBackgroundPath"
+    | "leftFrameBackgroundPath"
     | "fontFamily"
     | "leftColumnOrder"
     | "leftLogoPx"
@@ -243,6 +272,8 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
   frameColorMid: "#b91c1c",
   frameColorBot: "#7f1d1d",
   contentAreaBg: "#050607",
+  fullBackgroundPath: "",
+  leftFrameBackgroundPath: "",
   fontFamily:
     'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
   leftColumnOrder: [...DEFAULT_ORDER],
@@ -292,6 +323,14 @@ function normalizeTeamRadialAlphaHex(raw: string | undefined, fallback: string):
   return fallback;
 }
 
+function normalizeMediaPath(raw: unknown): string {
+  if (typeof raw !== "string") return "";
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed.length > 4096) return "";
+  if (/[\r\n]/.test(trimmed)) return "";
+  return trimmed;
+}
+
 function normalizeLayoutMode(raw: unknown): ScoreboardLayoutMode {
   if (raw === "left-l" || raw === "full" || raw === "bottom-strip" || raw === "auto" || raw === "custom") {
     return raw;
@@ -314,20 +353,77 @@ export function normalizeSlot(raw: Partial<LayoutSlot> | undefined, fallback: La
   };
 }
 
-export function normalizeSlots(raw: Partial<ScoreboardSlots> | undefined): ScoreboardSlots {
+/**
+ * Oude thema's hadden logo+score in één vak. Splits dat in een logo-vak en een
+ * score-vak eronder, zodat de cijfers onafhankelijk versleepbaar zijn.
+ */
+export function splitTeamSlot(slot: LayoutSlot): { logo: LayoutSlot; score: LayoutSlot } {
+  const scoreH = clampPct(Math.round(slot.h * 0.3), 8, 40);
+  const gap = slot.h >= scoreH + 9 ? 1 : 0;
+  const logoH = slot.h - scoreH - gap;
+  if (logoH < 8) {
+    return {
+      logo: slot,
+      score: {
+        x: slot.x,
+        y: clampPct(slot.y + Math.max(0, slot.h - scoreH), 0, 100 - scoreH),
+        w: slot.w,
+        h: scoreH,
+      },
+    };
+  }
   return {
-    home: normalizeSlot(raw?.home, DEFAULT_SLOTS.home),
-    away: normalizeSlot(raw?.away, DEFAULT_SLOTS.away),
+    logo: { x: slot.x, y: slot.y, w: slot.w, h: logoH },
+    score: { x: slot.x, y: slot.y + logoH + gap, w: slot.w, h: scoreH },
+  };
+}
+
+function hasOwnSlot(raw: Partial<LayoutSlot> | undefined): boolean {
+  return raw != null && typeof raw === "object";
+}
+
+function pairFrom(
+  rawSlot: Partial<LayoutSlot> | undefined,
+  rawScore: Partial<LayoutSlot> | undefined,
+  defaultLogo: LayoutSlot,
+  defaultScore: LayoutSlot,
+): { logo: LayoutSlot; score: LayoutSlot } {
+  if (hasOwnSlot(rawScore)) {
+    return {
+      logo: normalizeSlot(rawSlot, defaultLogo),
+      score: normalizeSlot(rawScore, defaultScore),
+    };
+  }
+  if (hasOwnSlot(rawSlot)) {
+    return splitTeamSlot(normalizeSlot(rawSlot, defaultLogo));
+  }
+  return { logo: defaultLogo, score: defaultScore };
+}
+
+export function normalizeSlots(raw: Partial<ScoreboardSlots> | undefined): ScoreboardSlots {
+  const home = pairFrom(raw?.home, raw?.homeScore, DEFAULT_SLOTS.home, DEFAULT_SLOTS.homeScore);
+  const away = pairFrom(raw?.away, raw?.awayScore, DEFAULT_SLOTS.away, DEFAULT_SLOTS.awayScore);
+  return {
+    home: home.logo,
+    homeScore: home.score,
+    away: away.logo,
+    awayScore: away.score,
     clock: normalizeSlot(raw?.clock, DEFAULT_SLOTS.clock),
+    shotClock: normalizeSlot(raw?.shotClock, DEFAULT_SLOTS.shotClock),
     sponsor: normalizeSlot(raw?.sponsor, DEFAULT_SLOTS.sponsor),
   };
 }
 
 export function normalizeFullSlots(raw: Partial<FullScoreboardSlots> | undefined): FullScoreboardSlots {
+  const home = pairFrom(raw?.home, raw?.homeScore, DEFAULT_FULL_SLOTS.home, DEFAULT_FULL_SLOTS.homeScore);
+  const away = pairFrom(raw?.away, raw?.awayScore, DEFAULT_FULL_SLOTS.away, DEFAULT_FULL_SLOTS.awayScore);
   return {
-    home: normalizeSlot(raw?.home, DEFAULT_FULL_SLOTS.home),
-    away: normalizeSlot(raw?.away, DEFAULT_FULL_SLOTS.away),
+    home: home.logo,
+    homeScore: home.score,
+    away: away.logo,
+    awayScore: away.score,
     clock: normalizeSlot(raw?.clock, DEFAULT_FULL_SLOTS.clock),
+    shotClock: normalizeSlot(raw?.shotClock, DEFAULT_FULL_SLOTS.shotClock),
   };
 }
 
@@ -342,10 +438,25 @@ export function slotsFromLeftFrame(leftBarWidthPx: number, bottomBarHeightPx: nu
   const colH = Math.max(30, 100 - botH);
   const homeH = colH * 0.36;
   const clockH = colH * 0.24;
+  const home = splitTeamSlot({ x: 0, y: 0, w: leftW, h: homeH });
+  const away = splitTeamSlot({
+    x: 0,
+    y: homeH + clockH,
+    w: leftW,
+    h: colH - homeH - clockH,
+  });
   return normalizeSlots({
-    home: { x: 0, y: 0, w: leftW, h: homeH },
-    clock: { x: 0, y: homeH, w: leftW, h: clockH },
-    away: { x: 0, y: homeH + clockH, w: leftW, h: colH - homeH - clockH },
+    home: home.logo,
+    homeScore: home.score,
+    clock: { x: 0, y: homeH, w: leftW, h: Math.max(8, clockH * 0.58) },
+    shotClock: {
+      x: 0,
+      y: homeH + Math.max(8, clockH * 0.58),
+      w: leftW,
+      h: Math.max(8, clockH - Math.max(8, clockH * 0.58)),
+    },
+    away: away.logo,
+    awayScore: away.score,
     sponsor: largestSixteenByNineSlot({ x: leftW, y: 0, w: 100 - leftW, h: 100 - botH }),
   });
 }
@@ -353,11 +464,15 @@ export function slotsFromLeftFrame(leftBarWidthPx: number, bottomBarHeightPx: nu
 /** Vrije vakken die een onderstrip benaderen. */
 export function slotsFromStrip(stripHeightPx: number): ScoreboardSlots {
   const h = Math.max(12, pctOf(stripHeightPx, SCOREBOARD_CANVAS_H));
+  const y = 100 - h;
   return normalizeSlots({
     sponsor: largestSixteenByNineSlot({ x: 0, y: 0, w: 100, h: 100 - h }),
-    home: { x: 0, y: 100 - h, w: 28, h },
-    clock: { x: 36, y: 100 - h, w: 28, h },
-    away: { x: 72, y: 100 - h, w: 28, h },
+    home: { x: 0, y, w: 16, h },
+    homeScore: { x: 16, y, w: 12, h },
+    clock: { x: 30, y, w: 16, h },
+    shotClock: { x: 46, y, w: 14, h },
+    awayScore: { x: 60, y, w: 12, h },
+    away: { x: 76, y, w: 24, h },
   });
 }
 
@@ -520,6 +635,8 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
     frameColorMid: patch.frameColorMid ?? DEFAULT_SCOREBOARD_THEME.frameColorMid,
     frameColorBot: patch.frameColorBot ?? DEFAULT_SCOREBOARD_THEME.frameColorBot,
     contentAreaBg: patch.contentAreaBg ?? DEFAULT_SCOREBOARD_THEME.contentAreaBg,
+    fullBackgroundPath: normalizeMediaPath(patch.fullBackgroundPath),
+    leftFrameBackgroundPath: normalizeMediaPath(patch.leftFrameBackgroundPath),
     fontFamily: patch.fontFamily?.trim() || DEFAULT_SCOREBOARD_THEME.fontFamily,
     timerRunningColor: patch.timerRunningColor ?? DEFAULT_SCOREBOARD_THEME.timerRunningColor,
     timerPausedColor: patch.timerPausedColor ?? DEFAULT_SCOREBOARD_THEME.timerPausedColor,

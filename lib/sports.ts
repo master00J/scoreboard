@@ -51,6 +51,8 @@ export type SportProfile = {
   supportsGoalVisuals: boolean;
   supportsInjuryTime: boolean;
   supportsSubstitutions: boolean;
+  /** FIBA wisselend balbezit: pijl op het scherm naar het team dat de volgende AP-inworp krijgt. */
+  supportsPossessionArrow: boolean;
   clockVisibleOnDisplay: boolean;
   pointsToWinRegular: number | null;
   pointsToWinDecider: number | null;
@@ -91,6 +93,7 @@ const PROFILES: Record<SportType, SportProfile> = {
     supportsGoalVisuals: true,
     supportsInjuryTime: true,
     supportsSubstitutions: true,
+    supportsPossessionArrow: false,
     clockVisibleOnDisplay: true,
     pointsToWinRegular: null,
     pointsToWinDecider: null,
@@ -130,6 +133,7 @@ const PROFILES: Record<SportType, SportProfile> = {
     supportsGoalVisuals: true,
     supportsInjuryTime: false,
     supportsSubstitutions: true,
+    supportsPossessionArrow: false,
     clockVisibleOnDisplay: true,
     pointsToWinRegular: null,
     pointsToWinDecider: null,
@@ -169,6 +173,7 @@ const PROFILES: Record<SportType, SportProfile> = {
     supportsGoalVisuals: false,
     supportsInjuryTime: false,
     supportsSubstitutions: true,
+    supportsPossessionArrow: true,
     clockVisibleOnDisplay: true,
     pointsToWinRegular: null,
     pointsToWinDecider: null,
@@ -207,6 +212,7 @@ const PROFILES: Record<SportType, SportProfile> = {
     supportsGoalVisuals: false,
     supportsInjuryTime: false,
     supportsSubstitutions: true,
+    supportsPossessionArrow: false,
     clockVisibleOnDisplay: false,
     pointsToWinRegular: 25,
     pointsToWinDecider: 15,
@@ -246,6 +252,7 @@ const PROFILES: Record<SportType, SportProfile> = {
     supportsGoalVisuals: true,
     supportsInjuryTime: false,
     supportsSubstitutions: true,
+    supportsPossessionArrow: false,
     clockVisibleOnDisplay: true,
     pointsToWinRegular: null,
     pointsToWinDecider: null,
@@ -403,6 +410,64 @@ export function formatSportClock(sport: unknown, seconds: number): string {
   return `${mm}:${ss}`;
 }
 
+/**
+ * Shotclocktekst. Onder 5 seconden in tienden (naar boven), zodat 0.3, 0.2 en 0.1
+ * afleesbaar blijven. Daarboven hele seconden, ook naar boven.
+ */
+export function formatShotClock(seconds: number): string {
+  const value = Math.max(0, seconds);
+  if (value < 5) {
+    const tenths = Math.ceil(value * 10 - 1e-9);
+    const whole = Math.floor(tenths / 10);
+    const frac = tenths % 10;
+    return `${whole}.${frac}`;
+  }
+  return String(Math.ceil(value - 1e-9));
+}
+
+/** FIBA 50.5: bij nieuw balbezit en minder dan 14s op de wedstrijdklok gaat de shotclock uit. */
+export const FIBA_SHOT_CLOCK_OFF_BELOW_SEC = 14;
+
+export function newShotClockSuppressed(sport: unknown, gameClockRemainingSec: number): boolean {
+  const profile = getSportProfile(sport);
+  if (profile.shotClockPresets.length === 0 || profile.timerMode !== "COUNT_DOWN") return false;
+  return gameClockRemainingSec < FIBA_SHOT_CLOCK_OFF_BELOW_SEC;
+}
+
+/** FIBA 18.2.5: in Q4 tellen maximaal 2 van de time-outs mee zodra de klok 2:00 of minder toont. */
+export const BASKETBALL_Q4_LATE_WINDOW_SEC = 120;
+export const BASKETBALL_Q4_LATE_TIMEOUT_MAX = 2;
+
+export function basketballLateTimeoutCounts(
+  sport: unknown,
+  period: number,
+  gameClockRemainingSec: number,
+): boolean {
+  const profile = getSportProfile(sport);
+  if (profile.id !== "BASKETBALL") return false;
+  if (Math.floor(period || 1) !== profile.periodCount) return false;
+  return gameClockRemainingSec <= BASKETBALL_Q4_LATE_WINDOW_SEC;
+}
+
+export function basketballLateTimeoutBlocked(input: {
+  sport: unknown;
+  period: number;
+  gameClockRemainingSec: number;
+  lateTimeoutsUsed: number;
+}): boolean {
+  if (!basketballLateTimeoutCounts(input.sport, input.period, input.gameClockRemainingSec)) return false;
+  return input.lateTimeoutsUsed >= BASKETBALL_Q4_LATE_TIMEOUT_MAX;
+}
+
+/** Zoemer 30s vóór Q2, Q4 en elke verlenging (niet vóór de grote rust). */
+export function breakWarnsAtThirtySeconds(sport: unknown, endedPeriod: number): boolean {
+  const profile = getSportProfile(sport);
+  if (profile.id !== "BASKETBALL") return false;
+  const next = Math.floor(endedPeriod || 1) + 1;
+  if (next === 2 || next === profile.periodCount) return true;
+  return next > profile.periodCount && profile.overtimeDurationSec > 0;
+}
+
 export function sportHasMainClock(sport: unknown): boolean {
   return getSportProfile(sport).timerMode !== "NONE";
 }
@@ -474,11 +539,79 @@ export function matchBreakDurationSec(match: {
   sport: unknown;
   currentPeriod?: number | null;
   halfBreakSec?: number | null;
+  shortBreakSec?: number | null;
 }): number {
   const profile = getSportProfile(match.sport);
   const configured = Number(match.halfBreakSec);
   const main = Number.isFinite(configured) && configured > 0 ? configured : profile.breakDurationSec;
-  if (profile.mainBreakAfterPeriod == null) return Math.max(60, main);
+  const shortConfigured = Number(match.shortBreakSec);
+  const short =
+    Number.isFinite(shortConfigured) && shortConfigured > 0 ? shortConfigured : profile.shortBreakDurationSec;
+  if (profile.mainBreakAfterPeriod == null) return Math.max(30, main);
   const period = Math.max(1, Math.floor(Number(match.currentPeriod) || 1));
-  return Math.max(60, period === profile.mainBreakAfterPeriod ? main : profile.shortBreakDurationSec);
+  return Math.max(60, period === profile.mainBreakAfterPeriod ? main : short);
+}
+
+/** Pauze die start wanneer `endedPeriod` op 0 komt (Q1 → 2 min, Q2 → rust, Q4 → 2 min vóór OT). */
+export function basketballIntervalBreak(match: {
+  sport: unknown;
+  currentPeriod?: number | null;
+  halfBreakSec?: number | null;
+  shortBreakSec?: number | null;
+}): { seconds: number; warnAt30: boolean } | null {
+  if (getSportProfile(match.sport).id !== "BASKETBALL") return null;
+  const ended = Math.max(1, Math.floor(Number(match.currentPeriod) || 1));
+  return {
+    seconds: matchBreakDurationSec({ ...match, currentPeriod: ended }),
+    warnAt30: breakWarnsAtThirtySeconds(match.sport, ended),
+  };
+}
+
+/** Hoogste speelperiode voor deze wedstrijd (volleybal: best-of via `setsToWin`). */
+export function sportMaxPeriodForMatch(match: { sport: unknown; setsToWin?: number | null }): number {
+  const profile = getSportProfile(match.sport);
+  if (profile.hasSets) {
+    const raw = Number(match.setsToWin);
+    const setsToWin =
+      Number.isFinite(raw) && raw > 0 ? Math.min(5, Math.max(1, Math.floor(raw))) : profile.setsToWinMatch || 3;
+    return setsToWin * 2 - 1;
+  }
+  return sportMaxPeriod(match.sport);
+}
+
+export function timeoutLimitForMatch(match: {
+  sport: unknown;
+  currentPeriod: number;
+  timeoutsPerSet?: number | null;
+}): number {
+  const profile = getSportProfile(match.sport);
+  if (profile.hasSets) {
+    const raw = Number(match.timeoutsPerSet);
+    if (Number.isFinite(raw)) return Math.max(0, Math.min(6, Math.floor(raw)));
+  }
+  return profile.timeoutLimitForPeriod(match.currentPeriod);
+}
+
+export function timeoutDurationSecForMatch(match: {
+  sport: unknown;
+  timeoutDurationSec?: number | null;
+}): number {
+  const profile = getSportProfile(match.sport);
+  const raw = Number(match.timeoutDurationSec);
+  if (profile.hasSets && Number.isFinite(raw) && raw > 0) {
+    return Math.max(5, Math.min(180, Math.floor(raw)));
+  }
+  return profile.timeoutDurationSec;
+}
+
+export function technicalTimeoutDurationSecForMatch(match: {
+  sport: unknown;
+  technicalTimeoutDurationSec?: number | null;
+}): number {
+  const profile = getSportProfile(match.sport);
+  const raw = Number(match.technicalTimeoutDurationSec);
+  if (profile.hasSets && Number.isFinite(raw) && raw > 0) {
+    return Math.max(5, Math.min(180, Math.floor(raw)));
+  }
+  return 60;
 }

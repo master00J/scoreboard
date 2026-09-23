@@ -1,8 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
   externalCaptureCoversDisplay,
+  isBesideInterruptOverlay,
   isSponsorPlaybackInterrupted,
+  timeoutCoversDisplay,
 } from "./sponsor-playback-interruption";
+
+describe("isBesideInterruptOverlay", () => {
+  it("legt goal, kaart en één-off media over de L-frame-rotatie", () => {
+    expect(isBesideInterruptOverlay("GOAL", false)).toBe(true);
+    expect(isBesideInterruptOverlay("CARD", false)).toBe(true);
+    expect(isBesideInterruptOverlay("SPONSOR", true)).toBe(true);
+  });
+
+  it("toont geen overlay voor rotatie of één-off zonder geladen clip", () => {
+    expect(isBesideInterruptOverlay("SPONSOR", false)).toBe(false);
+    expect(isBesideInterruptOverlay("SPONSOR_ROTATION", true)).toBe(false);
+    expect(isBesideInterruptOverlay("MATCH", true)).toBe(false);
+  });
+});
 
 describe("isSponsorPlaybackInterrupted", () => {
   it.each([
@@ -34,6 +50,11 @@ describe("isSponsorPlaybackInterrupted", () => {
   it("pauzeert de rotatie zolang externe capture het scherm bedekt", () => {
     expect(isSponsorPlaybackInterrupted("SPONSOR_ROTATION", false, true)).toBe(true);
     expect(isSponsorPlaybackInterrupted("SPONSOR_ROTATION", false, false)).toBe(false);
+  });
+
+  it("pauzeert de rotatie tijdens een time-out", () => {
+    expect(isSponsorPlaybackInterrupted("SPONSOR_ROTATION", false, false, true)).toBe(true);
+    expect(isSponsorPlaybackInterrupted("SPONSOR_ROTATION", false, false, false)).toBe(false);
   });
 });
 
@@ -78,5 +99,14 @@ describe("externalCaptureCoversDisplay", () => {
   it("is veilig bij ontbrekende state", () => {
     expect(externalCaptureCoversDisplay(null)).toBe(false);
     expect(externalCaptureCoversDisplay(undefined)).toBe(false);
+  });
+});
+
+describe("timeoutCoversDisplay", () => {
+  it("telt een lopende time-out, behalve tijdens blackout", () => {
+    expect(timeoutCoversDisplay({ timeoutRunning: true, mode: "SPONSOR_ROTATION" })).toBe(true);
+    expect(timeoutCoversDisplay({ timeoutRunning: true, mode: "BLACKOUT" })).toBe(false);
+    expect(timeoutCoversDisplay({ timeoutRunning: false, mode: "SPONSOR_ROTATION" })).toBe(false);
+    expect(timeoutCoversDisplay(null)).toBe(false);
   });
 });

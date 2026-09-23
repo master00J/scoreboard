@@ -3,6 +3,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DisplayMediaStage } from "@/components/display-media-stage";
+import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import type { Playlist, PlaylistItemFull } from "@/lib/types";
@@ -85,7 +86,7 @@ function FallbackMediaSlide({
       <DisplayMediaStage>
         <div className="absolute inset-0 flex items-center justify-center bg-black">
           {media.type === "VIDEO" ? (
-            <video
+            <DisplayVideo
               ref={videoRef}
               key={src}
               src={src}
@@ -118,7 +119,7 @@ function FallbackMediaSlide({
   if (media.type === "VIDEO") {
     return (
       <DisplayMediaStage>
-        <video
+        <DisplayVideo
           ref={videoRef}
           key={src}
           src={src}
@@ -307,7 +308,7 @@ export function SponsorRotation({
   }
 
   return (
-    <div className="absolute inset-0 overflow-hidden bg-black contain-layout contain-paint">
+    <div className="absolute inset-0 overflow-hidden bg-black">
       <AnimatePresence mode="wait">
         <motion.div
           key={current.id + "-" + index}
@@ -321,6 +322,11 @@ export function SponsorRotation({
             item={current}
             objectFit={mediaObjectFit}
             mediaDiagEnabled={!showPreviewProgress}
+            onFinished={
+              current.media.type === "VIDEO"
+                ? () => setIndex((i) => (i + 1) % items.length)
+                : undefined
+            }
           />
         </motion.div>
       </AnimatePresence>
@@ -335,10 +341,12 @@ function MediaRenderer({
   item,
   objectFit,
   mediaDiagEnabled = false,
+  onFinished,
 }: {
   item: PlaylistItemFull;
   objectFit: "cover" | "contain";
   mediaDiagEnabled?: boolean;
+  onFinished?: () => void;
 }) {
   const src = mediaUrl(item.media.path);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -388,7 +396,7 @@ function MediaRenderer({
       <DisplayMediaStage>
         <div className="absolute inset-0 flex items-center justify-center bg-black">
           {item.media.type === "VIDEO" ? (
-            <video
+            <DisplayVideo
               ref={videoRef}
               key={src}
               src={src}
@@ -402,7 +410,11 @@ function MediaRenderer({
               onStalled={(e) => logDiag("stalled", e.currentTarget)}
               onWaiting={(e) => logDiag("waiting", e.currentTarget)}
               onSuspend={(e) => logDiag("suspend", e.currentTarget)}
-              onError={(e) => logDiag("error", e.currentTarget)}
+              onEnded={() => onFinished?.()}
+              onError={(e) => {
+                logDiag("error", e.currentTarget);
+                onFinished?.();
+              }}
             />
           ) : (
             <img
@@ -420,7 +432,7 @@ function MediaRenderer({
   if (item.media.type === "VIDEO") {
     return (
       <DisplayMediaStage>
-        <video
+        <DisplayVideo
           ref={videoRef}
           key={src}
           src={src}
@@ -433,7 +445,11 @@ function MediaRenderer({
           onStalled={(e) => logDiag("stalled", e.currentTarget)}
           onWaiting={(e) => logDiag("waiting", e.currentTarget)}
           onSuspend={(e) => logDiag("suspend", e.currentTarget)}
-          onError={(e) => logDiag("error", e.currentTarget)}
+          onEnded={() => onFinished?.()}
+          onError={(e) => {
+            logDiag("error", e.currentTarget);
+            onFinished?.();
+          }}
         />
       </DisplayMediaStage>
     );

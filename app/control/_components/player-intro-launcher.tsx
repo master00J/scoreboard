@@ -85,10 +85,16 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
   function launch(side: "home" | "away") {
     const selected = side === "home" ? currentMatch.homeTeam : currentMatch.awayTeam;
     setSelectedTeamId(selected.id);
+    const order = introOrders[selected.id] ?? defaultIntroOrder(currentMatch, selected);
+    const first = playersFromOrder(selected, order)[0];
+    if (!first) {
+      sendCommand({ type: "display:setMode", mode: "TEAM_INTRO" });
+      return;
+    }
     sendCommand({
       type: "display:setMode",
       mode: "PLAYER_INTRO",
-      meta: { activePlayerId: null },
+      meta: { activePlayerId: first.id },
     });
   }
 

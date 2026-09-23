@@ -11,7 +11,8 @@ import { useDisplayStore } from "@/lib/store";
 import { streamProgramPhase } from "@/lib/stream-program-layout";
 import type { Match, MediaItem } from "@/lib/types";
 import StreamProgramPage from "@/app/stream/page";
-import DisplayPage from "@/app/display/page";
+import { useDisplayPreviewFrame } from "@/lib/use-display-preview-frame";
+import { shouldPauseDisplayPreviewCapture } from "@/lib/preview-capture-modes";
 import { enumerateCameraCaptureOptions, type CameraCaptureOption } from "@/lib/enumerate-camera-capture-options";
 import {
   isInternalArenaCueCaptureName,
@@ -243,6 +244,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const { t } = useTranslation();
   const matchId = useDisplayStore((s) => s.state?.matchId);
   const timerRunning = useDisplayStore((s) => Boolean(s.state?.timerRunning));
+  const displayMode = useDisplayStore((s) => s.state?.mode);
   const { data: match } = useApi<Match>(matchId ? `/api/matches/${matchId}` : null);
   const { data: libraryMedia } = useApi<MediaItem[]>("/api/media");
   const programPhase = streamProgramPhase(match?.status);
@@ -270,6 +272,10 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [addBrowserUrl, setAddBrowserUrl] = useState("");
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const programBoxRef = useRef<HTMLDivElement>(null);
+  const hasDisplayInput = settings.videoInputs.some((item) => item.kind === "display");
+  const ledPreviewFrame = useDisplayPreviewFrame(
+    Boolean(active && hasDisplayInput && !shouldPauseDisplayPreviewCapture(displayMode)),
+  );
 
   useEffect(() => {
     setEditPhase(programPhase);
@@ -660,7 +666,13 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       );
     }
     if (input.kind === "display") {
-      return <DisplayPage embedInControl />;
+      if (ledPreviewFrame) {
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={ledPreviewFrame} alt="" className="absolute inset-0 h-full w-full object-contain" />
+        );
+      }
+      return <StudioMonitorEmpty>{t("shell.previewLoading")}</StudioMonitorEmpty>;
     }
     if (input.kind === "camera" && !status.running && !holdPreview) {
       return (
@@ -739,9 +751,16 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       );
     }
     if (input.kind === "display") {
+      const thumb = sourceThumbs[input.id];
+      if (thumb) {
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={thumb} alt="" className="absolute inset-0 h-full w-full object-contain" />
+        );
+      }
       return (
-        <div className="absolute inset-0 overflow-hidden">
-          <DisplayPage embedInControl />
+        <div className="absolute inset-0 grid place-items-center px-1 text-center text-[9px] text-white/40">
+          {t("livestream.videoInputsAddDisplay")}
         </div>
       );
     }
@@ -1051,8 +1070,27 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         </div>
       </div>
 
-      {studioTab === "live" ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-1.5">
+      {active ? (
+      <>
+      <div
+        className={studioTab === "live" ? "flex min-h-0 flex-1 flex-col gap-1.5" : undefined}
+        aria-hidden={studioTab !== "live"}
+        {...(studioTab !== "live" ? { inert: "" } : {})}
+        style={
+          studioTab === "live"
+            ? undefined
+            : {
+                position: "fixed",
+                inset: 0,
+                width: "100vw",
+                height: "100vh",
+                opacity: 0,
+                pointerEvents: "none",
+                overflow: "hidden",
+                zIndex: -1,
+              }
+        }
+      >
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center gap-2">
             <div
               ref={previewBoxRef}
@@ -1481,7 +1519,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
 
           {streamBar}
         </div>
-      ) : (
+      {studioTab !== "live" ? (
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
                 {studioTab === "setup" ? (
         <StudioSection
@@ -2207,7 +2245,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         </StudioDisclosure>
         ) : null}
         </div>
-      )}
+      ) : null}
+      </>
+      ) : null}
     </div>
   );
 }

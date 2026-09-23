@@ -21,7 +21,7 @@ import { useLicenseFeatures } from "@/lib/use-license-features";
 import { toast } from "@/components/ui/toast";
 import type { Match, MatchEvent, Player, MediaItem } from "@/lib/types";
 import type { DisplayModeT, MatchStatusT } from "@/lib/validation/commands";
-import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
+import { isLivePlayingMatchStatus, programmedDisplayMode } from "@/lib/live-cycle-settings";
 import { getSportProfile, sportMaxPeriod } from "@/lib/sports";
 import { applyLivePeriod, applyLivePhase } from "@/lib/live-phase-commands";
 import { tPeriodButton } from "@/lib/i18n/t-sport";
@@ -103,7 +103,6 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
         .sort((a, b) => a.title.localeCompare(b.title)),
     [mediaRaw],
   );
-  const [mediaPickId, setMediaPickId] = useState("");
   const [mediaSearch, setMediaSearch] = useState("");
   const [favoriteMediaIds, setFavoriteMediaIds] = useState<string[]>([]);
   const [quickLabelMediaId, setQuickLabelMediaId] = useState<string | null>(null);
@@ -277,34 +276,36 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
   })();
 
   async function playMediaItem(item: MediaItem) {
-    setMediaPickId(item.id);
     if (mode !== "SPONSOR") {
       quickMediaResumeMode =
         mode === "MATCH" || mode === "SPONSOR_ROTATION" || mode === "IDLE"
           ? mode
-          : livePlay && automaticSponsorsAllowed
-            ? "SPONSOR_ROTATION"
-            : "MATCH";
+          : programmedDisplayMode({
+              matchStatus: activeMatch?.status,
+              automaticSponsorsAllowed,
+              preferSponsorRotation: state?.preferSponsorRotation,
+            });
     }
-    if (quickMediaAutoReturnTimer) clearTimeout(quickMediaAutoReturnTimer);
-    await sendCommand({
+    if (quickMediaAutoReturnTimer) {
+      clearTimeout(quickMediaAutoReturnTimer);
+      quickMediaAutoReturnTimer = null;
+    }
+    const result = await sendCommand({
       type: "display:setMode",
       mode: "SPONSOR",
       meta: { activeMediaId: item.id },
     });
-    quickMediaAutoReturnTimer = setTimeout(() => {
-      quickMediaAutoReturnTimer = null;
-      const current = useDisplayStore.getState().state;
-      if (current?.mode !== "SPONSOR" || current.activeMediaId !== item.id) return;
-      void sendCommand({
-        type: "display:setMode",
-        mode: quickMediaResumeMode,
+    if (!result.ok) {
+      toast({
+        title: t("display.quickMediaFileFailed"),
+        description: result.error,
+        variant: "error",
       });
-    }, Math.max(1500, Math.max(1, item.durationSec) * 1000 + 250));
+    }
   }
 
-  async function playMediaOnce(requestedMediaId = mediaPickId) {
-    const item = mediaList.find((media) => media.id === requestedMediaId);
+  async function playMediaOnce(mediaId: string) {
+    const item = mediaList.find((media) => media.id === mediaId);
     if (!item) return;
     await playMediaItem(item);
   }
@@ -387,8 +388,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
       }
 
       reloadMedia();
-      setMediaPickId(item.id);
-      setMediaSearch(fileName);
+      setMediaSearch(item.title || fileName);
       toast({
         title: t("display.quickMediaFileAdded", { name: fileName }),
         variant: "success",
@@ -412,12 +412,17 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
     await sendCommand({
       type: "display:setMode",
       mode: quickMediaResumeMode,
+      meta: { activeMediaId: null },
     });
   }
 
   async function backToLiveProgram() {
     if (!automaticSponsorsAllowed) return;
-    await resumeProgrammedDisplay();
+    await sendCommand({
+      type: "display:setMode",
+      mode: "SPONSOR_ROTATION",
+      meta: { persistSponsorPreference: true, activeMediaId: null },
+    });
   }
 
   const primaryLive = mode === "SPONSOR_ROTATION";
@@ -579,10 +584,23 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
               title={p.hint}
               onClick={() => void applyPhase(p.status)}
             >
-              {t(`phases.${p.status}`)}
+              {p.status === "PREMATCH" ? t("phases.PREMATCH_SHORT") : t(`phases.${p.status}`)}
             </Button>
           )) : (
             <>
+              <Button
+                size="sm"
+                variant={
+                  activeMatch?.status === "PREMATCH" || activeMatch?.status === "SETUP"
+                    ? "default"
+                    : "outline"
+                }
+                disabled={!activeMatch}
+                title={t("phases.PREMATCH")}
+                onClick={() => void applyPhase("PREMATCH")}
+              >
+                {t("phases.PREMATCH_SHORT")}
+              </Button>
               {Array.from({ length: sportProfile.periodCount }, (_, index) => index + 1).map((period) => (
                 <Button
                   key={period}
@@ -621,16 +639,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
                   size="sm"
                   variant="default"
                   disabled={!activeMatch}
-                  onClick={() =>
-                    void (async () => {
-                      const r = await sendCommand({ type: "sport:resumePlay" });
-                      if (!r.ok) return;
-                      await sendCommand({
-                        type: "display:setMode",
-                        mode: automaticSponsorsAllowed ? "SPONSOR_ROTATION" : "MATCH",
-                      });
-                    })()
-                  }
+                  onClick={() => void sendCommand({ type: "sport:resumePlay" })}
                 >
                   {t("matchLive.resumePlay")}
                 </Button>
@@ -677,7 +686,13 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             size="lg"
             variant={onlyBoard ? "default" : "outline"}
             className="h-auto min-h-11 flex-col items-center justify-center gap-0.5 whitespace-normal px-2 py-1.5 text-center leading-snug"
-            onClick={() => void sendCommand({ type: "display:setMode", mode: "MATCH" })}
+            onClick={() =>
+              void sendCommand({
+                type: "display:setMode",
+                mode: "MATCH",
+                meta: { persistSponsorPreference: true },
+              })
+            }
           >
             <span className="text-pretty">{t("display.boardOnly")}</span>
             <span className="text-[10px] font-normal leading-snug opacity-80">
@@ -695,15 +710,10 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
       </section>
       </div>
 
-      <section className="order-1 space-y-2 border-t border-border pt-2.5">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <div>
-            <div className="text-xs font-semibold text-foreground/90">
-              {t("display.quickMediaTitle")}
-            </div>
-            <p className="mt-0.5 hidden text-[11px] leading-snug text-muted-foreground 2xl:block">
-              {t("display.quickMediaHint")}
-            </p>
+      <section className="order-1 flex flex-col gap-2 border-t border-border pt-2.5">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+          <div className="text-xs font-semibold text-foreground/90">
+            {t("display.quickMediaTitle")}
           </div>
           {oneOffMedia && (
             <Button
@@ -719,68 +729,12 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           )}
         </div>
 
-        {isElectron && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background/60 p-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="h-8 min-w-0 flex-1 gap-1.5 px-3 sm:flex-none"
-              disabled={pickingLocalMedia}
-              onClick={() => void chooseLocalMedia()}
-            >
-              <FolderOpen className="size-3.5" />
-              {pickingLocalMedia
-                ? t("display.quickMediaChoosingFile")
-                : t("display.quickMediaChooseFile")}
-            </Button>
-            <label className="ml-auto flex items-center gap-1.5 text-[10px] text-muted-foreground">
-              {t("display.quickMediaImageDuration")}
-              <Input
-                type="number"
-                min={1}
-                max={600}
-                value={quickImageDurationSec}
-                onChange={(event) =>
-                  setQuickImageDurationSec(clampQuickMediaDuration(Number(event.target.value)))
-                }
-                className="h-8 w-16 px-2 text-center text-xs tabular-nums text-foreground"
-                aria-label={t("display.quickMediaImageDuration")}
-              />
-              s
-            </label>
-            <p className="w-full text-[10px] leading-snug text-muted-foreground">
-              {t("display.quickMediaFileHint")}
-            </p>
-          </div>
-        )}
-
-        {oneOffMedia && (
-          <div className="flex items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-xs">
-            <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" />
-            <span className="min-w-0 flex-1 truncate font-semibold">
-              {(() => {
-                const playing = mediaList.find((media) => media.id === state?.activeMediaId);
-                return playing ? quickMediaButtonLabel(playing) : t("display.quickMediaPlaying");
-              })()}
-            </span>
-            <span className="shrink-0 text-[10px] text-muted-foreground">
-              {t("display.quickMediaAutoReturn")}
-            </span>
-          </div>
-        )}
-
-        <div className="rounded-xl border border-primary/35 bg-primary/5 p-2.5">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-bold text-foreground">
-                {t("display.quickMediaButtonsTitle")}
-              </div>
-              <p className="text-[10px] leading-snug text-muted-foreground">
-                {t("display.quickMediaButtonsHint")}
-              </p>
+        <div className="flex flex-col rounded-xl border border-primary/35 bg-primary/5 p-2">
+          <div className="mb-1.5 flex shrink-0 items-center justify-between gap-3">
+            <div className="text-xs font-bold text-foreground">
+              {t("display.quickMediaButtonsTitle")}
             </div>
-            <span className="rounded-full bg-primary/15 px-2 py-1 text-[10px] font-bold text-primary">
+            <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-bold text-primary">
               {favoriteMediaList.length}
             </span>
           </div>
@@ -789,18 +743,15 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
               {t("display.quickMediaButtonsEmpty")}
             </div>
           ) : (
-            <div className="grid max-h-44 grid-cols-1 gap-1.5 overflow-y-auto pr-0.5 sm:grid-cols-2">
+            <div className="grid auto-rows-min grid-cols-2 content-start gap-1.5 xl:grid-cols-3 2xl:grid-cols-4">
               {favoriteMediaList.map((media) => {
                 const active = oneOffMedia && state?.activeMediaId === media.id;
                 return (
-                  <div
-                    key={media.id}
-                    className="grid min-w-0 grid-cols-[minmax(0,1fr)_2rem] grid-rows-2 gap-1"
-                  >
+                  <div key={media.id} className="flex min-w-0 items-center gap-1">
                     <Button
                       type="button"
                       variant={active ? "default" : "outline"}
-                      className={`row-span-2 h-auto min-h-12 min-w-0 justify-start gap-2 px-3 text-left ${
+                      className={`h-10 min-w-0 flex-1 justify-start gap-1.5 px-2.5 text-left ${
                         active
                           ? "shadow-[0_0_0_2px_hsl(var(--primary)/0.2)]"
                           : "border-primary/45 bg-background hover:bg-primary/10"
@@ -808,14 +759,14 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
                       title={`${quickMediaButtonLabel(media)} — ${media.title}`}
                       onClick={() => void playMediaOnce(media.id)}
                     >
-                      <Play className="size-4 shrink-0 fill-current" />
-                      <span className="min-w-0 break-words text-sm font-black leading-tight">
+                      <Play className="size-3.5 shrink-0 fill-current" />
+                      <span className="min-w-0 truncate text-xs font-black leading-tight">
                         {quickMediaButtonLabel(media)}
                       </span>
                     </Button>
                     <button
                       type="button"
-                      className="grid size-8 place-items-center rounded-md border border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-primary"
+                      className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-background text-muted-foreground hover:border-primary/50 hover:text-primary"
                       aria-label={t("display.quickMediaRename")}
                       title={t("display.quickMediaRename")}
                       onClick={() => openQuickLabelEditor(media)}
@@ -824,7 +775,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
                     </button>
                     <button
                       type="button"
-                      className="grid size-8 place-items-center rounded-md border border-border bg-background text-destructive hover:border-destructive/50 hover:bg-destructive/10"
+                      className="grid size-8 shrink-0 place-items-center rounded-md border border-border bg-background text-destructive hover:border-destructive/50 hover:bg-destructive/10"
                       aria-label={t("display.quickMediaRemoveButton")}
                       title={t("display.quickMediaRemoveButton")}
                       onClick={() => requestQuickButtonRemoval(media)}
@@ -838,16 +789,31 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           )}
         </div>
 
+        {oneOffMedia && (
+          <div className="flex shrink-0 items-center gap-2 rounded-lg border border-primary/40 bg-primary/10 px-3 py-2 text-xs">
+            <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" />
+            <span className="min-w-0 flex-1 truncate font-semibold">
+              {(() => {
+                const playing = mediaList.find((media) => media.id === state?.activeMediaId);
+                return playing ? quickMediaButtonLabel(playing) : t("display.quickMediaPlaying");
+              })()}
+            </span>
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              {t("display.quickMediaAutoReturn")}
+            </span>
+          </div>
+        )}
+
         <Input
           type="search"
           placeholder={t("display.oneOffSearch")}
           value={mediaSearch}
           onChange={(event) => setMediaSearch(event.target.value)}
-          className="h-8"
+          className="h-8 shrink-0"
           aria-label={t("display.oneOffSearch")}
         />
 
-        <div className="max-h-44 overflow-y-auto rounded-lg border border-input bg-background">
+        <div className="max-h-28 shrink-0 overflow-y-auto rounded-lg border border-input bg-background">
           {quickMediaList.length === 0 ? (
             <div className="px-3 py-5 text-center text-xs text-muted-foreground">
               {mediaList.length === 0
@@ -891,7 +857,7 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
                     <button
                       type="button"
                       className="min-w-0 flex-1 rounded-md px-1 py-1 text-left hover:bg-secondary/60"
-                      onClick={() => setMediaPickId(media.id)}
+                      onClick={() => void playMediaOnce(media.id)}
                     >
                       <span className="block truncate text-xs font-semibold">
                         {quickMediaButtonLabel(media)}
@@ -922,6 +888,42 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
             {t("display.quickMediaSearchMore", { count: mediaList.length })}
           </p>
         )}
+
+        {isElectron && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-border bg-background/60 p-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-8 min-w-0 flex-1 gap-1.5 px-3 sm:flex-none"
+              disabled={pickingLocalMedia}
+              onClick={() => void chooseLocalMedia()}
+            >
+              <FolderOpen className="size-3.5" />
+              {pickingLocalMedia
+                ? t("display.quickMediaChoosingFile")
+                : t("display.quickMediaChooseFile")}
+            </Button>
+            <label className="ml-auto flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              {t("display.quickMediaImageDuration")}
+              <Input
+                type="number"
+                min={1}
+                max={600}
+                value={quickImageDurationSec}
+                onChange={(event) =>
+                  setQuickImageDurationSec(clampQuickMediaDuration(Number(event.target.value)))
+                }
+                className="h-8 w-16 px-2 text-center text-xs tabular-nums text-foreground"
+                aria-label={t("display.quickMediaImageDuration")}
+              />
+              s
+            </label>
+            <p className="w-full text-[10px] leading-snug text-muted-foreground">
+              {t("display.quickMediaFileHint")}
+            </p>
+          </div>
+        )}
       </section>
 
       <button
@@ -936,137 +938,6 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
         </span>
         <ChevronDown className={`size-4 transition-transform ${advancedOpen ? "rotate-180" : ""}`} />
       </button>
-
-      {false && advancedOpen && (
-      <section className="space-y-2 border-t border-border pt-4">
-        <div className="text-xs font-medium text-foreground/90">{t("display.quickLaunchTitle")}</div>
-        <p className="text-[11px] text-muted-foreground leading-snug">
-          {t("display.quickLaunchHint")}
-        </p>
-        {quickLaunchMedia.length === 0 ? (
-          <p className="text-[11px] text-muted-foreground rounded-md border border-dashed border-border px-3 py-2">
-            {t("display.quickLaunchEmpty")}
-          </p>
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            {quickLaunchMedia.map((m) => {
-              const playing = oneOffMedia && state?.activeMediaId === m.id;
-              return (
-                <Button
-                  key={m.id}
-                  type="button"
-                  size="lg"
-                  variant={playing ? "default" : "outline"}
-                  className="h-auto min-h-14 flex-col items-stretch justify-center gap-0.5 px-2 py-2 whitespace-normal text-left leading-tight border-amber-500/50 bg-amber-500/10 hover:bg-amber-500/20"
-                  onClick={() => void playMediaId(m.id)}
-                >
-                  <span className="text-[10px] uppercase tracking-wide text-amber-800 dark:text-amber-300">
-                    {m.type === "VIDEO" ? t("media.typeVideo") : t("media.typeImage")}
-                    {playing ? ` · ${t("display.oneOffPlayingShort")}` : ""}
-                  </span>
-                  <span className="text-sm font-semibold break-words text-foreground">{m.title}</span>
-                </Button>
-              );
-            })}
-          </div>
-        )}
-        {oneOffMedia ? (
-          <Button
-            type="button"
-            variant="destructive"
-            className="w-full"
-            onClick={() => void resumeProgrammedDisplay()}
-          >
-            {t("display.oneOffStop")}
-          </Button>
-        ) : null}
-      </section>
-      )}
-
-      <section className="space-y-2 border-t border-border pt-4">
-        <div className="text-xs font-medium text-foreground/90">{t("display.oneOffTitle")}</div>
-        <p className="text-[11px] text-muted-foreground leading-snug">
-          {t("display.oneOffPick")}
-        </p>
-        <div className="space-y-2">
-          <Input
-            type="search"
-            placeholder={t("display.oneOffSearch")}
-            value={mediaSearch}
-            onChange={(e) => setMediaSearch(e.target.value)}
-            className="h-10"
-            aria-label={t("display.oneOffSearch")}
-          />
-          <div className="max-h-44 overflow-y-auto rounded-md border border-input bg-background">
-            {filteredMediaList.length === 0 ? (
-              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
-                {mediaList.length === 0
-                  ? "Nog geen media."
-                  : "Geen resultaten."}
-              </div>
-            ) : (
-              <ul className="divide-y divide-border">
-                {filteredMediaList.map((m) => (
-                  <li key={m.id}>
-                    <button
-                      type="button"
-                      className={`w-full text-left px-3 py-2.5 text-sm transition-colors hover:bg-secondary/80 ${
-                        mediaPickId === m.id ? "bg-secondary font-medium" : ""
-                      }`}
-                      onClick={() => setMediaPickId(m.id)}
-                    >
-                      <span className="text-muted-foreground text-xs mr-2">
-                        {m.type === "VIDEO" ? "Video" : "Beeld"}
-                      </span>
-                      <span className="break-words">{m.title}</span>
-                      <span className="text-muted-foreground text-xs ml-1">· {m.durationSec}s</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          {mediaPickId && (
-            <p className="text-[11px] text-muted-foreground">
-              <strong className="text-foreground">
-                {mediaList.find((m) => m.id === mediaPickId)?.title ?? "—"}
-              </strong>
-              <button
-                type="button"
-                className="ml-2 underline text-foreground/80 hover:text-foreground"
-                onClick={() => setMediaPickId("")}
-              >
-                {t("common.clear")}
-              </button>
-            </p>
-          )}
-        </div>
-        {oneOffMedia ? (
-          <p className="text-[11px] text-amber-700/90 dark:text-amber-400/90 leading-snug">
-            {t("display.oneOffPlaying")}
-          </p>
-        ) : null}
-        <div className="flex flex-col sm:flex-row gap-2">
-          <Button
-            type="button"
-            className="sm:flex-1"
-            disabled={!mediaPickId}
-            variant={oneOffMedia ? "default" : "secondary"}
-            onClick={() => void playMediaOnce()}
-          >
-            {t("display.oneOffShow")}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            className="sm:flex-1"
-            disabled={!oneOffMedia}
-            onClick={() => void resumeProgrammedDisplay()}
-          >
-            {t("display.oneOffStop")}
-          </Button>
-        </div>
-      </section>
 
       {advancedOpen && isElectron && (
         <Button

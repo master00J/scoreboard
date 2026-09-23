@@ -83,6 +83,13 @@ export type Match = {
   periodDurationSec: number;
   homeTimeouts: number;
   awayTimeouts: number;
+  /** Time-outs in Q4 bij 2:00 of minder. */
+  homeLateTimeouts?: number;
+  awayLateTimeouts?: number;
+  /** FIBA wisselend balbezit. */
+  possessionArrow?: "home" | "away" | null;
+  /** Korte pauze tussen quarters, in seconden. */
+  shortBreakSec?: number;
   homeFouls: number;
   awayFouls: number;
   homeSets: number;
@@ -91,8 +98,18 @@ export type Match = {
   servingSide?: "home" | "away" | null;
   /** Volleybal: afgesloten sets, bv. [{home:25,away:23}]. */
   setHistory?: { home: number; away: number }[];
-  /** Volleybal: technical timeout bij 8 en 16 in sets 1–4. */
+  /** Volleybal: gewonnen sets voor matchwinst (3 = best-of-5). */
+  setsToWin?: number;
+  pointsToWinSet?: number;
+  pointsToWinDecider?: number;
+  winBy?: number;
+  /** Volleybal: technical timeout (niet meer in FIVB; optioneel per competitie). */
   technicalTimeoutsEnabled?: boolean;
+  /** JSON number[] — scores waarop een TTO start, bv. [8,16]. */
+  technicalTimeoutScoresJson?: string | null;
+  technicalTimeoutDurationSec?: number;
+  timeoutsPerSet?: number;
+  timeoutDurationSec?: number;
   /**
    * Prematch: lengte van het herhalende sponsor-slotrooster (seconden).
    * 0 = automatisch: ongeveer de som van geplande «voor wedstrijd»-seconden per sponsor (min. 60).

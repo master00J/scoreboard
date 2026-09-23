@@ -110,6 +110,10 @@ export const CommandSchema = z.discriminatedUnion("type", [
     type: z.literal("sport:setServing"),
     side: z.enum(["home", "away"]),
   }),
+  z.object({
+    type: z.literal("sport:setPossession"),
+    side: z.enum(["home", "away"]),
+  }),
   z.object({ type: z.literal("sport:resumePlay") }),
   z.object({
     type: z.literal("timeout:start"),
@@ -146,7 +150,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
       .object({
         activePlayerId: z.string().nullable().optional(),
         activeMediaId: z.string().nullable().optional(),
-        note: z.string().nullable().optional(),
+        persistSponsorPreference: z.boolean().optional(),
       })
       .optional(),
   }),

@@ -6,7 +6,7 @@ import { useDisplayStore } from "@/lib/store";
 import { tMatchStatus } from "@/lib/i18n/t-phase";
 import { useLiveTimerSeconds } from "@/lib/use-timer";
 import { useWallClockMs } from "@/lib/use-wall-clock-tick";
-import type { Match, Playlist, PlaylistSlot, Sponsor, SponsorSection } from "@/lib/types";
+import type { Match, Playlist, PlaylistSlot, Sponsor, SponsorSection, MediaItem } from "@/lib/types";
 import { filterMediaForSponsorSpreadSection } from "@/lib/sponsor-match-spread-media";
 import { buildSponsorRotationMediaList } from "@/lib/sponsor-playback-order";
 import {
@@ -14,26 +14,25 @@ import {
   buildSponsorSlotMap,
   halfWindowElapsed,
   sectionSpreadClock,
+  sectionPlayheadExhausted,
   holdSecondsCappedBySlotRun,
   lookupSponsorAtSecond,
   postmatchSpreadTimelineSeconds,
   prematchSpreadTimelineSeconds,
   prematchSpreadClock,
   resolveSponsorSpreadPhase,
-  sponsorScreenSecondsConsumed,
-  sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
 import { computePrematchSpreadTiming } from "@/lib/prematch-spread-timing";
 import { sponsorRepeatBudgetCyclesFromThemeJson } from "@/lib/scoreboard-theme";
 import {
   ledgerActiveClipStillLiveForMatchSegment,
+  sponsorLedgerMatchesSegment,
   sponsorTelemetryActiveClipElapsedSec,
-  sponsorTelemetryConsumedSec,
   sponsorTelemetrySegmentKey,
 } from "@/lib/sponsor-telemetry";
 import {
+  applySponsorBudgetCapToSpreadPhase,
   allActiveSponsorSectionBudgetsExhausted,
-  hasSponsorsForSection,
   secondsUntilNextSponsorSlot,
   sectionForStatus,
   sponsorBesideShowsPanel,
@@ -46,8 +45,22 @@ import {
   type SponsorScheduleClock,
 } from "@/lib/sponsor-schedule-clock";
 import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
+import { periodStartHoldsFullScoreboard } from "@/lib/live-cycle-settings";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
-import { externalCaptureCoversDisplay } from "@/lib/sponsor-playback-interruption";
+import { isSponsorPlaybackInterrupted, externalCaptureCoversDisplay, timeoutCoversDisplay } from "@/lib/sponsor-playback-interruption";
+import { useResolvedSponsorWindow } from "@/lib/use-resolved-sponsor-window";
+import { getSportProfile } from "@/lib/sports";
+import {
+  activeSponsorsForWindow,
+  buildWindowSponsorSlotMap,
+  hasSponsorsForSectionOrWindow,
+  sponsorMatchClockFrozen,
+  sponsorWallPlayTimelineComplete,
+  sponsorWindowBudgetResolver,
+  windowScheduleElapsed,
+  windowTimelineSeconds,
+} from "@/lib/sponsor-windows";
+import { sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 
 export type SponsorPhaseHudModel =
   | { kind: "inactive" }
@@ -108,32 +121,32 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
   /** Externe capture bedekt het stadionscherm: rotatie pauzeert, budget loopt niet door. */
   const captureCovers = externalCaptureCoversDisplay(state);
+  const timeoutCovers = timeoutCoversDisplay(state);
 
-  /** Zelfde onderbrekings-set als `display/page.tsx` `sponsorInterrupted` (incl. geplande cue). */
+  /** Zelfde onderbrekings-set als het stadionscherm (incl. eenmalige SPONSOR-clip). */
   const sponsorInterrupted = useMemo(
-    () =>
-      activeScheduledCue != null ||
-      captureCovers ||
-      mode === "GOAL" ||
-      mode === "GOAL_INTRO_VIDEO" ||
-      mode === "GOAL_PLAYER_VIDEO" ||
-      mode === "SUBSTITUTION" ||
-      mode === "CARD" ||
-      mode === "HALFTIME" ||
-      mode === "FULLTIME",
-    [activeScheduledCue, captureCovers, mode],
+    () => isSponsorPlaybackInterrupted(mode, activeScheduledCue != null, captureCovers, timeoutCovers),
+    [activeScheduledCue, captureCovers, timeoutCovers, mode],
   );
 
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [mediaLibrary, setMediaLibrary] = useState<MediaItem[]>([]);
   const [playlists, setPlaylists] =
     useState<Record<PlaylistSlot, Playlist | null>>(EMPTY_PLAYLISTS);
 
   useEffect(() => {
     fetch("/api/sponsors")
       .then((r) => r.json())
-      .then((list: Sponsor[]) => setSponsors(list ?? []))
+      .then((list: Sponsor[]) => setSponsors(Array.isArray(list) ? list : []))
       .catch(() => setSponsors([]));
   }, [state?.updatedAt]);
+
+  useEffect(() => {
+    fetch("/api/media")
+      .then((r) => r.json())
+      .then((list: MediaItem[]) => setMediaLibrary(Array.isArray(list) ? list : []))
+      .catch(() => setMediaLibrary([]));
+  }, [state?.updatedAt, state?.activeMediaId, sponsorLedger?.updatedAtMs]);
 
   /**
    * Detecteer of de display geconfigureerd is om sponsorbudgetten oneindig te herhalen.
@@ -158,6 +171,10 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     fetch("/api/playlists")
       .then((r) => r.json())
       .then((list: Playlist[]) => {
+        if (!Array.isArray(list)) {
+          setPlaylists(EMPTY_PLAYLISTS);
+          return;
+        }
         const map: Record<PlaylistSlot, Playlist | null> = { ...EMPTY_PLAYLISTS };
         for (const p of list) {
           map[p.slot as PlaylistSlot] = p;
@@ -174,6 +191,16 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     !!state?.sponsorPeriodBreakPending,
     sponsorLayoutsJson,
   );
+  const matchClockFrozen = sponsorMatchClockFrozen(sponsorWindow, matchTimerRunning);
+  const wallClockPlay = !!sponsorWindow && !sponsorWindow.footballEngine && sponsorWindow.clock === "wall";
+  const rotationBudgetSeconds = useMemo(() => {
+    if (!match || !sponsorWindow) return undefined;
+    return sponsorWindowBudgetResolver(sponsorWindow, match.sport);
+  }, [match, sponsorWindow]);
+  const hasWindowSponsors =
+    !!match &&
+    !!sponsorWindow &&
+    activeSponsorsForWindow(sponsors, sponsorWindow, match.sport).length > 0;
   const periodBreakActive =
     sponsorWindow?.id === "periodBreak" &&
     mode === "SPONSOR_ROTATION" &&
@@ -186,8 +213,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       !!state &&
       sponsorRotationBesideScoreboard(match.status) &&
       !periodBreakActive &&
-      sponsorBesideShowsPanel(match, sponsors, playlists),
-    [match, state, sponsors, playlists, periodBreakActive],
+      sponsorBesideShowsPanel(match, sponsors, playlists, hasWindowSponsors),
+    [match, state, sponsors, playlists, periodBreakActive, hasWindowSponsors],
   );
 
   const liveAutoHalftime = useMemo(
@@ -197,13 +224,23 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         !!state &&
         mode === "SPONSOR_ROTATION" &&
         match.status === "HALF_TIME" &&
-        sponsorHalftimeShowsPanel(match, sponsors, playlists)),
-    [match, state, mode, sponsors, playlists, periodBreakActive],
+        sponsorHalftimeShowsPanel(match, sponsors, playlists, hasWindowSponsors)),
+    [match, state, mode, sponsors, playlists, periodBreakActive, hasWindowSponsors],
   );
 
   const prematchSpreadActive = useMemo(() => {
     if (!state) return false;
-    if (activeSponsorsForSection(sponsors, "prematch").length === 0) return false;
+    if (
+      !hasSponsorsForSectionOrWindow(
+        sponsors,
+        "prematch",
+        match?.status,
+        sponsorWindow,
+        match?.sport,
+      )
+    ) {
+      return false;
+    }
     return !!(
       mode === "SPONSOR_ROTATION" &&
       match &&
@@ -211,14 +248,20 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       !liveAutoHalftime &&
       sectionForStatus(match.status) === "prematch"
     );
-  }, [state, mode, match, sponsors, liveAutoHalftime]);
+  }, [state, mode, match, sponsors, liveAutoHalftime, sponsorWindow]);
 
   const postmatchSpreadActive = useMemo(() => {
     if (!state || !match) return false;
     if (mode !== "SPONSOR_ROTATION") return false;
     if (sectionForStatus(match.status) !== "postmatch") return false;
-    return activeSponsorsForSection(sponsors, "postmatch").length > 0;
-  }, [state, match, mode, sponsors]);
+    return hasSponsorsForSectionOrWindow(
+      sponsors,
+      "postmatch",
+      match.status,
+      sponsorWindow,
+      match.sport,
+    );
+  }, [state, match, mode, sponsors, sponsorWindow]);
 
   const postmatchEpochRef = useRef<number | null>(null);
   useEffect(() => {
@@ -269,32 +312,35 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       const active = activeSponsorsForSection(sponsors, "match", match.status);
       return buildSponsorSlotMap(active, "match", Math.max(60, match.halfDurationSec), match.status);
     }
-    const active = activeSponsorsForWindow(sponsors, sponsorWindow, match.sport);
-    return buildSponsorSlotMap(
-      active,
-      sponsorWindow.section,
-      windowTimelineSeconds(sponsorWindow, match, sponsors),
-      sponsorWindow.mediaStatus,
-    );
+    return buildWindowSponsorSlotMap(sponsors, sponsorWindow, match);
   }, [match, sponsorWindow, sponsors]);
 
   const sponsorSlotMapHalftime = useMemo(() => {
     if (!match) return [] as (string | null)[];
+    if (sponsorWindow && sponsorWindow.section === "halftime") {
+      return buildWindowSponsorSlotMap(sponsors, sponsorWindow, match);
+    }
     const active = activeSponsorsForSection(sponsors, "halftime");
     const H = Math.max(60, match.halfBreakSec);
     return buildSponsorSlotMap(active, "halftime", H);
-  }, [match?.id, match?.halfBreakSec, sponsors]);
+  }, [match, sponsorWindow, sponsors]);
 
   const sponsorSlotMapPrematch = useMemo(() => {
+    if (match && sponsorWindow && sponsorWindow.section === "prematch") {
+      return buildWindowSponsorSlotMap(sponsors, sponsorWindow, match);
+    }
     const active = activeSponsorsForSection(sponsors, "prematch");
     const H = prematchSpreadTimelineSeconds(match ?? undefined, sponsors);
     return buildSponsorSlotMap(active, "prematch", H);
-  }, [sponsors, match?.id, match?.prematchSpreadWindowSec]);
+  }, [sponsors, match, sponsorWindow]);
 
   const sponsorSlotMapPostmatch = useMemo(() => {
+    if (match && sponsorWindow && sponsorWindow.section === "postmatch") {
+      return buildWindowSponsorSlotMap(sponsors, sponsorWindow, match);
+    }
     const active = activeSponsorsForSection(sponsors, "postmatch");
     return buildSponsorSlotMap(active, "postmatch", postmatchSpreadTimelineSeconds(sponsors));
-  }, [sponsors, match?.id]);
+  }, [sponsors, match, sponsorWindow]);
 
   const tInterruptFrozen = useRef(0);
   const sponsorPhaseHangRef = useRef<{
@@ -365,16 +411,18 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     if (sponsorBesideConfigured && match && sponsorWindow) {
       /** Zelfde regels als display: pauze/reset + sync bij late inschakeling. */
       const football = sponsorWindow.footballEngine;
-      const matchClockFrozen = football
-        ? !matchTimerRunning
-        : sponsorWindow.clock !== "wall" && !matchTimerRunning;
       const rotationActive = mode === "SPONSOR_ROTATION";
       const scheduleFrozen = !rotationActive || sponsorInterrupted || matchClockFrozen;
       const hangFrozen = sponsorInterrupted || matchClockFrozen;
 
+      const wallElapsedSec = sponsorPlayWallElapsedSec({
+        state,
+        localEpochMs: playWallEpochRef.current,
+        nowMs: now,
+      });
       const tLive = football
         ? halfWindowElapsed(elapsed, match.status, match.halfDurationSec)
-        : windowPlayElapsed({
+        : windowScheduleElapsed({
             window: sponsorWindow,
             elapsedSec: elapsed,
             status: match.status,
@@ -382,11 +430,10 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
             periodDurationSec: match.periodDurationSec,
             currentPeriod: match.currentPeriod,
             periodCount: getSportProfile(match.sport).periodCount,
-            wallElapsedSec:
-              playWallEpochRef.current != null ? (now - playWallEpochRef.current) / 1000 : 0,
+            wallElapsedSec,
           });
       if (rotationActive) {
-        tInterruptFrozen.current = tLive;
+        if (!hangFrozen) tInterruptFrozen.current = tLive;
         if (!matchSponsorRotationWasActiveRef.current) {
           sponsorScheduleClockRef.current.initialized = false;
           sponsorPhaseHangRef.current = null;
@@ -394,52 +441,104 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       }
       matchSponsorRotationWasActiveRef.current = rotationActive;
 
+      const matchH = football
+        ? Math.max(60, match.halfDurationSec)
+        : windowTimelineSeconds(sponsorWindow, match, sponsors);
+      const section = football ? sectionForStatus(match.status) : sponsorWindow.section;
       const t = sponsorScheduleTime(
         sponsorScheduleClockRef,
         football ? `${match.id}:${match.status}:match` : `${match.id}:${sponsorWindow.id}:match`,
         rotationActive ? tLive : tInterruptFrozen.current,
         scheduleFrozen,
-        football ? Math.max(60, match.halfDurationSec) : windowTimelineSeconds(sponsorWindow, match, sponsors),
+        matchH,
       );
       if (sponsorScheduleClockRef.current.hardReset) {
         sponsorPhaseHangRef.current = null;
       }
+      if (
+        sponsorWallPlayTimelineComplete({
+          clock: sponsorWindow.clock,
+          section: sponsorWindow.section,
+          cycleBudgetForever,
+          wallElapsedSec: t,
+          timelineSec: matchH,
+        })
+      ) {
+        sponsorPhaseHangRef.current = null;
+        return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+      }
       const v = lookupSponsorAtSecond(sponsorSlotMapMatch, t);
-      const section = football ? sectionForStatus(match.status) : sponsorWindow.section;
-      return resolveSponsorSpreadPhase(v, sponsors, section, football ? match.status : sponsorWindow.mediaStatus, now, sponsorPhaseHangRef, {
+      if (
+        periodStartHoldsFullScoreboard({
+          matchStatus: match.status,
+          halfElapsedSec: tLive,
+          timerRunning: matchTimerRunning,
+          wallClockPlay,
+        })
+      ) {
+        sponsorPhaseHangRef.current = null;
+        return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+      }
+      const base = resolveSponsorSpreadPhase(v, sponsors, section, football ? match.status : sponsorWindow.mediaStatus, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapMatch,
         slotT: t,
         interrupted: hangFrozen,
       });
+      if (sponsorInterrupted) return base;
+      const capped = applySponsorBudgetCapToSpreadPhase(base, {
+        cycleBudgetForever,
+        sponsors,
+        section,
+        matchStatus: football ? match.status : sponsorWindow.mediaStatus,
+        slotMap: sponsorSlotMapMatch,
+        slotT: t,
+        sponsorLedger,
+        ledgerMatchesSegment: sponsorLedgerMatchesSegment(match, section, sponsorLedger),
+        nowMs: now,
+        budgetOf: rotationBudgetSeconds,
+      });
+      if (capped.phase === "scoreboard") sponsorPhaseHangRef.current = null;
+      return capped;
     }
     if (liveAutoHalftime && match && rustEpochRef.current != null) {
       const H = Math.max(60, match.halfBreakSec);
-      const { t: rawT, timelineComplete } = sectionSpreadClock(
-        (now - rustEpochRef.current) / 1000,
-        H,
-        cycleBudgetForever,
-      );
-      /** Zelfde regel als het display: rusttijd om ⇒ rooster klaar. */
-      if (timelineComplete) {
-        sponsorPhaseHangRef.current = null;
-        return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
-      }
+      const rawElapsed = (now - rustEpochRef.current) / 1000;
+      const { t: loopT } = sectionSpreadClock(rawElapsed, H, true);
       const t = sponsorScheduleTime(
         halftimeScheduleClockRef,
         `${match.id}:${match.status}:halftime`,
-        rawT,
+        cycleBudgetForever ? loopT : rawElapsed,
         sponsorInterrupted,
         H,
       );
+      if (sectionPlayheadExhausted(t, H, cycleBudgetForever)) {
+        sponsorPhaseHangRef.current = null;
+        return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+      }
       if (halftimeScheduleClockRef.current.hardReset) {
         sponsorPhaseHangRef.current = null;
       }
       const v = lookupSponsorAtSecond(sponsorSlotMapHalftime, t);
-      return resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
+      const base = resolveSponsorSpreadPhase(v, sponsors, "halftime", undefined, now, sponsorPhaseHangRef, {
         slotMap: sponsorSlotMapHalftime,
         slotT: t,
         interrupted: sponsorInterrupted,
       });
+      if (sponsorInterrupted) return base;
+      const capped = applySponsorBudgetCapToSpreadPhase(base, {
+        cycleBudgetForever,
+        sponsors,
+        section: "halftime",
+        matchStatus: undefined,
+        slotMap: sponsorSlotMapHalftime,
+        slotT: t,
+        sponsorLedger,
+        ledgerMatchesSegment: sponsorLedgerMatchesSegment(match, "halftime", sponsorLedger),
+        nowMs: now,
+        budgetOf: rotationBudgetSeconds,
+      });
+      if (capped.phase === "scoreboard") sponsorPhaseHangRef.current = null;
+      return capped;
     }
     sponsorPhaseHangRef.current = null;
     return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
@@ -456,8 +555,17 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     phaseTick,
     sponsorInterrupted,
     matchTimerRunning,
+    matchClockFrozen,
+    wallClockPlay,
     wallNowMs,
     sponsorWindow,
+    cycleBudgetForever,
+    sponsorLedger,
+    state?.liveWallCueOrigin,
+    state?.liveWallCueBlock,
+    state?.liveWallCueFrozenSec,
+    state?.matchId,
+    rotationBudgetSeconds,
   ]);
 
   const prematchDistView = useMemo(() => {
@@ -490,13 +598,28 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       prematchPhaseHangRef.current = null;
     }
     const v = lookupSponsorAtSecond(sponsorSlotMapPrematch, t);
-    return resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
+    const base = resolveSponsorSpreadPhase(v, sponsors, "prematch", undefined, now, prematchPhaseHangRef, {
       slotMap: sponsorSlotMapPrematch,
       slotT: t,
       interrupted: sponsorInterrupted,
     });
+    if (sponsorInterrupted) return base;
+    const capped = applySponsorBudgetCapToSpreadPhase(base, {
+      cycleBudgetForever,
+      sponsors,
+      section: "prematch",
+      matchStatus: undefined,
+      slotMap: sponsorSlotMapPrematch,
+      slotT: t,
+      sponsorLedger,
+      ledgerMatchesSegment: match ? sponsorLedgerMatchesSegment(match, "prematch", sponsorLedger) : false,
+      nowMs: now,
+      budgetOf: rotationBudgetSeconds,
     });
-  }, [prematchSpreadActive, match, sponsorSlotMapPrematch, sponsors, phaseTick, wallNowMs, sponsorInterrupted]);
+    if (capped.phase === "scoreboard") prematchPhaseHangRef.current = null;
+    return capped;
+    });
+  }, [prematchSpreadActive, match, sponsorSlotMapPrematch, sponsors, phaseTick, wallNowMs, sponsorInterrupted, cycleBudgetForever, sponsorLedger, rotationBudgetSeconds]);
 
   const postmatchDistView = useMemo(() => {
     const tickKey = `${phaseTick}|${Number(postmatchSpreadActive)}|${Number(sponsorInterrupted)}|${match?.id}`;
@@ -506,31 +629,43 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
     const H = postmatchSpreadTimelineSeconds(sponsors);
-    const { t: rawT, timelineComplete } = sectionSpreadClock(
-      (now - postmatchEpochRef.current) / 1000,
-      H,
-      cycleBudgetForever,
-    );
-    if (timelineComplete) {
-      postmatchPhaseHangRef.current = null;
-      return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
-    }
+    const rawElapsed = (now - postmatchEpochRef.current) / 1000;
+    const { t: loopT } = sectionSpreadClock(rawElapsed, H, true);
     const t = sponsorScheduleTime(
       postmatchScheduleClockRef,
       `${match.id}:postmatch`,
-      rawT,
+      cycleBudgetForever ? loopT : rawElapsed,
       sponsorInterrupted,
       H,
     );
+    if (sectionPlayheadExhausted(t, H, cycleBudgetForever)) {
+      postmatchPhaseHangRef.current = null;
+      return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
+    }
     if (postmatchScheduleClockRef.current.hardReset) {
       postmatchPhaseHangRef.current = null;
     }
     const v = lookupSponsorAtSecond(sponsorSlotMapPostmatch, t);
-    return resolveSponsorSpreadPhase(v, sponsors, "postmatch", undefined, now, postmatchPhaseHangRef, {
+    const base = resolveSponsorSpreadPhase(v, sponsors, "postmatch", undefined, now, postmatchPhaseHangRef, {
       slotMap: sponsorSlotMapPostmatch,
       slotT: t,
       interrupted: sponsorInterrupted,
     });
+    if (sponsorInterrupted) return base;
+    const capped = applySponsorBudgetCapToSpreadPhase(base, {
+      cycleBudgetForever,
+      sponsors,
+      section: "postmatch",
+      matchStatus: undefined,
+      slotMap: sponsorSlotMapPostmatch,
+      slotT: t,
+      sponsorLedger,
+      ledgerMatchesSegment: sponsorLedgerMatchesSegment(match, "postmatch", sponsorLedger),
+      nowMs: now,
+      budgetOf: rotationBudgetSeconds,
+    });
+    if (capped.phase === "scoreboard") postmatchPhaseHangRef.current = null;
+    return capped;
     });
   }, [
     postmatchSpreadActive,
@@ -541,6 +676,8 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     wallNowMs,
     sponsorInterrupted,
     cycleBudgetForever,
+    sponsorLedger,
+    rotationBudgetSeconds,
   ]);
 
   return useMemo(() => {
@@ -549,8 +686,14 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     if (
       sponsorBesideConfigured &&
       match &&
-      sponsorBesideShowsPanel(match, sponsors, playlists) &&
-      !hasSponsorsForSection(sponsors, sectionForStatus(match.status), match.status)
+      sponsorBesideShowsPanel(match, sponsors, playlists, hasWindowSponsors) &&
+      !hasSponsorsForSectionOrWindow(
+        sponsors,
+        sectionForStatus(match.status),
+        match.status,
+        sponsorWindow,
+        match.sport,
+      )
     ) {
       return {
         kind: "playlist_only" as const,
@@ -561,12 +704,55 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     if (
       liveAutoHalftime &&
       match &&
-      sponsorHalftimeShowsPanel(match, sponsors, playlists) &&
-      !hasSponsorsForSection(sponsors, "halftime")
+      sponsorHalftimeShowsPanel(match, sponsors, playlists, hasWindowSponsors) &&
+      !hasSponsorsForSectionOrWindow(sponsors, "halftime", match.status, sponsorWindow, match.sport)
     ) {
       return {
         kind: "playlist_only" as const,
         label: tUi("sponsors.playlistHalftime"),
+      };
+    }
+
+    if (activeScheduledCue && match && !captureCovers) {
+      const cueMedia = activeScheduledCue.media;
+      const cueLabel = mediaLabel(cueMedia.title, cueMedia.path);
+      const cueSponsor =
+        (cueMedia.sponsorId
+          ? sponsors.find((s) => s.id === cueMedia.sponsorId)?.name
+          : null) ?? cueMedia.sponsorName ?? null;
+      const section = sectionForStatus(match.status);
+      const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, section);
+      const ledgerClip =
+        segmentKey &&
+        sponsorLedger &&
+        sponsorLedger.matchId === match.id &&
+        sponsorLedger.segmentKey === segmentKey
+          ? sponsorLedger.activeClip
+          : null;
+      const confirmed = ledgerClip?.mediaId === cueMedia.id;
+      let sponsorClipProgress: number | null = null;
+      let clipRemainingSec: number | null = null;
+      if (confirmed && ledgerClip) {
+        const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ledgerClip, now);
+        const totalSec = Math.max(0.1, ledgerClip.expectedPlaySec || cueMedia.durationSec || 0.1);
+        sponsorClipProgress = Math.min(1, elapsedSec / totalSec);
+        clipRemainingSec = Math.max(0, totalSec - elapsedSec);
+      }
+      return {
+        kind: "roster" as const,
+        contextLabel: tMatchStatus(tUi, match.status, match.sport),
+        phase: "sponsor" as const,
+        sponsorName: cueSponsor,
+        mediaTitle: cueLabel.title,
+        mediaFileName: cueLabel.fileName,
+        hasLiveClip: confirmed,
+        sponsorClipProgress,
+        nextSlotEtaSec: null,
+        clipRemainingSec,
+        prematchWindowOpensInSec: null,
+        prematchTimelineComplete: false,
+        playbackUnconfirmed: !confirmed,
+        coveredByCapture: false,
       };
     }
 
@@ -630,29 +816,25 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
           effectiveSponsorId = dist.sponsorFilterId;
         }
       }
-      if (!cycleBudgetForever && effectivePhase === "sponsor" && effectiveSponsorId) {
-        const sponsor = sponsors.find((s) => s.id === effectiveSponsorId);
-        if (sponsor) {
-          const budget = sponsorSectionBudgetSeconds(sponsor, section, matchStatus);
-          const consumedSlot = sponsorScreenSecondsConsumed(
-            slotMap,
-            sponsors,
-            section,
-            matchStatus,
-            t,
-            sponsor.id,
-          );
-          const consumedTelem =
-            ledgerMatchesSegment && sponsorLedger
-              ? sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, now)
-              : consumedSlot;
-          const consumed = Math.max(consumedSlot, consumedTelem);
-          if (budget > 0 && consumed >= budget) {
-            effectivePhase = "scoreboard";
-            effectiveSponsorId = null;
-            hangRef.current = null;
-          }
-        }
+      const capped = applySponsorBudgetCapToSpreadPhase(
+        { phase: effectivePhase, sponsorFilterId: effectiveSponsorId },
+        {
+          cycleBudgetForever,
+          sponsors,
+          section,
+          matchStatus,
+          slotMap,
+          slotT: t,
+          sponsorLedger,
+          ledgerMatchesSegment,
+          nowMs: now,
+          budgetOf: rotationBudgetSeconds,
+        },
+      );
+      if (!sponsorInterrupted) {
+        effectivePhase = capped.phase;
+        effectiveSponsorId = capped.sponsorFilterId;
+        if (capped.phase === "scoreboard") hangRef.current = null;
       }
 
       const name =
@@ -666,13 +848,18 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         ledgerMatchesSegment && match
           ? ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, now)
           : null;
+      const playingMediaId =
+        liveClip?.mediaId ??
+        (mode === "SPONSOR" ? state?.activeMediaId ?? null : null);
       const media =
-        resolveSponsorMedia(sponsors, liveClip?.mediaId ?? null) ??
-        plannedMediaForSponsor(
-          sponsors.find((s) => s.id === effectiveSponsorId) ?? null,
-          section,
-          matchStatus,
-        );
+        resolveSponsorMedia(sponsors, playingMediaId, mediaLibrary) ??
+        (playingMediaId
+          ? null
+          : plannedMediaForSponsor(
+              sponsors.find((s) => s.id === effectiveSponsorId) ?? null,
+              section,
+              matchStatus,
+            ));
 
       let sponsorClipProgress: number | null = null;
       let clipRemainingSec: number | null = null;
@@ -716,6 +903,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
             sponsorLedger,
             ledgerMatchesSegment,
             now,
+            rotationBudgetSeconds,
           )
         ) {
           nextSlotEtaSec = null;
@@ -761,11 +949,11 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       };
     }
 
-    if (sponsorBesideConfigured && match && sponsorWindow && hasSponsorsForSection(sponsors, sectionForStatus(match.status), match.status)) {
+    if (sponsorBesideConfigured && match && sponsorWindow && hasSponsorsForSectionOrWindow(sponsors, sectionForStatus(match.status), match.status, sponsorWindow, match.sport)) {
       const football = sponsorWindow.footballEngine;
       const tLive = football
         ? halfWindowElapsed(elapsed, match.status, match.halfDurationSec)
-        : windowPlayElapsed({
+        : windowScheduleElapsed({
             window: sponsorWindow,
             elapsedSec: elapsed,
             status: match.status,
@@ -773,10 +961,16 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
             periodDurationSec: match.periodDurationSec,
             currentPeriod: match.currentPeriod,
             periodCount: getSportProfile(match.sport).periodCount,
-            wallElapsedSec:
-              playWallEpochRef.current != null ? (now - playWallEpochRef.current) / 1000 : 0,
+            wallElapsedSec: sponsorPlayWallElapsedSec({
+              state,
+              localEpochMs: playWallEpochRef.current,
+              nowMs: now,
+            }),
           });
-      const t = mode === "SPONSOR_ROTATION" ? tLive : tInterruptFrozen.current;
+      const t =
+        mode === "SPONSOR_ROTATION" && !sponsorInterrupted && !matchClockFrozen
+          ? tLive
+          : tInterruptFrozen.current;
       const section = football ? sectionForStatus(match.status) : sponsorWindow.section;
       return rosterFrom(
         tMatchStatus(tUi, match.status, match.sport),
@@ -794,7 +988,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       liveAutoHalftime &&
       match &&
       rustEpochRef.current != null &&
-      hasSponsorsForSection(sponsors, "halftime")
+      hasSponsorsForSectionOrWindow(sponsors, "halftime", match.status, sponsorWindow, match.sport)
     ) {
       const H = Math.max(60, match.halfBreakSec);
       const tUnbounded = (now - rustEpochRef.current) / 1000;
@@ -813,7 +1007,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       );
     }
 
-    if (postmatchSpreadActive && match && hasSponsorsForSection(sponsors, "postmatch")) {
+    if (postmatchSpreadActive && match && hasSponsorsForSectionOrWindow(sponsors, "postmatch", match.status, sponsorWindow, match.sport)) {
       const H = postmatchSpreadTimelineSeconds(sponsors);
       const tUnbounded =
         postmatchEpochRef.current != null ? (now - postmatchEpochRef.current) / 1000 : 0;
@@ -833,7 +1027,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
     if (
       prematchSpreadActive &&
-      hasSponsorsForSection(sponsors, "prematch")
+      hasSponsorsForSectionOrWindow(sponsors, "prematch", match?.status, sponsorWindow, match?.sport)
     ) {
       const timing = computePrematchSpreadTiming(
         match,
@@ -920,6 +1114,12 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     tUi,
     captureCovers,
     sponsorInterrupted,
+    activeScheduledCue,
+    mediaLibrary,
+    state?.activeMediaId,
+    rotationBudgetSeconds,
+    sponsorWindow,
+    hasWindowSponsors,
   ]);
 }
 
@@ -931,6 +1131,7 @@ function mediaLabel(title: string, path: string): { title: string; fileName: str
 function resolveSponsorMedia(
   sponsors: Sponsor[],
   mediaId: string | null,
+  library: MediaItem[] = [],
 ): { title: string; fileName: string } | null {
   if (!mediaId) return null;
   for (const sponsor of sponsors) {
@@ -938,6 +1139,8 @@ function resolveSponsorMedia(
     if (!item) continue;
     return mediaLabel(item.title, item.path);
   }
+  const item = library.find((m) => m.id === mediaId);
+  if (item) return mediaLabel(item.title, item.path);
   return null;
 }
 

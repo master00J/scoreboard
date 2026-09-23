@@ -56,24 +56,224 @@ export const DEFAULT_VOLLEYBALL_FORMAT: VolleyballFormat = {
   winBy: VOLLEYBALL_WIN_BY,
 };
 
+function clampInt(v: unknown, fallback: number, min: number, max: number): number {
+  const num = Number(v);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(num)));
+}
+
 export function normalizeVolleyballFormat(raw: Partial<VolleyballFormat> | null | undefined): VolleyballFormat {
   const d = DEFAULT_VOLLEYBALL_FORMAT;
-  const n = (v: unknown, fallback: number, min: number, max: number) => {
-    const num = Number(v);
-    if (!Number.isFinite(num)) return fallback;
-    return Math.min(max, Math.max(min, Math.floor(num)));
-  };
   return {
-    setsToWin: n(raw?.setsToWin, d.setsToWin, 1, 5),
-    pointsToWinSet: n(raw?.pointsToWinSet, d.pointsToWinSet, 5, 99),
-    pointsToWinDecider: n(raw?.pointsToWinDecider, d.pointsToWinDecider, 5, 99),
-    winBy: n(raw?.winBy, d.winBy, 1, 5),
+    setsToWin: clampInt(raw?.setsToWin, d.setsToWin, 1, 5),
+    pointsToWinSet: clampInt(raw?.pointsToWinSet, d.pointsToWinSet, 5, 99),
+    pointsToWinDecider: clampInt(raw?.pointsToWinDecider, d.pointsToWinDecider, 5, 99),
+    winBy: clampInt(raw?.winBy, d.winBy, 1, 5),
   };
 }
 
 /** Totaal aantal sets dat maximaal gespeeld wordt (best-of). */
-export function volleyballMaxSets(format: VolleyballFormat): number {
+export function volleyballMaxSets(format: Pick<VolleyballFormat, "setsToWin">): number {
   return format.setsToWin * 2 - 1;
+}
+
+export const VOLLEYBALL_TIMEOUTS_PER_SET = 2;
+export const VOLLEYBALL_TIMEOUT_DURATION_SEC = 30;
+export const VOLLEYBALL_TTO_DURATION_SEC = 60;
+export const VOLLEYBALL_SET_BREAK_SEC = 3 * 60;
+
+export type VolleyballMatchRules = VolleyballFormat & {
+  technicalTimeoutsEnabled: boolean;
+  technicalTimeoutScores: number[];
+  technicalTimeoutDurationSec: number;
+  timeoutsPerSet: number;
+  timeoutDurationSec: number;
+  setBreakSec: number;
+};
+
+export type VolleyballPresetId =
+  | "indoor"
+  | "indoor_tto"
+  | "best_of_3"
+  | "beach"
+  | "youth_21"
+  | "italy_serie_a_men"
+  | "custom";
+
+export const DEFAULT_VOLLEYBALL_RULES: VolleyballMatchRules = {
+  ...DEFAULT_VOLLEYBALL_FORMAT,
+  technicalTimeoutsEnabled: false,
+  technicalTimeoutScores: [...VOLLEYBALL_TTO_SCORES],
+  technicalTimeoutDurationSec: VOLLEYBALL_TTO_DURATION_SEC,
+  timeoutsPerSet: VOLLEYBALL_TIMEOUTS_PER_SET,
+  timeoutDurationSec: VOLLEYBALL_TIMEOUT_DURATION_SEC,
+  setBreakSec: VOLLEYBALL_SET_BREAK_SEC,
+};
+
+export const VOLLEYBALL_PRESETS: Record<Exclude<VolleyballPresetId, "custom">, VolleyballMatchRules> = {
+  indoor: { ...DEFAULT_VOLLEYBALL_RULES },
+  indoor_tto: {
+    ...DEFAULT_VOLLEYBALL_RULES,
+    technicalTimeoutsEnabled: true,
+    technicalTimeoutScores: [8, 16],
+    technicalTimeoutDurationSec: 60,
+  },
+  best_of_3: {
+    ...DEFAULT_VOLLEYBALL_RULES,
+    setsToWin: 2,
+  },
+  beach: {
+    ...DEFAULT_VOLLEYBALL_RULES,
+    setsToWin: 2,
+    pointsToWinSet: 21,
+    pointsToWinDecider: 15,
+    timeoutsPerSet: 1,
+    timeoutDurationSec: 30,
+    setBreakSec: 60,
+  },
+  youth_21: {
+    ...DEFAULT_VOLLEYBALL_RULES,
+    setsToWin: 2,
+    pointsToWinSet: 21,
+    pointsToWinDecider: 15,
+    timeoutsPerSet: 2,
+    timeoutDurationSec: 30,
+    setBreakSec: 120,
+  },
+  italy_serie_a_men: {
+    ...DEFAULT_VOLLEYBALL_RULES,
+    setBreakSec: 120,
+  },
+};
+
+export function parseTechnicalTimeoutScores(raw: unknown): number[] {
+  let value = raw;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      value = JSON.parse(trimmed);
+    } catch {
+      value = trimmed.split(/[,;/]+/);
+    }
+    if (!Array.isArray(value)) {
+      value = trimmed.split(/[,;/]+/);
+    }
+  }
+  if (!Array.isArray(value)) return [...VOLLEYBALL_TTO_SCORES];
+  const scores = new Set<number>();
+  for (const item of value) {
+    const n = clampInt(item, 0, 1, 40);
+    if (n > 0) scores.add(n);
+  }
+  return [...scores].sort((a, b) => a - b);
+}
+
+export const VOLLEYBALL_PRESET_IDS: Exclude<VolleyballPresetId, "custom">[] = [
+  "indoor",
+  "indoor_tto",
+  "best_of_3",
+  "beach",
+  "youth_21",
+  "italy_serie_a_men",
+];
+
+export function formatTechnicalTimeoutScores(scores: number[]): string {
+  return scores.join(", ");
+}
+
+export function normalizeVolleyballMatchRules(
+  raw: Partial<Omit<VolleyballMatchRules, "technicalTimeoutScores">> & {
+    technicalTimeoutScores?: unknown;
+    technicalTimeoutScoresJson?: string | null;
+    halfBreakSec?: number | null;
+  } | null | undefined,
+): VolleyballMatchRules {
+  const d = DEFAULT_VOLLEYBALL_RULES;
+  const format = normalizeVolleyballFormat(raw);
+  const scoresRaw =
+    raw?.technicalTimeoutScores ??
+    (raw && "technicalTimeoutScoresJson" in raw ? raw.technicalTimeoutScoresJson : undefined);
+  const scores = parseTechnicalTimeoutScores(
+    scoresRaw === undefined ? d.technicalTimeoutScores : scoresRaw,
+  );
+  return {
+    ...format,
+    technicalTimeoutsEnabled: raw?.technicalTimeoutsEnabled === true,
+    technicalTimeoutScores: scores,
+    technicalTimeoutDurationSec: clampInt(
+      raw?.technicalTimeoutDurationSec,
+      d.technicalTimeoutDurationSec,
+      5,
+      180,
+    ),
+    timeoutsPerSet: clampInt(raw?.timeoutsPerSet, d.timeoutsPerSet, 0, 6),
+    timeoutDurationSec: clampInt(raw?.timeoutDurationSec, d.timeoutDurationSec, 5, 180),
+    setBreakSec: clampInt(raw?.setBreakSec ?? raw?.halfBreakSec, d.setBreakSec, 30, 600),
+  };
+}
+
+export function matchVolleyballPresetId(rules: VolleyballMatchRules): VolleyballPresetId {
+  const keys = Object.keys(VOLLEYBALL_PRESETS) as Exclude<VolleyballPresetId, "custom">[];
+  for (const id of keys) {
+    const preset = VOLLEYBALL_PRESETS[id];
+    if (
+      preset.setsToWin === rules.setsToWin &&
+      preset.pointsToWinSet === rules.pointsToWinSet &&
+      preset.pointsToWinDecider === rules.pointsToWinDecider &&
+      preset.winBy === rules.winBy &&
+      preset.technicalTimeoutsEnabled === rules.technicalTimeoutsEnabled &&
+      preset.technicalTimeoutDurationSec === rules.technicalTimeoutDurationSec &&
+      preset.timeoutsPerSet === rules.timeoutsPerSet &&
+      preset.timeoutDurationSec === rules.timeoutDurationSec &&
+      preset.setBreakSec === rules.setBreakSec &&
+      JSON.stringify(preset.technicalTimeoutScores) === JSON.stringify(rules.technicalTimeoutScores)
+    ) {
+      return id;
+    }
+  }
+  return "custom";
+}
+
+export function volleyballRulesFromMatch(match: {
+  setsToWin?: number | null;
+  pointsToWinSet?: number | null;
+  pointsToWinDecider?: number | null;
+  winBy?: number | null;
+  technicalTimeoutsEnabled?: boolean | null;
+  technicalTimeoutScores?: number[] | null;
+  technicalTimeoutScoresJson?: string | null;
+  technicalTimeoutDurationSec?: number | null;
+  timeoutsPerSet?: number | null;
+  timeoutDurationSec?: number | null;
+  halfBreakSec?: number | null;
+}): VolleyballMatchRules {
+  return normalizeVolleyballMatchRules({
+    setsToWin: match.setsToWin ?? undefined,
+    pointsToWinSet: match.pointsToWinSet ?? undefined,
+    pointsToWinDecider: match.pointsToWinDecider ?? undefined,
+    winBy: match.winBy ?? undefined,
+    technicalTimeoutsEnabled: match.technicalTimeoutsEnabled === true,
+    technicalTimeoutScores: match.technicalTimeoutScores ?? undefined,
+    technicalTimeoutScoresJson: match.technicalTimeoutScoresJson,
+    technicalTimeoutDurationSec: match.technicalTimeoutDurationSec ?? undefined,
+    timeoutsPerSet: match.timeoutsPerSet ?? undefined,
+    timeoutDurationSec: match.timeoutDurationSec ?? undefined,
+    setBreakSec: match.halfBreakSec ?? undefined,
+  });
+}
+
+export function shouldTriggerTechnicalTimeout(opts: {
+  enabled: boolean;
+  scores: number[];
+  period: number;
+  maxSets: number;
+  scored: number;
+  other: number;
+}): boolean {
+  if (!opts.enabled || opts.scores.length === 0) return false;
+  if (opts.period >= opts.maxSets) return false;
+  return opts.scores.some((score) => opts.scored === score && opts.other < score);
 }
 
 export function volleyballTarget(period: number, format: VolleyballFormat = DEFAULT_VOLLEYBALL_FORMAT): number {
@@ -231,6 +431,7 @@ export function applyVolleyballScoreDelta(
   delta: number,
   opts?: {
     technicalTimeoutsEnabled?: boolean;
+    technicalTimeoutScores?: number[] | string | null;
     format?: Partial<VolleyballFormat> | null;
     /** Rally-winnaars van de huidige set (voor serviceherstel bij −1). */
     rallyWinnersInSet?: Side[];
@@ -321,12 +522,15 @@ export function applyVolleyballScoreDelta(
     return result(next, format, { technicalTimeout: false, setJustWon: true });
   }
 
-  const ttoEnabled = opts?.technicalTimeoutsEnabled === true;
   const scored = side === "home" ? next.homeScore : next.awayScore;
   const other = side === "home" ? next.awayScore : next.homeScore;
-  const technicalTimeout =
-    ttoEnabled &&
-    next.currentPeriod < volleyballMaxSets(format) &&
-    VOLLEYBALL_TTO_SCORES.some((score) => scored === score && other < score);
+  const technicalTimeout = shouldTriggerTechnicalTimeout({
+    enabled: opts?.technicalTimeoutsEnabled === true,
+    scores: parseTechnicalTimeoutScores(opts?.technicalTimeoutScores ?? VOLLEYBALL_TTO_SCORES),
+    period: next.currentPeriod,
+    maxSets: volleyballMaxSets(format),
+    scored,
+    other,
+  });
   return result(next, format, { technicalTimeout, setJustWon: false });
 }
