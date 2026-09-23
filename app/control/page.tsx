@@ -29,6 +29,10 @@ import { isFullMatch } from "@/lib/is-full-match";
 import { exportMatch, focusDisplayWindow } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
 import { MatchTabGrid, LivePreviewPanel } from "./_components/match-tab-grid";
+import { InterfaceProfileControl } from "./_components/interface-profile-control";
+import { MusicPanel, MusicPlayingIndicator } from "./_components/music-panel";
+import { useMusicPlayer } from "@/lib/use-music-player";
+import { activeInterfaceProfile, parseInterfaceProfileStore, type ControlTabId, type InterfaceProfile } from "@/lib/interface-profiles";
 import { AppResourceMeter } from "./_components/app-resource-meter";
 import { MobileBridgeMenu } from "./_components/mobile-bridge-menu";
 import { useLicenseFeatures } from "@/lib/use-license-features";
@@ -49,6 +53,7 @@ import {
 
 export default function ControlPage() {
   const { t } = useTranslation();
+  const musicPlayer = useMusicPlayer();
   useSocketSync();
   const connected = useDisplayStore((s) => s.connected);
   const state = useDisplayStore((s) => s.state);
@@ -59,9 +64,28 @@ export default function ControlPage() {
   const { data: match, reload: reloadMatch } = useApi<Match>(
     state?.matchId ? `/api/matches/${state.matchId}` : null,
   );
-  const { data: teams } = useApi<Team[]>("/api/teams");
-  const { data: settings } = useApi<AppSettings>("/api/settings");
+  const { data: teams, reload: reloadTeams } = useApi<Team[]>("/api/teams");
+  const { data: settings, reload: reloadSettings } = useApi<AppSettings>("/api/settings");
   const homeTeam = (teams ?? []).find((team) => team.id === settings?.homeTeamId) ?? null;
+
+  const interfaceStore = parseInterfaceProfileStore(settings?.interfaceProfilesJson);
+  const [draftProfile, setDraftProfile] = useState<InterfaceProfile | null>(null);
+  const interfaceProfile = draftProfile ?? activeInterfaceProfile(interfaceStore);
+
+  useEffect(() => {
+    const onHomeTeam = () => {
+      reloadSettings();
+      reloadTeams();
+    };
+    window.addEventListener("arenacue:home-team", onHomeTeam);
+    return () => window.removeEventListener("arenacue:home-team", onHomeTeam);
+  }, [reloadSettings, reloadTeams]);
+
+  useEffect(() => {
+    if (!interfaceProfile.tabs.includes(activeTab as ControlTabId)) {
+      setActiveTab(interfaceProfile.tabs[0] ?? "match");
+    }
+  }, [interfaceProfile, activeTab]);
 
   useEffect(() => {
     reloadMatch();
@@ -152,6 +176,7 @@ export default function ControlPage() {
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          <MusicPlayingIndicator player={musicPlayer} />
           <div className="hidden items-center gap-2 xl:flex">
             <AppResourceMeter />
             <MobileBridgeMenu info={mobileBridge} />
@@ -196,24 +221,37 @@ export default function ControlPage() {
               <Radio className="size-4" />
               {t("shell.tabMatch")}
             </TabsTrigger>
+            {interfaceProfile.tabs.includes("setup") && (
             <TabsTrigger value="setup" className="h-10 gap-2 px-3 sm:px-4">
               <Settings2 className="size-4" />
               {t("shell.tabSetup")}
             </TabsTrigger>
+            )}
+            {interfaceProfile.tabs.includes("media") && (
             <TabsTrigger value="media" className="h-10 gap-2 px-3 sm:px-4">
               <Images className="size-4" />
               {t("shell.tabMedia")}
             </TabsTrigger>
+            )}
+            {interfaceProfile.tabs.includes("reports") && (
             <TabsTrigger value="reports" className="h-10 gap-2 px-3 sm:px-4">
               <FileBarChart className="size-4" />
               {t("shell.tabReports")}
             </TabsTrigger>
+            )}
+            {interfaceProfile.tabs.includes("livestream") && (
             <TabsTrigger value="livestream" className="h-10 gap-2 px-3 sm:px-4">
               <Video className="size-4" />
               {t("shell.tabLivestream")}
             </TabsTrigger>
+            )}
           </TabsList>
           <div className="flex items-center gap-2">
+            <InterfaceProfileControl
+              raw={settings?.interfaceProfilesJson}
+              onSaved={reloadSettings}
+              onPreview={setDraftProfile}
+            />
             <Button
               type="button"
               size="sm"
@@ -270,8 +308,13 @@ export default function ControlPage() {
         </div>
 
         <TabsContent value="match" forceMount className="min-h-0 overflow-hidden">
+          {interfaceProfile.panels.length === 0 ? (
+            <p className="m-4 text-sm text-muted-foreground">{t("shell.profileEmptyLive")}</p>
+          ) : (
           <MatchTabGrid
-            panels={{
+            panels={Object.fromEntries(
+              Object.entries({
+              music: <MusicPanel player={musicPlayer} />,
               timer: <TimerPanel />,
               display: <DisplayControlPanel activeMatch={isFullMatch(match) ? match : null} />,
               "sponsor-hud": <SponsorPhaseHud match={isFullMatch(match) ? match : null} />,
@@ -285,8 +328,10 @@ export default function ControlPage() {
               "match-live": <MatchLivePanel />,
               "event-log": <EventLog match={isFullMatch(match) ? match : null} />,
               "match-info": <MatchInfoCard match={isFullMatch(match) ? match : null} />,
-            }}
+              }).filter(([id]) => interfaceProfile.panels.includes(id as (typeof interfaceProfile.panels)[number])),
+            )}
           />
+          )}
         </TabsContent>
 
         <TabsContent value="setup" className="min-h-0 overflow-y-auto">

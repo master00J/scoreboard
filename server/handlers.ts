@@ -244,7 +244,10 @@ async function validateSubPair(db: Db, matchId: string, pair: SubPair) {
   const team =
     pair.teamId === m.homeTeamId ? m.homeTeam : pair.teamId === m.awayTeamId ? m.awayTeam : null;
   if (!team) cmdErr("teamNotInMatch");
-  const ids = new Set((team.players ?? []).map((p) => p.id));
+  const roster = team.activePlayerListId
+    ? (team.players ?? []).filter((player) => player.listId === team.activePlayerListId)
+    : (team.players ?? []);
+  const ids = new Set(roster.map((p) => p.id));
   if (!ids.has(pair.playerInId) || !ids.has(pair.playerOutId)) {
     cmdErr("playerNotOnTeam");
   }

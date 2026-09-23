@@ -49,10 +49,10 @@ export function SportTeamExtras({
   const size = fontSize ?? (compact ? 32 : undefined);
   const style: CSSProperties = size
     ? { fontSize: size, gap: Math.max(6, Math.round(size * 0.28)) }
-    : { fontSize: "min(34cqh, 20cqw, 56px)", gap: "0.35em" };
+    : { fontSize: "min(28cqh, 8cqw, 42px)", gap: "0.28em" };
   return (
     <div
-      className="flex flex-wrap items-center justify-center font-black uppercase leading-none tracking-wide text-white"
+      className="flex w-full min-w-0 max-w-full flex-wrap items-center justify-center px-[2cqw] text-center font-black uppercase leading-none tracking-wide text-white"
       style={style}
     >
       {possession ? (

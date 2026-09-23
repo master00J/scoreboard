@@ -1,3 +1,9 @@
+export type PlayerList = {
+  id: string;
+  teamId: string;
+  name: string;
+};
+
 export type Team = {
   id: string;
   name: string;
@@ -6,6 +12,8 @@ export type Team = {
   primaryColor: string;
   secondaryColor: string;
   players?: Player[];
+  playerLists?: PlayerList[];
+  activePlayerListId?: string | null;
 };
 
 export type AppSettings = {
@@ -48,6 +56,8 @@ export type AppSettings = {
   uiLocale?: "nl" | "en" | "fr" | "it";
   /** JSON: sport → two_blocks | per_period | inplay_plus_breaks. Voetbal wordt genegeerd. */
   sponsorLayoutsJson?: string | null;
+  /** JSON met zichtbare tabs en live-blokken per opgeslagen interfaceprofiel. */
+  interfaceProfilesJson?: string | null;
 };
 
 export type Player = {
@@ -63,6 +73,7 @@ export type Player = {
   goalVideoPath: string | null;
   subImagePath: string | null;
   lineupVideoPath: string | null;
+  listId?: string | null;
 };
 
 export type Match = {

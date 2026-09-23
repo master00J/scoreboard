@@ -167,6 +167,18 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("Player", "goalVideoPath", "TEXT");
   await addColumnIfMissing("Player", "subImagePath", "TEXT");
   await addColumnIfMissing("Player", "lineupVideoPath", "TEXT");
+  await addColumnIfMissing("Player", "listId", "TEXT");
+  await addColumnIfMissing("Team", "activePlayerListId", "TEXT");
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS "PlayerList" (
+      "id" TEXT NOT NULL PRIMARY KEY,
+      "teamId" TEXT NOT NULL,
+      "name" TEXT NOT NULL,
+      CONSTRAINT "PlayerList_teamId_fkey"
+        FOREIGN KEY ("teamId") REFERENCES "Team" ("id")
+        ON DELETE CASCADE ON UPDATE CASCADE
+    )
+  `);
   await addColumnIfMissing("AppSettings", "goalIntroVideoPath", "TEXT");
   await addColumnIfMissing("AppSettings", "goalVisualHomeEnabled", "BOOLEAN NOT NULL DEFAULT 1");
   await addColumnIfMissing("AppSettings", "goalVisualAwayEnabled", "BOOLEAN NOT NULL DEFAULT 0");
@@ -188,6 +200,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("AppSettings", "displaySafeZoneMarginPx", "INTEGER NOT NULL DEFAULT 40");
   await addColumnIfMissing("AppSettings", "idleFallbackMediaId", "TEXT");
   await addColumnIfMissing("AppSettings", "uiLocale", `TEXT NOT NULL DEFAULT 'nl'`);
+  await addColumnIfMissing("AppSettings", "interfaceProfilesJson", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "externalCaptureAudio", "BOOLEAN NOT NULL DEFAULT 0");

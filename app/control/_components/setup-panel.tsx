@@ -47,7 +47,7 @@ export function SetupPanel() {
     team: Team;
     player: Player | "new";
   } | null>(null);
-  const [rosterDialogTeam, setRosterDialogTeam] = useState<Team | null>(null);
+  const [rosterDialog, setRosterDialog] = useState<{ team: Team; listId: string | null } | null>(null);
   const [matchDialog, setMatchDialog] = useState(false);
   const [scheduleMatch, setScheduleMatch] = useState<Match | null>(null);
   const [visualsField, setVisualsField] = useState<VisualField | null>(null);
@@ -81,6 +81,16 @@ export function SetupPanel() {
       return;
     }
     reloadSettings();
+    window.dispatchEvent(new CustomEvent("arenacue:home-team"));
+    if (teamId) {
+      const team = (teams ?? []).find((item) => item.id === teamId);
+      if (team) {
+        toast({
+          title: t("setup.homeTeamSwitched", { name: team.name }),
+          variant: "success",
+        });
+      }
+    }
   }
 
   async function pickGoalIntroVideo() {
@@ -226,9 +236,62 @@ export function SetupPanel() {
           )}
         </div>
 
+        {(teams ?? []).length === 0 ? (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-dashed border-border p-4">
+            <div className="text-sm text-muted-foreground">{t("setup.setHomeHint")}</div>
+            <Button size="sm" onClick={() => setTeamDialogTeam("new")}>
+              {t("setup.newTeam")}
+            </Button>
+          </div>
+        ) : (
+          <div className="mb-4">
+            <div className="mb-1 text-sm font-medium">{t("setup.homeTeamSwitch")}</div>
+            <p className="mb-3 text-sm text-muted-foreground">{t("setup.homeTeamSwitchHelp")}</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {(teams ?? []).map((team) => {
+                const active = team.id === homeTeam?.id;
+                return (
+                  <button
+                    key={team.id}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => {
+                      if (!active) void setHomeTeam(team.id);
+                    }}
+                    className={`flex items-center gap-3 rounded-lg border p-3 text-left ${
+                      active
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:bg-secondary"
+                    }`}
+                  >
+                    {team.logoPath ? (
+                      <img src={mediaUrl(team.logoPath)} alt="" className="h-10 w-10 rounded object-contain" />
+                    ) : (
+                      <div
+                        className="flex h-10 w-10 items-center justify-center rounded text-sm font-bold"
+                        style={{ background: team.primaryColor, color: team.secondaryColor }}
+                      >
+                        {team.shortName.slice(0, 2)}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="truncate font-semibold">{team.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {team.shortName} · {t("common.playersCount", { count: team.players?.length ?? 0 })}
+                        {active ? ` · ${t("setup.homeTeamActive")}` : ""}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {homeTeam ? (
           <>
-            <div className="flex items-center gap-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
+            <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+              <div className="flex items-center gap-4">
               {homeTeam.logoPath ? (
                 <img src={mediaUrl(homeTeam.logoPath)} alt="" className="h-14 w-14 rounded object-contain" />
               ) : (
@@ -242,8 +305,40 @@ export function SetupPanel() {
               <div>
                 <div className="font-semibold text-lg">{homeTeam.name}</div>
                 <div className="text-sm text-muted-foreground">
-                  {homeTeam.shortName} · {t("common.playersCount", { count: homeTeam.players?.length ?? 0 })}
+                  {homeTeam.shortName} · {t("common.playersCount", { count: playersForList(homeTeam).length })}
                 </div>
+              </div>
+              </div>
+              <div className="mt-4 border-t border-primary/20 pt-4">
+                <div className="mb-1 font-semibold">{t("setup.homeTeamPlayersTitle", { name: homeTeam.name })}</div>
+                <div className="mb-3 text-xs text-muted-foreground">{t("setup.homeTeamPlayersHelp")}</div>
+                <PlayerListControls
+                  team={homeTeam}
+                  onChanged={() => {
+                    reloadTeams();
+                    reloadSettings();
+                  }}
+                  onEdit={(listId) => setRosterDialog({ team: homeTeam, listId })}
+                />
+                {playersForList(homeTeam).length > 0 ? (
+                  <div className="mt-3 grid grid-cols-2 gap-1 max-h-80 overflow-auto sm:grid-cols-3">
+                    {playersForList(homeTeam).map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setPlayerDialog({ team: homeTeam, player: p })}
+                        className="flex items-center gap-2 rounded border border-border p-2 text-left text-xs hover:bg-secondary"
+                        title={t("setup.playerVisualsHint")}
+                      >
+                        <span className="w-6 text-right font-black">#{p.number}</span>
+                        <span className="truncate">
+                          {p.firstName} {p.lastName}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-3 text-xs italic text-muted-foreground">{t("setup.noPlayersYet")}</div>
+                )}
               </div>
             </div>
 
@@ -329,78 +424,8 @@ export function SetupPanel() {
               </div>
             </div>
 
-            <div className="mt-6 rounded-lg border border-border p-4">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-semibold">{t("setup.homeTeamPlayersTitle")}</div>
-                  <div className="text-xs text-muted-foreground">{t("setup.homeTeamPlayersHelp")}</div>
-                </div>
-                <Button size="sm" variant="outline" onClick={() => setRosterDialogTeam(homeTeam)}>
-                  {t("setup.editPlayers")}
-                </Button>
-              </div>
-              {(homeTeam.players ?? []).length > 0 ? (
-                <div className="grid grid-cols-2 gap-1 max-h-80 overflow-auto sm:grid-cols-3">
-                  {(homeTeam.players ?? []).map((p) => (
-                    <button
-                      key={p.id}
-                      onClick={() => setPlayerDialog({ team: homeTeam, player: p })}
-                      className="flex items-center gap-2 rounded border border-border p-2 text-left text-xs hover:bg-secondary"
-                      title={t("setup.playerVisualsHint")}
-                    >
-                      <span className="w-6 text-right font-black">#{p.number}</span>
-                      <span className="truncate">
-                        {p.firstName} {p.lastName}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-xs italic text-muted-foreground">{t("setup.noPlayersYet")}</div>
-              )}
-            </div>
           </>
-        ) : (
-          <div className="rounded-lg border border-dashed border-border p-4">
-            <div className="mb-3 text-sm font-medium">{t("setup.homeTeamPick")}</div>
-            {(teams ?? []).length > 0 ? (
-              <div className="grid gap-2 sm:grid-cols-2">
-                {(teams ?? []).map((team) => (
-                  <button
-                    key={team.id}
-                    type="button"
-                    onClick={() => void setHomeTeam(team.id)}
-                    className="flex items-center gap-3 rounded-lg border border-border p-3 text-left hover:bg-secondary"
-                  >
-                    {team.logoPath ? (
-                      <img src={mediaUrl(team.logoPath)} alt="" className="h-10 w-10 rounded object-contain" />
-                    ) : (
-                      <div
-                        className="flex h-10 w-10 items-center justify-center rounded text-sm font-bold"
-                        style={{ background: team.primaryColor }}
-                      >
-                        {team.shortName.slice(0, 2)}
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold">{team.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {t("common.playersCount", { count: team.players?.length ?? 0 })}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="text-sm text-muted-foreground">{t("setup.setHomeHint")}</div>
-                <Button size="sm" onClick={() => setTeamDialogTeam("new")}>
-                  {t("setup.newTeam")}
-                </Button>
-              </div>
-            )}
-          </div>
-        )}
+        ) : null}
       </section>
 
       <section className="bg-card border border-border rounded-xl p-6">
@@ -674,7 +699,7 @@ export function SetupPanel() {
                 team={team}
                 isHome={false}
                 onEdit={() => setTeamDialogTeam(team)}
-                onEditRoster={() => setRosterDialogTeam(team)}
+                onEditRoster={(listId) => setRosterDialog({ team, listId })}
                 onEditPlayer={(player) => setPlayerDialog({ team, player })}
                 onSetHome={() => void setHomeTeam(team.id)}
                 onChanged={() => {
@@ -710,12 +735,13 @@ export function SetupPanel() {
         />
       )}
 
-      {rosterDialogTeam && (
+      {rosterDialog && (
         <RosterDialog
-          team={rosterDialogTeam}
-          onClose={() => setRosterDialogTeam(null)}
+          team={rosterDialog.team}
+          listId={rosterDialog.listId}
+          onClose={() => setRosterDialog(null)}
           onSaved={() => {
-            setRosterDialogTeam(null);
+            setRosterDialog(null);
             reloadTeams();
           }}
         />
@@ -760,6 +786,131 @@ export function SetupPanel() {
   );
 }
 
+function playersForList(team: Team) {
+  const players = team.players ?? [];
+  if (!team.activePlayerListId) return players;
+  return players.filter((player) => player.listId === team.activePlayerListId);
+}
+
+function PlayerListControls({
+  team,
+  onChanged,
+  onEdit,
+}: {
+  team: Team;
+  onChanged: () => void;
+  onEdit: (listId: string | null) => void;
+}) {
+  const { t } = useTranslation();
+  const lists = team.playerLists ?? [];
+  const active = team.activePlayerListId ?? "";
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function createList() {
+    const name = draftName.trim();
+    if (!name || saving) return;
+    setSaving(true);
+    const res = await fetch("/api/player-lists", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamId: team.id, name }),
+    });
+    if (!res.ok) {
+      setSaving(false);
+      toast({ title: t("setup.playerListSaveFailed"), variant: "error" });
+      return;
+    }
+    const list = (await res.json()) as { id: string };
+    const activate = await fetch(`/api/teams/${team.id}/active-player-list`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playerListId: list.id }),
+    });
+    setSaving(false);
+    if (!activate.ok) {
+      toast({ title: t("setup.playerListSaveFailed"), variant: "error" });
+      return;
+    }
+    setNaming(false);
+    setDraftName("");
+    onChanged();
+    onEdit(list.id);
+  }
+
+  async function selectList(playerListId: string) {
+    const res = await fetch(`/api/teams/${team.id}/active-player-list`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playerListId: playerListId || null }),
+    });
+    if (!res.ok) {
+      toast({ title: t("setup.playerListSaveFailed"), variant: "error" });
+      return;
+    }
+    onChanged();
+  }
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2">
+      <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        {t("setup.playerListLabel")}
+      </label>
+      <select
+        aria-label={t("setup.playerListLabel")}
+        className="h-9 rounded-md border border-border bg-zinc-950 px-2 text-sm text-zinc-50"
+        style={{ colorScheme: "dark" }}
+        value={active}
+        onChange={(event) => void selectList(event.target.value)}
+      >
+        <option value="" style={{ backgroundColor: "#09090b", color: "#fafafa" }}>
+          {t("setup.playerListAll")}
+        </option>
+        {lists.map((list) => (
+          <option key={list.id} value={list.id} style={{ backgroundColor: "#09090b", color: "#fafafa" }}>
+            {list.name}
+          </option>
+        ))}
+      </select>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          setDraftName(t("setup.playerListDefaultName"));
+          setNaming(true);
+        }}
+      >
+        {t("setup.playerListNew")}
+      </Button>
+      {naming && (
+        <form
+          className="flex items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void createList();
+          }}
+        >
+          <Input
+            autoFocus
+            value={draftName}
+            maxLength={40}
+            aria-label={t("setup.playerListNamePrompt")}
+            className="h-9 w-40"
+            onChange={(event) => setDraftName(event.target.value)}
+          />
+          <Button size="sm" type="submit" disabled={saving || !draftName.trim()}>
+            {t("common.save")}
+          </Button>
+        </form>
+      )}
+      <Button size="sm" variant="outline" onClick={() => onEdit(active || null)}>
+        {t("setup.editPlayers")}
+      </Button>
+    </div>
+  );
+}
+
 function TeamCard({
   team,
   isHome,
@@ -772,7 +923,7 @@ function TeamCard({
   team: Team;
   isHome: boolean;
   onEdit: () => void;
-  onEditRoster: () => void;
+  onEditRoster: (listId: string | null) => void;
   onEditPlayer: (p: Player) => void;
   onSetHome: () => void;
   onChanged: () => void;
@@ -850,7 +1001,7 @@ function TeamCard({
         </div>
       </div>
       <div className="p-3">
-        {(team.players ?? []).length > 0 ? (
+        {((team.players ?? []).length > 0) ? (
           <div className="grid grid-cols-3 gap-1 max-h-64 overflow-auto">
             {(team.players ?? []).map((p) => (
               <button
@@ -875,7 +1026,7 @@ function TeamCard({
           size="sm"
           variant="outline"
           className="w-full mt-2"
-          onClick={onEditRoster}
+          onClick={() => onEditRoster(team.activePlayerListId ?? null)}
         >
           {t("setup.editPlayers")}
         </Button>
@@ -1375,15 +1526,20 @@ function makeEmptyRow(): RosterRow {
 
 function RosterDialog({
   team,
+  listId = null,
   onClose,
   onSaved,
 }: {
   team: Team;
+  listId?: string | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const { t } = useTranslation();
-  const initialRows: RosterRow[] = (team.players ?? [])
+  const scopedPlayers = (team.players ?? []).filter((player) =>
+    listId ? player.listId === listId : !player.listId,
+  );
+  const initialRows: RosterRow[] = scopedPlayers
     .slice()
     .sort((a, b) => a.number - b.number)
     .map((p) => ({
@@ -1481,9 +1637,7 @@ function RosterDialog({
         numberSet.add(num);
       }
 
-      const originalIds = new Set(
-        (team.players ?? []).map((p) => p.id),
-      );
+      const originalIds = new Set(scopedPlayers.map((p) => p.id));
       const keptIds = new Set(
         cleaned.map((row) => row.id).filter((id): id is string => !!id),
       );
@@ -1517,7 +1671,12 @@ function RosterDialog({
           : await fetch("/api/players", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ...body, teamId: team.id, position: "MID" }),
+              body: JSON.stringify({
+                ...body,
+                teamId: team.id,
+                position: "MID",
+                ...(listId ? { listId } : {}),
+              }),
             });
         if (!res.ok) {
           toast({

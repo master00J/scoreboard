@@ -25,6 +25,9 @@ try {
 
 const bridge: ElectronBridge = {
   context,
+  loadMusicLibrary: () => ipcRenderer.invoke("music:load"),
+  importMusic: () => ipcRenderer.invoke("music:import"),
+  saveMusicLibrary: (update) => ipcRenderer.invoke("music:save", update),
   selectFile: (opts) => ipcRenderer.invoke("dialog:openFile", opts),
   selectFolder: (opts) => ipcRenderer.invoke("dialog:openFolder", opts),
   apiRequest: (req) => ipcRenderer.invoke("api:request", req),

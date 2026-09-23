@@ -1,4 +1,5 @@
 export type MatchTabPanelId =
+  | "music"
   | "timer"
   | "display"
   | "sponsor-hud"
@@ -60,7 +61,7 @@ const LEGACY_DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
 };
 
 export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
-  orderLeft: ["timer", "match-live"],
+  orderLeft: ["timer", "match-live", "music"],
   orderCenter: [
     "sponsor-hud",
     "player-intro",
@@ -76,6 +77,7 @@ export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
 };
 
 const ALL_PANEL_IDS: MatchTabPanelId[] = [
+  "music",
   "timer",
   "display",
   "sponsor-hud",
@@ -283,7 +285,7 @@ export function parseMatchTabLayoutJson(raw: string | null): MatchTabLayoutState
       columnWeights: normalizeColumnWeights(p.columnWeights),
       panelHeights: sanitizePanelHeights(p.panelHeights),
     });
-    if (layoutOrdersEqual(parsed, LEGACY_DEFAULT_MATCH_TAB_LAYOUT)) {
+    if (layoutOrdersEqual(parsed, sanitizeMatchTabLayout(LEGACY_DEFAULT_MATCH_TAB_LAYOUT))) {
       return { ...DEFAULT_MATCH_TAB_LAYOUT, collapsed: parsed.collapsed };
     }
     return parsed;
@@ -372,6 +374,7 @@ export function moveMatchTabPanel(
 }
 
 export const MATCH_TAB_PANEL_LABELS: Record<MatchTabPanelId, string> = {
+  music: "Muziek",
   timer: "Timer",
   display: "Display & modus",
   "sponsor-hud": "Sponsor HUD",

@@ -6,6 +6,7 @@ import type {
   LivestreamStatus,
 } from "./livestream";
 import type { Command } from "./validation/commands";
+import type { MusicLibrary, MusicLibraryUpdate, MusicImportResult } from "./music";
 import type { StreamDeckInfo } from "./stream-deck";
 import type { SerializedDisplayState } from "./timer";
 import type {
@@ -184,6 +185,10 @@ export type MobileBridgeInfo = {
 
 export type ElectronBridge = {
   context: DesktopContext;
+  /** Desktop-only; the browser demo intentionally has no local music storage. */
+  loadMusicLibrary?: () => Promise<MusicLibrary>;
+  importMusic?: () => Promise<MusicImportResult>;
+  saveMusicLibrary?: (update: MusicLibraryUpdate) => Promise<MusicLibrary>;
   selectFile: (opts: {
     title?: string;
     filters?: { name: string; extensions: string[] }[];

@@ -117,6 +117,14 @@ public/uploads/  user media (gitignored)
 
 - `Space` — start / pause timer
 
+## Lokale muziek
+
+Het paneel **Muziek** op Live importeert lokale MP3-, WAV-, OGG-, FLAC-, M4A- en AAC-bestanden. De afspeellijst biedt play/pauze/stop, vorig/volgend nummer, zoeken binnen een nummer, volume, herhalen, volgorde aanpassen en verwijderen. Onder **Zichtbaarheid → Muziek** bepaal je per eigen schermprofiel of het paneel zichtbaar is. Het staat standaard in Alles en Alleen wedstrijd.
+
+Muziek blijft spelen bij tabwissels, verplaatsen, inklappen of verbergen van het paneel; tijdens afspelen blijft bovenaan een stopknop zichtbaar. Na herstart staat de speler stil. De standaardgeluidsuitgang van de pc wordt gebruikt. Videogeluid en de zoemer worden niet automatisch gemixt of gedempt.
+
+Imports worden gekopieerd naar `userData/uploads/music/`; de afspeellijst, volume en herhaalkeuze staan daar in `playlist.json`. Daardoor blijven imports beschikbaar zonder de originele bestanden en worden ze meegenomen in de venue-backup. Verwijderen wist alleen de geïmporteerde kopie. Codec- of bestandsfouten worden gemeld en stoppen de afspeellijst, zodat deze niet eindeloos door onleesbare bestanden blijft schakelen. Deze functie is beschikbaar in de desktop-app; er is geen streamingplatform gekoppeld.
+
 ## Reliability
 
 - Commands validated with Zod before mutating state

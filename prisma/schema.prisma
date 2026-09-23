@@ -20,6 +20,9 @@ model Team {
   primaryColor   String
   secondaryColor String
   players        Player[]
+  playerLists    PlayerList[]
+  /// Welke spelerslijst de wedstrijd gebruikt. Leeg = alle spelers.
+  activePlayerListId String?
   homeMatches    Match[]  @relation("HomeTeam")
   awayMatches    Match[]  @relation("AwayTeam")
 }
@@ -38,6 +41,18 @@ model Player {
   goalVideoPath   String?
   subImagePath    String?
   lineupVideoPath String?
+  listId          String?
+  list            PlayerList? @relation(fields: [listId], references: [id], onDelete: SetNull)
+}
+
+model PlayerList {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  name      String
+  players   Player[]
+
+  @@index([teamId])
 }
 
 model Match {
@@ -343,6 +358,8 @@ model AppSettings {
   uiLocale            String  @default("nl")
   /// JSON: sport → two_blocks | per_period | inplay_plus_breaks. FOOTBALL wordt genegeerd.
   sponsorLayoutsJson  String?
+  /// JSON met opgeslagen interfaceprofielen: welk tabblad en welk live-blok zichtbaar is.
+  interfaceProfilesJson String?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.

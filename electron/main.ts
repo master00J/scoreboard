@@ -14,6 +14,8 @@ import {
 import fs from "fs";
 import os from "os";
 import path from "path";
+import { MusicLibraryStore } from "./music-library";
+import { MUSIC_EXTENSIONS, type MusicLibraryUpdate } from "../lib/music";
 import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
 import * as licenseSvc from "./license-service";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
@@ -219,7 +221,7 @@ let displayPreviewCaptureUsers = 0;
 let displayPreviewTimer: ReturnType<typeof setInterval> | null = null;
 let displayPreviewBusy = false;
 /** True na bevestigde afsluiting of fatale fout — slaat de quit-waarschuwing over. */
-let allowQuitWithoutConfirm = false;
+let allowQuitWithoutConfirm = process.env.ARENACUE_QUIT_WITHOUT_CONFIRM === "1";
 
 /** Laatste gemelde stadion-afspeelcontext (IPC van display-renderer). */
 let lastDisplayPlaybackSummary = "—";
@@ -1536,6 +1538,29 @@ async function openLegalBundleFolder() {
 }
 
 function registerIpc() {
+  const music = new MusicLibraryStore(desktopContext!.uploadsDir);
+  const assertMusicOperator = (event: Electron.IpcMainInvokeEvent) => {
+    if (!controlWindow || event.sender !== controlWindow.webContents || event.senderFrame !== event.sender.mainFrame) {
+      throw new Error("Music is only available from the control window");
+    }
+  };
+  ipcMain.handle("music:load", (event) => {
+    assertMusicOperator(event);
+    return music.load();
+  });
+  ipcMain.handle("music:save", (event, update: MusicLibraryUpdate) => {
+    assertMusicOperator(event);
+    return music.save(update);
+  });
+  ipcMain.handle("music:import", async (event) => {
+    assertMusicOperator(event);
+    const result = await dialog.showOpenDialog(controlWindow!, {
+      properties: ["openFile", "multiSelections"],
+      filters: [{ name: "Audio", extensions: MUSIC_EXTENSIONS }],
+    });
+    if (result.canceled) return { library: await music.load(), failed: [] };
+    return music.importFiles(result.filePaths);
+  });
   ipcMain.handle("desktop:getCaptureSources", async () => {
     const sources = await desktopCapturer.getSources({
       types: ["window", "screen"],

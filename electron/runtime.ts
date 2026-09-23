@@ -406,6 +406,7 @@ type AppSettingsRow = {
   idleFallbackMediaId?: string | null;
   uiLocale?: string | null;
   sponsorLayoutsJson?: string | null;
+  interfaceProfilesJson?: string | null;
 };
 
 function defaultLiveCycle(): LiveCycleStored {
@@ -453,6 +454,7 @@ async function getAppSettings(): Promise<{
   displaySafeZoneMarginPx: number;
   uiLocale: "nl" | "en" | "fr" | "it";
   sponsorLayoutsJson: string | null;
+  interfaceProfilesJson: string | null;
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
@@ -464,7 +466,7 @@ async function getAppSettings(): Promise<{
       "scoreboardThemeJson", "proofOfPlayBrandJson",
       "displayCanvasWidth", "displayCanvasHeight",
       "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx",
-      "uiLocale", "sponsorLayoutsJson"
+      "uiLocale", "sponsorLayoutsJson", "interfaceProfilesJson"
      FROM "AppSettings" WHERE "id" = 1`,
   );
   const row = rows[0];
@@ -494,6 +496,7 @@ async function getAppSettings(): Promise<{
       displaySafeZoneMarginPx: row.displaySafeZoneMarginPx ?? 40,
       uiLocale: normalizeUiLocale(row.uiLocale),
       sponsorLayoutsJson: row.sponsorLayoutsJson ?? null,
+      interfaceProfilesJson: row.interfaceProfilesJson ?? null,
     };
   }
   await prisma.$executeRawUnsafe(
@@ -515,6 +518,7 @@ async function getAppSettings(): Promise<{
     displaySafeZoneMarginPx: 40,
     uiLocale: "nl",
     sponsorLayoutsJson: null,
+    interfaceProfilesJson: null,
     ...defaults,
   };
 }
@@ -619,6 +623,7 @@ async function buildSettingsApiJson() {
     homeTeamBranding,
     uiLocale: s.uiLocale,
     sponsorLayoutsJson: s.sponsorLayoutsJson,
+    interfaceProfilesJson: s.interfaceProfilesJson,
   };
 }
 
@@ -730,6 +735,13 @@ async function setProofOfPlayBrandJson(json: string | null) {
 async function setSponsorLayoutsJson(json: string | null) {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "sponsorLayoutsJson" = ? WHERE "id" = 1`,
+    json,
+  );
+}
+
+async function setInterfaceProfilesJson(json: string | null) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "interfaceProfilesJson" = ? WHERE "id" = 1`,
     json,
   );
 }
@@ -1471,6 +1483,16 @@ async function fetchAppReleaseFeed(): Promise<DesktopApiResponse> {
   return json(res.ok ? 200 : res.status, payload);
 }
 
+function presentMatchTeam<T extends { players?: Array<{ listId?: string | null }>; activePlayerListId?: string | null }>(
+  team: T,
+): T {
+  if (!team.activePlayerListId || !team.players) return team;
+  return {
+    ...team,
+    players: team.players.filter((player) => player.listId === team.activePlayerListId),
+  };
+}
+
 export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResponse> {
   try {
     const method = req.method.toUpperCase();
@@ -1483,7 +1505,10 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
 
     if (method === "GET" && pathname === "/api/teams") {
       const teams = await prisma.team.findMany({
-        include: { players: { orderBy: { number: "asc" } } },
+        include: {
+          players: { orderBy: { number: "asc" } },
+          playerLists: { orderBy: { name: "asc" } },
+        },
         orderBy: { name: "asc" },
       });
       return json(200, teams);
@@ -1501,7 +1526,10 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
     if (teamId && method === "GET") {
       const team = await prisma.team.findUnique({
         where: { id: teamId },
-        include: { players: { orderBy: { number: "asc" } } },
+        include: {
+          players: { orderBy: { number: "asc" } },
+          playerLists: { orderBy: { name: "asc" } },
+        },
       });
       return team ? json(200, team) : json(404, { error: "Not found" });
     }
@@ -1514,6 +1542,53 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       await broadcastDisplayState();
       return json(200, team);
     }
+
+    if (method === "POST" && pathname === "/api/player-lists") {
+      const body = (parseJsonBody(req) as { teamId?: string; name?: string }) ?? {};
+      const name = body.name?.trim() ?? "";
+      if (!body.teamId || !name) return json(400, { error: "teamId en naam zijn verplicht" });
+      const team = await prisma.team.findUnique({ where: { id: body.teamId }, select: { id: true } });
+      if (!team) return json(404, { error: "Team niet gevonden" });
+      const list = await prisma.playerList.create({
+        data: { teamId: body.teamId, name: name.slice(0, 40) },
+      });
+      await touchState();
+      return json(200, list);
+    }
+
+    const playerListId = pathname.match(/^\/api\/player-lists\/([^/]+)$/)?.[1];
+    if (playerListId && method === "DELETE") {
+      const list = await prisma.playerList.findUnique({ where: { id: playerListId } });
+      if (!list) return json(404, { error: "Lijst niet gevonden" });
+      await prisma.$transaction([
+        prisma.player.updateMany({ where: { listId: playerListId }, data: { listId: null } }),
+        prisma.team.updateMany({
+          where: { activePlayerListId: playerListId },
+          data: { activePlayerListId: null },
+        }),
+        prisma.playerList.delete({ where: { id: playerListId } }),
+      ]);
+      await touchState();
+      return json(200, { ok: true });
+    }
+
+    const activeListTeamId = pathname.match(/^\/api\/teams\/([^/]+)\/active-player-list$/)?.[1];
+    if (activeListTeamId && method === "PATCH") {
+      const body = (parseJsonBody(req) as { playerListId?: string | null }) ?? {};
+      const nextId = body.playerListId ?? null;
+      if (nextId) {
+        const list = await prisma.playerList.findUnique({ where: { id: nextId } });
+        if (!list || list.teamId !== activeListTeamId) return json(404, { error: "Lijst niet gevonden" });
+      }
+      const team = await prisma.team.update({
+        where: { id: activeListTeamId },
+        data: { activePlayerListId: nextId },
+      });
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, team);
+    }
+
     if (teamId && method === "DELETE") {
       const stillThere = await prisma.team.findUnique({
         where: { id: teamId },
@@ -1568,6 +1643,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           idleFallbackMediaId?: string | null;
           uiLocale?: "nl" | "en" | "fr" | "it";
           sponsorLayoutsJson?: string | null;
+          interfaceProfilesJson?: string | null;
         }) ?? {};
       if ("uiLocale" in body && body.uiLocale) {
         await setUiLocale(normalizeUiLocale(body.uiLocale));
@@ -1618,6 +1694,13 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         await setSponsorLayoutsJson(
           raw === null || raw === undefined ? null : String(raw),
         );
+      }
+      if ("interfaceProfilesJson" in body) {
+        const raw = body.interfaceProfilesJson;
+        if (raw != null && String(raw).length > 20000) {
+          return json(400, { error: "Interfaceprofiel is te groot" });
+        }
+        await setInterfaceProfilesJson(raw === null || raw === undefined ? null : String(raw));
       }
       const patchLiveCycle =
         "firstHalfScoreboardSec" in body ||
@@ -2042,6 +2125,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       } = match;
       return json(200, {
         ...rest,
+        homeTeam: presentMatchTeam(match.homeTeam),
+        awayTeam: presentMatchTeam(match.awayTeam),
         homeFieldPlayerIds: parsePlayerIdArrayJson(homeFieldPlayerIdsJson),
         awayFieldPlayerIds: parsePlayerIdArrayJson(awayFieldPlayerIdsJson),
         setHistory: parseSetHistory(setHistoryJson),
