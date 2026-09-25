@@ -2127,13 +2127,16 @@ if (!gotLock) {
     bootLog("=== Stadium Scoreboard start ===");
 
     session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-      if (permission === "media" || permission === "display-capture") {
+      if (permission === "media" || permission === "display-capture" || permission === "speaker-selection") {
         callback(true);
       } else {
         callback(false);
       }
     });
-    session.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === "media");
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => {
+      const name: string = permission;
+      return name === "media" || name === "speaker-selection";
+    });
 
     createSplashWindow();
 

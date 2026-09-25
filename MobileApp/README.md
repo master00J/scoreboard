@@ -46,10 +46,10 @@ Sneller voor klanten:
 
 | Tab | LAN | Cloud |
 | --- | --- | --- |
-| **Wedstrijd** | Live score, timer, goals, kaarten, wissels | Zelfde commando's via cloud queue |
-| **Setup** | Teams, spelers, thuisploeg, wedstrijden, instellingen | Alleen uitleg — gebruik LAN op locatie |
+| **Wedstrijd** | Live score, klok (basketbal: tienden onder 1:00), periodes en verlenging, pauze, time-outs (FIBA-limieten), teamfouten/bonus, shotclock 24/14, balbezitpijl, straftijd (hockey), sets/service (volleybal), goals, kaarten, wissels | Zelfde commando's via cloud queue (website moet de sportcommando's kennen, zie `lib/control-command-schema.ts`) |
+| **Setup** | Teams, spelers, thuisploeg, wedstrijden met sport, periodeduur en pauzes | Alleen uitleg — gebruik LAN op locatie |
 | **Media** | Sponsors (budgetten, actief), bibliotheek afspelen, playlists | Alleen uitleg |
-| **Display** | Modi, blackout, safe mode, timer presets, spelerintro | Commando's (operator) |
+| **Display** | Modi, blackout, timer presets (voetbal), klok ±1 minuut, spelerintro | Commando's (operator) |
 | **Koppeling** | Bridge URL, pairing, QR | Venue + cloud token |
 
 **Uploads** (nieuwe video's, sponsorlogo's, mediakoppelingen) blijven op de **desktop** (Media-tab). De mobiele app kan bestaande media wel **triggeren** en sponsor-seconden **aanpassen** zolang je via **Lokaal LAN** gekoppeld bent als **operator**.

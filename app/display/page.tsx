@@ -8,7 +8,6 @@ import {
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
-import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import { AnimatePresence, motion } from "framer-motion";
 import { ScaleContainer } from "@/components/scale-container";
 import { useSocketSync, sendCommand, onDisplayHorn } from "@/lib/use-socket";
@@ -2274,7 +2273,6 @@ function SingleMediaMode({
     return () => {
       finishedRef.current = true;
       clearStallWatchdog();
-      releaseHtmlVideoElement(videoRef.current);
     };
   }, [media?.id, media?.path, media?.type]);
 

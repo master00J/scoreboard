@@ -31,6 +31,9 @@ describe("local music library", () => {
     await fs.unlink(file);
     const saved = await store.save({ trackIds: library.tracks.map((track) => track.id), volume: 0.3, repeat: true });
     expect(await new MusicLibraryStore(uploads).load()).toEqual(saved);
+    const withOutput = await store.save({ trackIds: saved.tracks.map((track) => track.id), volume: 0.3, repeat: true, outputId: "soundcard-2" });
+    expect((await new MusicLibraryStore(uploads).load()).outputId).toBe("soundcard-2");
+    expect(withOutput.outputId).toBe("soundcard-2");
     expect(await fs.readFile(path.join(uploads, "music", path.basename(saved.tracks[0]!.path)), "utf8")).toBe("test audio bytes");
   });
 

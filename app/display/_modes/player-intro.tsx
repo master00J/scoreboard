@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { DisplayVideo } from "@/components/display-video";
 import type { Player, Team } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
-import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import {
   reportDisplayMediaDiagnostic,
   videoElementDiagnosticFields,
@@ -29,8 +28,6 @@ export function PlayerIntroMode({
     const t = window.setTimeout(() => void v.play().catch(() => {}), 0);
     return () => clearTimeout(t);
   }, [lineupSrc, player.id]);
-
-  useEffect(() => () => releaseHtmlVideoElement(lineupVideoRef.current), []);
 
   if (lineupSrc) {
     return (

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
-import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 import type { Playlist, PlaylistItemFull } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
 import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
@@ -67,12 +66,6 @@ function FallbackMediaSlide({
       throttleMs,
     );
   };
-  useEffect(() => {
-    if (media.type !== "VIDEO") return;
-    return () => {
-      releaseHtmlVideoElement(videoRef.current);
-    };
-  }, [media.path, media.type]);
   useEffect(() => {
     if (media.type !== "VIDEO" || !(media.playAudio ?? false)) return;
     const v = videoRef.current;
@@ -322,6 +315,11 @@ export function SponsorRotation({
             item={current}
             objectFit={mediaObjectFit}
             mediaDiagEnabled={!showPreviewProgress}
+            /**
+             * Eén item: `setIndex(0)` verandert niets, dus zonder loop bleef de video na
+             * afloop op het laatste frame staan.
+             */
+            loop={items.length === 1}
             onFinished={
               current.media.type === "VIDEO"
                 ? () => setIndex((i) => (i + 1) % items.length)
@@ -341,11 +339,13 @@ function MediaRenderer({
   item,
   objectFit,
   mediaDiagEnabled = false,
+  loop = false,
   onFinished,
 }: {
   item: PlaylistItemFull;
   objectFit: "cover" | "contain";
   mediaDiagEnabled?: boolean;
+  loop?: boolean;
   onFinished?: () => void;
 }) {
   const src = mediaUrl(item.media.path);
@@ -377,13 +377,6 @@ function MediaRenderer({
   };
 
   useEffect(() => {
-    if (item.media.type !== "VIDEO") return;
-    return () => {
-      releaseHtmlVideoElement(videoRef.current);
-    };
-  }, [item.media.id, item.media.path, item.media.type]);
-
-  useEffect(() => {
     if (item.media.type !== "VIDEO" || !(item.media.playAudio ?? false)) return;
     const v = videoRef.current;
     if (!v) return;
@@ -401,6 +394,7 @@ function MediaRenderer({
               key={src}
               src={src}
               autoPlay
+              loop={loop}
               muted={!(item.media.playAudio ?? false)}
               playsInline
               preload="metadata"
@@ -437,6 +431,7 @@ function MediaRenderer({
           key={src}
           src={src}
           autoPlay
+          loop={loop}
           muted={!(item.media.playAudio ?? false)}
           playsInline
           preload="metadata"

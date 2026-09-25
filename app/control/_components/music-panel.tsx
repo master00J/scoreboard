@@ -48,6 +48,22 @@ export function MusicPanel({ player }: { player: MusicPlayerController }) {
           </label>
           <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={playback?.repeat ?? false} disabled={!ready || busy} onChange={(e) => void player.repeat(e.target.checked)} />{t("music.repeat")}</label>
         </div>
+        <label className="flex min-w-0 items-center gap-2 text-xs">
+          {t("music.output")}
+          <select
+            aria-label={t("music.output")}
+            className="h-8 min-w-0 flex-1 rounded-md border border-border bg-zinc-950 px-2 text-xs text-zinc-50"
+            style={{ colorScheme: "dark" }}
+            value={library.outputId}
+            disabled={!ready || busy}
+            onChange={(event) => void player.output(event.target.value)}
+          >
+            <option value="" style={{ backgroundColor: "#09090b", color: "#fafafa" }}>{t("music.outputDefault")}</option>
+            {player.outputs.filter((device) => device.id).map((device) => (
+              <option key={device.id} value={device.id} style={{ backgroundColor: "#09090b", color: "#fafafa" }}>{device.label}</option>
+            ))}
+          </select>
+        </label>
         {library.tracks.length === 0 ? <p className="text-sm text-muted-foreground">{t("music.empty")}</p> : (
           <ol className="max-h-52 space-y-1 overflow-y-auto" aria-label={t("music.playlist")}>
             {library.tracks.map((track, index) => (

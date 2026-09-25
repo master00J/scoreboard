@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { callBridge, normalizeBaseUrl, parsePairCode } from "../lib/transport.js";
+import { callBridge, describeCommandError, normalizeBaseUrl, parsePairCode } from "../lib/transport.js";
+import { commandErrorMessages } from "../lib/commandErrors.js";
 import { createBridgeApi } from "../lib/bridgeApi.js";
 
 test("normalizes LAN addresses and cloud legacy domains", () => {
@@ -123,4 +124,16 @@ test("caller cancellation and network failure are distinguishable from timeout",
   t.mock.method(globalThis, "fetch", async () => { throw new Error("offline"); });
   await assert.rejects(callBridge("http://localhost", "", "/mobile/snapshot", "GET", undefined, { signal: controller.signal }), { code: "network", name: "AbortError" });
   await assert.rejects(callBridge("http://localhost", "", "/mobile/snapshot"), { code: "network" });
+});
+
+test("rejected desktop commands map known error codes to translated messages", () => {
+  const limit = describeCommandError({ ok: false, error: "timeoutLimit", code: "timeoutLimit", params: { limit: 2 } });
+  assert.deepEqual(limit, { key: "cmd.timeoutLimit", values: { limit: 2 } });
+  assert.equal(commandErrorMessages.nl.cmd.timeoutLimit, "Time-outlimiet bereikt ({limit}) voor deze periode.");
+  assert.equal(commandErrorMessages.en.cmd.periodOver, "The period is over (00:00). Choose the next period or set the time.");
+  for (const locale of ["nl", "en", "fr", "it"]) assert.equal(Object.keys(commandErrorMessages[locale].cmd).length, Object.keys(commandErrorMessages.nl.cmd).length);
+  assert.deepEqual(describeCommandError({ ok: false, error: "Iets onverwachts" }), { key: null, details: "Iets onverwachts" });
+  assert.deepEqual(describeCommandError({ message: "Ongeldig command formaat." }), { key: null, details: "Ongeldig command formaat." });
+  assert.deepEqual(describeCommandError(null), { key: null, details: null });
+  assert.deepEqual(describeCommandError({ error: "timeoutLateLimit", params: [1] }), { key: "cmd.timeoutLateLimit", values: {} });
 });

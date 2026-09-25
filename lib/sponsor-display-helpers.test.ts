@@ -6,7 +6,8 @@ import {
   liveSponsorBesideVisible,
   isExclusiveFullscreenDisplayMode,
 } from "./sponsor-display-helpers";
-import type { Match, Playlist, PlaylistSlot } from "./types";
+import type { SponsorLedgerPayload } from "./sponsor-telemetry";
+import type { Match, Playlist, PlaylistSlot, Sponsor } from "./types";
 
 const emptyPlaylists = {} as Record<PlaylistSlot, Playlist | null>;
 const match = { status: "FIRST_HALF" } as Match;
@@ -170,5 +171,72 @@ describe("applySponsorBudgetCapToSpreadPhase", () => {
         { ...capOpts, cycleBudgetForever: true },
       ),
     ).toEqual({ phase: "sponsor", sponsorFilterId: "sp-1" });
+  });
+
+  describe("laatste clip van een sponsor (budget 8 s, twee beelden van 4 s)", () => {
+    const sponsor = {
+      id: "sp",
+      name: "Sponsor",
+      active: true,
+      prematchSeconds: 0,
+      halftimeSeconds: 8,
+      matchSeconds: 0,
+      imageDefaultSec: 4,
+      media: [{ id: "sp-m1", type: "IMAGE", active: true, durationSec: 4, title: "sp", path: "/x/sp.png" }],
+    } as Sponsor;
+    const slotMap: (string | null)[] = Array(60).fill(null);
+    for (const t of [12, 13, 14, 36, 37, 38]) slotMap[t] = "sp";
+    const nowMs = 1_000_000;
+    const opts = {
+      cycleBudgetForever: false,
+      sponsors: [sponsor],
+      section: "halftime" as const,
+      matchStatus: undefined,
+      slotMap,
+      /** Rooster: 4 + 3,62 = 7,62 s, afgerond 8 ⇒ zonder lopende clip "op". */
+      slotT: 39.62,
+      ledgerMatchesSegment: true,
+      nowMs,
+    };
+    const ledger = (activeClip: SponsorLedgerPayload["activeClip"]): SponsorLedgerPayload => ({
+      matchId: "m1",
+      segmentKey: "m1:halftime",
+      bySponsorSec: { sp: 4 },
+      activeClip,
+      updatedAtMs: nowMs,
+    });
+    const phase = { phase: "sponsor" as const, sponsorFilterId: "sp" };
+
+    it("laat een lopende clip uitspelen, ook als het rooster al op budget staat", () => {
+      const running = ledger({
+        sponsorId: "sp",
+        mediaId: "sp-m1",
+        startedAtMs: nowMs - 3_620,
+        expectedPlaySec: 4,
+        clipSessionId: "s2",
+      });
+      expect(applySponsorBudgetCapToSpreadPhase(phase, { ...opts, sponsorLedger: running })).toEqual(phase);
+    });
+
+    it("start geen nieuwe clip meer als er niets loopt", () => {
+      expect(applySponsorBudgetCapToSpreadPhase(phase, { ...opts, sponsorLedger: ledger(null) })).toEqual({
+        phase: "scoreboard",
+        sponsorFilterId: null,
+      });
+    });
+
+    it("stopt zodra de lopende clip zelf het budget haalt", () => {
+      const done = ledger({
+        sponsorId: "sp",
+        mediaId: "sp-m1",
+        startedAtMs: nowMs - 4_100,
+        expectedPlaySec: 4,
+        clipSessionId: "s2",
+      });
+      expect(applySponsorBudgetCapToSpreadPhase(phase, { ...opts, sponsorLedger: done })).toEqual({
+        phase: "scoreboard",
+        sponsorFilterId: null,
+      });
+    });
   });
 });

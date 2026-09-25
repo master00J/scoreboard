@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { callBridge as request, normalizeBaseUrl, parsePairCode } from './transport';
+import { callBridge as request, describeCommandError, normalizeBaseUrl, parsePairCode } from './transport';
 import { applyCommandToMatch, cloudMatchesFromState, extractMatchId, hasStoredCredentials, mergeLiveMatch, normalizeSnapshot, readCloudState } from './match-state';
 import { loadSession, saveSession } from './session-store';
 
@@ -90,14 +90,16 @@ export function useController() {
       && Date.now()-lastContact.current<FRESH_MS && !!snapshotRef.current && Date.now()>=cloudGate.current;
   }
 
-  const refresh = useCallback(async (force=false) => {
+  const refresh = useCallback(async (force=false, options={}) => {
     if(poll.current) { await poll.current; if(!force) return; }
     const {config:cfg,session:auth}=current.current;
     if(!auth?.token || !current.current.foreground) return;
     const epoch=generation.current;
     const cloud=cfg.connectionMode==='cloud';
+    // Stil vernieuwen na een actie: geen trek-om-te-vernieuwen-spinner en geen foutmelding bovenop de actie.
+    const visible=force && !options.silent;
     const task=(async()=>{
-      if(force) setRefreshing(true);
+      if(visible) setRefreshing(true);
       try {
         const response=await scopedRequest(cfg,auth.token,cloud?'/api/control/state':'/mobile/snapshot');
         if(epoch!==generation.current || !alive.current) return;
@@ -154,7 +156,7 @@ export function useController() {
           } catch { nextNetwork='offline'; }
         }
         setNetwork(nextNetwork);
-        if(force) notify(`errors.${error.code || 'network'}`,'error');
+        if(visible) notify(`errors.${error.code || 'network'}`,'error');
       } finally {
         if(epoch===generation.current && alive.current) setRefreshing(false);
       }
@@ -208,30 +210,42 @@ export function useController() {
     const quiet=!!options.quiet;
     if(mutationLock.current && !quiet) { notify('errors.busy','warning'); return false; }
     if(!mayMutate() && !options.allowStale) { notify('errors.notLive','warning'); return false; }
-    if(!quiet) { mutationLock.current=true; setBusy(true); notify('command.sending'); }
     const epoch=generation.current;
     const {config:cfg,session:auth}=current.current;
     if(!auth?.token) return false;
+    if(!quiet) { mutationLock.current=true; setBusy(true); }
     const cloud=cfg.connectionMode==='cloud';
+    let refreshAfter=false;
     try {
       const response=await scopedRequest(cfg,auth.token,cloud?'/api/control/commands':'/mobile/command','POST',{command});
       if(epoch!==generation.current || !alive.current) return false;
       if(response.status===401) { expire(); return false; }
-      if(!response.ok) { notify(cloud&&response.status===422?'errors.cloudUnsupported':'errors.command','error',null,response.data?.error||response.data?.message); return false; }
+      if(!response.ok) {
+        if(cloud && response.status===422) { notify('errors.cloudUnsupported','error',null,response.data?.message); return false; }
+        const rejected=describeCommandError(response.data);
+        if(rejected.key) notify(rejected.key,'error',rejected.values);
+        else notify('errors.command','error',null,rejected.details);
+        refreshAfter=!quiet;
+        return false;
+      }
       if(!cloud && detailsRef.current) {
         const optimistic=applyCommandToMatch(detailsRef.current,command);
         detailsRef.current=optimistic; setDetails(optimistic);
       }
       if(!quiet) {
+        // Live-acties tonen hun resultaat op het scorebord zelf; een melding per tik zou de knoppen laten verspringen.
         if(cloud) { cloudGate.current=Date.now()+3500; setCloudPendingUntil(cloudGate.current); notify('command.queued'); }
-        else notify('command.sent','success',null,response.data?.warning);
-        await refresh(true);
+        else if(response.data?.warning) notify('command.sent','warning',null,response.data.warning);
+        refreshAfter=true;
       }
       return true;
     } catch(error) {
       if(epoch===generation.current && alive.current && !quiet) { notify('errors.uncertain','warning'); setNetwork('reconnecting'); }
       return false;
-    } finally { if(!quiet && epoch===generation.current && alive.current) { mutationLock.current=false; setBusy(false); } }
+    } finally {
+      if(!quiet && epoch===generation.current && alive.current) { mutationLock.current=false; setBusy(false); }
+      if(refreshAfter && epoch===generation.current && alive.current) void refresh(true,{silent:true});
+    }
   },[expire,notify,refresh,scopedRequest]);
 
   const callBridge = useCallback(async (baseUrl,token,path,method='GET',body,options) => {
@@ -306,5 +320,6 @@ export function useController() {
     busy:pending,authenticating,refreshing,notice,nowMs,age,isCloud:config.connectionMode==='cloud',
     hasCredentials:hasStoredCredentials(config),
     updateConfig,applyCode,connectWithCode,authenticate,disconnect,refresh,sendCommand,callBridge,onStatus,notify,
-    dismissNotice:()=>setNotice(null),clockNow:snapshot?Math.min(nowMs,snapshot._sampleReceivedAtMs+FRESH_MS):nowMs};
+    dismissNotice:()=>setNotice(null),clockNow:snapshot?Math.min(nowMs,snapshot._sampleReceivedAtMs+FRESH_MS):nowMs,
+    clockLimitMs:snapshot?snapshot._sampleReceivedAtMs+FRESH_MS:null};
 }

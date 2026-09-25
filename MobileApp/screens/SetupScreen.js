@@ -3,11 +3,43 @@ import { Text, View } from 'react-native';
 import { Button, Card, Chip, ConfirmButton, EmptyState, Field, Sheet, sharedStyles as s } from '../components/ui';
 import { createBridgeApi } from '../lib/bridgeApi';
 import { useI18n } from '../lib/i18n';
+import { sportProfile } from '../lib/match-state';
 import { colors } from '../lib/theme';
 
 const SPORTS = ['FOOTBALL', 'FUTSAL', 'BASKETBALL', 'VOLLEYBALL', 'HOCKEY'];
 const playerName = (p) => '#' + p.number + ' ' + [p.firstName, p.lastName].filter(Boolean).join(' ');
 const encoded = (id) => encodeURIComponent(id);
+const minutesText = (seconds) => seconds > 0 ? String(Math.round(seconds / 6) / 10) : '';
+const parseMinutes = (value) => { const parsed = Number(String(value ?? '').trim().replace(',', '.')); return Number.isFinite(parsed) ? parsed : NaN; };
+/** Split rust/korte pauze zoals de desktop: alleen waar de hoofdpauze langer is dan de pauze tussen andere periodes. */
+const splitBreaks = (profile) => profile.mainBreakAfterPeriod != null && profile.shortBreakDurationSec !== profile.breakDurationSec;
+function timingDraft(sport, entity) {
+  const profile = sportProfile(sport);
+  const configured = (value, fallback) => Number(value) > 0 ? Number(value) : fallback;
+  return {
+    periodMinutes: minutesText(configured(entity?.periodDurationSec, profile.defaultPeriodDurationSec)),
+    breakMinutes: minutesText(configured(entity?.halfBreakSec, profile.breakDurationSec)),
+    shortBreakMinutes: minutesText(configured(entity?.shortBreakSec, profile.shortBreakDurationSec)),
+  };
+}
+/** Klokduur en pauzes in seconden voor POST/PATCH /matches; null bij ongeldige invoer. */
+function timingPayload(profile, draft) {
+  if (profile.timer === 'none') return {};
+  const period = parseMinutes(draft.periodMinutes);
+  if (!(period >= 1 && period <= 90)) return null;
+  const payload = { periodDurationSec: Math.round(period * 60) };
+  if (profile.hasSets) return payload;
+  const main = parseMinutes(draft.breakMinutes);
+  if (!(main >= 1 && main <= 60)) return null;
+  payload.halfBreakSec = Math.round(main * 60);
+  payload.shortBreakSec = payload.halfBreakSec;
+  if (splitBreaks(profile)) {
+    const short = parseMinutes(draft.shortBreakMinutes);
+    if (!(short >= 1 && short <= 60)) return null;
+    payload.shortBreakSec = Math.round(short * 60);
+  }
+  return payload;
+}
 function localDateInput(value) {
   if (!value) return '';
   const d = new Date(value);
@@ -113,9 +145,10 @@ export function SetupScreen({ canCall, canMutate, isCloud, baseUrl, sessionToken
     setFormError(''); setSheet({ kind, entity });
     if (kind === 'team') setDraft({ name: entity?.name ?? '', shortName: entity?.shortName ?? '' });
     if (kind === 'player') setDraft({ number: String(entity?.number ?? ''), firstName: entity?.firstName ?? '', lastName: entity?.lastName ?? '', teamId: selectedTeamId });
-    if (kind === 'match') setDraft({ homeTeamId: entity?.homeTeamId ?? teams[0]?.id ?? '', awayTeamId: entity?.awayTeamId ?? teams[1]?.id ?? '', sport: entity?.sport ?? 'FOOTBALL', kickoff: localDateInput(entity?.kickoffAt) });
+    if (kind === 'match') setDraft({ homeTeamId: entity?.homeTeamId ?? teams[0]?.id ?? '', awayTeamId: entity?.awayTeamId ?? teams[1]?.id ?? '', sport: entity?.sport ?? 'FOOTBALL', kickoff: localDateInput(entity?.kickoffAt), ...timingDraft(entity?.sport ?? 'FOOTBALL', entity) });
   }
   const updateDraft = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+  const chooseSport = (sport) => setDraft((current) => ({ ...current, sport, ...timingDraft(sport, sheet?.entity?.sport === sport ? sheet.entity : null) }));
   async function saveEditor() {
     if (!sheet || disabled) return false;
     const entity = sheet.entity;
@@ -135,7 +168,9 @@ export function SetupScreen({ canCall, canMutate, isCloud, baseUrl, sessionToken
       let kickoffAt;
       try { kickoffAt = parseLocalDate(draft.kickoff ?? ''); }
       catch { setFormError(t('setup.kickoffError')); return false; }
-      const body = { kickoffAt, ...(!entity || entity.sport !== draft.sport ? { sport: draft.sport } : {}) };
+      const timing = timingPayload(sportProfile(draft.sport), draft);
+      if (!timing) { setFormError(t('setup.timingError')); return false; }
+      const body = { kickoffAt, ...(!entity || entity.sport !== draft.sport ? { sport: draft.sport } : {}), ...timing };
       request = (api) => entity ? api.patch('/matches/' + encoded(entity.id), body) : api.post('/matches', { ...body, homeTeamId: draft.homeTeamId, awayTeamId: draft.awayTeamId });
     }
     if (request && await mutate(request)) { setSheet(null); return true; }
@@ -208,7 +243,17 @@ export function SetupScreen({ canCall, canMutate, isCloud, baseUrl, sessionToken
         {['home', 'away'].map((side) => <View key={side} style={{ gap: 9 }}><Text style={s.text}>{t('setup.' + side)}</Text><View style={s.row}>
           {teams.map((team) => <Chip key={team.id} label={team.name} selected={draft[side + 'TeamId'] === team.id} disabled={disabled || !!sheet.entity} onPress={() => updateDraft(side + 'TeamId', team.id)}/>)}
         </View></View>)}
-        <Text style={s.text}>{t('setup.sport')}</Text><View style={s.row}>{SPORTS.map((sport) => <Chip key={sport} label={t('setup.sport' + sport)} selected={draft.sport === sport} disabled={disabled} onPress={() => updateDraft('sport', sport)}/>)}</View>
+        <Text style={s.text}>{t('setup.sport')}</Text><View style={s.row}>{SPORTS.map((sport) => <Chip key={sport} label={t('setup.sport' + sport)} selected={draft.sport === sport} disabled={disabled} onPress={() => chooseSport(sport)}/>)}</View>
+        {(() => {
+          const profile = sportProfile(draft.sport);
+          if (profile.timer === 'none') return null;
+          return <>
+            <Field label={t('setup.periodMinutes')} value={draft.periodMinutes ?? ''} onChangeText={(value) => updateDraft('periodMinutes', value)} keyboardType="decimal-pad" editable={!disabled} maxLength={4}/>
+            {profile.overtimeDurationSec > 0 && <Text style={s.muted}>{t('setup.timingHint', { n: profile.maxOvertimePeriods, min: Math.round(profile.overtimeDurationSec / 60) })}</Text>}
+            {splitBreaks(profile) && <Field label={t('setup.shortBreakMinutes')} value={draft.shortBreakMinutes ?? ''} onChangeText={(value) => updateDraft('shortBreakMinutes', value)} keyboardType="decimal-pad" editable={!disabled} maxLength={4}/>}
+            <Field label={t(splitBreaks(profile) ? 'setup.mainBreakMinutes' : 'setup.breakMinutes')} value={draft.breakMinutes ?? ''} onChangeText={(value) => updateDraft('breakMinutes', value)} keyboardType="decimal-pad" editable={!disabled} maxLength={4}/>
+          </>;
+        })()}
         <Field label={t('setup.kickoff')} placeholder={t('setup.kickoffHint')} value={draft.kickoff ?? ''} onChangeText={(value) => updateDraft('kickoff', value)} editable={!disabled} autoCapitalize="none" maxLength={16}/>
         {sheet.entity && <Text style={s.muted}>{t('setup.matchEditHint')}</Text>}
       </>}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { mediaUrl } from "./media-url";
-import { emptyMusicLibrary, type MusicLibrary } from "./music";
+import { emptyMusicLibrary, musicOutputId, type MusicLibrary } from "./music";
 import { MusicPlayback, type MusicPlaybackState } from "./music-playback";
 
 export function useMusicPlayer() {
@@ -16,6 +16,7 @@ export function useMusicPlayer() {
   const mounted = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [failed, setFailed] = useState<string[]>([]);
+  const [outputs, setOutputs] = useState<Array<{ id: string; label: string }>>([]);
 
   function acceptLibrary(next: MusicLibrary) {
     libraryRef.current = next;
@@ -39,6 +40,7 @@ export function useMusicPlayer() {
         engine.setTracks(next.tracks);
         engine.setVolume(next.volume);
         engine.setRepeat(next.repeat);
+        if (next.outputId) void engine.setOutput(next.outputId).catch(() => { if (!canceled) setError("outputError"); });
         setReady(true);
       }).catch(() => { if (!canceled) setError("loadError"); });
     }
@@ -48,6 +50,24 @@ export function useMusicPlayer() {
       unsubscribe();
       engine.dispose();
       player.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    let canceled = false;
+    async function refresh() {
+      const devices = await navigator.mediaDevices?.enumerateDevices?.().catch(() => []);
+      if (canceled || !devices) return;
+      setOutputs(devices.filter((device) => device.kind === "audiooutput").map((device, index) => ({
+        id: device.deviceId,
+        label: device.label || `Output ${index + 1}`,
+      })));
+    }
+    void refresh();
+    navigator.mediaDevices?.addEventListener?.("devicechange", refresh);
+    return () => {
+      canceled = true;
+      navigator.mediaDevices?.removeEventListener?.("devicechange", refresh);
     };
   }, []);
 
@@ -77,7 +97,7 @@ export function useMusicPlayer() {
   }
 
   return {
-    library, playback, ready, busy, error, failed,
+    library, playback, ready, busy, error, failed, outputs,
     supported: typeof window !== "undefined" && !!window.electronAPI?.loadMusicLibrary,
     importFiles: () => mutate(async () => {
       const result = await window.electronAPI!.importMusic!();
@@ -110,6 +130,17 @@ export function useMusicPlayer() {
       player.current?.setRepeat(repeat);
       await save();
     }, "saveError"),
+    output: (outputId: string) => mutate(async () => {
+      await player.current?.setOutput(musicOutputId(outputId));
+      const state = player.current!.snapshot();
+      const next = await window.electronAPI!.saveMusicLibrary!({
+        trackIds: libraryRef.current.tracks.map((track) => track.id),
+        volume: state.volume,
+        repeat: state.repeat,
+        outputId: musicOutputId(outputId),
+      });
+      if (mounted.current) acceptLibrary(next);
+    }, "outputError"),
   };
 }
 

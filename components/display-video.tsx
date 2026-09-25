@@ -9,6 +9,7 @@ import {
   type Ref,
   type VideoHTMLAttributes,
 } from "react";
+import { releaseHtmlVideoElement } from "@/lib/html-video-release";
 
 function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
   if (!ref) return;
@@ -89,6 +90,19 @@ export const DisplayVideo = forwardRef<HTMLVideoElement, VideoHTMLAttributes<HTM
         video.removeEventListener("ended", paint);
       };
     }, [props.src, props.autoPlay]);
+
+    /**
+     * Decoder vrijgeven bij unmount. Dit moet hier met het element uit de mount: in een
+     * effect-cleanup van de ouder is `ref.current` op dat moment al `null`, waardoor de
+     * release daar nooit iets deed. Alleen een losgekoppeld element: StrictMode-cleanups
+     * en hergebruik van dezelfde node met een nieuwe `src` laten we met rust.
+     */
+    useEffect(() => {
+      const video = videoRef.current;
+      return () => {
+        if (video && !video.isConnected) releaseHtmlVideoElement(video);
+      };
+    }, []);
 
     return (
       <div className="absolute inset-0 overflow-hidden bg-black">

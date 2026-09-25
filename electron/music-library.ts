@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { MUSIC_EXTENSIONS, emptyMusicLibrary, musicVolume, type MusicLibrary, type MusicLibraryUpdate, type MusicImportResult } from "../lib/music";
+import { MUSIC_EXTENSIONS, emptyMusicLibrary, musicOutputId, musicVolume, type MusicLibrary, type MusicLibraryUpdate, type MusicImportResult } from "../lib/music";
 
 /** Imported copies and the playlist live in uploads, so venue backups include both. */
 export class MusicLibraryStore {
@@ -39,7 +39,7 @@ export class MusicLibraryStore {
       }
       ids.add(track.id);
     }
-    return { tracks: data.tracks, volume: musicVolume(data.volume), repeat: data.repeat === true };
+    return { tracks: data.tracks, volume: musicVolume(data.volume), repeat: data.repeat === true, outputId: musicOutputId(data.outputId) };
   }
 
   private async write(library: MusicLibrary): Promise<void> {
@@ -93,7 +93,7 @@ export class MusicLibraryStore {
         if (!track) throw new Error("Unknown music track");
         return track;
       });
-      const library = { tracks, volume: musicVolume(update.volume), repeat: update.repeat };
+      const library = { tracks, volume: musicVolume(update.volume), repeat: update.repeat, outputId: musicOutputId(update.outputId ?? previous.outputId) };
       await this.write(library);
       // Only delete generated copies referenced by the validated previous manifest.
       for (const track of previous.tracks) {

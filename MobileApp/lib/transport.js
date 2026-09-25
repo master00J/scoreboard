@@ -1,3 +1,5 @@
+import { commandErrorCodes } from "./commandErrors.js";
+
 const DEFAULT_TIMEOUT_MS = 10_000;
 
 function transportError(code, message, cause) {
@@ -125,4 +127,16 @@ export async function callBridge(baseUrl, sessionToken, path, method = "GET", bo
     clearTimeout(timer);
     signal?.removeEventListener("abort", abortFromCaller);
   }
+}
+
+/** Geweigerde desktopactie ({ ok: false, code, params }): bekende foutcode → vertaalsleutel, anders de ruwe tekst. */
+export function describeCommandError(data) {
+  const record = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const code = [record.code, record.error].find((value) => typeof value === "string" && commandErrorCodes.includes(value));
+  if (code) {
+    const params = record.params && typeof record.params === "object" && !Array.isArray(record.params) ? record.params : {};
+    return { key: `cmd.${code}`, values: { ...params } };
+  }
+  const details = [record.error, record.message].find((value) => typeof value === "string" && value.trim());
+  return { key: null, details: details ?? null };
 }

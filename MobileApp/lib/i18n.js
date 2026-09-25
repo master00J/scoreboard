@@ -3,11 +3,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { coreMessages, locales } from './messages';
 import { screenMessages } from './screenMessages';
 import { matchMessages } from './matchMessages';
+import { commandErrorMessages } from './commandErrors';
 const Context = createContext(null);
-export function translate(locale,key,values={}) {
+export function translate(locale,key,values) {
+  const params=values||{};
   const lookup=data=>data?.[key] ?? key.split('.').reduce((value,part)=>value?.[part],data);
-  const template=lookup(coreMessages[locale]) ?? lookup(screenMessages[locale]) ?? lookup(matchMessages[locale]) ?? lookup(coreMessages.nl) ?? lookup(screenMessages.nl) ?? lookup(matchMessages.nl) ?? key;
-  return String(template).replace(/\{(\w+)\}/g,(_,name)=>String(values[name]??`{${name}}`));
+  const template=lookup(coreMessages[locale]) ?? lookup(screenMessages[locale]) ?? lookup(matchMessages[locale]) ?? lookup(commandErrorMessages[locale]) ?? lookup(coreMessages.nl) ?? lookup(screenMessages.nl) ?? lookup(matchMessages.nl) ?? lookup(commandErrorMessages.nl) ?? key;
+  return String(template).replace(/\{(\w+)\}/g,(_,name)=>String(params[name]??`{${name}}`));
 }
 export function I18nProvider({children}) {
   const [locale,setLocaleState]=useState('nl');

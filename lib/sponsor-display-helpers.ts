@@ -7,7 +7,10 @@ import {
 } from "./sponsor-distribution";
 import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 import type { SponsorLedgerPayload } from "./sponsor-telemetry";
-import { sponsorTelemetryConsumedSec } from "./sponsor-telemetry";
+import {
+  sponsorTelemetryActiveClipStillLive,
+  sponsorTelemetryConsumedSec,
+} from "./sponsor-telemetry";
 
 export type SponsorSpreadPhaseView = {
   phase: "scoreboard" | "sponsor";
@@ -211,22 +214,59 @@ export function allActiveSponsorSectionBudgetsExhausted(
 
   for (const sponsor of active) {
     const budget = budgetFn(sponsor);
-    const consumedSlot = sponsorScreenSecondsConsumed(
-      slotMap,
+    const consumed = sponsorConsumedForBudgetCap(sponsor.id, {
       sponsors,
       section,
       matchStatus,
+      slotMap,
       slotT,
-      sponsor.id,
-    );
-    const consumedTelem =
-      ledgerMatchesSegment && sponsorLedger
-        ? sponsorTelemetryConsumedSec(sponsorLedger, sponsor.id, nowMs)
-        : consumedSlot;
-    const consumed = Math.max(consumedSlot, consumedTelem);
+      sponsorLedger,
+      ledgerMatchesSegment,
+      nowMs,
+    });
     if (consumed < budget) return false;
   }
   return true;
+}
+
+/**
+ * Verbruik waarop het budgetplafond beslist: max van slotrooster en telemetry. Loopt er
+ * volgens de ledger nog een clip van deze sponsor, dan telt alleen de telemetry. Het
+ * slotrooster is een projectie die vóórloopt op het scherm (slots starten op hele
+ * seconden, het display pas bij de volgende tick) en op hele seconden afrondt; zo kapte
+ * het plafond de laatste clip van een sponsor tot ~0,5 s te vroeg af. In de rust bleef
+ * die clip daarna gepauzeerd als "bezig" in de ledger staan en blokkeerde hij de
+ * volgende slots. Een lopende clip speelt dus altijd uit; nieuwe clips stoppen wel.
+ */
+function sponsorConsumedForBudgetCap(
+  sponsorId: string,
+  opts: {
+    sponsors: Sponsor[];
+    section: SponsorSection;
+    matchStatus: string | undefined;
+    slotMap: (string | null)[];
+    slotT: number;
+    sponsorLedger: SponsorLedgerPayload | null | undefined;
+    ledgerMatchesSegment: boolean;
+    nowMs: number;
+  },
+): number {
+  const consumedSlot = sponsorScreenSecondsConsumed(
+    opts.slotMap,
+    opts.sponsors,
+    opts.section,
+    opts.matchStatus,
+    opts.slotT,
+    sponsorId,
+  );
+  const ledger = opts.ledgerMatchesSegment ? opts.sponsorLedger : null;
+  if (!ledger) return consumedSlot;
+  const consumedTelem = sponsorTelemetryConsumedSec(ledger, sponsorId, opts.nowMs);
+  const ac = ledger.activeClip;
+  if (ac && ac.sponsorId === sponsorId && sponsorTelemetryActiveClipStillLive(ac, opts.nowMs)) {
+    return consumedTelem;
+  }
+  return Math.max(consumedSlot, consumedTelem);
 }
 
 /**
@@ -270,19 +310,7 @@ export function applySponsorBudgetCapToSpreadPhase(
   const budget = opts.budgetOf
     ? opts.budgetOf(sponsor)
     : sponsorSectionBudgetSeconds(sponsor, opts.section, opts.matchStatus);
-  const consumedSlot = sponsorScreenSecondsConsumed(
-    opts.slotMap,
-    opts.sponsors,
-    opts.section,
-    opts.matchStatus,
-    opts.slotT,
-    sponsor.id,
-  );
-  const consumedTelem =
-    opts.ledgerMatchesSegment && opts.sponsorLedger
-      ? sponsorTelemetryConsumedSec(opts.sponsorLedger, sponsor.id, opts.nowMs)
-      : consumedSlot;
-  if (budget > 0 && Math.max(consumedSlot, consumedTelem) >= budget) {
+  if (budget > 0 && sponsorConsumedForBudgetCap(sponsor.id, opts) >= budget) {
     return { phase: "scoreboard", sponsorFilterId: null };
   }
   return base;

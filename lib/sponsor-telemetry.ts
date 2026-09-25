@@ -110,10 +110,17 @@ export function ledgerActiveClipStillLiveForMatchSegment(
     return null;
   }
   const ac = sponsorLedger.activeClip;
-  const elapsedSec = sponsorTelemetryActiveClipElapsedSec(ac, nowMs);
-  const totalSec = Math.max(0.1, ac.expectedPlaySec || 0.1);
-  if (elapsedSec >= totalSec + 0.75) return null;
-  return ac;
+  return sponsorTelemetryActiveClipStillLive(ac, nowMs) ? ac : null;
+}
+
+/** Zelfde marge als hierboven, zonder segmentcontrole (die doet de aanroeper). */
+export function sponsorTelemetryActiveClipStillLive(
+  activeClip: NonNullable<SponsorLedgerPayload["activeClip"]>,
+  nowMs: number,
+): boolean {
+  const elapsedSec = sponsorTelemetryActiveClipElapsedSec(activeClip, nowMs);
+  const totalSec = Math.max(0.1, activeClip.expectedPlaySec || 0.1);
+  return elapsedSec < totalSec + 0.75;
 }
 
 export function sponsorTelemetryActiveClipElapsedSec(

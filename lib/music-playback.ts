@@ -107,6 +107,12 @@ export class MusicPlayback {
     this.patch({ volume: this.audio.volume });
   }
   setRepeat(repeat: boolean) { this.patch({ repeat }); }
+  async setOutput(outputId: string): Promise<void> {
+    const sink = outputId.trim();
+    const media = this.audio as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+    if (sink && media.setSinkId) await media.setSinkId(sink);
+    else if (!sink && media.setSinkId) await media.setSinkId("");
+  }
   dispose() {
     this.generation++;
     for (const [event, handler] of Object.entries(this.handlers)) this.audio.removeEventListener(event, handler);

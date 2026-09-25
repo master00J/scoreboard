@@ -51,12 +51,12 @@ export function LeftScoreboardLayout({
       style={{ fontFamily: theme.fontFamily }}
     >
       <div
-        className="absolute left-0 top-0 z-0"
+        className="absolute left-0 top-0 z-[15]"
         style={{ width: barW, height: "100%", background: grad }}
       />
       <div
-        className="absolute bottom-0 z-0"
-        style={{ left: barW, right: 0, height: barH, background: grad }}
+        className="absolute bottom-0 z-[15]"
+        style={{ left: barW - 2, right: 0, height: barH, background: grad }}
       />
       {frameSrc ? (
         <img
@@ -113,10 +113,10 @@ export function LeftScoreboardLayout({
       <div
         className="absolute z-10 overflow-hidden"
         style={{
-          left: barW,
-          top: 0,
-          right: 0,
-          bottom: barH,
+          left: barW - 2,
+          top: -1,
+          right: -1,
+          bottom: barH - 2,
           background: theme.contentAreaBg,
         }}
       >
