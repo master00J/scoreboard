@@ -359,6 +359,13 @@ export function SportLiveControls({ match }: { match: Match }) {
             >
               {state?.shotClockRunning ? t("common.pause") : t("common.start")}
             </Button>
+            <Button
+              variant={shotOff ? "secondary" : "outline"}
+              disabled={shotOff}
+              onClick={() => void sendCommand({ type: "shotclock:off" })}
+            >
+              {t("matchLive.shotClockOff")}
+            </Button>
             {profile.shotClockPresets.map((seconds) => (
               <Button
                 key={seconds}
