@@ -182,6 +182,34 @@ describe("voetbal", () => {
 });
 
 describe("basketbal", () => {
+  it("onthoudt standaard uit bij reset, periodewissel en nieuwe wedstrijden", async () => {
+    await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "shotclock:start" });
+    await run({ type: "shotclock:setEnabled", enabled: false });
+    const disabled = {
+      shotClockDisabled: true,
+      shotClockOff: true,
+      shotClockRunning: false,
+      shotClockStartedAt: null,
+      shotClockBaseSec: 0,
+    };
+    expect(await state()).toMatchObject(disabled);
+    await run({ type: "shotclock:reset", seconds: 24 });
+    await run({ type: "shotclock:start" });
+    await run({ type: "shotclock:set", seconds: 10 });
+    expect(await state()).toMatchObject(disabled);
+    await run({ type: "sport:setPeriod", period: 2 });
+    expect(await state()).toMatchObject(disabled);
+    await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    expect(await state()).toMatchObject(disabled);
+    await run({ type: "shotclock:setEnabled", enabled: true });
+    expect(await state()).toMatchObject({
+      shotClockDisabled: false, shotClockOff: false, shotClockRunning: false, shotClockBaseSec: 24,
+    });
+    await run({ type: "shotclock:start" });
+    expect((await state()).shotClockRunning).toBe(true);
+  });
+
   it("schakelt een lopende shotclock handmatig uit en kan opnieuw starten of resetten", async () => {
     await seedMatch("BASKETBALL", { periodDurationSec: 600 });
     await run({ type: "timer:start" });
