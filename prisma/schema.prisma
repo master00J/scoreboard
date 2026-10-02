@@ -273,6 +273,8 @@ model DisplayState {
   shotClockBaseSec   Float     @default(24)
   /// True: shotclock bewust uit (FIBA, wedstrijdklok onder 14s bij nieuw balbezit).
   shotClockOff       Boolean   @default(false)
+  /// Operatorvoorkeur: shotclock standaard uit; blijft bewaard bij herstart en nieuwe wedstrijden.
+  shotClockDisabled  Boolean   @default(false)
   /// Kaartkleur voor CARD-overlay: YELLOW | RED | GREEN.
   activeCardColor    String?
   /// Hockey: straftijd per ploeg (aftellend, loopt mee met de wedstrijdklok).
