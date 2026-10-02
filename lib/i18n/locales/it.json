@@ -372,6 +372,8 @@
     "wonSets": "Set vinti",
     "shotClock": "Shot clock",
     "shotClockOff": "OFF",
+    "shotClockDefaultOff": "Shot clock disattivato per impostazione predefinita",
+    "shotClockDefaultOffHint": "Resta disattivato dopo un reset, nei nuovi periodi e nelle nuove partite. La preferenza viene salvata.",
     "shotClockUnder14": "Con un nuovo possesso e meno di 14 s sull’orologio, lo shot clock si spegne.",
     "possession": "Prossimo possesso",
     "timeoutLate": "Ultimi 2:00 · {{used}}/{{max}}",
