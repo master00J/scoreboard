@@ -52,6 +52,7 @@ export function SportLiveControls({ match }: { match: Match }) {
   const timeoutSide = state?.timeoutSide ?? null;
   const gameClock = sportClockSeconds(match.sport, elapsed, match.periodDurationSec, match.currentPeriod);
   const shotOff = !!state?.shotClockOff;
+  const shotDisabled = !!state?.shotClockDisabled;
   const overtimeAvailable = profile.overtimeDurationSec > 0 && profile.maxOvertimePeriods > 0;
   const inOvertime = match.currentPeriod > profile.periodCount;
   const nextOvertimePeriod = Math.min(
@@ -346,11 +347,24 @@ export function SportLiveControls({ match }: { match: Match }) {
             >
               {shotOff ? t("matchLive.shotClockOff") : formatShotClock(shotClock)}
             </div>
-            <div className="text-[10px] text-muted-foreground">{t("matchLive.shotClockUnder14")}</div>
+            <label className="mt-2 flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={shotDisabled}
+                onChange={(event) =>
+                  void sendCommand({ type: "shotclock:setEnabled", enabled: !event.target.checked })
+                }
+              />
+              {t("matchLive.shotClockDefaultOff")}
+            </label>
+            <div className="text-[10px] text-muted-foreground">
+              {t(shotDisabled ? "matchLive.shotClockDefaultOffHint" : "matchLive.shotClockUnder14")}
+            </div>
           </div>
           <div className="flex flex-wrap gap-1.5">
             <Button
               variant={state?.shotClockRunning ? "warning" : "success"}
+              disabled={shotDisabled}
               onClick={() =>
                 void sendCommand({
                   type: state?.shotClockRunning ? "shotclock:pause" : "shotclock:start",
@@ -370,6 +384,7 @@ export function SportLiveControls({ match }: { match: Match }) {
               <Button
                 key={seconds}
                 variant="outline"
+                disabled={shotDisabled}
                 onClick={() => void sendCommand({ type: "shotclock:reset", seconds })}
               >
                 {t("common.reset")} {seconds}
