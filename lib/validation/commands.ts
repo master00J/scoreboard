@@ -46,6 +46,7 @@ export const CommandSchema = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("shotclock:start") }),
   z.object({ type: z.literal("shotclock:pause") }),
+  z.object({ type: z.literal("shotclock:off") }),
   z.object({
     type: z.literal("shotclock:reset"),
     seconds: z.number().int().min(1).max(99).optional(),
