@@ -433,6 +433,8 @@
     "wonSets": "Gewonnen sets",
     "shotClock": "Shotclock",
     "shotClockOff": "UIT",
+    "shotClockDefaultOff": "Shotclock standaard uit",
+    "shotClockDefaultOffHint": "Blijft uit bij reset, nieuwe periodes en nieuwe wedstrijden. Deze voorkeur wordt onthouden.",
     "shotClockUnder14": "Bij nieuw balbezit en minder dan 14s op de wedstrijdklok gaat de shotclock uit.",
     "possession": "Volgend balbezit",
     "timeoutLate": "Laatste 2:00 · {{used}}/{{max}}",
