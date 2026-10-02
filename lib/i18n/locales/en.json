@@ -433,6 +433,8 @@
     "wonSets": "Sets won",
     "shotClock": "Shot clock",
     "shotClockOff": "OFF",
+    "shotClockDefaultOff": "Shot clock off by default",
+    "shotClockDefaultOffHint": "Stays off on reset, new periods and new matches. This preference is saved.",
     "shotClockUnder14": "On a new possession with under 14s on the game clock, the shot clock switches off.",
     "possession": "Next possession",
     "timeoutLate": "Last 2:00 · {{used}}/{{max}}",
