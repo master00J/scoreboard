@@ -25,6 +25,7 @@ describe("CommandSchema", () => {
   });
 
   it("accepteert multisport- en shotclockcommando's", () => {
+    expect(CommandSchema.safeParse({ type: "shotclock:off" }).success).toBe(true);
     expect(CommandSchema.safeParse({ type: "sport:setPeriod", period: 4 }).success).toBe(true);
     expect(
       CommandSchema.safeParse({
