@@ -182,6 +182,35 @@ describe("voetbal", () => {
 });
 
 describe("basketbal", () => {
+  it("schakelt een lopende shotclock handmatig uit en kan opnieuw starten of resetten", async () => {
+    await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "timer:start" });
+    await run({ type: "shotclock:start" });
+    expect((await state()).shotClockRunning).toBe(true);
+
+    await run({ type: "shotclock:off" });
+    expect(await state()).toMatchObject({
+      shotClockOff: true,
+      shotClockRunning: false,
+      shotClockStartedAt: null,
+      shotClockBaseSec: 0,
+      timerRunning: true,
+    });
+    await run({ type: "shotclock:off" });
+    expect((await state()).shotClockOff).toBe(true);
+
+    await run({ type: "shotclock:start" });
+    expect(await state()).toMatchObject({ shotClockOff: false, shotClockRunning: true });
+
+    await run({ type: "shotclock:off" });
+    await run({ type: "shotclock:reset", seconds: 14 });
+    expect(await state()).toMatchObject({
+      shotClockOff: false,
+      shotClockRunning: false,
+      shotClockBaseSec: 14,
+    });
+  });
+
   it("logt punten met terugdraai-info en maakt ze ongedaan", async () => {
     const m = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
     await run({ type: "score:adjust", side: "away", delta: 3 });
