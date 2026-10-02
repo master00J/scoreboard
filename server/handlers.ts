@@ -827,6 +827,10 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       await updateState(db, { ...pauseShotClockAt(computeShotClockSeconds(s)), shotClockOff: s.shotClockOff });
       return { ok: true };
     }
+    case "shotclock:off": {
+      await updateState(db, suppressShotClock());
+      return { ok: true };
+    }
     case "shotclock:reset": {
       const s = await getState(db);
       const match = await requireActiveMatch(db, s);
