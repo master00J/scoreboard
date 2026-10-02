@@ -433,6 +433,8 @@
     "wonSets": "Sets gagnés",
     "shotClock": "Shot clock",
     "shotClockOff": "OFF",
+    "shotClockDefaultOff": "Shot clock désactivé par défaut",
+    "shotClockDefaultOffHint": "Reste désactivé après une réinitialisation, une nouvelle période ou un nouveau match. Ce choix est enregistré.",
     "shotClockUnder14": "À une nouvelle possession avec moins de 14 s à l’horloge, le shot clock s’éteint.",
     "possession": "Prochaine possession",
     "timeoutLate": "2:00 dernières · {{used}}/{{max}}",
