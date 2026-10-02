@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { CommandSchema } from "./commands";
 
 describe("CommandSchema", () => {
+  it("vereist een boolean voor de opgeslagen shotclockvoorkeur", () => {
+    expect(CommandSchema.safeParse({ type: "shotclock:setEnabled", enabled: false }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "shotclock:setEnabled", enabled: true }).success).toBe(true);
+    expect(CommandSchema.safeParse({ type: "shotclock:setEnabled" }).success).toBe(false);
+    expect(CommandSchema.safeParse({ type: "shotclock:setEnabled", enabled: "false" }).success).toBe(false);
+  });
+
   it("accepteert timer:start", () => {
     const r = CommandSchema.safeParse({ type: "timer:start" });
     expect(r.success).toBe(true);
