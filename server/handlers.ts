@@ -112,8 +112,13 @@ async function getState(db: Db): Promise<DisplayState> {
 }
 
 async function updateState(db: Db, data: StateUpdate): Promise<DisplayState> {
-  await getState(db);
-  return db.displayState.update({ where: { id: 1 }, data });
+  const current = await getState(db);
+  const shotClockDisabled =
+    typeof data.shotClockDisabled === "boolean" ? data.shotClockDisabled : current.shotClockDisabled;
+  return db.displayState.update({
+    where: { id: 1 },
+    data: { ...data, ...(shotClockDisabled ? suppressShotClock() : {}) },
+  });
 }
 
 function liveWallPatchFor(
@@ -825,6 +830,18 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
     case "shotclock:pause": {
       const s = await getState(db);
       await updateState(db, { ...pauseShotClockAt(computeShotClockSeconds(s)), shotClockOff: s.shotClockOff });
+      return { ok: true };
+    }
+    case "shotclock:setEnabled": {
+      const s = await getState(db);
+      const match = await activeMatchOrNull(db, s);
+      const profile = getSportProfile(match?.sport);
+      await updateState(db, {
+        shotClockDisabled: !cmd.enabled,
+        ...(cmd.enabled
+          ? presentShotClock(profile.shotClockPresets[0] ?? 0, false)
+          : suppressShotClock()),
+      });
       return { ok: true };
     }
     case "shotclock:off": {
