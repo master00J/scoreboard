@@ -288,6 +288,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("DisplayState", "shotClockStartedAt", "DATETIME");
   await addColumnIfMissing("DisplayState", "shotClockBaseSec", "REAL NOT NULL DEFAULT 24");
   await addColumnIfMissing("DisplayState", "shotClockOff", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("DisplayState", "shotClockDisabled", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "activeCardColor", "TEXT");
   await addColumnIfMissing("DisplayState", "homePenaltyRunning", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "homePenaltyStartedAt", "DATETIME");
