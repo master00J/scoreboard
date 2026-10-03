@@ -1,15 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Lightbulb } from "lucide-react";
+import { ImagePlus, Lightbulb, X } from "lucide-react";
 import { isElectron } from "@/lib/electron";
 import {
   FEATURE_REQUEST_MAX_CHARS,
+  FEATURE_REQUEST_MAX_PHOTO_DATA_CHARS,
+  FEATURE_REQUEST_MAX_PHOTOS,
   FEATURE_REQUEST_MIN_CHARS,
   type FeatureReply,
   type FeatureRequestFailure,
+  type FeatureRequestPhoto,
 } from "@/lib/feature-request";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,6 +25,57 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+
+const PHOTO_ACCEPT = "image/jpeg,image/png,image/webp";
+const PHOTO_MAX_SOURCE_BYTES = 12 * 1024 * 1024;
+const PHOTO_MAX_EDGE = 1280;
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("decode"));
+    img.src = src;
+  });
+}
+
+async function photoFromFile(
+  file: File,
+): Promise<{ ok: true; photo: FeatureRequestPhoto } | { ok: false; reason: "type" | "size" | "read" }> {
+  const typeOk = file.type === "image/jpeg" || file.type === "image/png" || file.type === "image/webp";
+  const extOk = /\.(jpe?g|png|webp)$/i.test(file.name);
+  if (!typeOk && !extOk) return { ok: false, reason: "type" };
+  if (file.size > PHOTO_MAX_SOURCE_BYTES) return { ok: false, reason: "size" };
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const img = await loadImage(objectUrl);
+    const srcW = img.naturalWidth || img.width;
+    const srcH = img.naturalHeight || img.height;
+    if (!srcW || !srcH) return { ok: false, reason: "read" };
+    const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(srcW, srcH));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(srcW * scale));
+    canvas.height = Math.max(1, Math.round(srcH * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return { ok: false, reason: "read" };
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    let quality = 0.82;
+    let dataUrl = canvas.toDataURL("image/jpeg", quality);
+    while (dataUrl.length > FEATURE_REQUEST_MAX_PHOTO_DATA_CHARS && quality > 0.45) {
+      quality -= 0.12;
+      dataUrl = canvas.toDataURL("image/jpeg", quality);
+    }
+    if (dataUrl.length > FEATURE_REQUEST_MAX_PHOTO_DATA_CHARS) return { ok: false, reason: "size" };
+    const leaf = file.name.split(/[/\\]/).pop()?.replace(/\.[^.]+$/, "") || "photo";
+    const name = `${leaf}.jpg`.slice(0, 80);
+    return { ok: true, photo: { name, mimeType: "image/jpeg", dataUrl } };
+  } catch {
+    return { ok: false, reason: "read" };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
 
 const ERROR_KEYS: Record<FeatureRequestFailure, string> = {
   invalid: "featureRequest.errorInvalid",
@@ -40,6 +94,8 @@ export function FeatureRequestButton() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reply, setReply] = useState<FeatureReply | null>(null);
+  const [photos, setPhotos] = useState<FeatureRequestPhoto[]>([]);
+  const photoInputRef = useRef<HTMLInputElement>(null);
 
   if (!isElectron || typeof window === "undefined" || !window.electronAPI?.submitFeatureRequest) {
     return null;
@@ -56,7 +112,12 @@ export function FeatureRequestButton() {
     setBusy(true);
     setError(null);
     try {
-      const result = await submit({ text, contactEmail: email, locale: i18n.language });
+      const result = await submit({
+        text,
+        contactEmail: email,
+        locale: i18n.language,
+        ...(photos.length ? { photos } : {}),
+      });
       if (!result.ok) {
         setError(t(ERROR_KEYS[result.reason]));
         return;
@@ -66,6 +127,7 @@ export function FeatureRequestButton() {
         return;
       }
       setText("");
+      setPhotos([]);
       setReply(null);
       setOpen(false);
       toast({
@@ -78,6 +140,39 @@ export function FeatureRequestButton() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function onPhotosSelected(files: FileList | null) {
+    if (!files?.length) return;
+    const remaining = FEATURE_REQUEST_MAX_PHOTOS - photos.length;
+    if (remaining <= 0) {
+      setError(t("featureRequest.photosTooMany", { max: FEATURE_REQUEST_MAX_PHOTOS }));
+      return;
+    }
+    const picked = Array.from(files).slice(0, remaining);
+    if (files.length > remaining) {
+      setError(t("featureRequest.photosTooMany", { max: FEATURE_REQUEST_MAX_PHOTOS }));
+    } else {
+      setError(null);
+    }
+    const added: FeatureRequestPhoto[] = [];
+    for (const file of picked) {
+      const result = await photoFromFile(file);
+      if (!result.ok) {
+        setError(
+          t(
+            result.reason === "type"
+              ? "featureRequest.photosInvalidType"
+              : result.reason === "size"
+                ? "featureRequest.photosTooLarge"
+                : "featureRequest.photosReadFailed",
+          ),
+        );
+        continue;
+      }
+      added.push(result.photo);
+    }
+    if (added.length) setPhotos((prev) => [...prev, ...added].slice(0, FEATURE_REQUEST_MAX_PHOTOS));
   }
 
   return (
@@ -162,6 +257,64 @@ export function FeatureRequestButton() {
                     disabled={busy}
                   />
                 </label>
+                <div className="space-y-2">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-sm font-medium">{t("featureRequest.photosLabel")}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {photos.length} / {FEATURE_REQUEST_MAX_PHOTOS}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("featureRequest.photosHint", { max: FEATURE_REQUEST_MAX_PHOTOS })}
+                  </p>
+                  {photos.length > 0 && (
+                    <ul className="flex flex-wrap gap-2">
+                      {photos.map((photo, index) => (
+                        <li key={`${photo.name}-${index}`} className="relative">
+                          <img
+                            src={photo.dataUrl}
+                            alt={photo.name}
+                            className="h-16 w-16 rounded-md border border-border object-cover"
+                          />
+                          <button
+                            type="button"
+                            disabled={busy}
+                            className="absolute -right-1.5 -top-1.5 grid size-5 place-items-center rounded-full border border-border bg-background text-foreground shadow-sm disabled:opacity-50"
+                            aria-label={t("featureRequest.photosRemove")}
+                            onClick={() => setPhotos((prev) => prev.filter((_, i) => i !== index))}
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <input
+                    id="feature-request-photos"
+                    ref={photoInputRef}
+                    type="file"
+                    accept={PHOTO_ACCEPT}
+                    multiple
+                    className="sr-only"
+                    disabled={busy || photos.length >= FEATURE_REQUEST_MAX_PHOTOS}
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      e.target.value = "";
+                      void onPhotosSelected(files);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="gap-2"
+                    disabled={busy || photos.length >= FEATURE_REQUEST_MAX_PHOTOS}
+                    onClick={() => photoInputRef.current?.click()}
+                  >
+                    <ImagePlus className="size-4" />
+                    {t("featureRequest.photosAdd")}
+                  </Button>
+                </div>
                 {error && (
                   <p
                     role="alert"
