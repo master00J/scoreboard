@@ -290,11 +290,12 @@ export function FeatureRequestButton() {
                     </ul>
                   )}
                   <input
+                    id="feature-request-photos"
                     ref={photoInputRef}
                     type="file"
                     accept={PHOTO_ACCEPT}
                     multiple
-                    hidden
+                    className="sr-only"
                     disabled={busy || photos.length >= FEATURE_REQUEST_MAX_PHOTOS}
                     onChange={(e) => {
                       const files = e.target.files;
