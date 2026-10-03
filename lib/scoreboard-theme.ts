@@ -150,6 +150,8 @@ export type ScoreboardTheme = {
   frameColorBot?: string;
   /** Achtergrond contentvlak (rechts) */
   contentAreaBg?: string;
+  /** Fallbackbeeld voor alle scoreboard-layouts (leeg = uit). */
+  scoreboardBackgroundPath?: string;
   /** Beeld achter het volledige 16:9-scorebord (leeg = alleen kleuren). */
   fullBackgroundPath?: string;
   /** Beeld op de L-balk tijdens de wedstrijd (leeg = frame-gradient). */
@@ -221,6 +223,7 @@ export type ResolvedScoreboardTheme = Required<
     | "frameColorMid"
     | "frameColorBot"
     | "contentAreaBg"
+    | "scoreboardBackgroundPath"
     | "fullBackgroundPath"
     | "leftFrameBackgroundPath"
     | "fontFamily"
@@ -272,6 +275,7 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
   frameColorMid: "#b91c1c",
   frameColorBot: "#7f1d1d",
   contentAreaBg: "#050607",
+  scoreboardBackgroundPath: "",
   fullBackgroundPath: "",
   leftFrameBackgroundPath: "",
   fontFamily:
@@ -635,6 +639,7 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
     frameColorMid: patch.frameColorMid ?? DEFAULT_SCOREBOARD_THEME.frameColorMid,
     frameColorBot: patch.frameColorBot ?? DEFAULT_SCOREBOARD_THEME.frameColorBot,
     contentAreaBg: patch.contentAreaBg ?? DEFAULT_SCOREBOARD_THEME.contentAreaBg,
+    scoreboardBackgroundPath: normalizeMediaPath(patch.scoreboardBackgroundPath),
     fullBackgroundPath: normalizeMediaPath(patch.fullBackgroundPath),
     leftFrameBackgroundPath: normalizeMediaPath(patch.leftFrameBackgroundPath),
     fontFamily: patch.fontFamily?.trim() || DEFAULT_SCOREBOARD_THEME.fontFamily,

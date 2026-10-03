@@ -308,6 +308,12 @@ export function SetupScoreboardThemeSection({
           <div className="font-semibold text-sm">{t("setup.themeBackgroundsTitle")}</div>
           <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{t("setup.themeBackgroundsHelp")}</p>
         </div>
+        <ThemeBackgroundField
+          label={t("setup.themeScoreboardBackground")}
+          help={t("setup.themeScoreboardBackgroundHelp")}
+          value={draft.scoreboardBackgroundPath}
+          onChange={(path) => setDraft((d) => ({ ...d, scoreboardBackgroundPath: path }))}
+        />
         <div className="grid gap-6 lg:grid-cols-2">
           <ThemeBackgroundField
             label={t("setup.themeFullBackground")}

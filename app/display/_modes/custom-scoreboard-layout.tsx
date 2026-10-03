@@ -37,7 +37,7 @@ export function CustomScoreboardLayout({
   const theme = themeProp ?? mergeScoreboardTheme(null);
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
   const showShot = getSportProfile(match.sport).shotClockPresets.length > 0 && !useShotClockOff();
-  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath);
+  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath || theme.scoreboardBackgroundPath);
 
   return (
     <div className="absolute inset-0" style={{ fontFamily: theme.fontFamily, background: theme.contentAreaBg }}>
