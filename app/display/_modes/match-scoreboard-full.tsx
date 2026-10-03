@@ -37,7 +37,7 @@ export function MatchScoreboardFull({
   const theme = themeProp ?? mergeScoreboardTheme(null);
   const shotOff = useShotClockOff();
   const showShot = getSportProfile(match.sport).shotClockPresets.length > 0 && !shotOff;
-  const backgroundSrc = mediaUrl(theme.fullBackgroundPath);
+  const backgroundSrc = mediaUrl(theme.fullBackgroundPath || theme.scoreboardBackgroundPath);
 
   return (
     <motion.div

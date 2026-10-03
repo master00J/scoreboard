@@ -39,7 +39,7 @@ export function ScoreboardStrip({
   const showShot = getSportProfile(match.sport).shotClockPresets.length > 0 && !shotOff;
   const extrasPx = Math.max(30, Math.round(theme.stripScorePx * 0.32));
   const offscreen = placement === "top" ? -theme.stripHeightPx : theme.stripHeightPx;
-  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath);
+  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath || theme.scoreboardBackgroundPath);
   return (
     <motion.div
       key={`scoreboard-strip-${placement}`}
