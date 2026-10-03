@@ -43,7 +43,7 @@ export function LeftScoreboardLayout({
   const barW = theme.leftBarWidthPx;
   const barH = theme.bottomBarHeightPx;
   const grad = frameGradientCss(theme);
-  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath);
+  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath || theme.scoreboardBackgroundPath);
 
   return (
     <div

@@ -43,7 +43,11 @@ const VISUAL_THEME_KEYS = Object.keys(DEFAULT_SCOREBOARD_THEME) as (keyof Resolv
 export const NON_VISUAL_THEME_KEYS = ["sponsorRepeatBudgetCycles"] as const;
 
 /** Venue-beelden: blijven staan bij een layoutwissel, tenzij de template zelf een pad zet. */
-const VENUE_BACKGROUND_KEYS = ["fullBackgroundPath", "leftFrameBackgroundPath"] as const;
+const VENUE_BACKGROUND_KEYS = [
+  "scoreboardBackgroundPath",
+  "fullBackgroundPath",
+  "leftFrameBackgroundPath",
+] as const;
 
 function parseThemeJson(raw: string | null | undefined): ScoreboardTheme {
   if (!raw || typeof raw !== "string" || !raw.trim()) return {};

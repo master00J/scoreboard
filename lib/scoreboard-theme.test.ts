@@ -107,13 +107,15 @@ describe("scoreboard theme personalization", () => {
     expect(theme.fullSlots.away.x).toBeGreaterThan(0);
   });
 
-  it("bewaart achtergrondpaden voor fullscreen en L-balk", () => {
+  it("bewaart achtergrondpaden voor scoreboard, fullscreen en L-balk", () => {
     const theme = mergeScoreboardTheme(
       JSON.stringify({
+        scoreboardBackgroundPath: "/uploads/default-board.webp",
         fullBackgroundPath: "D:/led/full.png",
         leftFrameBackgroundPath: "/uploads/l-bar.webp",
       }),
     );
+    expect(theme.scoreboardBackgroundPath).toBe("/uploads/default-board.webp");
     expect(theme.fullBackgroundPath).toBe("D:/led/full.png");
     expect(theme.leftFrameBackgroundPath).toBe("/uploads/l-bar.webp");
   });
@@ -122,9 +124,11 @@ describe("scoreboard theme personalization", () => {
     const theme = mergeScoreboardTheme(
       JSON.stringify({
         fullBackgroundPath: "  ",
+        scoreboardBackgroundPath: "   ",
         leftFrameBackgroundPath: "line\nbreak",
       }),
     );
+    expect(theme.scoreboardBackgroundPath).toBe("");
     expect(theme.fullBackgroundPath).toBe("");
     expect(theme.leftFrameBackgroundPath).toBe("");
   });
