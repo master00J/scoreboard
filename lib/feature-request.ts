@@ -24,7 +24,26 @@ export type FeatureRequestInput = {
 
 export type FeatureRequestFailure = "invalid" | "license" | "rate_limited" | "network" | "server";
 
-export type FeatureRequestResult = { ok: true } | { ok: false; reason: FeatureRequestFailure };
+export type FeatureReply = {
+  outcome: "exists" | "already_requested";
+  title: string;
+  where: string;
+  summary: string;
+};
+
+export type FeatureRequestResult =
+  | { ok: true; outcome: "accepted" }
+  | ({ ok: true } & FeatureReply)
+  | { ok: false; reason: FeatureRequestFailure };
+
+function replyFromRecord(rec: Record<string, unknown>): FeatureReply | null {
+  if (rec.outcome !== "exists" && rec.outcome !== "already_requested") return null;
+  const title = typeof rec.title === "string" ? rec.title.trim() : "";
+  const where = typeof rec.where === "string" ? rec.where.trim() : "";
+  const summary = typeof rec.summary === "string" ? rec.summary.trim() : "";
+  if (!title || !where || !summary) return null;
+  return { outcome: rec.outcome, title, where, summary };
+}
 
 /** Valideert wat de renderer stuurt; `null` bij te korte/lange tekst of een ongeldig e-mailadres. */
 export function normalizeFeatureRequestInput(raw: unknown): FeatureRequestInput | null {
@@ -47,7 +66,8 @@ export function normalizeFeatureRequestInput(raw: unknown): FeatureRequestInput 
 export function featureRequestResultFromResponse(status: number, json: unknown): FeatureRequestResult {
   const rec = json && typeof json === "object" ? (json as Record<string, unknown>) : {};
   if (status >= 200 && status < 300 && rec.ok === true) {
-    return { ok: true };
+    const reply = replyFromRecord(rec);
+    return reply ? { ok: true, ...reply } : { ok: true, outcome: "accepted" };
   }
   const reason = rec.reason;
   if (reason === "invalid" || reason === "license" || reason === "rate_limited") {

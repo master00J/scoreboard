@@ -8,6 +8,7 @@ import { isElectron } from "@/lib/electron";
 import {
   FEATURE_REQUEST_MAX_CHARS,
   FEATURE_REQUEST_MIN_CHARS,
+  type FeatureReply,
   type FeatureRequestFailure,
 } from "@/lib/feature-request";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,7 @@ export function FeatureRequestButton() {
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reply, setReply] = useState<FeatureReply | null>(null);
 
   if (!isElectron || typeof window === "undefined" || !window.electronAPI?.submitFeatureRequest) {
     return null;
@@ -59,7 +61,12 @@ export function FeatureRequestButton() {
         setError(t(ERROR_KEYS[result.reason]));
         return;
       }
+      if (result.outcome !== "accepted") {
+        setReply(result);
+        return;
+      }
       setText("");
+      setReply(null);
       setOpen(false);
       toast({
         title: t("featureRequest.sentTitle"),
@@ -84,6 +91,7 @@ export function FeatureRequestButton() {
         aria-label={t("featureRequest.button")}
         onClick={() => {
           setError(null);
+          setReply(null);
           setOpen(true);
         }}
       >
@@ -100,6 +108,28 @@ export function FeatureRequestButton() {
           }}
         >
           <DialogContent size="md">
+            {reply ? (
+              <div className="space-y-4">
+                <DialogHeader>
+                  <DialogTitle>
+                    {t(reply.outcome === "exists" ? "featureRequest.existsHeading" : "featureRequest.requestedHeading")}
+                  </DialogTitle>
+                  <DialogDescription>{reply.title}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 text-sm">
+                  <p>
+                    <span className="font-medium">{t("featureRequest.whereLabel")}</span>
+                    <span className="mt-1 block text-muted-foreground">{reply.where}</span>
+                  </p>
+                  <p className="leading-relaxed">{reply.summary}</p>
+                </div>
+                <DialogFooter>
+                  <Button type="button" onClick={() => setOpen(false)}>
+                    {t("featureRequest.close")}
+                  </Button>
+                </DialogFooter>
+              </div>
+            ) : (
             <form onSubmit={(e) => void onSubmit(e)}>
               <DialogHeader>
                 <DialogTitle>{t("featureRequest.title")}</DialogTitle>
@@ -146,10 +176,11 @@ export function FeatureRequestButton() {
                   {t("common.cancel")}
                 </Button>
                 <Button type="submit" disabled={busy}>
-                  {busy ? t("featureRequest.sending") : t("featureRequest.send")}
+                  {busy ? t("featureRequest.checking") : t("featureRequest.send")}
                 </Button>
               </DialogFooter>
             </form>
+            )}
           </DialogContent>
         </Dialog>,
         document.body,

@@ -40,7 +40,27 @@ describe("normalizeFeatureRequestInput", () => {
 
 describe("featureRequestResultFromResponse", () => {
   it("is alleen geslaagd bij 2xx mét ok:true", () => {
-    expect(featureRequestResultFromResponse(200, { ok: true })).toEqual({ ok: true });
+    expect(featureRequestResultFromResponse(200, { ok: true })).toEqual({ ok: true, outcome: "accepted" });
+    expect(featureRequestResultFromResponse(200, { ok: true, outcome: "accepted" })).toEqual({ ok: true, outcome: "accepted" });
+    expect(
+      featureRequestResultFromResponse(200, {
+        ok: true,
+        outcome: "exists",
+        title: " Shotclock ",
+        where: "Wedstrijd live",
+        summary: "De shotclock kan standaard uit.",
+      }),
+    ).toEqual({
+      ok: true,
+      outcome: "exists",
+      title: "Shotclock",
+      where: "Wedstrijd live",
+      summary: "De shotclock kan standaard uit.",
+    });
+    expect(featureRequestResultFromResponse(200, { ok: true, outcome: "exists", title: "Shotclock" })).toEqual({
+      ok: true,
+      outcome: "accepted",
+    });
     expect(featureRequestResultFromResponse(200, {})).toEqual({ ok: false, reason: "server" });
     expect(featureRequestResultFromResponse(200, "<html>")).toEqual({ ok: false, reason: "server" });
   });
