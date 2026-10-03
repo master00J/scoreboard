@@ -17,6 +17,7 @@ import path from "path";
 import { MusicLibraryStore } from "./music-library";
 import { MUSIC_EXTENSIONS, type MusicLibraryUpdate } from "../lib/music";
 import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
+import { normalizeFeatureRequestInput, type FeatureRequestResult } from "../lib/feature-request";
 import * as licenseSvc from "./license-service";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
@@ -2082,6 +2083,29 @@ function registerIpc() {
       ...(r.planLabel !== undefined ? { planLabel: r.planLabel } : {}),
       ...(r.features !== undefined ? { features: r.features } : {}),
     };
+  });
+
+  ipcMain.handle("feature:submit", async (_, raw: unknown): Promise<FeatureRequestResult> => {
+    const input = normalizeFeatureRequestInput(raw);
+    if (!input) {
+      return { ok: false, reason: "invalid" };
+    }
+    if (!desktopContext) {
+      return { ok: false, reason: "server" };
+    }
+    const dir = desktopContext.userDataDir;
+    const stored = licenseSvc.readStoredLicense(dir);
+    if (!stored) {
+      return { ok: false, reason: "license" };
+    }
+    const result = await licenseSvc.remoteFeatureRequest(licenseSvc.getLicenseApiBase(), {
+      ...input,
+      licenseKey: stored.licenseKey,
+      machineId: licenseSvc.getOrCreateMachineId(dir),
+      appVersion: app.getVersion(),
+    });
+    bootLog(`[feature-request] ${result.ok ? "sent" : `failed: ${result.reason}`}`);
+    return result;
   });
 }
 

@@ -1564,6 +1564,24 @@
     "bodyFallback": "Download the latest build and replace your file.",
     "replaceHint": "Quit the app and replace Stadium-Scoreboard.exe with the new file."
   },
+  "featureRequest": {
+    "button": "Request a feature",
+    "title": "Request a feature",
+    "description": "Missing something in ArenaCue? Describe what you want to do and why. We read every request.",
+    "textLabel": "What do you want to be able to do?",
+    "textPlaceholder": "E.g. show team fouls next to the score in basketball.",
+    "emailLabel": "Email for a reply (optional)",
+    "send": "Send",
+    "sending": "Sending…",
+    "sentTitle": "Request sent",
+    "sentBody": "Thanks. We’ll look at your request.",
+    "tooShort": "Describe your idea in at least {{min}} characters.",
+    "errorInvalid": "Check your text and email address.",
+    "errorLicense": "Requests need an active license on this PC.",
+    "errorRateLimited": "You’ve already sent several requests today. Try again tomorrow.",
+    "errorNetwork": "No connection. Check your internet and try again.",
+    "errorServer": "Sending isn’t possible right now. Try again later."
+  },
   "crash": {
     "title": "Crash recovery",
     "body": "A previous session was found. Resume?",

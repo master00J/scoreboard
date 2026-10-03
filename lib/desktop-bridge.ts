@@ -6,6 +6,7 @@ import type {
   LivestreamStatus,
 } from "./livestream";
 import type { Command } from "./validation/commands";
+import type { FeatureRequestDraft, FeatureRequestResult } from "./feature-request";
 import type { MusicLibrary, MusicLibraryUpdate, MusicImportResult } from "./music";
 import type { StreamDeckInfo } from "./stream-deck";
 import type { SerializedDisplayState } from "./timer";
@@ -231,6 +232,8 @@ export type ElectronBridge = {
   /** ArenaCue-licentie: status (gate vs ok). */
   licenseGetStatus: () => Promise<LicenseGetStatusResult>;
   licenseActivate: (opts: { licenseKey: string }) => Promise<LicenseActivateResult>;
+  /** Stuurt een feature-aanvraag naar arenacue.be met de licentie van deze pc. */
+  submitFeatureRequest?: (input: FeatureRequestDraft) => Promise<FeatureRequestResult>;
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
   getStreamDeckInfo: () => Promise<StreamDeckInfo | null>;
   /** CPU/RAM van deze app (Electron); GPU = GPU-hulpproces. */

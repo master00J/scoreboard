@@ -1,0 +1,58 @@
+name: Notify ArenaCue
+
+# Meldt bij arenacue.be dat een pull request geopend of gemerged is. De site mailt dan
+# "PR klaar om na te kijken" of "Feature toegevoegd" met de knop om de build te starten.
+#
+# pull_request_target draait deze workflow vanaf master, dus een PR kan hem niet aanpassen.
+# Er wordt geen code uit de PR uitgecheckt of uitgevoerd: alleen titel, nummer en branch gaan mee.
+
+on:
+  pull_request_target:
+    types: [opened, reopened, closed]
+
+permissions: {}
+
+jobs:
+  notify:
+    # Geopend: alleen branches in deze repo (de cloud agent), geen forks. Gesloten: alleen na een merge.
+    if: >-
+      (github.event.action == 'closed' && github.event.pull_request.merged == true) ||
+      (github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - name: Send pull request event
+        env:
+          ARENACUE_CI_TOKEN: ${{ secrets.ARENACUE_CI_TOKEN }}
+          ARENACUE_SITE_URL: ${{ vars.ARENACUE_SITE_URL || 'https://arenacue.be' }}
+          PR_ACTION: ${{ github.event.action == 'closed' && 'merged' || 'opened' }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_MERGED_AT: ${{ github.event.pull_request.merged_at }}
+        run: |
+          if [ -z "$ARENACUE_CI_TOKEN" ]; then
+            echo "::error::Zet ARENACUE_CI_TOKEN in de omgeving 'release' (zelfde waarde als SCOREBOARD_CI_TOKEN op Vercel)."
+            exit 1
+          fi
+          jq -n \
+            --arg action "$PR_ACTION" \
+            --argjson number "$PR_NUMBER" \
+            --arg url "$PR_URL" \
+            --arg title "$PR_TITLE" \
+            --arg branch "$PR_BRANCH" \
+            --arg mergeSha "$PR_MERGE_SHA" \
+            --arg mergedAt "$PR_MERGED_AT" \
+            'def blank_to_null: if . == "" then null else . end;
+             {action: $action, number: $number, url: $url, title: $title, branch: $branch}
+             + (if $action == "merged"
+                then {mergeSha: ($mergeSha | blank_to_null), mergedAt: ($mergedAt | blank_to_null)}
+                else {} end)' \
+            > event.json
+          curl --fail-with-body --silent --show-error --max-time 30 \
+            -X POST "${ARENACUE_SITE_URL%/}/api/scoreboard-ci/pull-request" \
+            -H "Authorization: Bearer ${ARENACUE_CI_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data-binary @event.json

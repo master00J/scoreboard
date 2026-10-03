@@ -52,7 +52,15 @@ Daarna optioneel: `npm run release:checksums` voor `dist/SHA256SUMS.txt`.
 De desktop checkt bij het openen van het control panel `https://arenacue.be/api/app/release`.
 Als `APP_RELEASE_VERSION` op Vercel hoger is dan de versie in de lokale `.exe`, toont de app een updatebanner met downloadknop.
 
-Release-stappen:
+Release (automatisch):
+
+1. Merge de pull request(s). Je krijgt een mail "Feature toegevoegd" met de knop **Start build**.
+2. Die knop opent `arenacue.be/<admin>/features/release`. Kies de versie-ophoging en de tekst voor klanten en start de build. Rechtstreeks kan ook: GitHub → Actions → **Release Windows** → Run workflow.
+3. De workflow `.github/workflows/release-win.yml` hoogt `version` op, test, bouwt en signeert, zet de `.exe` achter de downloadknop (met een versiekopie in `archive/`), maakt een GitHub Release en meldt de versie bij de site. De app toont dan de updatebanner; de cron mailt de licentiehouders.
+
+Secrets voor die workflow: zie `docs/RELEASE_SIGNING.md`. Klanten vragen features aan met de knop **Feature aanvragen** in het bedieningspaneel; de site mailt elke aanvraag en start na jouw akkoord een Cursor cloud agent die een pull request opent.
+
+Release-stappen met de hand (als de workflow niet beschikbaar is):
 
 1. Verhoog `version` in `package.json` voordat je bouwt, bv. `0.1.1`.
 2. Windows: `npm run electron:build:win` → upload `dist/Stadium-Scoreboard.exe` naar Supabase Storage.

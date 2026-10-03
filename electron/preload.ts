@@ -52,6 +52,7 @@ const bridge: ElectronBridge = {
   openExternalUrl: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   licenseGetStatus: () => ipcRenderer.invoke("license:getStatus"),
   licenseActivate: (opts: { licenseKey: string }) => ipcRenderer.invoke("license:activate", opts),
+  submitFeatureRequest: (input) => ipcRenderer.invoke("feature:submit", input),
   getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
   getStreamDeckInfo: () => ipcRenderer.invoke("streamdeck:getInfo"),
   getAppResourceMetrics: () => ipcRenderer.invoke("app:getResourceMetrics"),

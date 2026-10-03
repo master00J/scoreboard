@@ -41,12 +41,13 @@ Get-AuthenticodeSignature "dist\Stadium-Scoreboard.exe" | Format-List
 
 ## GitHub Actions
 
-Workflow: `.github/workflows/build-win.yml` (handmatig of bij tag `v*`).
+Workflow: `.github/workflows/release-win.yml` (start vanuit de admin of met Run workflow). Die bouwt, signeert en publiceert.
 
-Secrets in de scoreboard-repo:
+De secrets staan in de **omgeving `release`** (Settings → Environments), niet als repo-secrets. Beperk die omgeving tot de branch `master` (Deployment branches → Selected branches), zonder verplichte reviewers. Een workflow op een PR-branch kan dan niet bij de secrets, ook niet als een pull request zelf een workflow toevoegt.
 
 | Secret | Voorbeeld |
 | --- | --- |
+| `ARENACUE_CI_TOKEN` | zelfde waarde als `SCOREBOARD_CI_TOKEN` op Vercel (min. 24 tekens) |
 | `AZURE_TENANT_ID` | directory-id |
 | `AZURE_CLIENT_ID` | app registration id |
 | `AZURE_CLIENT_SECRET` | secret value |

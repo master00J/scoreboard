@@ -1,0 +1,139 @@
+name: Release Windows
+
+# Bouwt, signeert en publiceert een nieuwe Stadium-Scoreboard.exe voor klanten.
+# Start vanuit arenacue.be/admin (Features → Start build) of hier via "Run workflow".
+# Secrets staan in de omgeving "release" (alleen branch master), zie docs/RELEASE_SIGNING.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Versie-ophoging"
+        type: choice
+        options:
+          - patch
+          - minor
+        default: patch
+      title:
+        description: "Titel voor klanten (updatemelding in de app)"
+        type: string
+        required: false
+      notes:
+        description: "Tekst voor klanten (wat is er nieuw)"
+        type: string
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-win
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/master'
+    runs-on: windows-latest
+    environment: release
+    env:
+      ARENACUE_CI_TOKEN: ${{ secrets.ARENACUE_CI_TOKEN }}
+      ARENACUE_SITE_URL: ${{ vars.ARENACUE_SITE_URL || 'https://arenacue.be' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Require release secrets
+        shell: pwsh
+        run: |
+          if (-not $env:AZURE_TENANT_ID -or -not $env:AZURE_CLIENT_ID -or -not $env:AZURE_CLIENT_SECRET) {
+            throw "Zet AZURE_TENANT_ID, AZURE_CLIENT_ID en AZURE_CLIENT_SECRET in de omgeving 'release'."
+          }
+          if (-not $env:ARENACUE_CI_TOKEN) {
+            throw "Zet ARENACUE_CI_TOKEN in de omgeving 'release' (zelfde waarde als SCOREBOARD_CI_TOKEN op Vercel)."
+          }
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Bump version
+        id: version
+        shell: bash
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          echo "built_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          npm version "$BUMP" --no-git-tag-version
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      # Vóór de build: stopt meteen als de site al een gelijke of hogere versie aankondigt.
+      - name: Check version against arenacue.be
+        run: node scripts/release/publish-release.mjs preflight
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build and sign Windows (portable + NSIS)
+        run: npm run electron:build:win
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_PROFILE: ${{ secrets.AZURE_SIGNING_PROFILE }}
+
+      - name: Verify signatures
+        run: npm run electron:verify-win-sign
+
+      - name: Smoke test packaged app
+        run: node scripts/smoke-start.mjs --exe dist/Stadium-Scoreboard.exe
+        env:
+          # De portable .exe pakt zich eerst uit; op een runner duurt dat langer dan lokaal.
+          SMOKE_TIMEOUT_MS: "120000"
+
+      - name: Checksums
+        run: npm run release:checksums
+
+      # Pas na een geslaagde, gesigneerde build komt de versie in de repo. Mislukt de push
+      # (master is intussen veranderd), dan is er nog niets naar klanten gegaan.
+      - name: Commit version and tag
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json package-lock.json
+          git commit -m "Ship Scoreboard ${VERSION}."
+          git tag "v${VERSION}"
+          git push origin HEAD:master "v${VERSION}"
+
+      - name: Upload .exe behind the download button
+        run: node scripts/release/publish-release.mjs upload
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          files: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
+          generate_release_notes: true
+
+      - name: Announce release on arenacue.be
+        run: node scripts/release/publish-release.mjs announce
+        env:
+          RELEASE_TITLE: ${{ inputs.title }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          RELEASE_BUILT_SHA: ${{ steps.version.outputs.built_sha }}
+          RELEASE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

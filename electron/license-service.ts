@@ -12,6 +12,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { safeStorage } from "electron";
+import {
+  featureRequestResultFromResponse,
+  type FeatureRequestInput,
+  type FeatureRequestResult,
+} from "../lib/feature-request";
 
 /** Onder userData; geëxporteerd voor portable-migratie in `main.ts`. */
 export const ARENACUE_MACHINE_ID_FILENAME = "arenacue-machine-id.txt";
@@ -296,6 +301,19 @@ export async function remoteLicenseActivate(
     };
   } catch {
     return { kind: "network" };
+  }
+}
+
+/** Feature-aanvraag van deze club; de site controleert licentie + machine en mailt het ArenaCue-team. */
+export async function remoteFeatureRequest(
+  apiBase: string,
+  body: FeatureRequestInput & { licenseKey: string; machineId: string; appVersion: string },
+): Promise<FeatureRequestResult> {
+  try {
+    const { status, json } = await postJson(`${apiBase}/api/app/feature-request`, body);
+    return featureRequestResultFromResponse(status, json);
+  } catch {
+    return { ok: false, reason: "network" };
   }
 }
 

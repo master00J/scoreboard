@@ -14,6 +14,7 @@
   "include": [
     "../electron/**/*.ts",
     "../lib/desktop-bridge.ts",
+    "../lib/feature-request.ts",
     "../lib/livestream.ts",
     "../lib/stream-deck.ts",
     "../lib/sponsor-telemetry.ts",

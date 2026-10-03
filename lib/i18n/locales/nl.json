@@ -1564,6 +1564,24 @@
     "bodyFallback": "Download de nieuwste build en vervang je bestand.",
     "replaceHint": "Sluit de app en vervang Stadium-Scoreboard.exe door het nieuwe bestand."
   },
+  "featureRequest": {
+    "button": "Feature aanvragen",
+    "title": "Feature aanvragen",
+    "description": "Mis je iets in ArenaCue? Beschrijf wat je wilt kunnen doen en waarom. We lezen elke aanvraag.",
+    "textLabel": "Wat wil je kunnen doen?",
+    "textPlaceholder": "Bv. de teamfouten naast de score tonen bij basketbal.",
+    "emailLabel": "E-mail voor een antwoord (optioneel)",
+    "send": "Versturen",
+    "sending": "Versturen…",
+    "sentTitle": "Aanvraag verstuurd",
+    "sentBody": "Bedankt. We bekijken je aanvraag.",
+    "tooShort": "Beschrijf je idee in minstens {{min}} tekens.",
+    "errorInvalid": "Controleer je tekst en e-mailadres.",
+    "errorLicense": "Aanvragen kan alleen met een actieve licentie op deze pc.",
+    "errorRateLimited": "Je hebt vandaag al meerdere aanvragen verstuurd. Probeer het morgen opnieuw.",
+    "errorNetwork": "Geen verbinding. Controleer internet en probeer opnieuw.",
+    "errorServer": "Versturen lukt nu niet. Probeer het later opnieuw."
+  },
   "crash": {
     "title": "Herstel na crash",
     "body": "Er is een eerdere sessie gevonden. Wil je doorgaan?",

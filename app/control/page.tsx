@@ -35,6 +35,7 @@ import { useMusicPlayer } from "@/lib/use-music-player";
 import { activeInterfaceProfile, parseInterfaceProfileStore, type ControlTabId, type InterfaceProfile } from "@/lib/interface-profiles";
 import { AppResourceMeter } from "./_components/app-resource-meter";
 import { MobileBridgeMenu } from "./_components/mobile-bridge-menu";
+import { FeatureRequestButton } from "./_components/feature-request-button";
 import { useLicenseFeatures } from "@/lib/use-license-features";
 import { tMatchStatus } from "@/lib/i18n/t-phase";
 import {
@@ -197,6 +198,7 @@ export default function ControlPage() {
             {t("shell.mode")}:
             <strong className="ml-1 text-foreground">{state?.mode ?? "…"}</strong>
           </span>
+          <FeatureRequestButton />
           <Button
             type="button"
             size="sm"

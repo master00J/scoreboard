@@ -1464,6 +1464,24 @@
     "bodyFallback": "Scarica l’ultima build e sostituisci il file.",
     "replaceHint": "Chiudi l’app e sostituisci Stadium-Scoreboard.exe con il nuovo file."
   },
+  "featureRequest": {
+    "button": "Richiedi una funzione",
+    "title": "Richiedi una funzione",
+    "description": "Ti manca qualcosa in ArenaCue? Descrivi cosa vuoi fare e perché. Leggiamo ogni richiesta.",
+    "textLabel": "Cosa vorresti poter fare?",
+    "textPlaceholder": "Es. mostrare i falli di squadra accanto al punteggio nel basket.",
+    "emailLabel": "E-mail per una risposta (facoltativa)",
+    "send": "Invia",
+    "sending": "Invio…",
+    "sentTitle": "Richiesta inviata",
+    "sentBody": "Grazie. Esamineremo la tua richiesta.",
+    "tooShort": "Descrivi la tua idea in almeno {{min}} caratteri.",
+    "errorInvalid": "Controlla il testo e l’indirizzo e-mail.",
+    "errorLicense": "Per inviare una richiesta serve una licenza attiva su questo PC.",
+    "errorRateLimited": "Hai già inviato diverse richieste oggi. Riprova domani.",
+    "errorNetwork": "Nessuna connessione. Controlla internet e riprova.",
+    "errorServer": "Al momento non è possibile inviare. Riprova più tardi."
+  },
   "crash": {
     "title": "Ripristino dopo un arresto anomalo",
     "body": "È stata trovata una sessione precedente. Riprendere?",

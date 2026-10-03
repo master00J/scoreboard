@@ -1,0 +1,40 @@
+name: Preview Windows
+
+# Bouwt bij elke pull request een ongesigneerde test-.exe, zodat je de feature kunt proberen
+# vóór je merget. Deze workflow krijgt geen secrets: signeren gebeurt alleen in Release Windows.
+
+on:
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-win-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Build Windows (unsigned)
+        run: npm run electron:build:win
+
+      - name: Upload test .exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: Stadium-Scoreboard-preview-pr${{ github.event.pull_request.number }}
+          path: dist/Stadium-Scoreboard.exe
+          if-no-files-found: error
+          retention-days: 7

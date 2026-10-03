@@ -121,6 +121,7 @@ describe("time-outklok", () => {
       timeoutStartedAt: started,
       timeoutBaseSec: 60,
       timeoutSide: "home",
+      timeoutWarnSent: false,
     });
     expect(computeTimeoutSeconds(state, started.getTime() + 15_000)).toBe(45);
     expect(computeTimeoutSeconds(state, started.getTime() + 90_000)).toBe(0);
@@ -129,6 +130,7 @@ describe("time-outklok", () => {
       timeoutStartedAt: null,
       timeoutBaseSec: 0,
       timeoutSide: null,
+      timeoutWarnSent: false,
     });
   });
 });
