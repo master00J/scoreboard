@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createWriteStream } from "node:fs";
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { mkdir, writeFile, access, readdir } from "node:fs/promises";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
@@ -37,9 +37,52 @@ async function runPowerShell(command, extraEnv = {}) {
   return `${stdout || ""}${stderr || ""}`.trim();
 }
 
+async function findSignTool() {
+  const cached = path.join(TOOLS_ROOT, `${BUILD_TOOLS.name}.${BUILD_TOOLS.version}`, BUILD_TOOLS.signtoolRel);
+  if (await fileExists(cached)) return cached;
+  const roots = ["C:\\Program Files (x86)\\Windows Kits\\10\\bin", "C:\\Program Files\\Windows Kits\\10\\bin"];
+  const found = [];
+  for (const root of roots) {
+    let versions = [];
+    try {
+      versions = await readdir(root);
+    } catch {
+      continue;
+    }
+    for (const version of versions) {
+      const candidate = path.join(root, version, "x64", "signtool.exe");
+      if (await fileExists(candidate)) found.push(candidate);
+    }
+  }
+  found.sort();
+  return found.at(-1) ?? null;
+}
+
+/** signtool verify /pa: 0 betekent een geldige Authenticode-handtekening. */
+async function signtoolSaysValid(filePath) {
+  const tool = await findSignTool();
+  if (!tool) return false;
+  try {
+    await execFileAsync(tool, ["verify", "/pa", "/q", filePath], { windowsHide: true, maxBuffer: 1024 * 1024 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function isAuthenticodeSigned(filePath) {
-  const out = await runPowerShell(`(Get-AuthenticodeSignature -FilePath ${psQuote(filePath)}).Status`);
-  return out.split(/\r?\n/).pop()?.trim() === "Valid";
+  try {
+    const out = await runPowerShell(
+      `Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; (Get-AuthenticodeSignature -FilePath ${psQuote(filePath)}).Status`,
+    );
+    const status = out.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).pop();
+    if (status === "Valid") return true;
+    if (status) return false;
+  } catch (error) {
+    const detail = String(error?.message ?? error).split(/\r?\n/)[0]?.slice(0, 180);
+    console.warn(`[azure-sign] PowerShell-handtekeningencheck mislukt, signtool neemt over: ${detail}`);
+  }
+  return signtoolSaysValid(filePath);
 }
 
 async function fileExists(filePath) {
