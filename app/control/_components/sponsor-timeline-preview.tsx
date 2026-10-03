@@ -2,14 +2,16 @@
 
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { Match, Sponsor, SponsorSection } from "@/lib/types";
 import { useDisplayStore } from "@/lib/store";
 import { useApi } from "@/lib/use-api";
+import { tSponsorBlock } from "@/lib/i18n/t-phase";
 import {
   activeSponsorsForSection,
-  sponsorBudgetSectionFromMatchStatus,
   sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
+import { useSponsorPhaseHud } from "../_hooks/use-sponsor-phase-hud";
 
 type PhaseKey = "prematch" | "h1" | "h2" | "halftime";
 
@@ -24,6 +26,14 @@ function sectionForPhase(phase: PhaseKey): SponsorSection {
   if (phase === "prematch") return "prematch";
   if (phase === "halftime") return "halftime";
   return "match";
+}
+
+/** Zelfde blokken als de live-tabel: Q1–2 / Q3–4 bij basketbal, helften bij voetbal. */
+function phaseTitle(t: TFunction, sport: unknown, phase: PhaseKey): string {
+  if (phase === "prematch") return t("phases.PREMATCH");
+  if (phase === "halftime") return tSponsorBlock(t, sport, "halftime");
+  if (phase === "h1") return tSponsorBlock(t, sport, "h1");
+  return tSponsorBlock(t, sport, "h2");
 }
 
 function budgetForPhase(sponsor: Sponsor, phase: PhaseKey): number {
@@ -54,6 +64,11 @@ export function SponsorTimelinePreview({
   }, [displayStateUpdatedAt, reloadSponsors]);
 
   const matchStatus = match?.status;
+  const hud = useSponsorPhaseHud(match);
+  const onScreenSponsor =
+    hud.kind === "roster" && hud.phase === "sponsor" && !hud.playbackUnconfirmed
+      ? hud.sponsorName?.trim() || null
+      : null;
 
   const currentPhase = useMemo(() => {
     if (!matchStatus) return PHASES[0];
@@ -86,13 +101,6 @@ export function SponsorTimelinePreview({
     });
   }, [sponsors, matchStatus]);
 
-  const activeSponsorNames = useMemo(() => {
-    if (!matchStatus || sponsors.length === 0) return [];
-    const section = sponsorBudgetSectionFromMatchStatus(matchStatus);
-    const active = activeSponsorsForSection(sponsors, section, matchStatus);
-    return active.map((s) => s.name);
-  }, [sponsors, matchStatus]);
-
   if (!match || sponsors.length === 0) {
     return null;
   }
@@ -107,13 +115,13 @@ export function SponsorTimelinePreview({
           <div className="mb-2">
             {t("sponsors.phaseLabel")}{" "}
             <span className="text-foreground font-medium">
-              {t(`phases.${currentPhase.phaseStatusKey}`)}
+              {phaseTitle(t, match.sport, currentPhase.key)}
             </span>
           </div>
           <div>
             {t("sponsors.activeNow")}{" "}
-            {activeSponsorNames.length > 0 ? (
-              <span className="text-foreground font-medium">{activeSponsorNames.join(", ")}</span>
+            {onScreenSponsor ? (
+              <span className="text-foreground font-medium">{onScreenSponsor}</span>
             ) : (
               <span className="text-muted-foreground italic">{t("common.none").toLowerCase()}</span>
             )}
@@ -133,7 +141,7 @@ export function SponsorTimelinePreview({
           >
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-xs font-semibold text-foreground">
-                {t(`phases.${phaseData.phaseStatusKey}`)}
+                {phaseTitle(t, match.sport, phaseData.phase)}
               </h4>
               {phaseData.totalBudget > 0 && (
                 <span className="text-xs font-mono bg-secondary/50 px-2 py-1 rounded">

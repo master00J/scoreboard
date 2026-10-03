@@ -9,7 +9,6 @@ import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 import { useDisplayStore } from "@/lib/store";
 import type { Match, Sponsor } from "@/lib/types";
 import {
-  activeSponsorsForSection,
   sponsorBudgetSectionFromMatchStatus,
   sponsorSectionBudgetSeconds,
 } from "@/lib/sponsor-distribution";
@@ -23,6 +22,7 @@ import {
 import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
 import { prematchRosterClockSec } from "@/lib/prematch-spread-timing";
 import { tMatchStatus, tSponsorBlock } from "@/lib/i18n/t-phase";
+import { useSponsorPhaseHud } from "../_hooks/use-sponsor-phase-hud";
 import { useResolvedSponsorWindow } from "@/lib/use-resolved-sponsor-window";
 
 function formatClock(sec: number): string {
@@ -115,10 +115,14 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
   const liveWindow = useResolvedSponsorWindow(activeMatch, timerRunning, periodBreakPending, null);
   const highlightCol = segmentHighlightForMatch(activeMatch?.status, liveWindow?.id);
 
+  const hud = useSponsorPhaseHud(activeMatch);
   const activeInLoop = useMemo(() => {
-    if (!activeMatch) return [] as Sponsor[];
-    return activeSponsorsForSection(sponsors, section, activeMatch.status);
-  }, [sponsors, section, activeMatch?.status, activeMatch]);
+    if (hud.kind !== "roster" || hud.phase !== "sponsor" || hud.playbackUnconfirmed || !hud.sponsorName) {
+      return [] as Sponsor[];
+    }
+    const name = hud.sponsorName;
+    return sponsors.filter((s) => s.name === name);
+  }, [sponsors, hud]);
 
   const sortedWithMedia = useMemo(() => {
     const list = sponsors.filter(sponsorHasActiveMedia).slice();
@@ -218,11 +222,15 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
   }
 
   const segmentLabel =
-    section === "prematch"
-      ? t("phases.prematch")
-      : section === "halftime"
-        ? t("phases.halftime")
-        : t("phases.matchHalf");
+    highlightCol === "prematch"
+      ? t("phases.PREMATCH")
+      : highlightCol === "halftime"
+        ? tSponsorBlock(t, activeMatch?.sport, "halftime")
+        : highlightCol === "h2"
+          ? tSponsorBlock(t, activeMatch?.sport, "h2")
+          : highlightCol === "h1"
+            ? tSponsorBlock(t, activeMatch?.sport, "h1")
+            : t("phases.matchHalf");
 
   return (
     <div className="bg-card border border-border rounded-xl p-4 flex flex-col gap-3">
