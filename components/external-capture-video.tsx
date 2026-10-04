@@ -14,16 +14,7 @@ function videoIsLive(video: HTMLVideoElement | null): boolean {
   return Boolean(video && !video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0);
 }
 
-/** Live capture: desktop/venster (desktopCapturer-id) of webcam (`camera:deviceId`). */
-export function ExternalCaptureVideo({
-  sourceId,
-  className = "",
-  audio = false,
-  preferHighRes = true,
-  onError,
-  onActive,
-  onEnded,
-}: {
+type ExternalCaptureVideoProps = {
   sourceId: string;
   className?: string;
   /** Audio doorgeven aan output (bv. vMix-feed met commentaar). Standaard uit. */
@@ -36,58 +27,68 @@ export function ExternalCaptureVideo({
   onActive?: () => void;
   /** Bron is tijdens de wedstrijd weggevallen (venster gesloten, kabel eruit). */
   onEnded?: () => void;
-}) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  // Callbacks via ref: anders herstart de stream bij elke parent-render.
-  const cbRef = useRef({ onError, onActive, onEnded });
-  cbRef.current = { onError, onActive, onEnded };
+};
 
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    let cancelled = false;
+/** Live capture: desktop/venster (desktopCapturer-id) of webcam (`camera:deviceId`). */
+export const ExternalCaptureVideo = forwardRef<ExternalCaptureVideoHandle, ExternalCaptureVideoProps>(
+  function ExternalCaptureVideo(
+    { sourceId, className = "", audio = false, preferHighRes = true, onError, onActive, onEnded },
+    ref,
+  ) {
+    const videoRef = useRef<HTMLVideoElement>(null);
+    // De livestream vraagt hiermee of de camera al beeld geeft voordat de opname start.
+    useImperativeHandle(ref, () => ({ isPlaying: () => videoIsLive(videoRef.current) }), []);
+    // Callbacks via ref: anders herstart de stream bij elke parent-render.
+    const cbRef = useRef({ onError, onActive, onEnded });
+    cbRef.current = { onError, onActive, onEnded };
 
-    void (async () => {
-      try {
-        stream = await getCaptureStream(sourceId, { audio, preferHighRes });
-        if (cancelled || !videoRef.current) {
-          stream?.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        // Bron kan midden in de wedstrijd verdwijnen (venster dicht, HDMI eruit).
-        stream.getTracks().forEach((track) => {
-          track.addEventListener("ended", () => {
-            if (!cancelled) cbRef.current.onEnded?.();
+    useEffect(() => {
+      let stream: MediaStream | null = null;
+      let cancelled = false;
+
+      void (async () => {
+        try {
+          stream = await getCaptureStream(sourceId, { audio, preferHighRes });
+          if (cancelled || !videoRef.current) {
+            stream?.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          // Bron kan midden in de wedstrijd verdwijnen (venster dicht, HDMI eruit).
+          stream.getTracks().forEach((track) => {
+            track.addEventListener("ended", () => {
+              if (!cancelled) cbRef.current.onEnded?.();
+            });
           });
-        });
-        videoRef.current.srcObject = stream;
-        videoRef.current.muted = !audio;
-        await videoRef.current.play().catch(() => {});
-        if (!cancelled) cbRef.current.onActive?.();
-      } catch (err) {
-        console.error("[ExternalCaptureVideo]", err);
-        if (!cancelled) {
-          cbRef.current.onError?.(err instanceof Error ? err.message : String(err));
+          videoRef.current.srcObject = stream;
+          videoRef.current.muted = !audio;
+          await videoRef.current.play().catch(() => {});
+          if (!cancelled) cbRef.current.onActive?.();
+        } catch (err) {
+          console.error("[ExternalCaptureVideo]", err);
+          if (!cancelled) {
+            cbRef.current.onError?.(err instanceof Error ? err.message : String(err));
+          }
         }
-      }
-    })();
+      })();
 
-    return () => {
-      cancelled = true;
-      stream?.getTracks().forEach((t) => t.stop());
-      if (videoRef.current) videoRef.current.srcObject = null;
-    };
-  }, [sourceId, audio, preferHighRes]);
+      return () => {
+        cancelled = true;
+        stream?.getTracks().forEach((t) => t.stop());
+        if (videoRef.current) videoRef.current.srcObject = null;
+      };
+    }, [sourceId, audio, preferHighRes]);
 
-  return (
-    <DisplayMediaStage>
-      <DisplayVideo
-        ref={videoRef}
-        muted={!audio}
-        playsInline
-        autoPlay
-        className={className}
-        style={DISPLAY_COVER_MEDIA_STYLE}
-      />
-    </DisplayMediaStage>
-  );
-}
+    return (
+      <DisplayMediaStage>
+        <DisplayVideo
+          ref={videoRef}
+          muted={!audio}
+          playsInline
+          autoPlay
+          className={className}
+          style={DISPLAY_COVER_MEDIA_STYLE}
+        />
+      </DisplayMediaStage>
+    );
+  },
+);

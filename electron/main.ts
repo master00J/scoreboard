@@ -19,6 +19,7 @@ import { MUSIC_EXTENSIONS, type MusicLibraryUpdate } from "../lib/music";
 import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
 import { normalizeFeatureRequestInput, type FeatureRequestResult } from "../lib/feature-request";
 import * as licenseSvc from "./license-service";
+import { backupDatabaseBeforeUpgrade } from "../server/db-backup";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
@@ -509,6 +510,14 @@ function configureDesktopContext() {
     `userDataDir=${userDataDir} portableEnv=${Boolean(process.env.PORTABLE_EXECUTABLE_DIR || process.env.PORTABLE_EXECUTABLE_FILE)}`,
   );
   bootLog(`DATABASE_URL=${process.env.DATABASE_URL}`);
+
+  // Vóór de runtime de database opent en het schema bijwerkt: één kopie per nieuwe versie.
+  const backup = backupDatabaseBeforeUpgrade({ dataDir, version: app.getVersion() });
+  if (backup.kind === "created") {
+    bootLog(`[db-backup] kopie vóór update (van ${backup.fromVersion ?? "onbekende versie"}) in ${backup.dir}`);
+  } else if (backup.kind === "failed") {
+    bootLog(`[db-backup] kopie vóór update mislukt: ${backup.error}`);
+  }
 
   return {
     isElectron: true as const,

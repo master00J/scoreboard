@@ -79,6 +79,9 @@ jobs:
       - name: Check version against arenacue.be
         run: node scripts/release/publish-release.mjs preflight
 
+      - name: Typecheck
+        run: npm run typecheck
+
       - name: Unit tests
         run: npm test
 

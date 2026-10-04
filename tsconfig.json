@@ -36,6 +36,16 @@
     ".next/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "Website",
+    "version home 28-08",
+    "MobileApp",
+    "demo 14-09",
+    "dist",
+    "dist-*",
+    "electron-dist",
+    "renderer-dist",
+    "web-demo-dist",
+    "legal-dist"
   ]
 }

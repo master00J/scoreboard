@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LIVESTREAM_SETTINGS,
+  type LivestreamVideoInput,
   buildRtmpDestination,
   buildRtmpDestinations,
   clampBitrateKbps,
@@ -53,6 +54,9 @@ const base = {
   ...DEFAULT_LIVESTREAM_SETTINGS,
   streamKey: "abcd-efgh-ijkl-mnop",
 };
+
+/** De merge vult ontbrekende velden zelf aan; de tests geven daarom bewust onvolledige bronnen mee. */
+const partialInputs = (inputs: Array<Partial<LivestreamVideoInput>>) => inputs as LivestreamVideoInput[];
 
 describe("buildRtmpDestination", () => {
   it("bouwt YouTube- en Twitch-URL's", () => {
@@ -284,7 +288,7 @@ describe("helpers", () => {
         { id: "a1", device: "Mic", volume: 80, muted: false },
         { id: "a2", device: "HDMI", volume: 80, muted: false },
       ],
-      videoInputs: [
+      videoInputs: partialInputs([
         {
           id: "v-cam",
           name: "Tafel",
@@ -299,7 +303,7 @@ describe("helpers", () => {
           cameraDevice: "",
           audioFollow: { a1: "mute", a2: "unmute" },
         },
-      ],
+      ]),
       activeVideoInputId: "v-cam",
     });
     const next = mergeLivestreamSettings({ ...base, ...applyVideoInputSelection(base, "v-led") });
@@ -310,10 +314,10 @@ describe("helpers", () => {
 
   it("kiest de volgende browserbron voor preview, niet alleen program", () => {
     const merged = mergeLivestreamSettings({
-      videoInputs: [
+      videoInputs: partialInputs([
         { id: "v-cam", name: "Camera 1", kind: "camera", cameraDevice: "HDMI" },
         { id: "v-web", name: "Browser 1", kind: "browser", browserUrl: "https://example.com/overlay" },
-      ],
+      ]),
       activeVideoInputId: "v-cam",
       previewVideoInputId: "v-web",
     });
@@ -325,9 +329,9 @@ describe("helpers", () => {
     expect(sanitizeBrowserUrl("scoreboard.example")).toBe("https://scoreboard.example/");
     expect(sanitizeBrowserUrl("javascript:alert(1)")).toBe("");
     const merged = mergeLivestreamSettings({
-      videoInputs: [
+      videoInputs: partialInputs([
         { id: "v-web", name: "Sponsor", kind: "browser", browserUrl: "https://example.com/overlay" },
-      ],
+      ]),
       activeVideoInputId: "v-web",
     });
     expect(merged.source).toBe("browser");
@@ -343,9 +347,9 @@ describe("helpers", () => {
     expect(sanitizeMediaPath("https://evil.example/x.mp4")).toBe("");
     expect(sanitizeMediaPath("javascript:alert(1)")).toBe("");
     const merged = mergeLivestreamSettings({
-      videoInputs: [
+      videoInputs: partialInputs([
         { id: "v-clip", name: "Intro", kind: "media", mediaPath: "C:\\Videos\\intro.mp4", mediaLoop: false },
-      ],
+      ]),
       activeVideoInputId: "v-clip",
     });
     expect(merged.source).toBe("media");

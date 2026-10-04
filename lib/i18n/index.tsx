@@ -29,7 +29,7 @@ export function ensureI18n(locale: UiLocale = DEFAULT_LOCALE) {
         it: ["it", "en"],
         default: ["en"],
       },
-      initImmediate: false,
+      initAsync: false,
       interpolation: { escapeValue: false },
       returnNull: false,
     });

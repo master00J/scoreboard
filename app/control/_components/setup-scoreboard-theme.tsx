@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Redo2, Undo2 } from "lucide-react";
 import type { AppSettings, Team } from "@/lib/types";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
@@ -19,6 +20,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
+import { tSportLabel } from "@/lib/i18n/t-sport";
+import { layoutDraftIsDirty, useLayoutEditorStore, type LayoutEditorDraft } from "@/lib/layout-editor-store";
+import {
+  LAYOUT_PHASES,
+  LAYOUT_RULE_LIMIT,
+  layoutRulesFromThemeJson,
+  type LayoutPhase,
+  type LayoutRule,
+} from "@/lib/scoreboard-elements";
+import { templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
+import { SPORT_TYPES, type SportType } from "@/lib/sports";
+import { canRedo, canUndo } from "@/lib/undo-history";
 import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
 
 const FONT_PRESETS = [
@@ -118,6 +131,120 @@ function swapOrder(order: LeftStripSegment[], i: number, seg: LeftStripSegment):
   return o;
 }
 
+/** Indeling per situatie: welke opgeslagen indeling hoort bij welke sport of wedstrijdfase. */
+function LayoutRulesSection({
+  rules,
+  layouts,
+  onChange,
+  onFocus,
+}: {
+  rules: LayoutRule[];
+  layouts: ScoreboardTemplate[];
+  onChange: (next: LayoutRule[]) => void;
+  onFocus: () => void;
+}) {
+  const { t } = useTranslation();
+  const update = (id: string, patch: Partial<LayoutRule>) =>
+    onChange(rules.map((rule) => (rule.id === id ? { ...rule, ...patch } : rule)));
+
+  return (
+    <div
+      className="mb-6 space-y-3 rounded-lg border border-border p-4"
+      data-layout-rules
+      // De bibliotheek staat in een ander blok; haal de lijst op zodra iemand hier komt.
+      onFocus={onFocus}
+      onPointerEnter={onFocus}
+    >
+      <div>
+        <div className="font-semibold text-sm">{t("layoutEditor.rulesTitle")}</div>
+        <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
+          {t("layoutEditor.rulesBody")} {t("layoutEditor.rulesPriority")}
+        </p>
+      </div>
+      {rules.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("layoutEditor.rulesEmpty")}</p>
+      ) : (
+        <div className="space-y-2">
+          {rules.map((rule) => (
+            <div key={rule.id} className="grid gap-2 sm:grid-cols-[1fr_1fr_1.4fr_auto]" data-layout-rule>
+              <Select
+                value={rule.sport}
+                aria-label={t("layoutEditor.rulesSport")}
+                onChange={(e) => update(rule.id, { sport: e.target.value as SportType | "*" })}
+              >
+                <option value="*">{t("layoutEditor.rulesAnySport")}</option>
+                {SPORT_TYPES.map((sport) => (
+                  <option key={sport} value={sport}>
+                    {tSportLabel(t, sport)}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={rule.phase}
+                aria-label={t("layoutEditor.rulesPhase")}
+                onChange={(e) => update(rule.id, { phase: e.target.value as LayoutPhase | "*" })}
+              >
+                <option value="*">{t("layoutEditor.rulesAnyPhase")}</option>
+                {LAYOUT_PHASES.map((phase) => (
+                  <option key={phase} value={phase}>
+                    {t(`layoutEditor.phase_${phase}`)}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                value={rule.templateId}
+                aria-label={t("layoutEditor.rulesLayout")}
+                onChange={(e) => update(rule.id, { templateId: e.target.value })}
+              >
+                {layouts.some((layout) => layout.id === rule.templateId) ? null : (
+                  <option value={rule.templateId}>{t("layoutEditor.rulesMissing")}</option>
+                )}
+                {layouts.map((layout) => (
+                  <option key={layout.id} value={layout.id}>
+                    {templateDisplayName(layout)}
+                  </option>
+                ))}
+              </Select>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-10"
+                onClick={() => onChange(rules.filter((item) => item.id !== rule.id))}
+              >
+                {t("common.remove")}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {layouts.length === 0 ? (
+        <p className="text-xs text-muted-foreground">{t("layoutEditor.rulesNoLayouts")}</p>
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={rules.length >= LAYOUT_RULE_LIMIT}
+          onClick={() =>
+            onChange([
+              ...rules,
+              {
+                id: "rule-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                sport: "*",
+                phase: "*",
+                templateId: layouts[0].id,
+              },
+            ])
+          }
+        >
+          {t("layoutEditor.rulesAdd")}
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export function SetupScoreboardThemeSection({
   settings,
   reloadSettings,
@@ -138,10 +265,64 @@ export function SetupScoreboardThemeSection({
     () => mergeScoreboardTheme(settings?.scoreboardThemeJson ?? null),
     [settings?.scoreboardThemeJson],
   );
-  const [draft, setDraft] = useState<ResolvedScoreboardTheme>(() => themeForFreeformEdit(resolved));
+  const savedJson = settings?.scoreboardThemeJson ?? null;
+  /** Wat opgeslagen is, in de vorm waarin de editor ermee werkt. */
+  const savedDraft = useMemo<LayoutEditorDraft>(
+    () => ({
+      theme: themeForFreeformEdit(resolved),
+      rules: layoutRulesFromThemeJson(savedJson),
+      repeatSponsorBudgetCycles: sponsorRepeatBudgetCyclesFromThemeJson(savedJson),
+    }),
+    [resolved, savedJson],
+  );
+  const history = useLayoutEditorStore((state) => state.history);
+  const base = useLayoutEditorStore((state) => state.base);
+  const store = useLayoutEditorStore.getState;
+  const present = history?.present ?? savedDraft;
+  const draft = present.theme;
+  const rules = present.rules;
+  const repeatSponsorBudgetCycles = present.repeatSponsorBudgetCycles;
+  const dirty = layoutDraftIsDirty(base, history?.present ?? null);
+  const gestureStartRef = useRef<LayoutEditorDraft | null>(null);
   const [surface, setSurface] = useState<EditorSurface>("sponsor");
+  const [layouts, setLayouts] = useState<ScoreboardTemplate[]>([]);
+  const [tryUntil, setTryUntil] = useState<number | null>(null);
 
-  const [repeatSponsorBudgetCycles, setRepeatSponsorBudgetCycles] = useState(false);
+  const canvasWidth = Math.max(320, Number(settings?.displayCanvasWidth ?? 1920));
+  const canvasHeight = Math.max(240, Number(settings?.displayCanvasHeight ?? 1080));
+
+  /** Eén stap in de geschiedenis, of met `live` een tussenstand tijdens slepen. */
+  const setDraft = useCallback(
+    (
+      next: ResolvedScoreboardTheme | ((current: ResolvedScoreboardTheme) => ResolvedScoreboardTheme),
+      opts?: { live?: boolean; coalesce?: string },
+    ) => {
+      const current = store().history?.present;
+      if (!current) return;
+      const theme = typeof next === "function" ? next(current.theme) : next;
+      if (opts?.live) store().replace({ ...current, theme });
+      else store().push({ ...current, theme }, opts?.coalesce);
+    },
+    [store],
+  );
+  const patchDraft = useCallback(
+    (patch: Partial<LayoutEditorDraft>) => {
+      const current = store().history?.present;
+      if (current) store().push({ ...current, ...patch });
+    },
+    [store],
+  );
+  const setRepeatSponsorBudgetCycles = (value: boolean) => patchDraft({ repeatSponsorBudgetCycles: value });
+  const setRules = (next: LayoutRule[]) => patchDraft({ rules: next });
+
+  const loadLayouts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/scoreboard-templates");
+      setLayouts(res.ok ? ((await res.json()) as ScoreboardTemplate[]) : []);
+    } catch {
+      setLayouts([]);
+    }
+  }, []);
 
   const segLabels: Record<LeftStripSegment, string> = {
     home: t("setup.themeSegHome"),
@@ -149,46 +330,91 @@ export function SetupScoreboardThemeSection({
     away: t("setup.themeSegAway"),
   };
 
+  // Begin opnieuw zodra de opgeslagen indeling verandert (eerste keer laden, of na opslaan). Bij
+  // terugkeren naar dit tabblad met dezelfde opgeslagen indeling blijft het concept gewoon staan.
   useEffect(() => {
-    setDraft(themeForFreeformEdit(resolved));
-  }, [resolved]);
+    if (!settings) return;
+    const key = savedJson ?? "";
+    if (store().baseKey === key && store().history) return;
+    store().reset(key, savedDraft);
+  }, [settings, savedJson, savedDraft, store]);
 
   useEffect(() => {
     if (!seedThemeJson) return;
     setDraft(themeForFreeformEdit(mergeScoreboardTheme(seedThemeJson)));
     onSeedConsumed?.();
-  }, [seedThemeJson, onSeedConsumed]);
+  }, [seedThemeJson, onSeedConsumed, setDraft]);
 
   useEffect(() => {
-    setRepeatSponsorBudgetCycles(
-      sponsorRepeatBudgetCyclesFromThemeJson(settings?.scoreboardThemeJson ?? null),
-    );
-  }, [settings?.scoreboardThemeJson]);
+    void loadLayouts();
+  }, [loadLayouts, savedJson]);
 
-  async function save() {
-    const themePayload: Record<string, unknown> = {
+  // "Probeer op scherm" loopt vanzelf af; zet de knop dan terug.
+  useEffect(() => {
+    if (!tryUntil) return;
+    const id = window.setTimeout(() => setTryUntil(null), Math.max(0, tryUntil - Date.now()));
+    return () => window.clearTimeout(id);
+  }, [tryUntil]);
+
+  function themePayload(): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
       ...draft,
       layoutMode: draft.layoutMode === "auto" ? "custom" : draft.layoutMode,
     };
-    if (repeatSponsorBudgetCycles) {
-      themePayload.sponsorRepeatBudgetCycles = true;
+    if (repeatSponsorBudgetCycles) payload.sponsorRepeatBudgetCycles = true;
+    if (rules.length > 0) payload.layoutRules = rules;
+    return payload;
+  }
+
+  async function tryOnScreen() {
+    const seconds = 60;
+    try {
+      const res = await fetch("/api/display/theme-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ themeJson: JSON.stringify(themePayload()), seconds }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { until?: number };
+      if (!res.ok) throw new Error("preview");
+      setTryUntil(data.until ?? Date.now() + seconds * 1000);
+      toast({ title: t("layoutEditor.tryStarted", { seconds }), variant: "success" });
+    } catch {
+      toast({ title: t("layoutEditor.tryFailed"), variant: "error" });
     }
+  }
+
+  async function stopTryOnScreen() {
+    await fetch("/api/display/theme-preview", { method: "DELETE" }).catch(() => {});
+    setTryUntil(null);
+    toast({ title: t("layoutEditor.tryStopped") });
+  }
+
+  function discardChanges() {
+    if (!confirm(t("layoutEditor.discardConfirm"))) return;
+    store().discard();
+  }
+
+  async function save() {
+    const json = JSON.stringify(themePayload());
     const res = await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        scoreboardThemeJson: JSON.stringify(themePayload),
-      }),
+      body: JSON.stringify({ scoreboardThemeJson: json }),
     });
     if (!res.ok) {
       toast({ title: t("setup.themeSaveFailed"), variant: "error" });
       return;
     }
+    // De geschiedenis blijft staan, zodat ongedaan maken ook na opslaan nog kan.
+    store().markSaved(json);
+    setTryUntil(null);
     toast({ title: t("setup.themeSaved"), variant: "success" });
     reloadSettings();
   }
 
   async function resetDefault() {
+    // Dit wist de opgeslagen indeling van de club; ongedaan maken kan daarna niet meer.
+    if (!confirm(t("layoutEditor.resetConfirm"))) return;
     const res = await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -210,7 +436,7 @@ export function SetupScoreboardThemeSection({
       onChange={(e) => {
         const v = Number(e.target.value);
         if (!Number.isFinite(v)) return;
-        setDraft((d) => ({ ...d, [key]: v }));
+        setDraft((d) => ({ ...d, [key]: v }), { coalesce: `field:${key}` });
       }}
     />
   );
@@ -227,11 +453,11 @@ export function SetupScoreboardThemeSection({
           aria-label={label}
           className="h-9 w-14 cursor-pointer rounded border border-border bg-background"
           value={/^#[0-9a-fA-F]{6}$/.test(draft[key]) ? draft[key] : "#000000"}
-          onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+          onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }), { coalesce: `field:${key}` })}
         />
         <Input
           value={draft[key]}
-          onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+          onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }), { coalesce: `field:${key}` })}
           className="font-mono text-sm"
         />
       </div>
@@ -244,7 +470,7 @@ export function SetupScoreboardThemeSection({
       <div className="mt-1 flex gap-2 items-center">
         <Input
           value={draft[key]}
-          onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }))}
+          onChange={(e) => setDraft((d) => ({ ...d, [key]: e.target.value }), { coalesce: `field:${key}` })}
           className="font-mono text-sm"
           placeholder="#ffffff"
         />
@@ -261,7 +487,49 @@ export function SetupScoreboardThemeSection({
             {t("setup.themeBody")}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {dirty ? (
+            <span
+              className="rounded-full border border-amber-500/50 bg-amber-500/10 px-2.5 py-1 text-xs font-semibold text-amber-200"
+              data-layout-dirty
+            >
+              {t("layoutEditor.unsaved")}
+            </span>
+          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!history || !canUndo(history)}
+            title={t("layoutEditor.undo")}
+            aria-label={t("layoutEditor.undo")}
+            onClick={() => store().undo()}
+          >
+            <Undo2 className="size-4" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!history || !canRedo(history)}
+            title={t("layoutEditor.redo")}
+            aria-label={t("layoutEditor.redo")}
+            onClick={() => store().redo()}
+          >
+            <Redo2 className="size-4" />
+          </Button>
+          {tryUntil ? (
+            <Button variant="warning" size="sm" onClick={() => void stopTryOnScreen()}>
+              {t("layoutEditor.trying")}
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => void tryOnScreen()}>
+              {t("layoutEditor.tryOnScreen")}
+            </Button>
+          )}
+          {dirty ? (
+            <Button variant="ghost" size="sm" onClick={discardChanges}>
+              {t("layoutEditor.discard")}
+            </Button>
+          ) : null}
           <Button variant="outline" size="sm" onClick={() => void resetDefault()}>
             {t("setup.themeDefault")}
           </Button>
@@ -297,11 +565,30 @@ export function SetupScoreboardThemeSection({
         <SetupScoreboardPlacer
           theme={draft}
           onChange={setDraft}
+          onGestureStart={() => {
+            gestureStartRef.current = store().history?.present ?? null;
+          }}
+          onGestureEnd={() => {
+            if (gestureStartRef.current) store().commitGesture(gestureStartRef.current);
+            gestureStartRef.current = null;
+          }}
+          onUndo={() => store().undo()}
+          onRedo={() => store().redo()}
           homeTeam={homeTeam}
           awayTeam={awayTeam}
           surface={surface}
+          canvasWidth={canvasWidth}
+          canvasHeight={canvasHeight}
+          safeZonePx={Math.max(0, Number(settings?.displaySafeZoneMarginPx ?? 40))}
         />
       </div>
+
+      <LayoutRulesSection
+        rules={rules}
+        layouts={layouts}
+        onChange={setRules}
+        onFocus={() => void loadLayouts()}
+      />
 
       <div className="mb-6 space-y-4 rounded-lg border border-border p-4">
         <div>
@@ -437,7 +724,7 @@ export function SetupScoreboardThemeSection({
             <Input
               className="mt-1 font-mono text-sm"
               value={draft.fontFamily}
-              onChange={(e) => setDraft((d) => ({ ...d, fontFamily: e.target.value }))}
+              onChange={(e) => setDraft((d) => ({ ...d, fontFamily: e.target.value }), { coalesce: "field:fontFamily" })}
             />
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -557,7 +844,7 @@ export function SetupScoreboardThemeSection({
                 placeholder="2a"
                 onChange={(e) => {
                   const v = e.target.value.replace(/[^0-9a-fA-F]/g, "").slice(0, 2);
-                  setDraft((d) => ({ ...d, fullTeamRadialAlphaHex: v }));
+                  setDraft((d) => ({ ...d, fullTeamRadialAlphaHex: v }), { coalesce: "field:fullTeamRadialAlphaHex" });
                 }}
               />
               <p className="text-xs text-muted-foreground mt-1">

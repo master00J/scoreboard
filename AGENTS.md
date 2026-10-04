@@ -10,12 +10,22 @@ Electron + React desktop app that sports clubs run live on matchday. A crash or 
 - `server/`: command handlers and database setup. `prisma/`: SQLite schema.
 - `lib/i18n/locales/{nl,en,fr,it}.json`: UI texts.
 
+## Scoreboard layout
+
+The layout a club makes under "Scherm indelen" is stored as JSON in `AppSettings.scoreboardThemeJson`. Always read it through `mergeScoreboardTheme()` in `lib/scoreboard-theme.ts`.
+
+- A layout is a list of elements per surface: `theme.elements.sponsor` and `theme.elements.full`, in layer order (`lib/scoreboard-elements.ts`). The seven classic boxes (`home`, `homeScore`, `away`, `awayScore`, `clock`, `shotClock`, `sponsor`) are elements with those fixed ids; they can be hidden but not removed. `slots` and `fullSlots` are derived from the elements, and layouts saved before elements existed are converted on read. Do not write `slots` yourself.
+- The stadium screen renders the elements in `app/display/_modes/custom-scoreboard-layout.tsx` and `match-scoreboard-full.tsx`. A new element type needs: the type in `scoreboard-elements.ts`, rendering in `layout-elements.tsx`, and the `layoutEditor.type_*` texts.
+- `layoutRules` in the same JSON pick a saved layout per sport and match phase; "Probeer op scherm" is an in-memory preview in `electron/runtime.ts`. The screen chooses preview, then rule, then the saved layout (`app/display/page.tsx`).
+- An existing layout must keep rendering exactly the same after your change.
+
 ## Checks
 
 CI runs these on every pull request; make them pass before you open one.
 
 ```bash
 npm ci --legacy-peer-deps
+npm run typecheck
 npm test
 npm run renderer:build
 npm run electron:compile

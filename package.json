@@ -21,6 +21,7 @@
     "electron:compile": "tsc -p electron/tsconfig.json",
     "legal:desktop": "node scripts/assemble-desktop-legal-bundle.mjs",
     "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:watch": "vitest",
     "release:checksums": "node scripts/write-release-checksums.mjs",
     "soak:test": "node scripts/soak-test.mjs",

@@ -3,7 +3,8 @@
  *
  * Omgeving (optioneel):
  * - ARENACUE_LICENSE_API_BASE — basis-URL zonder slash (default https://arenacue.be).
- * - ARENACUE_SKIP_LICENSE_GATE=1 — geen gate (alleen voor interne test).
+ * - ARENACUE_SKIP_LICENSE_GATE=1 — geen gate, alleen in een ontwikkelbuild (`electron .`).
+ *   Een verpakte .exe negeert dit: anders zet iedereen de licentiecontrole uit met één variabele.
  *
  * Bestanden in userData: zie ARENACUE_MACHINE_ID_FILENAME / ARENACUE_LICENSE_FILENAME.
  */
@@ -11,7 +12,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { safeStorage } from "electron";
+import { app, safeStorage } from "electron";
 import {
   featureRequestResultFromResponse,
   type FeatureRequestInput,
@@ -86,7 +87,7 @@ function serializeStoredLicense(data: StoredLicense): string {
 }
 
 export function skipLicenseGateFromEnv(): boolean {
-  return process.env.ARENACUE_SKIP_LICENSE_GATE === "1";
+  return !app.isPackaged && process.env.ARENACUE_SKIP_LICENSE_GATE === "1";
 }
 
 export function getLicenseApiBase(): string {

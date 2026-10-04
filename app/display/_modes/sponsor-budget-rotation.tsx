@@ -803,7 +803,7 @@ export function SponsorBudgetRotation({
           setSponsorSwitchHoldFrame(lastCompletedVideoFrameRef.current);
           lastCompletedVideoFrameRef.current = null;
           setCurrent(null);
-          sponsorSwitchTimerRef.current = window.setTimeout(() => {
+          sponsorSwitchTimerRef.current = setTimeout(() => {
             sponsorSwitchTimerRef.current = null;
             setSponsorSwitchReleaseUntilMs(0);
             /** Intussen gepauzeerd: laat de keuze aan de pick-effect. */
@@ -1063,7 +1063,7 @@ export function SponsorBudgetRotation({
       ) {
         const holdMs = Math.min(60_000, Math.max(250, (current.playSec - sec) * 1000));
         playbackProgressMsRef.current = current.playSec * 1000;
-        earlyEndedCommitTimerRef.current = window.setTimeout(() => {
+        earlyEndedCommitTimerRef.current = setTimeout(() => {
           earlyEndedCommitTimerRef.current = null;
           finishClipOnce(current, current.playSec);
         }, holdMs);
@@ -1802,7 +1802,7 @@ function MediaRenderer({
       currentTime: video.currentTime,
     });
     onVideoProgressMs?.(catalogDur * 1000);
-    earlyEndHoldTimerRef.current = window.setTimeout(() => {
+    earlyEndHoldTimerRef.current = setTimeout(() => {
       earlyEndHoldTimerRef.current = null;
       onVideoEnded(catalogDur, captureVideoHoldFrame(video));
     }, holdMs);

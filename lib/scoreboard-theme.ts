@@ -1,5 +1,15 @@
 /** Opgeslagen in AppSettings.scoreboardThemeJson (merge met defaults). */
 
+import {
+  elementsFromFullSlots,
+  elementsFromSlots,
+  normalizeBox,
+  normalizeElements,
+  slotsFromElements,
+  type LayoutElements,
+  type LayoutRule,
+} from "./scoreboard-elements";
+
 export type LeftStripSegment = "home" | "timer" | "away";
 
 export type ScoreboardLayoutMode = "auto" | "custom" | "left-l" | "full" | "bottom-strip";
@@ -199,6 +209,11 @@ export type ScoreboardTheme = {
   slots?: ScoreboardSlots;
   /** Vrije plaatsing op het volledige scorebord (zonder sponsorvak). */
   fullSlots?: FullScoreboardSlots;
+  /**
+   * Alle elementen per vlak, in laagvolgorde. De klassieke vakken staan hier ook in; `slots` en
+   * `fullSlots` volgen hun plek. Ontbreekt dit (oudere indeling), dan komen de elementen uit de vakken.
+   */
+  elements?: LayoutElements;
   /** Onderstrip (indien later gebruikt) */
   stripHeightPx?: number;
   stripLogoPx?: number;
@@ -212,6 +227,11 @@ export type ScoreboardTheme = {
    * heeft gehaald (doorlopende loop tot de fase wisselt). Zie ook playlist voor losse video-loops.
    */
   sponsorRepeatBudgetCycles?: boolean;
+  /**
+   * Welke opgeslagen indeling bij welke sport of fase hoort. Geen vormgeving: blijft staan als je
+   * een andere indeling toepast. Lezen via `layoutRulesFromThemeJson`.
+   */
+  layoutRules?: LayoutRule[];
 };
 
 export type ResolvedScoreboardTheme = Required<
@@ -256,6 +276,7 @@ export type ResolvedScoreboardTheme = Required<
     | "teamNameColor"
     | "slots"
     | "fullSlots"
+    | "elements"
     | "stripHeightPx"
     | "stripLogoPx"
     | "stripScorePx"
@@ -309,6 +330,10 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
   teamNameColor: "rgba(255,255,255,0.88)",
   slots: normalizeSlots(DEFAULT_SLOTS),
   fullSlots: DEFAULT_FULL_SLOTS,
+  elements: {
+    sponsor: elementsFromSlots(normalizeSlots(DEFAULT_SLOTS)),
+    full: elementsFromFullSlots(DEFAULT_FULL_SLOTS),
+  },
   stripHeightPx: 180,
   stripLogoPx: 120,
   stripScorePx: 120,
@@ -346,14 +371,30 @@ function clampPct(n: number, lo: number, hi: number): number {
   return Math.round(Math.min(hi, Math.max(lo, n)));
 }
 
+/** Plek van een vak op één decimaal (2 px op een scherm van 1920 breed), minstens 2 % groot. */
 export function normalizeSlot(raw: Partial<LayoutSlot> | undefined, fallback: LayoutSlot): LayoutSlot {
-  const w = clampPct(raw?.w ?? fallback.w, 8, 100);
-  const h = clampPct(raw?.h ?? fallback.h, 8, 100);
+  return normalizeBox(raw, fallback);
+}
+
+/**
+ * Hele procenten, minstens 8 %: zo rekenden de oude frames (L-balk, onderstrip) hun vakken uit.
+ * Blijft zo, zodat een bestaande L-balk in de editor op exact dezelfde plek uitkomt als voorheen.
+ */
+function wholeSlot(raw: LayoutSlot): LayoutSlot {
+  const w = clampPct(raw.w, 8, 100);
+  const h = clampPct(raw.h, 8, 100);
+  return { x: clampPct(raw.x, 0, 100 - w), y: clampPct(raw.y, 0, 100 - h), w, h };
+}
+
+function wholeSlots(raw: ScoreboardSlots): ScoreboardSlots {
   return {
-    x: clampPct(raw?.x ?? fallback.x, 0, 100 - w),
-    y: clampPct(raw?.y ?? fallback.y, 0, 100 - h),
-    w,
-    h,
+    home: wholeSlot(raw.home),
+    homeScore: wholeSlot(raw.homeScore),
+    away: wholeSlot(raw.away),
+    awayScore: wholeSlot(raw.awayScore),
+    clock: wholeSlot(raw.clock),
+    shotClock: wholeSlot(raw.shotClock),
+    sponsor: wholeSlot(raw.sponsor),
   };
 }
 
@@ -449,7 +490,7 @@ export function slotsFromLeftFrame(leftBarWidthPx: number, bottomBarHeightPx: nu
     w: leftW,
     h: colH - homeH - clockH,
   });
-  return normalizeSlots({
+  return wholeSlots({
     home: home.logo,
     homeScore: home.score,
     clock: { x: 0, y: homeH, w: leftW, h: Math.max(8, clockH * 0.58) },
@@ -469,7 +510,7 @@ export function slotsFromLeftFrame(leftBarWidthPx: number, bottomBarHeightPx: nu
 export function slotsFromStrip(stripHeightPx: number): ScoreboardSlots {
   const h = Math.max(12, pctOf(stripHeightPx, SCOREBOARD_CANVAS_H));
   const y = 100 - h;
-  return normalizeSlots({
+  return wholeSlots({
     sponsor: largestSixteenByNineSlot({ x: 0, y: 0, w: 100, h: 100 - h }),
     home: { x: 0, y, w: 16, h },
     homeScore: { x: 16, y, w: 12, h },
@@ -504,7 +545,33 @@ export function themeForFreeformEdit(theme: ResolvedScoreboardTheme): ResolvedSc
     ...theme,
     layoutMode: "custom",
     slots,
+    // Een oud frame kent geen vrije elementen: begin met de klassieke vakken op de plek van dat frame.
+    elements: { ...theme.elements, sponsor: elementsFromSlots(slots) },
     contentAreaBg: theme.layoutMode === "left-l" ? theme.frameColorMid : theme.contentAreaBg,
+  };
+}
+
+/**
+ * Zet de elementen van één vlak in het thema en laat de klassieke vakken volgen.
+ * Bewerken van het sponsorvlak maakt de indeling "vrij plaatsen".
+ */
+export function withSurfaceElements(
+  theme: ResolvedScoreboardTheme,
+  surface: "sponsor" | "full",
+  list: LayoutElements["sponsor"],
+): ResolvedScoreboardTheme {
+  if (surface === "full") {
+    return {
+      ...theme,
+      elements: { ...theme.elements, full: list },
+      fullSlots: slotsFromElements(list, theme.fullSlots),
+    };
+  }
+  return {
+    ...theme,
+    layoutMode: "custom",
+    elements: { ...theme.elements, sponsor: list },
+    slots: slotsFromElements(list, theme.slots),
   };
 }
 
@@ -565,6 +632,12 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
       patch = {};
     }
   }
+  const slots = normalizeSlots(patch.slots);
+  const fullSlots = normalizeFullSlots(patch.fullSlots);
+  const elements: LayoutElements = {
+    sponsor: normalizeElements(patch.elements?.sponsor, "sponsor", slots),
+    full: normalizeElements(patch.elements?.full, "full", fullSlots),
+  };
   const bar = clamp(Math.round(patch.leftBarWidthPx ?? DEFAULT_SCOREBOARD_THEME.leftBarWidthPx), 180, 520);
   const bottom = patch.bottomBarHeightPx != null
     ? clamp(Math.round(patch.bottomBarHeightPx), 120, 600)
@@ -628,8 +701,9 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
     showClock: patch.showClock !== false,
     scoreColor: patch.scoreColor?.trim() || DEFAULT_SCOREBOARD_THEME.scoreColor,
     teamNameColor: patch.teamNameColor?.trim() || DEFAULT_SCOREBOARD_THEME.teamNameColor,
-    slots: normalizeSlots(patch.slots),
-    fullSlots: normalizeFullSlots(patch.fullSlots),
+    slots: slotsFromElements(elements.sponsor, slots),
+    fullSlots: slotsFromElements(elements.full, fullSlots),
+    elements,
     stripHeightPx: clamp(Math.round(patch.stripHeightPx ?? DEFAULT_SCOREBOARD_THEME.stripHeightPx), 120, 280),
     stripLogoPx: clamp(Math.round(patch.stripLogoPx ?? DEFAULT_SCOREBOARD_THEME.stripLogoPx), 64, 200),
     stripScorePx: clamp(Math.round(patch.stripScorePx ?? DEFAULT_SCOREBOARD_THEME.stripScorePx), 48, 200),

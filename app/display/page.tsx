@@ -33,8 +33,9 @@ import {
   scoreboardUsesLeftFrame,
   scoreboardUsesStrip,
   sponsorRepeatBudgetCyclesFromThemeJson,
-  type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
+import { layoutRulesFromThemeJson, pickLayoutRule } from "@/lib/scoreboard-elements";
+import { applyTemplateToThemeJson } from "@/lib/scoreboard-templates";
 import { mediaUrl } from "@/lib/media-url";
 import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
 import {
@@ -225,9 +226,19 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const [allPlayers, setAllPlayers] = useState<Record<string, Player>>({});
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
-  const [scoreboardTheme, setScoreboardTheme] = useState<ResolvedScoreboardTheme>(() =>
-    mergeScoreboardTheme(null),
-  );
+  const [themeJson, setThemeJson] = useState<string | null>(null);
+  /** "Probeer op scherm" vanuit de editor: tijdelijk, niet opgeslagen. */
+  const [themePreviewJson, setThemePreviewJson] = useState<string | null>(null);
+  const [layoutTemplates, setLayoutTemplates] = useState<Array<{ id: string; themeJson: string }>>([]);
+  /** Welke indeling nu geldt: de proefweergave, anders de regel voor deze sport en fase, anders de gewone. */
+  const scoreboardTheme = useMemo(() => {
+    if (themePreviewJson) return mergeScoreboardTheme(themePreviewJson);
+    const rule = match
+      ? pickLayoutRule(layoutRulesFromThemeJson(themeJson), { sport: match.sport, status: match.status })
+      : null;
+    const template = rule ? layoutTemplates.find((item) => item.id === rule.templateId) : null;
+    return mergeScoreboardTheme(template ? applyTemplateToThemeJson(themeJson, template.themeJson) : themeJson);
+  }, [themeJson, themePreviewJson, layoutTemplates, match?.sport, match?.status]);
   const liveTheme = useMemo(() => {
     const profile = getSportProfile(match?.sport);
     return {
@@ -267,7 +278,18 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       })
       .then((s: AppSettings | null) => {
         if (cancelled || !s) return;
-        setScoreboardTheme(mergeScoreboardTheme(s.scoreboardThemeJson ?? null));
+        setThemeJson(s.scoreboardThemeJson ?? null);
+        setThemePreviewJson(s.scoreboardThemePreviewJson ?? null);
+        if (layoutRulesFromThemeJson(s.scoreboardThemeJson ?? null).length > 0) {
+          fetch("/api/scoreboard-templates")
+            .then((r) => r.json())
+            .then((list: unknown) => {
+              if (!cancelled) setLayoutTemplates(Array.isArray(list) ? list : []);
+            })
+            .catch(() => {});
+        } else {
+          setLayoutTemplates([]);
+        }
         setSponsorRepeatBudgetCycles(
           sponsorRepeatBudgetCyclesFromThemeJson(s.scoreboardThemeJson ?? null),
         );

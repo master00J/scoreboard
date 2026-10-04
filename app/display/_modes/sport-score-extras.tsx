@@ -22,8 +22,8 @@ export function SportTeamExtras({
   match: Match;
   side: "home" | "away";
   compact?: boolean;
-  /** Vaste LED-grootte. Zonder waarde schaalt het vak met de container (cqh). */
-  fontSize?: number;
+  /** Vaste LED-grootte in px, of een CSS-grootte voor een eigen vak. Zonder waarde schaalt het met de container. */
+  fontSize?: number | string;
 }) {
   const profile = getSportProfile(match.sport);
   const timeouts = side === "home" ? match.homeTimeouts : match.awayTimeouts;
@@ -46,10 +46,10 @@ export function SportTeamExtras({
   ) {
     return null;
   }
-  const size = fontSize ?? (compact ? 32 : undefined);
+  const size = typeof fontSize === "number" ? fontSize : compact && fontSize === undefined ? 32 : undefined;
   const style: CSSProperties = size
     ? { fontSize: size, gap: Math.max(6, Math.round(size * 0.28)) }
-    : { fontSize: "min(28cqh, 8cqw, 42px)", gap: "0.28em" };
+    : { fontSize: typeof fontSize === "string" ? fontSize : "min(28cqh, 8cqw, 42px)", gap: "0.28em" };
   return (
     <div
       className="flex w-full min-w-0 max-w-full flex-wrap items-center justify-center px-[2cqw] text-center font-black uppercase leading-none tracking-wide text-white"

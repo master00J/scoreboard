@@ -26,7 +26,6 @@ import {
 } from "@/lib/sponsor-live-roster";
 import { useHalftimeSponsorTimelineT } from "@/lib/use-halftime-sponsor-timeline";
 import { tMatchStatus } from "@/lib/i18n/t-phase";
-import { getSportProfile } from "@/lib/sports";
 import { toast } from "@/components/ui/toast";
 import { sendCommand } from "@/lib/use-socket";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";

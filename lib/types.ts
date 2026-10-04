@@ -42,6 +42,9 @@ export type AppSettings = {
   secondHalfSponsorSec: number;
   /** JSON-string; zie lib/scoreboard-theme.ts */
   scoreboardThemeJson?: string | null;
+  /** "Probeer op scherm": tijdelijke indeling die het stadionscherm toont tot `…Until` (ms sinds epoch). */
+  scoreboardThemePreviewJson?: string | null;
+  scoreboardThemePreviewUntil?: number | null;
   /** JSON-string; zie lib/proof-of-play-brand.ts */
   proofOfPlayBrandJson?: string | null;
   /** Logisch canvas voor stadiondisplay (default 1920×1080). Pas aan voor exotische LED-formaten. */

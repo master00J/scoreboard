@@ -182,7 +182,7 @@ export default function StreamProgramPage({
           ref={captureRef}
           sourceId={camera}
           className="absolute inset-0 h-full w-full"
-          onReady={notifyProgramReady}
+          onActive={notifyProgramReady}
         />
       ) : (
         <div className="absolute inset-0 grid place-items-center text-white/40 text-2xl">

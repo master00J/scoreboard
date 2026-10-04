@@ -5,7 +5,8 @@ import { uiLocaleFromSearch } from "@/lib/i18n/locales";
 import { DEFAULT_LIVESTREAM_SETTINGS, DEFAULT_LIVESTREAM_STATUS, mergeLivestreamSettings } from "@/lib/livestream";
 import { CommandSchema, type Command } from "@/lib/validation/commands";
 import { captureOnBlackoutEnter, captureOnBlackoutExit } from "@/lib/external-capture-blackout";
-import type { CommandAck, DesktopApiRequest, DesktopApiResponse, ElectronBridge, SerializedDisplayState, TickPayload } from "@/lib/desktop-bridge";
+import type { CommandAck, DesktopApiRequest, DesktopApiResponse, ElectronBridge, TickPayload } from "@/lib/desktop-bridge";
+import type { SerializedDisplayState } from "@/lib/timer";
 
 const CHANNEL = "arenacue-web-scoreboard";
 const STORAGE_KEY = "arenacue_web_scoreboard_v4";

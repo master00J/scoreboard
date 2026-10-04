@@ -40,7 +40,7 @@ export type ScoreboardTemplate = {
 const VISUAL_THEME_KEYS = Object.keys(DEFAULT_SCOREBOARD_THEME) as (keyof ResolvedScoreboardTheme)[];
 
 /** Keys die in dezelfde JSON zitten maar géén layout zijn — nooit in een template. */
-export const NON_VISUAL_THEME_KEYS = ["sponsorRepeatBudgetCycles"] as const;
+export const NON_VISUAL_THEME_KEYS = ["sponsorRepeatBudgetCycles", "layoutRules"] as const;
 
 /** Venue-beelden: blijven staan bij een layoutwissel, tenzij de template zelf een pad zet. */
 const VENUE_BACKGROUND_KEYS = [

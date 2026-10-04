@@ -11,11 +11,14 @@ export function AppResourceMeter() {
   const [metrics, setMetrics] = useState<AppResourceMetrics | null>(null);
 
   useEffect(() => {
-    if (!isElectron || !window.electronAPI?.getAppResourceMetrics) return;
+    const api = window.electronAPI;
+    if (!isElectron || !api?.getAppResourceMetrics) return;
+    // Aparte const: binnen de functie hieronder onthoudt TypeScript de controle hierboven niet.
+    const readMetrics = api.getAppResourceMetrics;
     let cancelled = false;
     async function tick() {
       try {
-        const next = await window.electronAPI.getAppResourceMetrics();
+        const next = await readMetrics();
         if (!cancelled) setMetrics(next);
       } catch {
         /* ignore */

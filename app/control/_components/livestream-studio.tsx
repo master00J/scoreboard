@@ -1075,7 +1075,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       <div
         className={studioTab === "live" ? "flex min-h-0 flex-1 flex-col gap-1.5" : undefined}
         aria-hidden={studioTab !== "live"}
-        {...(studioTab !== "live" ? { inert: "" } : {})}
+        {...(studioTab !== "live" ? { inert: true } : {})}
         style={
           studioTab === "live"
             ? undefined

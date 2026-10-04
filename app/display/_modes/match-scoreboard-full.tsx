@@ -1,21 +1,20 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { StableClockText } from "@/components/stable-clock-text";
 import type { Match } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
-import {
-  type ResolvedScoreboardTheme,
-  mergeScoreboardTheme,
-  slotStyle,
-} from "@/lib/scoreboard-theme";
+import { type ResolvedScoreboardTheme, mergeScoreboardTheme } from "@/lib/scoreboard-theme";
+import type { LayoutElement } from "@/lib/scoreboard-elements";
 import { formatSportClock, getSportProfile } from "@/lib/sports";
+import { ExtraElement, elementBoxStyle, elementInnerStyle } from "./layout-elements";
 import { TeamLogo } from "./scoreboard-strip";
 import { ShotClockReadout, SportMatchMeta, SportTeamExtras, useShotClockOff } from "./sport-score-extras";
 
 /**
  * Volledig scherm tijdens de match zonder sponsorpaneel: thuis, klok en uit
- * op vrije vakken (fullSlots).
+ * en alles wat de club erbij zette, als elementen in laagvolgorde (theme.elements.full).
  */
 export function MatchScoreboardFull({
   match,
@@ -66,52 +65,80 @@ export function MatchScoreboardFull({
             radial-gradient(ellipse 55% 70% at 82% 50%, ${match.awayTeam.primaryColor}${theme.fullTeamRadialAlphaHex} 0%, transparent 65%)`,
         }}
       />
-      <TeamSide
-        team={match.homeTeam}
-        match={match}
-        side="home"
-        theme={theme}
-        style={slotStyle(theme.fullSlots.home)}
-      />
-      <TeamScore
-        score={match.homeScore}
-        match={match}
-        side="home"
-        theme={theme}
-        style={slotStyle(theme.fullSlots.homeScore)}
-      />
-      <CenterBlock
-        match={match}
-        elapsed={elapsed}
-        running={running}
-        period={period}
-        addedTime={addedTime}
-        shotClock={shotClock}
-        theme={theme}
-        style={slotStyle(theme.fullSlots.clock)}
-      />
-      {showShot ? (
-        <div
-          className="absolute z-10 box-border overflow-hidden"
-          style={{ ...slotStyle(theme.fullSlots.shotClock), containerType: "size" }}
-        >
-          <ShotClockReadout seconds={shotClock} fontSize="min(72cqh, 78cqw)" />
-        </div>
-      ) : null}
-      <TeamSide
-        team={match.awayTeam}
-        match={match}
-        side="away"
-        theme={theme}
-        style={slotStyle(theme.fullSlots.away)}
-      />
-      <TeamScore
-        score={match.awayScore}
-        match={match}
-        side="away"
-        theme={theme}
-        style={slotStyle(theme.fullSlots.awayScore)}
-      />
+      {theme.elements.full.map((element, index) => {
+        if (element.hidden) return null;
+        const box = elementBoxStyle(element, index);
+        const inner = elementInnerStyle(element);
+        const side = element.side === "away" ? "away" : "home";
+        switch (element.type) {
+          case "teamLogo":
+            return (
+              <TeamSide
+                key={element.id}
+                team={side === "away" ? match.awayTeam : match.homeTeam}
+                match={match}
+                side={side}
+                theme={theme}
+                element={element}
+                style={box}
+                inner={inner}
+              />
+            );
+          case "teamScore":
+            return (
+              <TeamScore
+                key={element.id}
+                score={side === "away" ? match.awayScore : match.homeScore}
+                match={match}
+                side={side}
+                theme={theme}
+                element={element}
+                style={box}
+                inner={inner}
+              />
+            );
+          case "clock":
+            return (
+              <CenterBlock
+                key={element.id}
+                match={match}
+                elapsed={elapsed}
+                running={running}
+                period={period}
+                addedTime={addedTime}
+                shotClock={shotClock}
+                theme={theme}
+                element={element}
+                style={box}
+                inner={inner}
+              />
+            );
+          case "shotClock":
+            if (!showShot) return null;
+            return (
+              <div
+                key={element.id}
+                className="absolute box-border overflow-hidden"
+                style={{ ...box, containerType: "size" }}
+              >
+                <ShotClockReadout seconds={shotClock} fontSize="min(72cqh, 78cqw)" />
+              </div>
+            );
+          case "media":
+            return null;
+          default:
+            return (
+              <ExtraElement
+                key={element.id}
+                element={element}
+                index={index}
+                match={match}
+                period={period}
+                theme={theme}
+              />
+            );
+        }
+      })}
     </motion.div>
   );
 }
@@ -121,20 +148,24 @@ function TeamSide({
   match,
   side,
   theme,
+  element,
   style,
+  inner,
 }: {
   team: Match["homeTeam"];
   match: Match;
   side: "home" | "away";
   theme: ResolvedScoreboardTheme;
-  style: { left: string; top: string; width: string; height: string };
+  element: LayoutElement;
+  style: CSSProperties;
+  inner: CSSProperties | undefined;
 }) {
   const nameEl = theme.fullShowTeamNames ? (
     <div
       className={`max-w-full shrink-0 px-[4cqw] text-center font-bold leading-tight ${theme.fullTeamNameUppercase ? "uppercase tracking-wide" : ""}`}
       style={{
         fontSize: `min(${theme.fullTeamNamePx}px, 14cqh, 12cqw)`,
-        color: theme.teamNameColor,
+        color: element.style?.color ?? theme.teamNameColor,
         textShadow: "0 4px 24px rgba(0,0,0,0.45)",
       }}
     >
@@ -159,10 +190,10 @@ function TeamSide({
   const stack = nameFirst ? [nameEl, logoEl] : [logoEl, nameEl];
 
   return (
-    <div className="absolute z-10 box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
+    <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
       <div
         className="flex h-full w-full flex-col items-center justify-center min-w-0"
-        style={{ gap: `${Math.min(theme.fullTeamStackGapPx, 10)}cqh` }}
+        style={{ gap: `${Math.min(theme.fullTeamStackGapPx, 10)}cqh`, ...inner }}
       >
         {stack}
         {!theme.showScores ? <SportTeamExtras match={match} side={side} /> : null}
@@ -176,23 +207,30 @@ function TeamScore({
   match,
   side,
   theme,
+  element,
   style,
+  inner,
 }: {
   score: number;
   match: Match;
   side: "home" | "away";
   theme: ResolvedScoreboardTheme;
-  style: { left: string; top: string; width: string; height: string };
+  element: LayoutElement;
+  style: CSSProperties;
+  inner: CSSProperties | undefined;
 }) {
   if (!theme.showScores) return null;
   return (
-    <div className="absolute z-10 box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
-      <div className="flex h-full w-full flex-col items-center justify-center gap-[6cqh] px-[4cqw] py-[4cqh]">
+    <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
+      <div
+        className="flex h-full w-full flex-col items-center justify-center gap-[6cqh] px-[4cqw] py-[4cqh]"
+        style={inner}
+      >
         <div
           className="shrink-0 font-black tabular-nums leading-none"
           style={{
             fontSize: `min(${theme.fullScorePx}px, 72cqh, 70cqw)`,
-            color: theme.scoreColor,
+            color: element.style?.color ?? theme.scoreColor,
             textShadow: "0 8px 40px rgba(0,0,0,0.55)",
           }}
         >
@@ -212,7 +250,9 @@ function CenterBlock({
   addedTime,
   shotClock,
   theme,
+  element,
   style,
+  inner,
 }: {
   match: Match;
   elapsed: number;
@@ -221,17 +261,19 @@ function CenterBlock({
   addedTime: number;
   shotClock: number;
   theme: ResolvedScoreboardTheme;
-  style: { left: string; top: string; width: string; height: string };
+  element: LayoutElement;
+  style: CSSProperties;
+  inner: CSSProperties | undefined;
 }) {
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
   return (
     <div
-      className="absolute z-10 box-border overflow-hidden"
+      className="absolute box-border overflow-hidden"
       style={{ ...style, containerType: "size" }}
     >
       <div
         className="flex h-full w-full flex-col items-center justify-center min-w-0"
-        style={{ gap: `${Math.min(theme.fullCenterStackGapPx, 10)}cqh` }}
+        style={{ gap: `${Math.min(theme.fullCenterStackGapPx, 10)}cqh`, ...inner }}
       >
         {theme.fullShowPeriod && (
           <div
@@ -248,7 +290,7 @@ function CenterBlock({
               className="font-black leading-none"
               style={{
                 fontSize: `min(${theme.fullTimerPx}px, 48cqh, 36cqw)`,
-                color: accent,
+                color: element.style?.color ?? accent,
                 textShadow: "0 6px 36px rgba(0,0,0,0.5)",
                 opacity: running ? 1 : 0.82,
               }}

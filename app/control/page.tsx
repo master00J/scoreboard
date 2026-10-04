@@ -26,6 +26,7 @@ import { LicenseActivationGate } from "./_components/license-activation-gate";
 import type { AppSettings, Match, Team } from "@/lib/types";
 import type { MobileBridgeInfo } from "@/lib/desktop-bridge";
 import { isFullMatch } from "@/lib/is-full-match";
+import { isMatchInPlay } from "@/lib/match-in-play";
 import { exportMatch, focusDisplayWindow } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
 import { MatchTabGrid, LivePreviewPanel } from "./_components/match-tab-grid";
@@ -145,7 +146,7 @@ export default function ControlPage() {
       >
       <ToastViewport />
 
-      <UpdateNudgeBanner />
+      <UpdateNudgeBanner matchInPlay={isMatchInPlay(isFullMatch(match) ? match : null)} />
 
       <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/80 bg-card/80 px-3 py-3 shadow-lg shadow-black/10 backdrop-blur sm:px-4">
         <div className="flex min-w-0 items-center gap-3">

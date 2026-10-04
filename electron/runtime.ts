@@ -558,8 +558,42 @@ async function ensureBuiltInScoreboardTemplates(): Promise<void> {
   }
 }
 
+/**
+ * "Probeer op scherm": een indeling die het stadionscherm tijdelijk toont zonder dat ze opgeslagen
+ * is. Alleen in het geheugen; na de ingestelde tijd of een herstart is het scherm vanzelf terug.
+ */
+const THEME_PREVIEW_MAX_CHARS = 200_000;
+let themePreview: { json: string; until: number; timer: ReturnType<typeof setTimeout> } | null = null;
+
+function activeThemePreview(): { json: string; until: number } | null {
+  if (!themePreview) return null;
+  if (themePreview.until <= Date.now()) return null;
+  return { json: themePreview.json, until: themePreview.until };
+}
+
+async function clearThemePreview(): Promise<void> {
+  if (!themePreview) return;
+  clearTimeout(themePreview.timer);
+  themePreview = null;
+  await touchState();
+  await broadcastDisplayState();
+}
+
+async function startThemePreview(json: string, seconds: number): Promise<number> {
+  if (themePreview) clearTimeout(themePreview.timer);
+  const until = Date.now() + seconds * 1000;
+  const timer = setTimeout(() => {
+    void clearThemePreview().catch(() => {});
+  }, seconds * 1000);
+  themePreview = { json, until, timer };
+  await touchState();
+  await broadcastDisplayState();
+  return until;
+}
+
 async function buildSettingsApiJson() {
   const s = await getAppSettings();
+  const preview = activeThemePreview();
   let idleFallbackMedia: unknown = null;
   if (s.idleFallbackMediaId) {
     const m = await prisma.mediaItem.findUnique({ where: { id: s.idleFallbackMediaId } });
@@ -612,6 +646,8 @@ async function buildSettingsApiJson() {
     secondHalfScoreboardSec: s.secondHalfScoreboardSec,
     secondHalfSponsorSec: s.secondHalfSponsorSec,
     scoreboardThemeJson: s.scoreboardThemeJson,
+    scoreboardThemePreviewJson: preview?.json ?? null,
+    scoreboardThemePreviewUntil: preview?.until ?? null,
     proofOfPlayBrandJson: s.proofOfPlayBrandJson,
     displayCanvasWidth: s.displayCanvasWidth,
     displayCanvasHeight: s.displayCanvasHeight,
@@ -1682,6 +1718,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         await setScoreboardThemeJson(
           raw === null || raw === undefined ? null : String(raw),
         );
+        await clearThemePreview();
       }
       if ("proofOfPlayBrandJson" in body) {
         const raw = body.proofOfPlayBrandJson;
@@ -1812,6 +1849,28 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       return json(200, { ok: true });
     }
 
+    if (pathname === "/api/display/theme-preview" && method === "POST") {
+      const body = (parseJsonBody(req) as { themeJson?: unknown; seconds?: unknown }) ?? {};
+      const themeJson = typeof body.themeJson === "string" ? body.themeJson : "";
+      if (!themeJson || themeJson.length > THEME_PREVIEW_MAX_CHARS) {
+        return json(400, { error: "Ongeldige indeling." });
+      }
+      try {
+        const parsed = JSON.parse(themeJson) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("no object");
+      } catch {
+        return json(400, { error: "Ongeldige indeling." });
+      }
+      const seconds = Math.min(300, Math.max(5, Math.round(Number(body.seconds) || 60)));
+      const until = await startThemePreview(themeJson, seconds);
+      return json(200, { ok: true, until });
+    }
+
+    if (pathname === "/api/display/theme-preview" && method === "DELETE") {
+      await clearThemePreview();
+      return json(200, { ok: true });
+    }
+
     if (pathname === "/api/scoreboard-templates" && method === "GET") {
       await ensureBuiltInScoreboardTemplates();
       const rows = await prisma.scoreboardTemplate.findMany({
@@ -1860,6 +1919,9 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       if (body.label !== undefined) data.label = body.label?.trim().slice(0, 80) || null;
       if (body.themeJson !== undefined) data.themeJson = sanitizeTemplateThemeJson(body.themeJson);
       const row = await prisma.scoreboardTemplate.update({ where: { id: templateId }, data });
+      // Een regel per sport of fase kan naar deze indeling verwijzen: laat het scherm ze opnieuw laden.
+      await touchState();
+      await broadcastDisplayState();
       return json(200, row);
     }
 
@@ -1870,6 +1932,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         return json(400, { error: "Meegeleverde templates kunnen niet verwijderd worden." });
       }
       await prisma.scoreboardTemplate.delete({ where: { id: templateId } });
+      await touchState();
+      await broadcastDisplayState();
       return json(200, { ok: true });
     }
 

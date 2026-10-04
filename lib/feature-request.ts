@@ -6,8 +6,11 @@
 export const FEATURE_REQUEST_MIN_CHARS = 10;
 export const FEATURE_REQUEST_MAX_CHARS = 2000;
 export const FEATURE_REQUEST_MAX_PHOTOS = 3;
-/** Max lengte van de data-URL (base64); houdt de JSON-post onder de 15s-timeout. */
-export const FEATURE_REQUEST_MAX_PHOTO_DATA_CHARS = 1_800_000;
+/**
+ * Max lengte van de data-URL (base64) per foto. Drie foto's samen blijven zo onder de 4,5 MB
+ * die Vercel per verzoek toelaat; daarboven weigert Vercel de aanvraag nog vóór de site ze ziet.
+ */
+export const FEATURE_REQUEST_MAX_PHOTO_DATA_CHARS = 1_200_000;
 export const FEATURE_REQUEST_PHOTO_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
 const LOCALES = ["nl", "en", "fr", "it"] as const;

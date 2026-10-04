@@ -61,7 +61,11 @@ function parseRelease(value: unknown): ReleaseInfo | null {
   };
 }
 
-export function UpdateNudgeBanner() {
+/**
+ * `matchInPlay`: tijdens een wedstrijd blijft de melding volledig weg. Ook de balk, want die
+ * schuift alle knoppen omlaag. Na het eindsignaal of het afsluiten verschijnt ze vanzelf.
+ */
+export function UpdateNudgeBanner({ matchInPlay = false }: { matchInPlay?: boolean }) {
   const { t } = useTranslation();
   const [state, setState] = useState<
     | { kind: "idle" }
@@ -141,7 +145,7 @@ export function UpdateNudgeBanner() {
     };
   }, []);
 
-  if (state.kind !== "update") {
+  if (state.kind !== "update" || matchInPlay) {
     return null;
   }
 
