@@ -11,7 +11,13 @@ import { Label, Select } from "@/components/ui/form";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { AppSettings, Match, MediaItem, Player, Team } from "@/lib/types";
 import { toast } from "@/components/ui/toast";
-import { isElectron, selectFilesViaDialog, selectFolderViaDialog, exportVenueBackup } from "@/lib/electron";
+import {
+  isElectron,
+  selectFilesViaDialog,
+  selectFolderViaDialog,
+  exportVenueBackup,
+  restoreVenueBackup,
+} from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
 import { normalizeUiLocale, type UiLocale } from "@/lib/i18n";
@@ -41,6 +47,8 @@ export function SetupPanel() {
   const { data: idleFallbackPickMedia } = useApi<MediaItem[]>("/api/media");
   const state = useDisplayStore((s) => s.state);
   const homeTeam = (teams ?? []).find((team) => team.id === settings?.homeTeamId) ?? null;
+  /** De wedstrijd die nu op het scherm staat: de indelingseditor toont die ploegen en sport. */
+  const activeMatch = (matches ?? []).find((match) => match.id === state?.matchId) ?? null;
 
   const [teamDialogTeam, setTeamDialogTeam] = useState<Team | "new" | null>(null);
   const [playerDialog, setPlayerDialog] = useState<{
@@ -195,27 +203,46 @@ export function SetupPanel() {
         <section className="bg-card border border-border rounded-xl p-6">
           <h2 className="text-lg font-semibold mb-1">{t("setup.venueBackupTitle")}</h2>
           <p className="text-sm text-muted-foreground mb-3">{t("setup.venueBackupBody")}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void (async () => {
-                const r = await exportVenueBackup();
-                if (r.canceled) return;
-                if (!r.ok) {
-                  toast({ title: t("setup.backupFailed"), description: r.error ?? "", variant: "error" });
-                  return;
-                }
-                toast({
-                  title: t("setup.backupSaved"),
-                  description: r.filePath ?? "",
-                  variant: "success",
-                });
-              })();
-            }}
-          >
-            {t("setup.exportBackup")}
-          </Button>
+          <div className="flex flex-wrap gap-2" data-venue-backup>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void (async () => {
+                  const r = await exportVenueBackup();
+                  if (r.canceled) return;
+                  if (!r.ok) {
+                    toast({ title: t("setup.backupFailed"), description: r.error ?? "", variant: "error" });
+                    return;
+                  }
+                  const skipped = r.skipped?.length ?? 0;
+                  toast({
+                    title: t("setup.backupSaved"),
+                    description:
+                      skipped > 0 ? `${r.filePath ?? ""} ${t("backup.skipped", { count: skipped })}` : (r.filePath ?? ""),
+                    variant: "success",
+                  });
+                })();
+              }}
+            >
+              {t("setup.exportBackup")}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void (async () => {
+                  const r = await restoreVenueBackup();
+                  // Gelukt: de app herstart vanzelf met de teruggezette gegevens.
+                  if (r.ok || r.canceled) return;
+                  toast({ title: t("backup.restoreFailed"), description: r.error ?? "", variant: "error" });
+                })();
+              }}
+            >
+              {t("backup.restoreButton")}
+            </Button>
+          </div>
+          <p className="mt-2 max-w-3xl text-xs text-muted-foreground">{t("backup.restoreHint")}</p>
         </section>
       ) : null}
       <section className="bg-card border border-border rounded-xl p-6">
@@ -500,13 +527,18 @@ export function SetupPanel() {
       <SetupScoreboardThemeSection
         settings={settings}
         reloadSettings={reloadSettings}
-        homeTeam={homeTeam}
-        awayTeam={(teams ?? []).find((team) => team.id !== homeTeam?.id) ?? null}
+        homeTeam={activeMatch?.homeTeam ?? homeTeam}
+        awayTeam={activeMatch?.awayTeam ?? (teams ?? []).find((team) => team.id !== homeTeam?.id) ?? null}
+        previewSport={activeMatch?.sport ?? null}
         seedThemeJson={editLayoutJson}
         onSeedConsumed={consumeEditLayout}
       />
 
-      <SetupDisplayCanvasSection settings={settings ?? null} reloadSettings={reloadSettings} />
+      <SetupDisplayCanvasSection
+        settings={settings ?? null}
+        reloadSettings={reloadSettings}
+        sport={activeMatch?.sport ?? null}
+      />
 
       <section className="bg-card border border-border rounded-xl p-6">
         <h2 className="text-lg font-semibold mb-3">{t("setup.prematchCheck")}</h2>

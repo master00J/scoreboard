@@ -103,6 +103,8 @@ import { SponsorRotation, type IdleEmptyFallback } from "./_modes/sponsor-rotati
 import { SponsorBudgetRotation } from "./_modes/sponsor-budget-rotation";
 import { HalfTimeMode, FullTimeMode } from "./_modes/halftime-fulltime";
 import { TimeoutOverlay } from "./_modes/timeout-overlay";
+import { DisplayExtrasLayer } from "./_modes/display-extras-overlay";
+import { DEFAULT_DISPLAY_EXTRAS, displayExtrasFromJson, type DisplayExtras } from "@/lib/display-extras";
 import { BreakOverlay } from "./_modes/break-overlay";
 import { DisplayWatchdog } from "./_components/watchdog";
 import { ExternalCaptureVideo } from "@/components/external-capture-video";
@@ -230,6 +232,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   /** "Probeer op scherm" vanuit de editor: tijdelijk, niet opgeslagen. */
   const [themePreviewJson, setThemePreviewJson] = useState<string | null>(null);
   const [layoutTemplates, setLayoutTemplates] = useState<Array<{ id: string; themeJson: string }>>([]);
+  /** Aftelklok naar de start en de mededeling van de operator. */
+  const [displayExtras, setDisplayExtras] = useState<DisplayExtras>(DEFAULT_DISPLAY_EXTRAS);
   /** Welke indeling nu geldt: de proefweergave, anders de regel voor deze sport en fase, anders de gewone. */
   const scoreboardTheme = useMemo(() => {
     if (themePreviewJson) return mergeScoreboardTheme(themePreviewJson);
@@ -294,6 +298,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           sponsorRepeatBudgetCyclesFromThemeJson(s.scoreboardThemeJson ?? null),
         );
         setSponsorLayoutsJson(s.sponsorLayoutsJson ?? null);
+        setDisplayExtras(displayExtrasFromJson(s.displayExtrasJson));
         const w = Math.max(320, Number(s.displayCanvasWidth ?? 1920));
         const h = Math.max(240, Number(s.displayCanvasHeight ?? 1080));
         const rawMode = (s.displayScalingMode ?? "cover") as
@@ -1957,6 +1962,15 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             />
           </div>
         )}
+
+      <DisplayExtrasLayer
+        extras={displayExtras}
+        match={match}
+        mode={mode}
+        canvasWidth={displayCanvas.width}
+        canvasHeight={displayCanvas.height}
+        marginPx={displayCanvas.safeZoneMarginPx}
+      />
     </ScaleContainer>
   );
 }

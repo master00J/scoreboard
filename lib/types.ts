@@ -61,6 +61,8 @@ export type AppSettings = {
   sponsorLayoutsJson?: string | null;
   /** JSON met zichtbare tabs en live-blokken per opgeslagen interfaceprofiel. */
   interfaceProfilesJson?: string | null;
+  /** JSON: aftelklok naar de start en de mededeling op het stadionscherm (lib/display-extras.ts). */
+  displayExtrasJson?: string | null;
 };
 
 export type Player = {

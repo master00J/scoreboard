@@ -7,13 +7,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
 import type { AppSettings } from "@/lib/types";
+import { KickoffCountdownSettingsBlock, StadiumScreenPicker } from "./setup-display-extras";
 
 export function SetupDisplayCanvasSection({
   settings,
   reloadSettings,
+  sport,
 }: {
   settings: AppSettings | null;
   reloadSettings: () => void;
+  /** Sport van de actieve wedstrijd, voor het juiste woord (aftrap, start). */
+  sport?: string | null;
 }) {
   const { t } = useTranslation();
   const [width, setWidth] = useState<string>("1920");
@@ -133,7 +137,9 @@ export function SetupDisplayCanvasSection({
         </p>
       </div>
 
-      <div>
+      <StadiumScreenPicker />
+
+      <div className="border-t border-border pt-4">
         <Label className="text-xs">{t("setup.canvasPresets")}</Label>
         <div className="mt-1 flex flex-wrap gap-2">
           {presets.map((p) => (
@@ -247,6 +253,10 @@ export function SetupDisplayCanvasSection({
             </div>
           </div>
         )}
+      </div>
+
+      <div className="border-t border-border pt-4">
+        <KickoffCountdownSettingsBlock sport={sport} />
       </div>
     </section>
   );

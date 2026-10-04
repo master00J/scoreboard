@@ -1,4 +1,4 @@
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import {
   app,
   BrowserWindow,
@@ -20,6 +20,28 @@ import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/des
 import { normalizeFeatureRequestInput, type FeatureRequestResult } from "../lib/feature-request";
 import * as licenseSvc from "./license-service";
 import { backupDatabaseBeforeUpgrade } from "../server/db-backup";
+import {
+  BACKUP_ROOT_DIR,
+  RESTORE_PENDING_DIR,
+  RESTORE_READY_MARKER,
+  applyPendingRestore,
+  inspectBackupDir,
+  stageConfigFiles,
+  stageDirectory,
+  stageExternalFiles,
+  takeRestoreFollowup,
+  writeManifest,
+  type BackupManifest,
+} from "../server/venue-backup";
+import {
+  choiceFromScreen,
+  normalizeStadiumScreenChoice,
+  numberScreens,
+  pickStadiumScreen,
+  type ScreenInfo,
+  type StadiumScreenChoice,
+  type StadiumScreensPayload,
+} from "../lib/stadium-screen";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
@@ -511,6 +533,15 @@ function configureDesktopContext() {
   );
   bootLog(`DATABASE_URL=${process.env.DATABASE_URL}`);
 
+  // Een klaargezette venue-back-up omwisselen terwijl nog niets de database open heeft.
+  const restore = applyPendingRestore({ userDataDir, appVersion: app.getVersion() });
+  if (restore.kind === "applied") {
+    bootLog(`[restore] back-up teruggezet; vorige gegevens in ${restore.followup.safetyDir}`);
+  } else if (restore.kind === "failed") {
+    bootLog(`[restore] terugzetten mislukt, oude gegevens behouden: ${restore.error}`);
+    restoreNotice = { kind: "failed", error: restore.error };
+  }
+
   // Vóór de runtime de database opent en het schema bijwerkt: één kopie per nieuwe versie.
   const backup = backupDatabaseBeforeUpgrade({ dataDir, version: app.getVersion() });
   if (backup.kind === "created") {
@@ -539,6 +570,7 @@ async function loadRuntime() {
       void buildMenu();
     },
   });
+  await finishRestoreAfterStart();
   await buildMenu();
   mobileBridge = await startMobileBridge({
     runtime: {
@@ -903,14 +935,133 @@ async function ensureMediaSourceWindow(
   return { win: mediaSourceWindow, reloaded: true };
 }
 
+/** De monitorkeuze hoort bij deze pc (kabels, poorten) en staat daarom naast, niet in, de database. */
+function stadiumScreenFile(): string {
+  return path.join(app.getPath("userData"), "stadium-screen.json");
+}
+
+function readStadiumScreenChoice(): StadiumScreenChoice | null {
+  try {
+    return normalizeStadiumScreenChoice(JSON.parse(fs.readFileSync(stadiumScreenFile(), "utf8")));
+  } catch {
+    return null;
+  }
+}
+
+function writeStadiumScreenChoice(choice: StadiumScreenChoice | null) {
+  const file = stadiumScreenFile();
+  if (!choice) {
+    fs.rmSync(file, { force: true });
+    return;
+  }
+  fs.writeFileSync(file, JSON.stringify(choice, null, 2), "utf8");
+}
+
+function connectedScreens(): ScreenInfo[] {
+  const primaryId = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((d) => ({
+    id: d.id,
+    label: d.label ?? "",
+    x: d.bounds.x,
+    y: d.bounds.y,
+    width: d.bounds.width,
+    height: d.bounds.height,
+    primary: d.id === primaryId,
+  }));
+}
+
 /**
- * Monitor voor het stadionscherm: bij twee schermen de niet-primaire (meestal HDMI → processor → muur),
- * anders de primaire. Zo blijft de taakbalk op de bedieningsmonitor staan.
+ * Monitor voor het stadionscherm: de keuze van de operator. Zonder keuze, of als die monitor niet is
+ * aangesloten, de niet-primaire (meestal HDMI → processor → muur), anders de primaire. Zo blijft de
+ * taakbalk op de bedieningsmonitor staan.
  */
 function stadiumDisplay() {
-  const primary = screen.getPrimaryDisplay();
-  const external = screen.getAllDisplays().find((d) => d.id !== primary.id);
-  return external ?? primary;
+  const pick = pickStadiumScreen(connectedScreens(), readStadiumScreenChoice());
+  const found = pick ? screen.getAllDisplays().find((d) => d.id === pick.screen.id) : undefined;
+  return found ?? screen.getPrimaryDisplay();
+}
+
+function stadiumScreensPayload(): StadiumScreensPayload {
+  const screens = connectedScreens();
+  const choice = readStadiumScreenChoice();
+  const pick = pickStadiumScreen(screens, choice);
+  const scale = new Map(screen.getAllDisplays().map((d) => [d.id, d.scaleFactor]));
+  return {
+    screens: numberScreens(screens).map((row) => ({
+      ...row,
+      pixelWidth: Math.round(row.width * (scale.get(row.id) ?? 1)),
+      pixelHeight: Math.round(row.height * (scale.get(row.id) ?? 1)),
+      active: pick?.screen.id === row.id,
+    })),
+    via: pick?.via ?? "auto",
+    missingLabel:
+      pick?.via === "fallback" && choice ? choice.label || `${choice.width}×${choice.height}` : null,
+  };
+}
+
+let identifyWindows: BrowserWindow[] = [];
+
+function closeIdentifyWindows() {
+  for (const win of identifyWindows) {
+    try {
+      if (!win.isDestroyed()) win.close();
+    } catch {
+      /* ignore */
+    }
+  }
+  identifyWindows = [];
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/** Toont enkele seconden een groot nummer op elke monitor, zodat de operator weet welke welke is. */
+function identifyScreens() {
+  closeIdentifyWindows();
+  const width = 380;
+  const height = 250;
+  for (const row of stadiumScreensPayload().screens) {
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+<style>
+  body { margin: 0; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif; background: #09090b; color: #fafafa;
+    border: 6px solid ${row.active ? "#22c55e" : "#3f3f46"}; box-sizing: border-box; }
+  .n { font-size: 120px; font-weight: 900; line-height: 1; }
+  .l { margin-top: 10px; font-size: 16px; color: #d4d4d8; max-width: 330px; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .t { margin-top: 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.16em; color: #22c55e; }
+</style></head><body>
+<div class="n">${row.number}</div>
+<div class="l">${escapeHtml(row.label || "Monitor")} · ${row.pixelWidth} × ${row.pixelHeight}</div>
+${row.active ? '<div class="t">SCOREBOARD</div>' : ""}
+</body></html>`;
+    const win = new BrowserWindow({
+      x: Math.round(row.x + (row.width - width) / 2),
+      y: Math.round(row.y + (row.height - height) / 2),
+      width,
+      height,
+      frame: false,
+      resizable: false,
+      movable: false,
+      focusable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      show: false,
+      backgroundColor: "#09090b",
+      webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    win.setAlwaysOnTop(true, "screen-saver");
+    win.once("ready-to-show", () => {
+      if (!win.isDestroyed()) win.showInactive();
+    });
+    void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    identifyWindows.push(win);
+  }
+  const shown = identifyWindows;
+  setTimeout(() => {
+    if (identifyWindows === shown) closeIdentifyWindows();
+  }, 4000);
 }
 
 function isLikelyVirtualAdapter(name: string): boolean {
@@ -959,9 +1110,29 @@ function mobileLocalPairCodesOperator(handle: MobileBridgeHandle): string[] {
 function applyDisplayFullscreen(win: BrowserWindow | null) {
   if (!win || win.isDestroyed()) return;
   try {
-    const { x, y, width, height } = stadiumDisplay().bounds;
-    win.setBounds({ x, y, width, height });
-    if (!win.isFullScreen()) win.setFullScreen(true);
+    const target = stadiumDisplay();
+    const place = () => {
+      if (win.isDestroyed()) return;
+      const { x, y, width, height } = target.bounds;
+      win.setBounds({ x, y, width, height });
+      if (!win.isFullScreen()) win.setFullScreen(true);
+    };
+    // Een schermvullend venster laat zich niet naar een andere monitor verplaatsen: eerst uit fullscreen.
+    if (win.isFullScreen() && screen.getDisplayMatching(win.getBounds()).id !== target.id) {
+      let placed = false;
+      const finish = () => {
+        if (placed) return;
+        placed = true;
+        // Windows meldt "uit fullscreen" terwijl het venster nog terugspringt naar zijn oude plek;
+        // pas daarna blijft de nieuwe plek staan.
+        setTimeout(place, 150);
+      };
+      win.once("leave-full-screen", finish);
+      setTimeout(finish, 700);
+      win.setFullScreen(false);
+      return;
+    }
+    place();
   } catch {
     try {
       win.maximize();
@@ -1203,6 +1374,10 @@ function createDisplayWindow() {
 
 function wireDisplayMonitorTracking() {
   const relayout = () => {
+    // Het bedieningspaneel toont de lijst met monitoren; houd die actueel.
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("display:screensChanged", stadiumScreensPayload());
+    }
     if (!displayWindowAlive()) {
       if (!allowQuitWithoutConfirm && stadiumDisplayAllowed) createDisplayWindow();
       return;
@@ -1313,14 +1488,83 @@ function psSingleQuoteEscape(p: string): string {
   return p.replace(/'/g, "''");
 }
 
-async function runVenueBackupExport(parent: BrowserWindow | null): Promise<{
+type VenueBackupResult = {
   ok: boolean;
   canceled?: boolean;
   error?: string;
   filePath?: string;
-}> {
+  /** Bestanden waarnaar de club verwijst maar die niet in de back-up zitten. */
+  skipped?: BackupManifest["skipped"];
+};
+
+/** Melding voor het bedieningspaneel na een herstart waarbij een back-up is teruggezet. */
+type RestoreNotice =
+  | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
+  | { kind: "failed"; error: string };
+
+let restoreNotice: RestoreNotice | null = null;
+/** Eén back-up of herstel tegelijk: beide lezen en schrijven dezelfde mappen. */
+let backupBusy = false;
+
+async function menuTexts(): Promise<(key: string) => string> {
+  let locale = normalizeMenuLocale("nl");
+  try {
+    if (runtime?.getUiLocale) locale = normalizeMenuLocale(await runtime.getUiLocale());
+  } catch {
+    /* keep nl */
+  }
+  return (key) => menuLabel(locale, key);
+}
+
+/** Voert een hulpprogramma uit zonder de app te blokkeren: het stadionscherm blijft lopen. */
+function runTool(command: string, args: string[], cwd?: string): Promise<{ status: number | null; output: string }> {
+  return new Promise((resolve) => {
+    let output = "";
+    const keep = (chunk: unknown) => {
+      output = (output + String(chunk)).slice(-4000);
+    };
+    try {
+      const child = spawn(command, args, { cwd, windowsHide: true });
+      child.stdout?.on("data", keep);
+      child.stderr?.on("data", keep);
+      child.on("error", (err) => resolve({ status: -1, output: String(err) }));
+      child.on("close", (status) => resolve({ status, output }));
+    } catch (err) {
+      resolve({ status: -1, output: String(err) });
+    }
+  });
+}
+
+function zipFolder(parentDir: string, folderName: string, zipTarget: string) {
+  if (process.platform === "win32") {
+    const cmd =
+      `$ProgressPreference='SilentlyContinue'; Compress-Archive -LiteralPath '${psSingleQuoteEscape(path.join(parentDir, folderName))}' ` +
+      `-DestinationPath '${psSingleQuoteEscape(zipTarget)}' -Force`;
+    return runTool("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd]);
+  }
+  fs.rmSync(zipTarget, { force: true });
+  return runTool("zip", ["-r", "-q", zipTarget, folderName], parentDir);
+}
+
+function unzipTo(zipFile: string, destDir: string) {
+  if (process.platform === "win32") {
+    const cmd =
+      `$ProgressPreference='SilentlyContinue'; Expand-Archive -LiteralPath '${psSingleQuoteEscape(zipFile)}' ` +
+      `-DestinationPath '${psSingleQuoteEscape(destDir)}' -Force`;
+    return runTool("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd]);
+  }
+  return runTool("unzip", ["-q", "-o", zipFile, "-d", destDir]);
+}
+
+/**
+ * ZIP met alles wat een club nodig heeft om op een andere pc verder te gaan: database, uploads,
+ * de media die elders op deze pc staat, en de indeling van het Live-tabblad.
+ */
+async function runVenueBackupExport(parent: BrowserWindow | null): Promise<VenueBackupResult> {
   const ctx = desktopContext;
   if (!ctx) return { ok: false, error: "Desktop context ontbreekt." };
+  const m = await menuTexts();
+  if (backupBusy) return { ok: false, error: m("backupBusy") };
   const dbSrc = path.join(ctx.userDataDir, "data", "stadium.db");
   if (!fs.existsSync(dbSrc)) {
     return { ok: false, error: `Database niet gevonden: ${dbSrc}` };
@@ -1338,11 +1582,12 @@ async function runVenueBackupExport(parent: BrowserWindow | null): Promise<{
     : await dialog.showSaveDialog(dialogOpts);
   if (save.canceled || !save.filePath) return { ok: false, canceled: true };
 
+  backupBusy = true;
+  win?.setProgressBar(2);
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stadium-bk-"));
-  const staging = path.join(tmpRoot, "stadium-backup");
+  const staging = path.join(tmpRoot, BACKUP_ROOT_DIR);
   try {
     fs.mkdirSync(path.join(staging, "data"), { recursive: true });
-    fs.mkdirSync(path.join(staging, "uploads"), { recursive: true });
     // WAL-modus: recente commits staan in stadium.db-wal. Eerst checkpointen, anders is de kopie onvolledig.
     try {
       await runtime?.checkpointDatabaseForBackup();
@@ -1356,38 +1601,55 @@ async function runVenueBackupExport(parent: BrowserWindow | null): Promise<{
         fs.copyFileSync(side, path.join(staging, "data", `stadium.db${suffix}`));
       }
     }
+    const skipped: BackupManifest["skipped"] = [];
     if (fs.existsSync(ctx.uploadsDir)) {
-      fs.cpSync(ctx.uploadsDir, path.join(staging, "uploads"), { recursive: true });
+      stageDirectory(ctx.uploadsDir, path.join(staging, "uploads"), skipped);
+    } else {
+      fs.mkdirSync(path.join(staging, "uploads"), { recursive: true });
     }
+    // Video's, logo's en foto's staan meestal op een eigen plek op de pc: die moeten mee.
+    let references: string[] = [];
+    try {
+      references = (await runtime?.listExternalFilesForBackup()) ?? [];
+    } catch (err) {
+      bootLog(`[backup] externe bestanden opzoeken mislukt: ${String(err)}`);
+    }
+    const external = stageExternalFiles(staging, references);
+    skipped.push(...external.skipped);
+    stageConfigFiles(staging, ctx.userDataDir);
+    writeManifest(staging, {
+      format: 2,
+      app: "arenacue-scoreboard",
+      appVersion: app.getVersion(),
+      createdAt: new Date().toISOString(),
+      files: external.files,
+      skipped,
+    });
     const zipTarget = save.filePath.toLowerCase().endsWith(".zip") ? save.filePath : `${save.filePath}.zip`;
 
-    if (process.platform === "win32") {
-      const cmd = `Compress-Archive -LiteralPath '${psSingleQuoteEscape(staging)}' -DestinationPath '${psSingleQuoteEscape(zipTarget)}' -Force`;
-      const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd], {
-        encoding: "utf8",
-      });
-      if (r.status !== 0) {
-        bootLog(`[backup] powershell failed: ${r.stderr ?? r.stdout ?? "unknown"}`);
-        return { ok: false, error: r.stderr || r.stdout || "ZIP-export mislukt (PowerShell)." };
-      }
-    } else {
-      const r = spawnSync("zip", ["-r", "-q", zipTarget, "stadium-backup"], {
-        cwd: tmpRoot,
-        encoding: "utf8",
-      });
-      if (r.status !== 0) {
-        bootLog(`[backup] zip failed: ${r.stderr ?? ""}`);
-        return {
-          ok: false,
-          error: "ZIP-export mislukt (installeer het `zip`-commando, of voer backup uit op Windows).",
-        };
-      }
+    const r = await zipFolder(tmpRoot, BACKUP_ROOT_DIR, zipTarget);
+    if (r.status !== 0) {
+      bootLog(`[backup] zip mislukt: ${r.output || "onbekend"}`);
+      return {
+        ok: false,
+        error:
+          process.platform === "win32"
+            ? r.output.trim().split(/\r?\n/)[0] || "ZIP-export mislukt (PowerShell)."
+            : "ZIP-export mislukt (installeer het `zip`-commando, of voer backup uit op Windows).",
+      };
     }
 
-    bootLog(`[backup] venue export OK: ${zipTarget}`);
-    return { ok: true, filePath: zipTarget };
+    bootLog(
+      `[backup] venue export OK: ${zipTarget} (${external.files.length} externe bestanden, ${skipped.length} overgeslagen)`,
+    );
+    return { ok: true, filePath: zipTarget, skipped };
+  } catch (err) {
+    bootLog(`[backup] export mislukt: ${String(err)}`);
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
   } finally {
+    backupBusy = false;
     try {
+      if (win && !win.isDestroyed()) win.setProgressBar(-1);
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     } catch {
       /* ignore */
@@ -1395,6 +1657,129 @@ async function runVenueBackupExport(parent: BrowserWindow | null): Promise<{
   }
 }
 
+/** Regels voor het bericht na een export: wat niet mee kon. */
+function skippedSummary(skipped: BackupManifest["skipped"] | undefined, intro: string): string {
+  if (!skipped || skipped.length === 0) return "";
+  const lines = skipped.slice(0, 12).map((item) => `• ${item.path}`);
+  if (skipped.length > lines.length) lines.push(`… +${skipped.length - lines.length}`);
+  return `\n\n${intro}\n${lines.join("\n")}`;
+}
+
+/**
+ * Leest een venue-back-up in. De ZIP wordt uitgepakt en nagekeken; pas na bevestiging herstart de app
+ * en wisselt `applyPendingRestore` de gegevens om, vóór de database open gaat.
+ */
+async function runVenueBackupRestore(parent: BrowserWindow | null): Promise<VenueBackupResult> {
+  const ctx = desktopContext;
+  if (!ctx) return { ok: false, error: "Desktop context ontbreekt." };
+  const m = await menuTexts();
+  if (backupBusy) return { ok: false, error: m("backupBusy") };
+  const win = parent ?? controlWindow;
+
+  let inPlay = false;
+  try {
+    inPlay = (await runtime?.isMatchInPlayNow()) ?? false;
+  } catch {
+    /* zonder runtime is er ook geen wedstrijd bezig */
+  }
+  if (inPlay) return { ok: false, error: m("restoreNotDuringMatch") };
+
+  const openOpts = {
+    title: m("restoreTitle"),
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+    properties: ["openFile" as const],
+  };
+  const open = win ? await dialog.showOpenDialog(win, openOpts) : await dialog.showOpenDialog(openOpts);
+  const zipFile = open.filePaths[0];
+  if (open.canceled || !zipFile) return { ok: false, canceled: true };
+
+  backupBusy = true;
+  win?.setProgressBar(2);
+  const pending = path.join(ctx.userDataDir, RESTORE_PENDING_DIR);
+  const discard = () => fs.rmSync(pending, { recursive: true, force: true });
+  try {
+    discard();
+    fs.mkdirSync(pending, { recursive: true });
+    const unzip = await unzipTo(zipFile, pending);
+    if (unzip.status !== 0) {
+      bootLog(`[restore] uitpakken mislukt: ${unzip.output || "onbekend"}`);
+      discard();
+      return { ok: false, error: m("restoreUnpackFailed") };
+    }
+    const inspection = inspectBackupDir(pending, app.getVersion());
+    if (!inspection.ok) {
+      discard();
+      return {
+        ok: false,
+        error:
+          inspection.reason === "newer_version"
+            ? m("restoreNewerVersion").replace("{{version}}", inspection.backupVersion ?? "?")
+            : m("restoreNoDatabase"),
+      };
+    }
+
+    const madeAt = inspection.manifest?.createdAt ? new Date(inspection.manifest.createdAt) : fs.statSync(zipFile).mtime;
+    const confirmOpts = {
+      type: "warning" as const,
+      buttons: [m("restoreConfirmOk"), m("quitConfirmCancel")],
+      defaultId: 1,
+      cancelId: 1,
+      title: m("restoreTitle"),
+      message: m("restoreConfirmMessage"),
+      detail: m("restoreConfirmDetail").replace("{{date}}", madeAt.toLocaleString()),
+    };
+    const confirm = win
+      ? await dialog.showMessageBox(win, confirmOpts)
+      : await dialog.showMessageBox(confirmOpts);
+    if (confirm.response !== 0) {
+      discard();
+      return { ok: false, canceled: true };
+    }
+
+    // Vanaf hier wisselt de volgende start de gegevens om.
+    fs.writeFileSync(path.join(pending, RESTORE_READY_MARKER), JSON.stringify({ at: new Date().toISOString() }), "utf8");
+    try {
+      await runtime?.checkpointDatabaseForBackup();
+    } catch {
+      /* de -wal/-shm-bestanden gaan mee naar de veiligheidskopie */
+    }
+    bootLog(`[restore] back-up klaargezet uit ${zipFile}; app herstart`);
+    flushBootLogSync();
+    allowQuitWithoutConfirm = true;
+    // In een testomgeving start de test de app zelf opnieuw.
+    if (app.isPackaged || process.env.ARENACUE_NO_RELAUNCH !== "1") app.relaunch();
+    setTimeout(() => app.exit(0), 150);
+    return { ok: true };
+  } catch (err) {
+    bootLog(`[restore] voorbereiden mislukt: ${String(err)}`);
+    discard();
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    backupBusy = false;
+    try {
+      if (win && !win.isDestroyed()) win.setProgressBar(-1);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Na een herstart met teruggezette back-up: paden naar teruggezette media in de database zetten. */
+async function finishRestoreAfterStart() {
+  const followup = takeRestoreFollowup(app.getPath("userData"));
+  if (!followup) return;
+  try {
+    const changed = (await runtime?.remapRestoredFilePaths(followup.remap)) ?? 0;
+    bootLog(`[restore] ${Object.keys(followup.remap).length} mediabestanden uit de back-up, ${changed} verwijzingen bijgewerkt`);
+  } catch (err) {
+    bootLog(`[restore] verwijzingen bijwerken mislukt: ${String(err)}`);
+  }
+  restoreNotice = {
+    kind: "restored",
+    backupCreatedAt: followup.backupCreatedAt,
+    restoredFiles: Object.keys(followup.remap).length,
+  };
+}
 async function buildMenu() {
   const uploadsDir = desktopContext?.uploadsDir ?? path.join(app.getPath("userData"), "uploads");
   let locale = normalizeMenuLocale("nl");
@@ -1428,7 +1813,20 @@ async function buildMenu() {
               type: "info",
               title: m("backupTitle"),
               message: m("backupSaved"),
-              detail: r.filePath ?? "",
+              detail: `${r.filePath ?? ""}${skippedSummary(r.skipped, m("backupSkippedIntro"))}`,
+            });
+          },
+        },
+        {
+          label: m("restoreVenueBackup"),
+          click: async () => {
+            const r = await runVenueBackupRestore(controlWindow);
+            if (r.ok || r.canceled) return;
+            await dialog.showMessageBox({
+              type: "error",
+              title: m("restoreTitle"),
+              message: m("restoreFailed"),
+              detail: r.error ?? m("unknownError"),
             });
           },
         },
@@ -1700,6 +2098,38 @@ function registerIpc() {
 
   ipcMain.handle("backup:exportVenue", async () => {
     return runVenueBackupExport(BrowserWindow.getFocusedWindow() ?? controlWindow);
+  });
+
+  ipcMain.handle("backup:restoreVenue", async () => {
+    return runVenueBackupRestore(BrowserWindow.getFocusedWindow() ?? controlWindow);
+  });
+
+  // Eén keer tonen na de herstart: daarna is de melding weg.
+  ipcMain.handle("backup:takeRestoreNotice", async () => {
+    const notice = restoreNotice;
+    restoreNotice = null;
+    return notice;
+  });
+
+  ipcMain.handle("display:listScreens", async () => stadiumScreensPayload());
+
+  ipcMain.handle("display:setStadiumScreen", async (_, id: unknown) => {
+    if (id === null || id === undefined) {
+      writeStadiumScreenChoice(null);
+      bootLog("[display] monitor: automatisch");
+    } else {
+      const picked = connectedScreens().find((row) => row.id === Number(id));
+      if (!picked) return { ok: false, ...stadiumScreensPayload() };
+      writeStadiumScreenChoice(choiceFromScreen(picked));
+      bootLog(`[display] monitor gekozen: ${picked.label || picked.id} ${picked.width}x${picked.height}`);
+    }
+    if (displayWindowAlive()) applyDisplayFullscreen(displayWindow);
+    return { ok: true, ...stadiumScreensPayload() };
+  });
+
+  ipcMain.handle("display:identifyScreens", async () => {
+    identifyScreens();
+    return { ok: true };
   });
 
   ipcMain.handle("shell:openExternal", async (_, url: unknown) => {

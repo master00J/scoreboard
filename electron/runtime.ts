@@ -57,6 +57,9 @@ import {
   builtInTemplateRows,
   sanitizeTemplateThemeJson,
 } from "../lib/scoreboard-templates";
+import { displayExtrasFromJson, serializeDisplayExtras } from "../lib/display-extras";
+import { isMatchInPlay } from "../lib/match-in-play";
+import { listExternalFileReferences, remapStoredFilePaths } from "../server/venue-backup";
 import { isCommandUserError } from "../lib/command-user-error";
 import { handleCommand } from "../server/handlers";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
@@ -407,6 +410,7 @@ type AppSettingsRow = {
   uiLocale?: string | null;
   sponsorLayoutsJson?: string | null;
   interfaceProfilesJson?: string | null;
+  displayExtrasJson?: string | null;
 };
 
 function defaultLiveCycle(): LiveCycleStored {
@@ -455,6 +459,7 @@ async function getAppSettings(): Promise<{
   uiLocale: "nl" | "en" | "fr" | "it";
   sponsorLayoutsJson: string | null;
   interfaceProfilesJson: string | null;
+  displayExtrasJson: string | null;
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
@@ -466,7 +471,7 @@ async function getAppSettings(): Promise<{
       "scoreboardThemeJson", "proofOfPlayBrandJson",
       "displayCanvasWidth", "displayCanvasHeight",
       "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx",
-      "uiLocale", "sponsorLayoutsJson", "interfaceProfilesJson"
+      "uiLocale", "sponsorLayoutsJson", "interfaceProfilesJson", "displayExtrasJson"
      FROM "AppSettings" WHERE "id" = 1`,
   );
   const row = rows[0];
@@ -497,6 +502,7 @@ async function getAppSettings(): Promise<{
       uiLocale: normalizeUiLocale(row.uiLocale),
       sponsorLayoutsJson: row.sponsorLayoutsJson ?? null,
       interfaceProfilesJson: row.interfaceProfilesJson ?? null,
+      displayExtrasJson: row.displayExtrasJson ?? null,
     };
   }
   await prisma.$executeRawUnsafe(
@@ -519,6 +525,7 @@ async function getAppSettings(): Promise<{
     uiLocale: "nl",
     sponsorLayoutsJson: null,
     interfaceProfilesJson: null,
+    displayExtrasJson: null,
     ...defaults,
   };
 }
@@ -660,6 +667,7 @@ async function buildSettingsApiJson() {
     uiLocale: s.uiLocale,
     sponsorLayoutsJson: s.sponsorLayoutsJson,
     interfaceProfilesJson: s.interfaceProfilesJson,
+    displayExtrasJson: s.displayExtrasJson,
   };
 }
 
@@ -779,6 +787,26 @@ async function setInterfaceProfilesJson(json: string | null) {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "interfaceProfilesJson" = ? WHERE "id" = 1`,
     json,
+  );
+}
+
+async function setDisplayExtrasJson(json: string | null) {
+  await prisma.$executeRawUnsafe(
+    `UPDATE "AppSettings" SET "displayExtrasJson" = ? WHERE "id" = 1`,
+    json,
+  );
+}
+
+/**
+ * Een mededeling die bij het afsluiten nog aan stond, hoort na een herstart niet opnieuw op het
+ * stadionscherm te verschijnen: de operator weet niet meer dat ze er staat.
+ */
+async function resetAnnouncementOnStartup(): Promise<void> {
+  const settings = await getAppSettings();
+  const extras = displayExtrasFromJson(settings.displayExtrasJson);
+  if (!extras.announcement.active) return;
+  await setDisplayExtrasJson(
+    serializeDisplayExtras({ ...extras, announcement: { ...extras.announcement, active: false, until: null } }),
   );
 }
 
@@ -1209,6 +1237,34 @@ export async function checkpointDatabaseForBackup(): Promise<void> {
   await checkpointSqlite();
 }
 
+/** Media en beelden die buiten de uploads-map staan: die moeten mee in een venue-back-up. */
+export async function listExternalFilesForBackup(): Promise<string[]> {
+  return listExternalFileReferences(prisma);
+}
+
+/** Na het terugzetten van een back-up: verwijs naar de teruggezette kopieën in uploads. */
+export async function remapRestoredFilePaths(remap: Record<string, string>): Promise<number> {
+  const changed = await remapStoredFilePaths(prisma, remap);
+  if (changed > 0) {
+    await touchState();
+    await broadcastDisplayState();
+  }
+  return changed;
+}
+
+/** Loopt er nu een wedstrijd? Dan geen ingrepen die de app herstarten. */
+export async function isMatchInPlayNow(): Promise<boolean> {
+  const state = await getStateRow();
+  if (!state.matchId) return false;
+  const match = await prisma.match.findUnique({
+    where: { id: state.matchId },
+    select: { status: true, closedAt: true },
+  });
+  return isMatchInPlay(
+    match ? { status: match.status, closedAt: match.closedAt ? match.closedAt.toISOString() : null } : null,
+  );
+}
+
 export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   opts = runtimeOptions;
   await ensureSqliteSchema(runtimeOptions.log);
@@ -1216,6 +1272,7 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   await migrateAppSettingsLiveCycleFromLegacy();
   await repairOrphanDisplayMatchId();
   await resetAutoSponsorModeOnStartup();
+  await resetAnnouncementOnStartup();
   await seedLiveWallCueClockIfMissing();
   await seedCuePhaseClocksIfMissing();
   startTickLoop();
@@ -1680,6 +1737,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           uiLocale?: "nl" | "en" | "fr" | "it";
           sponsorLayoutsJson?: string | null;
           interfaceProfilesJson?: string | null;
+          displayExtrasJson?: string | null;
         }) ?? {};
       if ("uiLocale" in body && body.uiLocale) {
         await setUiLocale(normalizeUiLocale(body.uiLocale));
@@ -1738,6 +1796,13 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           return json(400, { error: "Interfaceprofiel is te groot" });
         }
         await setInterfaceProfilesJson(raw === null || raw === undefined ? null : String(raw));
+      }
+      if ("displayExtrasJson" in body) {
+        const raw = body.displayExtrasJson;
+        // Altijd genormaliseerd opslaan: het stadionscherm leest dit bij elke wijziging.
+        await setDisplayExtrasJson(
+          raw === null || raw === undefined ? null : serializeDisplayExtras(displayExtrasFromJson(String(raw))),
+        );
       }
       const patchLiveCycle =
         "firstHalfScoreboardSec" in body ||

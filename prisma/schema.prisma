@@ -362,6 +362,8 @@ model AppSettings {
   sponsorLayoutsJson  String?
   /// JSON met opgeslagen interfaceprofielen: welk tabblad en welk live-blok zichtbaar is.
   interfaceProfilesJson String?
+  /// JSON: aftelklok naar de start en de mededeling op het stadionscherm (lib/display-extras.ts).
+  displayExtrasJson String?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.

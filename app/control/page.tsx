@@ -93,6 +93,26 @@ export default function ControlPage() {
     reloadMatch();
   }, [state?.updatedAt, reloadMatch]);
 
+  // Na een herstart waarbij een venue-back-up is teruggezet: één keer melden hoe het afliep.
+  useEffect(() => {
+    void window.electronAPI?.takeRestoreNotice?.().then((notice) => {
+      if (!notice) return;
+      if (notice.kind === "failed") {
+        toast({ title: t("backup.restoreFailed"), description: notice.error, variant: "error" });
+        return;
+      }
+      toast({
+        title: t("backup.restored"),
+        description: t("backup.restoredDetail", {
+          date: notice.backupCreatedAt ? new Date(notice.backupCreatedAt).toLocaleString() : "?",
+          count: notice.restoredFiles,
+        }),
+        variant: "success",
+      });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     async function loadMobileBridge() {

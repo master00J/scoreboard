@@ -20,6 +20,12 @@ The layout a club makes under "Scherm indelen" is stored as JSON in `AppSettings
 - `layoutMode: "auto"` (the default) uses `LeftScoreboardLayout` on the stadium screen while a sponsor clip plays: logos stacked in the L-bar, not the free overlay. The editor must preview that same L-bar until the club drags a box (that switch to `custom`). Do not open auto as `DEFAULT_SLOTS`.
 - An existing layout must keep rendering exactly the same after your change.
 
+## Screen extras, monitor and backup
+
+- The countdown to the planned start and the operator's announcement live in `AppSettings.displayExtrasJson` (`lib/display-extras.ts`). `DisplayExtrasLayer` draws them on top of every screen mode. Change them through `useDisplayExtras().update(...)`, which reads the latest value first so two panels do not overwrite each other.
+- Which monitor shows the stadium screen is a choice per PC, stored in `stadium-screen.json` next to the database (`lib/stadium-screen.ts`). It is not a database setting and is not part of a backup.
+- A venue backup must let a club continue on another PC. It holds the database, `uploads/`, and every file the database points to outside `uploads/`. `server/venue-backup.ts` finds those files by scanning all text columns, including paths inside JSON, so store a file path as a plain string. Restoring swaps the files at startup, before the database is opened (`applyPendingRestore`), and keeps what was there in `restore-safety/`.
+
 ## Checks
 
 CI runs these on every pull request; make them pass before you open one.

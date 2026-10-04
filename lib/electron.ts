@@ -2,6 +2,7 @@
  * Client-side helpers for the Electron wrapper.
  * Safe to import in browser context — all functions no-op when not in Electron.
  */
+import type { VenueBackupResult } from "./desktop-bridge";
 
 export const isElectron =
   typeof window !== "undefined" && window.electronAPI?.context.isElectron === true;
@@ -86,15 +87,18 @@ export async function exportMatch(
   }
 }
 
-/** ZIP met `data/stadium.db` + `uploads/` (desktop). */
-export async function exportVenueBackup(): Promise<{
-  ok: boolean;
-  canceled?: boolean;
-  error?: string;
-  filePath?: string;
-}> {
+/** ZIP met database, uploads en de media die elders op de pc staat (desktop). */
+export async function exportVenueBackup(): Promise<VenueBackupResult> {
   if (!isElectron || !window.electronAPI?.exportVenueBackup) {
     return { ok: false, error: "Alleen beschikbaar in de desktop-app." };
   }
   return window.electronAPI.exportVenueBackup();
+}
+
+/** Leest een venue-back-up in; na bevestiging herstart de app met die gegevens (desktop). */
+export async function restoreVenueBackup(): Promise<VenueBackupResult> {
+  if (!isElectron || !window.electronAPI?.restoreVenueBackup) {
+    return { ok: false, error: "Alleen beschikbaar in de desktop-app." };
+  }
+  return window.electronAPI.restoreVenueBackup();
 }

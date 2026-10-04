@@ -8,6 +8,7 @@ import type {
 import type { Command } from "./validation/commands";
 import type { FeatureRequestDraft, FeatureRequestResult } from "./feature-request";
 import type { MusicLibrary, MusicLibraryUpdate, MusicImportResult } from "./music";
+import type { StadiumScreensPayload } from "./stadium-screen";
 import type { StreamDeckInfo } from "./stream-deck";
 import type { SerializedDisplayState } from "./timer";
 import type {
@@ -184,6 +185,19 @@ export type MobileBridgeInfo = {
   };
 };
 
+export type VenueBackupResult = {
+  ok: boolean;
+  canceled?: boolean;
+  error?: string;
+  filePath?: string;
+  /** Bestanden waarnaar de club verwijst maar die niet in de back-up zitten. */
+  skipped?: Array<{ path: string; reason: "missing" | "too_large" }>;
+};
+
+export type RestoreNotice =
+  | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
+  | { kind: "failed"; error: string };
+
 export type ElectronBridge = {
   context: DesktopContext;
   /** Desktop-only; the browser demo intentionally has no local music storage. */
@@ -238,8 +252,19 @@ export type ElectronBridge = {
   getStreamDeckInfo: () => Promise<StreamDeckInfo | null>;
   /** CPU/RAM van deze app (Electron); GPU = GPU-hulpproces. */
   getAppResourceMetrics: () => Promise<AppResourceMetrics>;
-  /** Zip met `data/stadium.db` + kopie van `uploads/` (wedstrijddag-backup). */
-  exportVenueBackup: () => Promise<{ ok: boolean; canceled?: boolean; error?: string; filePath?: string }>;
+  /** ZIP met database, uploads en de media die elders op de pc staat. */
+  exportVenueBackup: () => Promise<VenueBackupResult>;
+  /** Leest een venue-back-up in; na bevestiging herstart de app met die gegevens. */
+  restoreVenueBackup?: () => Promise<VenueBackupResult>;
+  /** Melding na een herstart waarbij een back-up is teruggezet (één keer op te halen). */
+  takeRestoreNotice?: () => Promise<RestoreNotice | null>;
+  /** Aangesloten monitoren en welke het stadionscherm toont. */
+  listStadiumScreens?: () => Promise<StadiumScreensPayload>;
+  /** Kiest de monitor voor het stadionscherm; `null` = automatisch. */
+  setStadiumScreen?: (id: number | null) => Promise<StadiumScreensPayload & { ok: boolean }>;
+  /** Toont enkele seconden een nummer op elke monitor. */
+  identifyStadiumScreens?: () => Promise<{ ok: boolean }>;
+  onStadiumScreensChanged?: (listener: (payload: StadiumScreensPayload) => void) => () => void;
   /**
    * Match-tab rooster: JSON-string uit userData (bestand), anders null.
    * Betrouwbaarder dan file://-localStorage in de packaged control-UI.

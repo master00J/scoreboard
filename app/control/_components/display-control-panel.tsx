@@ -15,6 +15,7 @@ import {
 import { useDisplayStore } from "@/lib/store";
 import { sendCommand } from "@/lib/use-socket";
 import { useApi } from "@/lib/use-api";
+import { DisplayAnnouncementControl } from "./display-announcement-control";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
 import { useLicenseFeatures } from "@/lib/use-license-features";
@@ -925,6 +926,8 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
           </div>
         )}
       </section>
+
+      <DisplayAnnouncementControl />
 
       <button
         type="button"

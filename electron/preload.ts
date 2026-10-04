@@ -57,6 +57,12 @@ const bridge: ElectronBridge = {
   getStreamDeckInfo: () => ipcRenderer.invoke("streamdeck:getInfo"),
   getAppResourceMetrics: () => ipcRenderer.invoke("app:getResourceMetrics"),
   exportVenueBackup: () => ipcRenderer.invoke("backup:exportVenue"),
+  restoreVenueBackup: () => ipcRenderer.invoke("backup:restoreVenue"),
+  takeRestoreNotice: () => ipcRenderer.invoke("backup:takeRestoreNotice"),
+  listStadiumScreens: () => ipcRenderer.invoke("display:listScreens"),
+  setStadiumScreen: (id) => ipcRenderer.invoke("display:setStadiumScreen", id),
+  identifyStadiumScreens: () => ipcRenderer.invoke("display:identifyScreens"),
+  onStadiumScreensChanged: (listener) => subscribe("display:screensChanged", listener),
   getMatchTabLayoutSnapshot: () =>
     ipcRenderer.sendSync("control:getMatchTabLayoutSnapshot") as string | null,
   persistMatchTabLayout: (json: string) => {

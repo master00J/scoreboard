@@ -48,7 +48,7 @@ import {
   type LayoutSlot,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
-import { SPORT_TYPES, getSportProfile, resolveDisplayShowClock, type SportType } from "@/lib/sports";
+import { SPORT_TYPES, getSportProfile, normalizeSport, resolveDisplayShowClock, type SportType } from "@/lib/sports";
 import type { Match, Team } from "@/lib/types";
 
 export type EditorSurface = "sponsor" | "full";
@@ -319,6 +319,7 @@ export function SetupScoreboardPlacer({
   onRedo,
   homeTeam,
   awayTeam,
+  initialSport,
   surface,
   canvasWidth,
   canvasHeight,
@@ -332,6 +333,8 @@ export function SetupScoreboardPlacer({
   onRedo: () => void;
   homeTeam?: Team | null;
   awayTeam?: Team | null;
+  /** Sport van de actieve wedstrijd; daarna kiest de operator zelf. */
+  initialSport?: string | null;
   surface: EditorSurface;
   /** Schermformaat uit Scherminstellingen; het canvas en het 16:9-videovak rekenen hiermee. */
   canvasWidth: number;
@@ -347,7 +350,12 @@ export function SetupScoreboardPlacer({
   const [showAlignGuides, setShowAlignGuides] = useState(true);
   const [snap, setSnap] = useState(true);
   const [lockMediaRatio, setLockMediaRatio] = useState(true);
-  const [previewSport, setPreviewSport] = useState<SportType>("FOOTBALL");
+  const [previewSport, setPreviewSport] = useState<SportType>(() => normalizeSport(initialSport));
+
+  // Een andere wedstrijd actief: het voorbeeld volgt die sport.
+  useEffect(() => {
+    if (initialSport) setPreviewSport(normalizeSport(initialSport));
+  }, [initialSport]);
   const [selected, setSelected] = useState<string>(surface === "full" ? "home" : "sponsor");
 
   useEffect(() => {

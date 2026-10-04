@@ -250,6 +250,7 @@ export function SetupScoreboardThemeSection({
   reloadSettings,
   homeTeam,
   awayTeam,
+  previewSport,
   seedThemeJson,
   onSeedConsumed,
 }: {
@@ -257,6 +258,8 @@ export function SetupScoreboardThemeSection({
   reloadSettings: () => void;
   homeTeam?: Team | null;
   awayTeam?: Team | null;
+  /** Sport van de actieve wedstrijd; het voorbeeld start daarmee. */
+  previewSport?: string | null;
   seedThemeJson?: string | null;
   onSeedConsumed?: () => void;
 }) {
@@ -576,6 +579,7 @@ export function SetupScoreboardThemeSection({
           onRedo={() => store().redo()}
           homeTeam={homeTeam}
           awayTeam={awayTeam}
+          initialSport={previewSport}
           surface={surface}
           canvasWidth={canvasWidth}
           canvasHeight={canvasHeight}

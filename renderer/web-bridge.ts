@@ -1029,6 +1029,7 @@ export function installWebDemoBridge() {
       cpuTotalPercent: 0,
     }),
     exportVenueBackup: async () => ({ ok: false, canceled: true }),
+    restoreVenueBackup: async () => ({ ok: false, canceled: true }),
     getMatchTabLayoutSnapshot: () => window.localStorage.getItem("arenacue_match_tab_layout"),
     persistMatchTabLayout: (value) => window.localStorage.setItem("arenacue_match_tab_layout", value),
     setDisplayPreviewCapture: () => undefined,
