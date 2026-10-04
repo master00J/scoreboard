@@ -556,7 +556,8 @@ export function themeForFreeformEdit(theme: ResolvedScoreboardTheme): ResolvedSc
     slots,
     // Een oud frame kent geen vrije elementen: begin met de klassieke vakken op de plek van dat frame.
     elements: { ...theme.elements, sponsor: elementsFromSlots(slots) },
-    contentAreaBg: scoreboardEditorShowsLeftFrame(theme) ? theme.frameColorMid : theme.contentAreaBg,
+    // De kleuren blijven zoals ze zijn. `contentAreaBg` is ook de achtergrond van het volledige
+    // scorebord: wie de editor opent en opslaat, mag dat scherm niet in de framekleur terugvinden.
   };
 }
 

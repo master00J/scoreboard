@@ -235,8 +235,9 @@ const NEW_ELEMENT_BOX: Record<AddableElementType, LayoutSlot> = {
   period: { x: 40, y: 4, w: 20, h: 8 },
   // Rechtsonder: rechtsboven staat de teamnaam van de bezoekers al.
   timeOfDay: { x: 84, y: 90, w: 14, h: 8 },
-  text: { x: 35, y: 44, w: 30, h: 10 },
-  image: { x: 42, y: 40, w: 16, h: 20 },
+  // Onderaan: daar is op beide standaardindelingen plaats, zonder de klok of het videovak te bedekken.
+  text: { x: 3, y: 87, w: 30, h: 9 },
+  image: { x: 68, y: 84, w: 14, h: 14 },
 };
 
 /** Nieuw element op een standaardplek. `id` komt van de aanroeper, zodat dit zuiver blijft. */

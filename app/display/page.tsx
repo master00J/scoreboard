@@ -282,6 +282,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       })
       .then((s: AppSettings | null) => {
         if (cancelled || !s) return;
+        // De taal wordt in het bedieningsvenster gekozen; het stadionscherm volgt bij de volgende
+        // wijziging, zonder dat het venster herladen moet worden.
+        if (!embedInControl && s.uiLocale) {
+          window.dispatchEvent(new CustomEvent("arenacue:ui-locale", { detail: s.uiLocale }));
+        }
         setThemeJson(s.scoreboardThemeJson ?? null);
         setThemePreviewJson(s.scoreboardThemePreviewJson ?? null);
         if (layoutRulesFromThemeJson(s.scoreboardThemeJson ?? null).length > 0) {

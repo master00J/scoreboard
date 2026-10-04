@@ -94,6 +94,8 @@ export type DesktopContext = {
   appRoot: string;
   userDataDir: string;
   uploadsDir: string;
+  /** De browserdemo op de website: geen apart stadionvenster en geen bestanden op schijf. */
+  webDemo?: boolean;
 };
 
 export type DesktopApiRequest = {

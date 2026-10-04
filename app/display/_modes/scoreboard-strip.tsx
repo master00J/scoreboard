@@ -221,11 +221,16 @@ export function TeamLogo({
         ...box,
         ...fit,
         background: team.primaryColor,
-        fontSize: size != null ? size * 0.4 : "40%",
+        // De tekst schaalt mee met de cirkel zoals die werkelijk uitvalt: de indeling kan hem kleiner
+        // maken dan `size` (smalle L-balk) of de maat helemaal zelf bepalen (vrije indeling).
+        // ("40%" was 40% van de lettergrootte van de ouder en gaf een onleesbaar klein opschrift.)
+        containerType: "size",
+        // Met een vaste maat blijft het een cirkel, ook als de indeling de breedte op "auto" zet.
+        ...(size != null ? { aspectRatio: "1 / 1" } : null),
         ...style,
       }}
     >
-      {team.shortName.slice(0, 2)}
+      <span style={{ fontSize: "40cqmin", lineHeight: 1 }}>{team.shortName.slice(0, 2)}</span>
     </div>
   );
 }

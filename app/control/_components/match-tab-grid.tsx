@@ -1,6 +1,8 @@
 "use client";
 
 import {
+  lazy,
+  Suspense,
   useEffect,
   useRef,
   useState,
@@ -438,6 +440,12 @@ function LayoutPanelWrapper({
   );
 }
 
+/**
+ * De desktop-app kopieert het beeld van het stadionvenster. De browserdemo heeft dat venster niet
+ * en tekent het scherm daarom zelf in de preview.
+ */
+const EmbeddedDisplay = lazy(() => import("@/app/display/page"));
+
 function LivePreviewPanel({
   active = true,
 }: {
@@ -446,7 +454,8 @@ function LivePreviewPanel({
 }) {
   const { t } = useTranslation();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { stream, jpeg } = useDisplayPreviewPlayback(active);
+  const webDemo = typeof window !== "undefined" && window.electronAPI?.context.webDemo === true;
+  const { stream, jpeg } = useDisplayPreviewPlayback(active && !webDemo);
 
   useEffect(() => {
     const el = videoRef.current;
@@ -467,7 +476,13 @@ function LivePreviewPanel({
         <div className="text-xs text-muted-foreground">1920 × 1080</div>
       </div>
       <div className="relative min-h-[12rem] w-full flex-1 bg-black" style={{ aspectRatio: "16 / 9" }}>
-        {active ? (
+        {active && webDemo ? (
+          <div className="absolute inset-0 overflow-hidden" data-live-preview-embedded>
+            <Suspense fallback={null}>
+              <EmbeddedDisplay embedInControl />
+            </Suspense>
+          </div>
+        ) : active ? (
           <>
             <video
               ref={videoRef}

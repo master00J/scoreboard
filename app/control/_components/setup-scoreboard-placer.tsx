@@ -363,6 +363,20 @@ export function SetupScoreboardPlacer({
     dragRef.current = null;
   }, [surface]);
 
+  // Het voorbeeld wordt op de ware schermgrootte getekend en daarna verkleind. Zo kloppen vaste
+  // pixelmaten (L-balk, lettergroottes) met wat het stadionscherm toont, op elk formaat van dit venster.
+  const [canvasPx, setCanvasPx] = useState(0);
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const measure = () => setCanvasPx(el.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const previewScale = canvasPx > 0 ? canvasPx / Math.max(1, canvasWidth) : 0;
+
   const elements = theme.elements[surface];
   const active = elements.find((element) => element.id === selected) ?? elements[0];
   const activeIndex = elements.indexOf(active);
@@ -685,7 +699,16 @@ export function SetupScoreboardPlacer({
               if (e.key === "Alt") e.preventDefault();
             }}
           >
-            <div className="pointer-events-none absolute inset-0" data-layout-preview>
+            <div
+              className="pointer-events-none absolute left-0 top-0 origin-top-left"
+              data-layout-preview
+              style={{
+                width: canvasWidth,
+                height: canvasHeight,
+                transform: `scale(${previewScale})`,
+                visibility: previewScale > 0 ? "visible" : "hidden",
+              }}
+            >
               {surface === "full" ? (
                 <MatchScoreboardFull
                   match={match}

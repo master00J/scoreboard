@@ -23,6 +23,9 @@ function run(command, args) {
 }
 
 async function main() {
+  const { version } = JSON.parse(await fs.readFile(path.join(root, "package.json"), "utf8"));
+  // Elke build een eigen adres voor script en stijl, zodat bezoekers geen oude versie uit de cache krijgen.
+  const stamp = `${version}-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}`;
   await fs.rm(outDir, { recursive: true, force: true });
   await fs.mkdir(assetsDir, { recursive: true });
 
@@ -43,6 +46,8 @@ async function main() {
     entryPoints: [path.join(root, "renderer", "web-demo-main.tsx")],
     outfile: path.join(assetsDir, "renderer.js"),
     bundle: true,
+    // Bezoekers van de website downloaden dit bestand: kleiner laadt sneller.
+    minify: true,
     format: "esm",
     platform: "browser",
     jsx: "automatic",
@@ -50,6 +55,7 @@ async function main() {
     alias: { "@": root },
     define: {
       "process.env.NODE_ENV": JSON.stringify("production"),
+      __APP_VERSION__: JSON.stringify(version),
     },
   });
 
@@ -61,7 +67,7 @@ async function main() {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ArenaCue Scoreboard</title>
-    <link rel="stylesheet" href="./assets/renderer.css" />
+    <link rel="stylesheet" href="./assets/renderer.css?v=${stamp}" />
     <script>
       (function () {
         var m = /(?:^|[?&])(?:lang|locale)=([a-z]{2})/.exec(location.search);
@@ -71,7 +77,7 @@ async function main() {
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="./assets/renderer.js?v=lang-20260906"></script>
+    <script type="module" src="./assets/renderer.js?v=${stamp}"></script>
   </body>
 </html>
 `,

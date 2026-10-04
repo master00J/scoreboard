@@ -5,11 +5,26 @@ import { uiLocaleFromSearch } from "@/lib/i18n/locales";
 import { DEFAULT_LIVESTREAM_SETTINGS, DEFAULT_LIVESTREAM_STATUS, mergeLivestreamSettings } from "@/lib/livestream";
 import { CommandSchema, type Command } from "@/lib/validation/commands";
 import { captureOnBlackoutEnter, captureOnBlackoutExit } from "@/lib/external-capture-blackout";
+import { displayExtrasFromJson, serializeDisplayExtras } from "@/lib/display-extras";
+import { applyTemplateToThemeJson, builtInTemplateRows, sanitizeTemplateThemeJson } from "@/lib/scoreboard-templates";
 import type { CommandAck, DesktopApiRequest, DesktopApiResponse, ElectronBridge, TickPayload } from "@/lib/desktop-bridge";
 import type { SerializedDisplayState } from "@/lib/timer";
 
 const CHANNEL = "arenacue-web-scoreboard";
-const STORAGE_KEY = "arenacue_web_scoreboard_v4";
+const STORAGE_KEY = "arenacue_web_scoreboard_v5";
+/** Versie van de app waaruit deze demo gebouwd is; de build vult ze in. */
+declare const __APP_VERSION__: string | undefined;
+const APP_VERSION = typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "0.0.0";
+/** In de demo staat de wedstrijd altijd zo lang vóór de start, zodat de aftelklok te zien is. */
+const DEMO_KICKOFF_LEAD_MS = 25 * 60_000;
+
+/** Zinnen die de bezoeker met één klik als mededeling kan tonen. */
+const DEMO_ANNOUNCEMENTS: Record<string, string[]> = {
+  nl: ["Welkom in ons stadion", "Auto 1-ABC-123 staat voor de nooduitgang"],
+  en: ["Welcome to our stadium", "Car 1-ABC-123 is blocking the emergency exit"],
+  fr: ["Bienvenue dans notre stade", "La voiture 1-ABC-123 bloque la sortie de secours"],
+  it: ["Benvenuti nel nostro stadio", "L’auto 1-ABC-123 blocca l’uscita di emergenza"],
+};
 let webLivestreamSettings = { ...DEFAULT_LIVESTREAM_SETTINGS };
 
 function id(prefix = "c") {
@@ -38,7 +53,37 @@ type Store = {
   sponsorPlays: any[];
   templates: any[];
   cues: any[];
+  /** "Probeer op scherm": tijdelijk, niet opgeslagen in de indeling. */
+  themePreview?: { json: string; until: number } | null;
 };
+
+/** Verzonnen namen; ze verwijzen naar geen enkele echte club of speler. Rugnummer = plaats in de lijst. */
+const DEMO_HOME_SQUAD: Array<[string, string]> = [
+  ["Lars", "Peeters"],
+  ["Milan", "Claes"],
+  ["Jonas", "Maes"],
+  ["Ruben", "Willems"],
+  ["Stijn", "Goossens"],
+  ["Tibo", "Jacobs"],
+  ["Arne", "Mertens"],
+  ["Wout", "Hermans"],
+  ["Nathan", "Wouters"],
+  ["Senne", "Dubois"],
+  ["Kobe", "Lemmens"],
+];
+const DEMO_AWAY_SQUAD: Array<[string, string]> = [
+  ["Tom", "Verbeek"],
+  ["Daan", "Smits"],
+  ["Luuk", "Bakker"],
+  ["Finn", "de Graaf"],
+  ["Sem", "Visser"],
+  ["Jesse", "Mulder"],
+  ["Bram", "Dekker"],
+  ["Thijs", "Bos"],
+  ["Noah", "Vos"],
+  ["Levi", "Hendriks"],
+  ["Mats", "Kok"],
+];
 
 function seed(): Store {
   const homeId = id("t");
@@ -49,12 +94,12 @@ function seed(): Store {
   const voltMediaId = id("md");
   const worksMediaId = id("md");
   const createdAt = nowIso();
-  const homePlayers = Array.from({ length: 11 }, (_, i) => ({
+  const homePlayers = DEMO_HOME_SQUAD.map(([firstName, lastName], i) => ({
     id: id("p"),
     teamId: homeId,
     number: i + 1,
-    firstName: `H${i + 1}`,
-    lastName: "Demo",
+    firstName,
+    lastName,
     position: i === 0 ? "GK" : i < 5 ? "DEF" : i < 9 ? "MID" : "FWD",
     photoPath: null,
     isCoach: false,
@@ -63,12 +108,12 @@ function seed(): Store {
     subImagePath: null,
     lineupVideoPath: null,
   }));
-  const awayPlayers = Array.from({ length: 11 }, (_, i) => ({
+  const awayPlayers = DEMO_AWAY_SQUAD.map(([firstName, lastName], i) => ({
     id: id("p"),
     teamId: awayId,
     number: i + 1,
-    firstName: `A${i + 1}`,
-    lastName: "Demo",
+    firstName,
+    lastName,
     position: i === 0 ? "GK" : i < 5 ? "DEF" : i < 9 ? "MID" : "FWD",
     photoPath: null,
     isCoach: false,
@@ -79,8 +124,8 @@ function seed(): Store {
   }));
   return {
     teams: [
-      { id: homeId, name: "Home FC", shortName: "HOM", logoPath: null, primaryColor: "#1e40af", secondaryColor: "#fbbf24" },
-      { id: awayId, name: "Away United", shortName: "AWY", logoPath: null, primaryColor: "#b91c1c", secondaryColor: "#ffffff" },
+      { id: homeId, name: "Arena FC", shortName: "AFC", logoPath: "/uploads/demo-arena-fc.svg", primaryColor: "#1e40af", secondaryColor: "#fbbf24" },
+      { id: awayId, name: "Sporting United", shortName: "SPU", logoPath: "/uploads/demo-sporting-united.svg", primaryColor: "#b91c1c", secondaryColor: "#ffffff" },
     ],
     players: [...homePlayers, ...awayPlayers],
     matches: [
@@ -88,7 +133,7 @@ function seed(): Store {
         id: matchId,
         homeTeamId: homeId,
         awayTeamId: awayId,
-        kickoffAt: null,
+        kickoffAt: new Date(Date.now() + DEMO_KICKOFF_LEAD_MS).toISOString(),
         matchSponsorMediaId: null,
         halfDurationSec: 2700,
         halfBreakSec: 900,
@@ -145,7 +190,7 @@ function seed(): Store {
         id: voltMediaId,
         type: "IMAGE",
         path: "/uploads/demo-volt-energy.svg",
-        title: "Volt Energy â€” LED",
+        title: "Volt Energy — LED",
         durationSec: 10,
         sponsorName: "Volt Energy",
         sponsorId: voltId,
@@ -159,7 +204,7 @@ function seed(): Store {
         id: worksMediaId,
         type: "IMAGE",
         path: "/uploads/demo-stadion-works.svg",
-        title: "Stadion Works â€” LED",
+        title: "Stadion Works — LED",
         durationSec: 10,
         sponsorName: "Stadion Works",
         sponsorId: worksId,
@@ -199,6 +244,16 @@ function seed(): Store {
       displaySafeZoneMarginPx: 40,
       idleFallbackMediaId: null,
       uiLocale: "nl",
+      displayExtrasJson: serializeDisplayExtras(
+        displayExtrasFromJson(
+          JSON.stringify({
+            kickoffCountdown: { enabled: true, leadMinutes: 60, position: "top-right" },
+            announcement: {
+              presets: DEMO_ANNOUNCEMENTS[uiLocaleFromSearch(window.location.search) ?? "nl"] ?? DEMO_ANNOUNCEMENTS.nl,
+            },
+          }),
+        ),
+      ),
     },
     display: {
       id: 1,
@@ -248,6 +303,31 @@ function loadStore(): Store {
 }
 
 let store = loadStore();
+
+/** Zelfde gedrag als de desktop-app na een herstart, plus een aftrap die in de demo nooit voorbij is. */
+function refreshDemoStore() {
+  const extras = displayExtrasFromJson(store.settings?.displayExtrasJson);
+  if (extras.announcement.active) {
+    store.settings = {
+      ...store.settings,
+      displayExtrasJson: serializeDisplayExtras({
+        ...extras,
+        announcement: { ...extras.announcement, active: false, until: null },
+      }),
+    };
+  }
+  if (store.themePreview && store.themePreview.until <= Date.now()) store.themePreview = null;
+  const soon = Date.now() + 5 * 60_000;
+  store.matches = store.matches.map((match) => {
+    if (match.closedAt || (match.status !== "SETUP" && match.status !== "PREMATCH")) return match;
+    const at = match.kickoffAt ? new Date(match.kickoffAt).getTime() : 0;
+    return at > soon ? match : { ...match, kickoffAt: new Date(Date.now() + DEMO_KICKOFF_LEAD_MS).toISOString() };
+  });
+}
+refreshDemoStore();
+
+/** Wekker die de proefweergave in dit tabblad beëindigt. */
+let themePreviewTimer: number | null = null;
 
 function queryUiLocale() {
   return uiLocaleFromSearch(window.location.search);
@@ -299,6 +379,24 @@ function touchDisplay(patch: Record<string, unknown> = {}) {
   window.dispatchEvent(new CustomEvent(CHANNEL, { detail: snap }));
 }
 
+/**
+ * Bedieningspaneel en stadionscherm staan in de demo in aparte tabbladen. De browser meldt een
+ * wijziging van de opslag alleen aan de andere tabbladen, dus dit kan geen lus worden.
+ */
+function followOtherTabs() {
+  window.addEventListener("storage", (event) => {
+    if (event.key !== STORAGE_KEY || !event.newValue) return;
+    try {
+      store = JSON.parse(event.newValue) as Store;
+    } catch {
+      return;
+    }
+    const snap = serializeDisplay();
+    stateListeners.forEach((fn) => fn(snap));
+    window.dispatchEvent(new CustomEvent(CHANNEL, { detail: snap }));
+  });
+}
+
 function teamById(teamId: string) {
   const team = store.teams.find((t) => t.id === teamId);
   if (!team) return null;
@@ -321,8 +419,11 @@ function settingsJson() {
   const forced = queryUiLocale();
   const s = forced ? { ...store.settings, uiLocale: forced } : store.settings;
   const home = s.homeTeamId ? store.teams.find((t) => t.id === s.homeTeamId) : null;
+  const preview = store.themePreview && store.themePreview.until > Date.now() ? store.themePreview : null;
   return {
     ...s,
+    scoreboardThemePreviewJson: preview?.json ?? null,
+    scoreboardThemePreviewUntil: preview?.until ?? null,
     idleFallbackMedia: null,
     homeTeamBranding: home
       ? {
@@ -341,6 +442,17 @@ function sponsorById(sponsorId: string) {
   return { ...sponsor, media: store.media.filter((m) => m.sponsorId === sponsorId) };
 }
 
+function clearThemePreview() {
+  if (themePreviewTimer != null) window.clearTimeout(themePreviewTimer);
+  themePreviewTimer = null;
+  store.themePreview = null;
+}
+
+/** Meegeleverde indelingen plus wat de bezoeker zelf bewaarde. */
+function templateList() {
+  return [...builtInTemplateRows(), ...store.templates.filter((t) => !t.isBuiltIn)];
+}
+
 function parseBody(req: DesktopApiRequest) {
   if (!req.bodyText) return {};
   try {
@@ -356,10 +468,16 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   const pathname = url.pathname;
   const body = parseBody(req);
 
-  if (pathname === "/api/app/release") return json(200, { version: "0.1.30", notes: "" });
+  if (pathname === "/api/app/release") return json(200, { version: APP_VERSION, notes: "" });
   if (pathname === "/api/settings" && method === "GET") return json(200, settingsJson());
   if (pathname === "/api/settings" && method === "PATCH") {
-    store.settings = { ...store.settings, ...body };
+    const patch = { ...body };
+    if (typeof patch.displayExtrasJson === "string") {
+      patch.displayExtrasJson = serializeDisplayExtras(displayExtrasFromJson(patch.displayExtrasJson));
+    }
+    // Opslaan beëindigt een lopende proef: het scherm toont dan wat opgeslagen is.
+    if ("scoreboardThemeJson" in patch) clearThemePreview();
+    store.settings = { ...store.settings, ...patch };
     if (body.uiLocale) {
       window.dispatchEvent(new CustomEvent("arenacue:ui-locale", { detail: body.uiLocale }));
     }
@@ -582,24 +700,73 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
     persist();
     return json(200, { ok: true });
   }
-  if (pathname === "/api/scoreboard-templates" && method === "GET") return json(200, store.templates);
+  if (pathname === "/api/display/theme-preview" && method === "POST") {
+    const themeJson = typeof body.themeJson === "string" ? body.themeJson : "";
+    if (!themeJson) return json(400, { error: "Ongeldige indeling." });
+    const seconds = Math.min(300, Math.max(5, Math.round(Number(body.seconds) || 60)));
+    clearThemePreview();
+    const until = Date.now() + seconds * 1000;
+    themePreviewTimer = window.setTimeout(() => {
+      clearThemePreview();
+      touchDisplay();
+    }, seconds * 1000);
+    store.themePreview = { json: themeJson, until };
+    touchDisplay();
+    return json(200, { ok: true, until });
+  }
+  if (pathname === "/api/display/theme-preview" && method === "DELETE") {
+    clearThemePreview();
+    touchDisplay();
+    return json(200, { ok: true });
+  }
+
+  if (pathname === "/api/scoreboard-templates" && method === "GET") return json(200, templateList());
   if (pathname === "/api/scoreboard-templates" && method === "POST") {
+    const name = String(body.name ?? "").trim().slice(0, 80);
+    if (!name) return json(400, { error: "Naam is verplicht." });
     const template = {
       id: id("tpl"),
+      name,
+      label: typeof body.label === "string" ? body.label.trim().slice(0, 80) || null : null,
+      themeJson: sanitizeTemplateThemeJson(body.themeJson),
       isBuiltIn: false,
-      sortIndex: store.templates.length,
+      sortIndex: 0,
       createdAt: nowIso(),
       updatedAt: nowIso(),
-      ...body,
     };
     store.templates.push(template);
     persist();
     return json(200, template);
   }
+  const applyId = pathname.match(/^\/api\/scoreboard-templates\/([^/]+)\/apply$/)?.[1];
+  if (applyId && method === "POST") {
+    const template = templateList().find((t) => t.id === applyId);
+    if (!template) return json(404, { error: "Template niet gevonden." });
+    const scoreboardThemeJson = applyTemplateToThemeJson(store.settings.scoreboardThemeJson, template.themeJson);
+    store.settings = { ...store.settings, scoreboardThemeJson };
+    clearThemePreview();
+    touchDisplay();
+    return json(200, { ok: true, scoreboardThemeJson });
+  }
   const templateId = pathname.match(/^\/api\/scoreboard-templates\/([^/]+)$/)?.[1];
+  if (templateId && method === "PATCH") {
+    const existing = store.templates.find((t) => t.id === templateId && !t.isBuiltIn);
+    if (!existing) return json(400, { error: "Meegeleverde templates zijn niet aanpasbaar — dupliceer ze." });
+    const next = {
+      ...existing,
+      ...(typeof body.name === "string" && body.name.trim() ? { name: body.name.trim().slice(0, 80) } : {}),
+      ...(body.label !== undefined ? { label: String(body.label ?? "").trim().slice(0, 80) || null } : {}),
+      ...(body.themeJson !== undefined ? { themeJson: sanitizeTemplateThemeJson(body.themeJson) } : {}),
+      updatedAt: nowIso(),
+    };
+    store.templates = store.templates.map((t) => (t.id === templateId ? next : t));
+    // Een regel per sport of fase kan naar deze indeling verwijzen.
+    touchDisplay();
+    return json(200, next);
+  }
   if (templateId && method === "DELETE") {
     store.templates = store.templates.filter((t) => t.id !== templateId || t.isBuiltIn);
-    persist();
+    touchDisplay();
     return json(200, { ok: true });
   }
   if (pathname === "/api/sponsor-plays" && method === "GET") return json(200, store.sponsorPlays);
@@ -966,7 +1133,7 @@ function tickPayload(): TickPayload {
 
 export function installWebDemoBridge() {
   const bridge: ElectronBridge = {
-    context: { isElectron: true, appRoot: "", userDataDir: "", uploadsDir: "" },
+    context: { isElectron: true, appRoot: "", userDataDir: "", uploadsDir: "", webDemo: true },
     selectFile: async () => ({ canceled: true, filePaths: [] }),
     selectFolder: async () => ({ canceled: true, folderPath: null, files: [] }),
     apiRequest: async (req) => handleApi(req),
@@ -982,7 +1149,12 @@ export function installWebDemoBridge() {
     },
     onSponsorLedger: () => () => undefined,
     onDisplayError: () => () => undefined,
-    focusDisplayWindow: async () => undefined,
+    // De demo heeft geen tweede venster: het stadionscherm opent in een eigen tabblad en loopt live mee.
+    focusDisplayWindow: async () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", "display");
+      window.open(url.toString(), "arenacue-demo-display");
+    },
     reloadDisplayWindow: async () => ({ ok: true }),
     saveProofOfPlayExport: async () => ({ canceled: true }),
     exportMatch: async () => ({ canceled: true }),
@@ -991,7 +1163,7 @@ export function installWebDemoBridge() {
     reportSponsorClipEnd: async () => ({ ok: true }),
     reportSponsorClipProgress: async () => ({ ok: true }),
     getSponsorLedgerSnapshot: async () => null,
-    getAppVersion: async () => "0.1.30-web",
+    getAppVersion: async () => `${APP_VERSION}-web`,
     openExternalUrl: async (url) => {
       window.open(url, "_blank", "noopener,noreferrer");
       return { ok: true };
@@ -1066,6 +1238,7 @@ export function installWebDemoBridge() {
   };
 
   window.electronAPI = bridge;
+  followOtherTabs();
 
   window.setInterval(() => {
     const tick = tickPayload();
