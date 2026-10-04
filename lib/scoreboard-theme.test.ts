@@ -93,8 +93,21 @@ describe("scoreboard theme personalization", () => {
     expect(slots.sponsor.x).toBeGreaterThan(10);
     expect(slotIsSixteenByNine(slots.sponsor)).toBe(true);
     const edit = themeForFreeformEdit(theme);
-    expect(edit.layoutMode).toBe("custom");
+    expect(edit.layoutMode).toBe("left-l");
     expect(edit.contentAreaBg).toBe(theme.frameColorMid);
+  });
+
+  it("zet automatisch (sponsorclip) om naar dezelfde L-balk als het stadionscherm", () => {
+    const theme = mergeScoreboardTheme(JSON.stringify({ layoutMode: "auto", leftBarWidthPx: 320 }));
+    const slots = slotsFromTheme(theme);
+    expect(slots.home.x).toBe(0);
+    expect(slots.away.x).toBe(0);
+    expect(slots.away.y).toBeGreaterThan(slots.home.y);
+    expect(slots.sponsor.x).toBeGreaterThan(10);
+    const edit = themeForFreeformEdit(theme);
+    expect(edit.layoutMode).toBe("auto");
+    expect(edit.slots.home.x).toBe(0);
+    expect(edit.slots.away.y).toBeGreaterThan(edit.slots.home.y);
   });
 
   it("bewaart vakken van het volledige scorebord", () => {

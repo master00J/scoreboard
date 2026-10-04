@@ -17,6 +17,7 @@ The layout a club makes under "Scherm indelen" is stored as JSON in `AppSettings
 - A layout is a list of elements per surface: `theme.elements.sponsor` and `theme.elements.full`, in layer order (`lib/scoreboard-elements.ts`). The seven classic boxes (`home`, `homeScore`, `away`, `awayScore`, `clock`, `shotClock`, `sponsor`) are elements with those fixed ids; they can be hidden but not removed. `slots` and `fullSlots` are derived from the elements, and layouts saved before elements existed are converted on read. Do not write `slots` yourself.
 - The stadium screen renders the elements in `app/display/_modes/custom-scoreboard-layout.tsx` and `match-scoreboard-full.tsx`. A new element type needs: the type in `scoreboard-elements.ts`, rendering in `layout-elements.tsx`, and the `layoutEditor.type_*` texts.
 - `layoutRules` in the same JSON pick a saved layout per sport and match phase; "Probeer op scherm" is an in-memory preview in `electron/runtime.ts`. The screen chooses preview, then rule, then the saved layout (`app/display/page.tsx`).
+- `layoutMode: "auto"` (the default) uses `LeftScoreboardLayout` on the stadium screen while a sponsor clip plays: logos stacked in the L-bar, not the free overlay. The editor must preview that same L-bar until the club drags a box (that switch to `custom`). Do not open auto as `DEFAULT_SLOTS`.
 - An existing layout must keep rendering exactly the same after your change.
 
 ## Checks

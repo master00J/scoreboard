@@ -1031,7 +1031,7 @@
     "themeLayoutMode": "On-screen frame",
     "themeLayoutModeHelp": "Choose how score, clock and sponsors sit on the LED. Automatic still uses the L-frame beside sponsors.",
     "themeLayout_auto": "Automatic",
-    "themeLayoutHelp_auto": "Fullscreen until sponsors or a goal need the side panel. Once the L-frame appears during a half it stays for the rest of that half.",
+    "themeLayoutHelp_auto": "Full scoreboard until a sponsor clip or goal needs the side panel. Then the L-bar appears: logos stacked, video beside them.",
     "themeLayout_left-l": "L-scoreboard",
     "themeLayoutHelp_left-l": "Always left column + content area, even without sponsors.",
     "themeLayout_full": "Fullscreen",

@@ -1009,7 +1009,7 @@
     "themeLayoutMode": "Riquadro sullo schermo",
     "themeLayoutModeHelp": "Scegli come punteggio, orologio e sponsor stanno sul LED. Automatico usa ancora il riquadro a L accanto agli sponsor.",
     "themeLayout_auto": "Automatico",
-    "themeLayoutHelp_auto": "Schermo intero finché sponsor o un gol richiedono il pannello laterale. Quando il riquadro a L compare in un tempo, resta fino alla fine di quel tempo.",
+    "themeLayoutHelp_auto": "Tabellone intero finché un clip sponsor o un gol non servono il pannello. Allora compare la barra a L: loghi uno sotto l’altro, video accanto.",
     "themeLayout_left-l": "Tabellone a L",
     "themeLayoutHelp_left-l": "Sempre colonna sinistra + area contenuti, anche senza sponsor.",
     "themeLayout_full": "Schermo intero",

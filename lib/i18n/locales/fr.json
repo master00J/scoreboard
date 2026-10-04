@@ -1031,7 +1031,7 @@
     "themeLayoutMode": "Cadre à l’écran",
     "themeLayoutModeHelp": "Choisissez comment score, horloge et sponsors s’affichent. Automatique garde le L à côté des sponsors.",
     "themeLayout_auto": "Automatique",
-    "themeLayoutHelp_auto": "Plein écran jusqu’à ce qu’un sponsor ou un but ait besoin du panneau latéral. Une fois le L affiché pendant une mi-temps, il reste jusqu’à la fin de celle-ci.",
+    "themeLayoutHelp_auto": "Scoreboard plein écran jusqu’à ce qu’un clip sponsor ou un but ait besoin du panneau. Alors la barre en L apparaît : logos empilés, vidéo à côté.",
     "themeLayout_left-l": "Tableau en L",
     "themeLayoutHelp_left-l": "Toujours colonne gauche + zone contenu, même sans sponsors.",
     "themeLayout_full": "Plein écran",

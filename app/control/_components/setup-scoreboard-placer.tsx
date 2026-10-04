@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, Trash2 } from "lucide-react";
 import { CustomScoreboardLayout } from "@/app/display/_modes/custom-scoreboard-layout";
+import { LeftScoreboardLayout } from "@/app/display/_modes/left-scoreboard-layout";
 import { MatchScoreboardFull } from "@/app/display/_modes/match-scoreboard-full";
+import { StripScoreboardLayout } from "@/app/display/_modes/scoreboard-strip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
@@ -40,7 +42,12 @@ import {
   type LayoutElement,
   type LayoutElementStyle,
 } from "@/lib/scoreboard-elements";
-import { withSurfaceElements, type LayoutSlot, type ResolvedScoreboardTheme } from "@/lib/scoreboard-theme";
+import {
+  scoreboardEditorShowsLeftFrame,
+  withSurfaceElements,
+  type LayoutSlot,
+  type ResolvedScoreboardTheme,
+} from "@/lib/scoreboard-theme";
 import { SPORT_TYPES, getSportProfile, resolveDisplayShowClock, type SportType } from "@/lib/sports";
 import type { Match, Team } from "@/lib/types";
 
@@ -368,7 +375,6 @@ export function SetupScoreboardPlacer({
   /** Zelfde aanpassingen als het stadionscherm: geen klok of extra tijd bij sporten die dat niet kennen. */
   const previewTheme: ResolvedScoreboardTheme = {
     ...theme,
-    layoutMode: "custom",
     showClock: resolveDisplayShowClock(previewSport, theme.showClock),
     fullShowAddedTime: profile.supportsInjuryTime ? theme.fullShowAddedTime : false,
   };
@@ -682,6 +688,30 @@ export function SetupScoreboardPlacer({
                   shotClock={shotClock}
                   theme={previewTheme}
                 />
+              ) : scoreboardEditorShowsLeftFrame(previewTheme) ? (
+                <LeftScoreboardLayout
+                  match={match}
+                  elapsed={previewElapsed(previewSport)}
+                  running
+                  period={period}
+                  addedTime={2}
+                  shotClock={shotClock}
+                  theme={previewTheme}
+                >
+                  <VideoPlate />
+                </LeftScoreboardLayout>
+              ) : previewTheme.layoutMode === "bottom-strip" ? (
+                <StripScoreboardLayout
+                  match={match}
+                  elapsed={previewElapsed(previewSport)}
+                  running
+                  period={period}
+                  addedTime={2}
+                  shotClock={shotClock}
+                  theme={previewTheme}
+                >
+                  <VideoPlate />
+                </StripScoreboardLayout>
               ) : (
                 <CustomScoreboardLayout
                   match={match}

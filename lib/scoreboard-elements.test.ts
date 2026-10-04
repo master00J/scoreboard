@@ -176,7 +176,7 @@ describe("vrij bewerken en de bibliotheek", () => {
   it("begint bij een oud frame met de klassieke vakken van dat frame", () => {
     const theme = mergeScoreboardTheme(JSON.stringify({ layoutMode: "left-l", leftBarWidthPx: 320 }));
     const edit = themeForFreeformEdit(theme);
-    expect(edit.layoutMode).toBe("custom");
+    expect(edit.layoutMode).toBe("left-l");
     expect(edit.elements.sponsor.map((e) => e.id)).toHaveLength(7);
     for (const element of edit.elements.sponsor) {
       expect({ x: element.x, y: element.y, w: element.w, h: element.h }).toEqual(edit.slots[element.id as "home"]);

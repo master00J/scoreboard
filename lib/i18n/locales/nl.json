@@ -1031,7 +1031,7 @@
     "themeLayoutMode": "Frame op het scherm",
     "themeLayoutModeHelp": "Kies hoe score, klok en sponsors op het LED-scherm staan. Automatisch blijft L naast sponsors gebruiken.",
     "themeLayout_auto": "Automatisch",
-    "themeLayoutHelp_auto": "Fullscreen tot er sponsors of een goal naast moeten. Staat het L-frame eenmaal aan in een helft, dan blijft het die helft staan.",
+    "themeLayoutHelp_auto": "Volledig scorebord tot er een sponsorclip of goal naast moet. Dan komt de L-balk: logo's onder elkaar, video ernaast.",
     "themeLayout_left-l": "L-scorebord",
     "themeLayoutHelp_left-l": "Altijd linker kolom + contentvlak, ook zonder sponsors.",
     "themeLayout_full": "Fullscreen",

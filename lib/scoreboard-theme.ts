@@ -521,9 +521,12 @@ export function slotsFromStrip(stripHeightPx: number): ScoreboardSlots {
   });
 }
 
-/** Zet elk thema om naar sleepbare custom-vakken. */
+/**
+ * Zet elk thema om naar sleepbare vakken. `auto` volgt de L-balk: zo staat het stadionscherm
+ * tijdens een sponsorclip (logo's onder elkaar), niet de vrije overlay.
+ */
 export function slotsFromTheme(theme: Pick<ResolvedScoreboardTheme, "layoutMode" | "slots" | "leftBarWidthPx" | "bottomBarHeightPx" | "stripHeightPx">): ScoreboardSlots {
-  if (theme.layoutMode === "left-l") {
+  if (theme.layoutMode === "left-l" || theme.layoutMode === "auto") {
     return slotsFromLeftFrame(theme.leftBarWidthPx, theme.bottomBarHeightPx);
   }
   if (theme.layoutMode === "bottom-strip") {
@@ -532,9 +535,16 @@ export function slotsFromTheme(theme: Pick<ResolvedScoreboardTheme, "layoutMode"
   return normalizeSlots(theme.slots);
 }
 
+/** Zelfde L-balk als het stadionscherm bij een sponsorclip (`auto`) of een vast L-frame. */
+export function scoreboardEditorShowsLeftFrame(
+  theme: Pick<ResolvedScoreboardTheme, "layoutMode">,
+): boolean {
+  return theme.layoutMode === "auto" || theme.layoutMode === "left-l";
+}
+
 /**
- * Draft voor de canvas-editor: altijd `custom`, met vakken die het huidige frame volgen.
- * Bij een L-balk wordt de canvaskleur de framekleur, zodat de balk zichtbaar blijft.
+ * Draft voor de canvas-editor: vakken die het huidige frame volgen.
+ * `auto` en `left-l` blijven dat frame tot je een vak versleept (`withSurfaceElements` maakt dan custom).
  */
 export function themeForFreeformEdit(theme: ResolvedScoreboardTheme): ResolvedScoreboardTheme {
   const slots = slotsFromTheme(theme);
@@ -543,11 +553,10 @@ export function themeForFreeformEdit(theme: ResolvedScoreboardTheme): ResolvedSc
   }
   return {
     ...theme,
-    layoutMode: "custom",
     slots,
     // Een oud frame kent geen vrije elementen: begin met de klassieke vakken op de plek van dat frame.
     elements: { ...theme.elements, sponsor: elementsFromSlots(slots) },
-    contentAreaBg: theme.layoutMode === "left-l" ? theme.frameColorMid : theme.contentAreaBg,
+    contentAreaBg: scoreboardEditorShowsLeftFrame(theme) ? theme.frameColorMid : theme.contentAreaBg,
   };
 }
 

@@ -359,7 +359,7 @@ export function SetupScoreboardThemeSection({
   function themePayload(): Record<string, unknown> {
     const payload: Record<string, unknown> = {
       ...draft,
-      layoutMode: draft.layoutMode === "auto" ? "custom" : draft.layoutMode,
+      layoutMode: draft.layoutMode,
     };
     if (repeatSponsorBudgetCycles) payload.sponsorRepeatBudgetCycles = true;
     if (rules.length > 0) payload.layoutRules = rules;

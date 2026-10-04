@@ -91,7 +91,7 @@ export function ScoreboardThemePreview({
   const mode = theme.layoutMode;
   const video = <PreviewSixteenByNinePlate />;
   const board =
-    mode === "custom" || mode === "auto" ? (
+    mode === "custom" ? (
       <CustomScoreboardLayout
         match={match}
         elapsed={512}
@@ -102,6 +102,17 @@ export function ScoreboardThemePreview({
       >
         {video}
       </CustomScoreboardLayout>
+    ) : mode === "auto" || mode === "left-l" ? (
+      <LeftScoreboardLayout
+        match={match}
+        elapsed={512}
+        running
+        period={period}
+        addedTime={2}
+        theme={theme}
+      >
+        {video}
+      </LeftScoreboardLayout>
     ) : mode === "bottom-strip" ? (
       <StripScoreboardLayout
         match={match}
@@ -113,17 +124,6 @@ export function ScoreboardThemePreview({
       >
         {video}
       </StripScoreboardLayout>
-    ) : mode === "left-l" ? (
-      <LeftScoreboardLayout
-        match={match}
-        elapsed={512}
-        running
-        period={period}
-        addedTime={2}
-        theme={theme}
-      >
-        {video}
-      </LeftScoreboardLayout>
     ) : (
       <MatchScoreboardFull
         match={match}
