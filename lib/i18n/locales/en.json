@@ -299,7 +299,16 @@
     "openPortal": "License & download (website)",
     "keyTooShort": "Enter your full license key (format ARENA-…).",
     "unexpectedError": "Unexpected error. Please try again.",
-    "afterActivate": "After activation you can view your installations at arenacue.be/portal with the same key and email."
+    "afterActivate": "After activation you can view your installations at arenacue.be/portal with the same key and email.",
+    "sectionTitle": "Licence",
+    "sectionBody": "After purchase, paste your new key here. You do not need to reinstall the app.",
+    "currentPlan": "Current plan",
+    "currentOrg": "Organisation",
+    "change": "Change licence",
+    "replaceBody": "Activate a new licence key on this PC. Machine ID (for support):",
+    "replaceHint": "Enter your new key. The current licence stays active until activation succeeds.",
+    "cancel": "Cancel",
+    "changed": "New licence activated"
   },
   "timer": {
     "title": "Match clock",

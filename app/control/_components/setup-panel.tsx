@@ -18,6 +18,8 @@ import {
   exportVenueBackup,
   restoreVenueBackup,
 } from "@/lib/electron";
+import { requestChangeLicense } from "@/lib/license-ui";
+import { useLicenseFeatures } from "@/lib/use-license-features";
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
 import { normalizeUiLocale, type UiLocale } from "@/lib/i18n";
@@ -180,6 +182,7 @@ export function SetupPanel() {
   }
 
   const currentLocale = normalizeUiLocale(settings?.uiLocale ?? i18n.language);
+  const { planLabel, organizationLabel } = useLicenseFeatures();
 
   return (
     <div className="flex flex-col gap-6">
@@ -199,6 +202,36 @@ export function SetupPanel() {
           <option value="it">{t("language.it")}</option>
         </Select>
       </section>
+      {isElectron ? (
+        <section className="bg-card border border-border rounded-xl p-6">
+          <h2 className="text-lg font-semibold mb-1">{t("license.sectionTitle")}</h2>
+          <p className="text-sm text-muted-foreground mb-3">{t("license.sectionBody")}</p>
+          {planLabel ? (
+            <p className="text-sm mb-4">
+              {t("license.currentPlan")}: <strong>{planLabel}</strong>
+              {organizationLabel ? (
+                <>
+                  {" · "}
+                  {t("license.currentOrg")}: <strong>{organizationLabel}</strong>
+                </>
+              ) : null}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" onClick={() => requestChangeLicense()}>
+              {t("license.change")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => void window.electronAPI?.openExternalUrl("https://arenacue.be/portal")}
+            >
+              {t("license.openPortal")}
+            </Button>
+          </div>
+        </section>
+      ) : null}
       {isElectron ? (
         <section className="bg-card border border-border rounded-xl p-6">
           <h2 className="text-lg font-semibold mb-1">{t("setup.venueBackupTitle")}</h2>

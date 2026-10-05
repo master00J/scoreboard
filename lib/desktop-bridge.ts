@@ -135,6 +135,7 @@ export type LicenseGetStatusResult =
       plan?: string;
       planLabel?: string;
       features?: Record<string, boolean>;
+      machinePreview?: string;
     }
   | {
       gate: true;

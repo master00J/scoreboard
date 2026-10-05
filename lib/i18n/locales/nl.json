@@ -299,7 +299,16 @@
     "openPortal": "Licentie & download (website)",
     "keyTooShort": "Voer je volledige licentiesleutel in (formaat ARENA-…).",
     "unexpectedError": "Onverwachte fout. Probeer opnieuw.",
-    "afterActivate": "Na activeren kun je je installaties bekijken op arenacue.be/portal met dezelfde sleutel en je e-mailadres."
+    "afterActivate": "Na activeren kun je je installaties bekijken op arenacue.be/portal met dezelfde sleutel en je e-mailadres.",
+    "sectionTitle": "Licentie",
+    "sectionBody": "Na aankoop plak je hier je nieuwe sleutel. De app hoeft niet opnieuw geïnstalleerd.",
+    "currentPlan": "Huidig plan",
+    "currentOrg": "Organisatie",
+    "change": "Licentie wijzigen",
+    "replaceBody": "Activeer een nieuwe licentiesleutel op deze pc. Machine-id (voor support):",
+    "replaceHint": "Voer je nieuwe sleutel in. De huidige licentie blijft actief tot de activatie lukt.",
+    "cancel": "Annuleren",
+    "changed": "Nieuwe licentie geactiveerd"
   },
   "timer": {
     "title": "Wedstrijdklok",

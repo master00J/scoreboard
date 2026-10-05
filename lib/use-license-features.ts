@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { isElectron } from "@/lib/electron";
 import type { LicenseGetStatusResult } from "@/lib/desktop-bridge";
+import { LICENSE_CHANGED_EVENT } from "@/lib/license-ui";
 
 export type DesktopFeatureKey =
   | "automatic_sponsor_rotation"
@@ -19,11 +20,16 @@ export function useLicenseFeatures() {
       setStatus({ gate: false, organizationLabel: null });
       return;
     }
-    void window.electronAPI.licenseGetStatus().then((result) => {
-      if (alive) setStatus(result);
-    });
+    const read = () => {
+      void window.electronAPI?.licenseGetStatus().then((result) => {
+        if (alive) setStatus(result);
+      });
+    };
+    read();
+    window.addEventListener(LICENSE_CHANGED_EVENT, read);
     return () => {
       alive = false;
+      window.removeEventListener(LICENSE_CHANGED_EVENT, read);
     };
   }, []);
 
@@ -33,6 +39,7 @@ export function useLicenseFeatures() {
       status,
       plan: status && status.gate === false ? status.plan : undefined,
       planLabel: status && status.gate === false ? status.planLabel : undefined,
+      organizationLabel: status && status.gate === false ? status.organizationLabel : undefined,
       isFeatureAllowed: (key: DesktopFeatureKey) => features?.[key] !== false,
     };
   }, [status]);

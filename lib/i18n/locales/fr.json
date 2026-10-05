@@ -299,7 +299,16 @@
     "openPortal": "Licence & téléchargement (site)",
     "keyTooShort": "Saisissez votre clé complète (format ARENA-…).",
     "unexpectedError": "Erreur inattendue. Réessayez.",
-    "afterActivate": "Après activation, consultez vos installations sur arenacue.be/portal avec la même clé et votre e-mail."
+    "afterActivate": "Après activation, consultez vos installations sur arenacue.be/portal avec la même clé et votre e-mail.",
+    "sectionTitle": "Licence",
+    "sectionBody": "Après l’achat, collez ici votre nouvelle clé. Pas besoin de réinstaller l’application.",
+    "currentPlan": "Offre actuelle",
+    "currentOrg": "Organisation",
+    "change": "Changer de licence",
+    "replaceBody": "Activez une nouvelle clé de licence sur ce PC. ID machine (support) :",
+    "replaceHint": "Saisissez votre nouvelle clé. La licence actuelle reste active tant que l’activation n’a pas réussi.",
+    "cancel": "Annuler",
+    "changed": "Nouvelle licence activée"
   },
   "timer": {
     "title": "Chronomètre",

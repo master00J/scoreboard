@@ -2411,6 +2411,7 @@ function registerIpc() {
         return {
           gate: false,
           organizationLabel: prev.organizationLabel ?? null,
+          machinePreview: preview,
           offlineGrace: true,
           ...(prev.plan !== undefined ? { plan: prev.plan } : {}),
           ...(prev.planLabel !== undefined ? { planLabel: prev.planLabel } : {}),
@@ -2475,6 +2476,7 @@ function registerIpc() {
     return {
       gate: false,
       organizationLabel: r.organizationLabel,
+      machinePreview: preview,
       ...(r.plan !== undefined ? { plan: r.plan } : {}),
       ...(r.planLabel !== undefined ? { planLabel: r.planLabel } : {}),
       ...(r.features !== undefined ? { features: r.features } : {}),

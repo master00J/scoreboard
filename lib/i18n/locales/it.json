@@ -299,7 +299,16 @@
     "openPortal": "Licenza e download (sito)",
     "keyTooShort": "Inserisci la chiave di licenza completa (formato ARENA-…).",
     "unexpectedError": "Errore imprevisto. Riprova.",
-    "afterActivate": "Dopo l’attivazione puoi vedere le tue installazioni su arenacue.be/portal con la stessa chiave e e-mail."
+    "afterActivate": "Dopo l’attivazione puoi vedere le tue installazioni su arenacue.be/portal con la stessa chiave e e-mail.",
+    "sectionTitle": "Licenza",
+    "sectionBody": "Dopo l’acquisto incolla qui la nuova chiave. Non devi reinstallare l’app.",
+    "currentPlan": "Piano attuale",
+    "currentOrg": "Organizzazione",
+    "change": "Cambia licenza",
+    "replaceBody": "Attiva una nuova chiave di licenza su questo PC. Machine ID (per il supporto):",
+    "replaceHint": "Inserisci la nuova chiave. La licenza attuale resta attiva finché l’attivazione non riesce.",
+    "cancel": "Annulla",
+    "changed": "Nuova licenza attivata"
   },
   "timer": {
     "title": "Orologio partita",
