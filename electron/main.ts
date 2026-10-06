@@ -44,6 +44,7 @@ import {
 } from "../lib/stadium-screen";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
+import { startOfficialClock, type OfficialClockHandle } from "./official-clock";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
 import { getAppResourceMetrics, getMemoryBreakdownForBootLog } from "./resource-metrics";
 import { menuLabel, normalizeMenuLocale } from "./menu-i18n";
@@ -337,6 +338,7 @@ let mobileBridge: MobileBridgeHandle | null = null;
 let cloudAgent: CloudAgentHandle | null = null;
 let livestream: LivestreamController | null = null;
 let streamDeck: StreamDeckHandle | null = null;
+let officialClock: OfficialClockHandle | null = null;
 let splashWindow: BrowserWindow | null = null;
 
 function bootLogPath(): string {
@@ -589,6 +591,22 @@ async function loadRuntime() {
       runCommand: (command) => runtime!.runCommand(command as any),
     },
     log: bootLog,
+  });
+  // Officiële klok volgen: instellingen horen bij deze pc (welke poort, welke console), niet bij de club.
+  officialClock = startOfficialClock({
+    settingsPath: path.join(app.getPath("userData"), "official-clock.json"),
+    captureDir: path.join(app.getPath("userData"), "official-clock-captures"),
+    runtime: {
+      getContext: () => runtime!.getOfficialClockContext(),
+      sync: (targets) => runtime!.syncOfficialClock(targets),
+      setHornMute: (mute) => runtime!.setOfficialClockHornMute(mute),
+    },
+    log: bootLog,
+    onStatus: (status) => {
+      if (controlWindow && !controlWindow.isDestroyed()) {
+        controlWindow.webContents.send("officialclock:status", status);
+      }
+    },
   });
 }
 
@@ -2024,6 +2042,25 @@ function registerIpc() {
     });
   }
   ipcMain.handle("streamdeck:getInfo", () => streamDeck?.info() ?? null);
+  ipcMain.handle("officialclock:getSettings", () => officialClock?.getSettings() ?? null);
+  ipcMain.handle("officialclock:saveSettings", (_e, raw: unknown) => {
+    if (!officialClock) return null;
+    const settings = officialClock.saveSettings(raw);
+    return { settings, status: officialClock.getStatus() };
+  });
+  ipcMain.handle("officialclock:getStatus", () => officialClock?.getStatus() ?? null);
+  ipcMain.handle("officialclock:listSerialPorts", () => officialClock?.listSerialPorts() ?? []);
+  ipcMain.handle("officialclock:startCapture", () => officialClock?.startCapture() ?? { ok: false });
+  ipcMain.handle("officialclock:stopCapture", () => {
+    officialClock?.stopCapture();
+    return { ok: true };
+  });
+  ipcMain.handle("officialclock:showCaptures", async () => {
+    if (!officialClock) return { ok: false };
+    const dir = officialClock.captureDir();
+    fs.mkdirSync(dir, { recursive: true });
+    return { ok: (await shell.openPath(dir)) === "" };
+  });
   ipcMain.on("livestream:programReady", (event) => {
     if (streamWindow && !streamWindow.isDestroyed() && event.sender === streamWindow.webContents) {
       livestream?.notifyProgramReady();
@@ -2721,6 +2758,10 @@ app.on("before-quit", (e) => {
   if (streamDeck) {
     void streamDeck.stop();
     streamDeck = null;
+  }
+  if (officialClock) {
+    officialClock.stop();
+    officialClock = null;
   }
   if (livestream) {
     void livestream.stop();

@@ -28,6 +28,7 @@ import { tPeriodLabel } from "@/lib/i18n/t-sport";
 import { SetupScoreboardTemplatesSection } from "./setup-scoreboard-templates";
 import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
 import { SetupDisplayCanvasSection } from "./setup-display-canvas";
+import { OfficialClockSection } from "./setup-official-clock";
 import { AssetHealthCheck } from "./asset-health-check";
 import { getSportProfile, SPORT_TYPES, type SportType } from "@/lib/sports";
 import { DEFAULT_VOLLEYBALL_RULES, type VolleyballMatchRules } from "@/lib/volleyball";
@@ -278,6 +279,7 @@ export function SetupPanel() {
           <p className="mt-2 max-w-3xl text-xs text-muted-foreground">{t("backup.restoreHint")}</p>
         </section>
       ) : null}
+      <OfficialClockSection />
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-center justify-between mb-4 gap-4">
           <div>

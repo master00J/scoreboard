@@ -20,6 +20,7 @@ import {
 } from "@/lib/sports";
 import { useLiveBreakSeconds, useLiveTimerSeconds } from "@/lib/use-timer";
 import { applyLivePeriod, applyLivePhase } from "@/lib/live-phase-commands";
+import { OfficialClockBadge } from "./official-clock-badge";
 import { tPeriodButton, tPeriodName, tSportLabel, tStatLabel } from "@/lib/i18n/t-sport";
 import { formatTechnicalTimeoutScores, volleyballRulesFromMatch } from "@/lib/volleyball";
 import type { Match } from "@/lib/types";
@@ -346,6 +347,9 @@ export function SportLiveControls({ match }: { match: Match }) {
               style={{ color: shotOff ? "#71717a" : state?.shotClockRunning ? "#ef4444" : "#f59e0b" }}
             >
               {shotOff ? t("matchLive.shotClockOff") : formatShotClock(shotClock)}
+            </div>
+            <div className="flex">
+              <OfficialClockBadge clock="shot" />
             </div>
             <label className="mt-2 flex items-center gap-2 text-xs">
               <input

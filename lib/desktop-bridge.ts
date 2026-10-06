@@ -8,6 +8,7 @@ import type {
 import type { Command } from "./validation/commands";
 import type { FeatureRequestDraft, FeatureRequestResult } from "./feature-request";
 import type { MusicLibrary, MusicLibraryUpdate, MusicImportResult } from "./music";
+import type { OfficialClockSettings, OfficialClockStatus } from "./official-clock/types";
 import type { StadiumScreensPayload } from "./stadium-screen";
 import type { StreamDeckInfo } from "./stream-deck";
 import type { SerializedDisplayState } from "./timer";
@@ -253,6 +254,19 @@ export type ElectronBridge = {
   submitFeatureRequest?: (input: FeatureRequestDraft) => Promise<FeatureRequestResult>;
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
   getStreamDeckInfo: () => Promise<StreamDeckInfo | null>;
+  /** Officiële klok volgen (console van de jurytafel). Alleen in de desktop-app. */
+  getOfficialClockSettings?: () => Promise<OfficialClockSettings | null>;
+  saveOfficialClockSettings?: (
+    settings: OfficialClockSettings,
+  ) => Promise<{ settings: OfficialClockSettings; status: OfficialClockStatus } | null>;
+  getOfficialClockStatus?: () => Promise<OfficialClockStatus | null>;
+  /** COM-poorten (Windows) of seriële apparaten (macOS) op deze pc. */
+  listOfficialClockSerialPorts?: () => Promise<string[]>;
+  /** Neemt de ruwe datastroom van de console op, om een nog onbekend merk te kunnen toevoegen. */
+  startOfficialClockCapture?: () => Promise<{ ok: boolean; path?: string; error?: string }>;
+  stopOfficialClockCapture?: () => Promise<{ ok: boolean }>;
+  showOfficialClockCaptures?: () => Promise<{ ok: boolean }>;
+  onOfficialClockStatus?: (listener: (status: OfficialClockStatus) => void) => () => void;
   /** CPU/RAM van deze app (Electron); GPU = GPU-hulpproces. */
   getAppResourceMetrics: () => Promise<AppResourceMetrics>;
   /** ZIP met database, uploads en de media die elders op de pc staat. */

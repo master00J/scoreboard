@@ -21,6 +21,7 @@ import {
   sportMaxPeriod,
 } from "@/lib/sports";
 import { applyLivePeriod, applyLivePreset } from "@/lib/live-phase-commands";
+import { OfficialClockBadge } from "./official-clock-badge";
 import { tPeriodButton, tSportLabel } from "@/lib/i18n/t-sport";
 
 function minutesLabel(seconds: number): string {
@@ -96,6 +97,7 @@ export function TimerPanel() {
           {t("timer.noClock")}
         </div>
       )}
+      {hasClock ? <OfficialClockBadge clock="game" /> : null}
       {periodEnded && !running && (
         <div className="rounded-md border border-red-500/40 bg-red-500/10 px-2 py-1 text-center text-[11px] font-semibold text-red-200">
           {t("matchLive.periodEnded")}

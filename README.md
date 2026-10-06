@@ -133,6 +133,10 @@ Muziek blijft spelen bij tabwissels, verplaatsen, inklappen of verbergen van het
 
 Imports worden gekopieerd naar `userData/uploads/music/`; de afspeellijst, volume en herhaalkeuze staan daar in `playlist.json`. Daardoor blijven imports beschikbaar zonder de originele bestanden en worden ze meegenomen in de venue-backup. Verwijderen wist alleen de geïmporteerde kopie. Codec- of bestandsfouten worden gemeld en stoppen de afspeellijst, zodat deze niet eindeloos door onleesbare bestanden blijft schakelen. Deze functie is beschikbaar in de desktop-app; er is geen streamingplatform gekoppeld.
 
+## Officiële klok volgen
+
+ArenaCue kan meelezen met de console van de jurytafel (Bodet/Mobatime, Stramatel, Swiss Timing, Daktronics, of een ander merk via een open JSON-formaat) en zijn wedstrijdklok en shotclock daarmee gelijkzetten. Standaard uit, alleen lezen, en bij signaalverlies loopt ArenaCue op zijn eigen klok verder. Instellen in **Voorbereiden → Officiële klok volgen**; aansluiting per merk, het JSON-formaat en de simulator staan in `docs/OFFICIAL_CLOCK.md`.
+
 ## Reliability
 
 - Commands validated with Zod before mutating state

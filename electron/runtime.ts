@@ -68,6 +68,13 @@ import { startupDisplayStatePatch } from "../lib/display-startup";
 import { isDisplayPlaybackRisk } from "../lib/media-playback-compat";
 import { inspectVideoForDisplay, prepareVideoForDisplay } from "./media-transcode";
 import { cueEndSec } from "../lib/scheduled-media-cue";
+import {
+  gameSyncHasWork,
+  planGameClockSync,
+  planShotClockSync,
+  type OfficialClockTargets,
+} from "../lib/official-clock/sync";
+import type { OfficialClockHoldReason } from "../lib/official-clock/types";
 
 type RuntimeOptions = {
   getControlWindow: () => BrowserWindow | null;
@@ -1137,7 +1144,7 @@ function startTickLoop() {
               if (interval) Object.assign(data, runBreakFrom(interval.seconds, interval.warnAt30));
               state = await prisma.displayState.update({ where: { id: 1 }, data });
               mutated = true;
-              broadcastHorn("period_end");
+              if (!officialClockHornMute.game) broadcastHorn("period_end");
               requireOpts().log(`[tick] periode-einde: klok gestopt op 00:00 (${match.sport} periode ${match.currentPeriod})`);
             }
           }
@@ -1150,7 +1157,7 @@ function startTickLoop() {
           data: pauseShotClockAt(0),
         });
         mutated = true;
-        broadcastHorn("shot_clock");
+        if (!officialClockHornMute.shot) broadcastHorn("shot_clock");
       }
       if (state.homePenaltyRunning && computePenaltySeconds(penaltyStateFor(state, "home"), now) <= 0) {
         state = await prisma.displayState.update({
@@ -2905,6 +2912,97 @@ export async function runCommand(input: Command): Promise<CommandAck> {
       sendControl("display:error", { message });
       return { ok: false, error: message };
     }
+  };
+  const next = commandQueue.then(run, run);
+  commandQueue = next.catch(() => undefined);
+  return next;
+}
+
+/**
+ * Klokken die de officiële console volgen, hebben daar hun eigen claxon: die van ArenaCue zwijgt dan.
+ * `electron/official-clock.ts` zet dit zolang het signaal er is en weer uit zodra het wegvalt.
+ */
+let officialClockHornMute = { game: false, shot: false };
+
+export function setOfficialClockHornMute(next: { game: boolean; shot: boolean }): void {
+  officialClockHornMute = { game: Boolean(next.game), shot: Boolean(next.shot) };
+}
+
+/** Telt de klok van de actieve wedstrijd op of af? Zonder wedstrijd: af, zoals bij de meeste zaalsporten. */
+export async function getOfficialClockContext(): Promise<{ direction: "down" | "up" }> {
+  const match = await tickMatchInfo(await getStateRowCached());
+  return { direction: match && getSportProfile(match.sport).timerMode === "COUNT_UP" ? "up" : "down" };
+}
+
+let officialClockLastError = "";
+
+/**
+ * Stuurt wedstrijdklok en shotclock bij naar wat de officiële console toont. Loopt in dezelfde
+ * wachtrij als de commando's; starten en pauzeren gaan via `timer:start` en `timer:pause`, zodat ze
+ * precies doen wat de knop doet. Geeft terug waarom de wedstrijdklok eventueel niet gevolgd wordt.
+ */
+export async function syncOfficialClock(
+  targets: OfficialClockTargets,
+): Promise<{ gameHold: OfficialClockHoldReason | null }> {
+  // Voorcontrole op de gecachte stand: meestal valt er niets te doen en blijft de database met rust.
+  const cached = await getStateRowCached();
+  const cachedMatch = await tickMatchInfo(cached);
+  const previewAt = Date.now();
+  const gamePreview = targets.game
+    ? planGameClockSync({ state: cached, match: cachedMatch, official: targets.game, nowMs: previewAt })
+    : null;
+  const shotPreview = targets.shot
+    ? planShotClockSync({ state: cached, sport: cachedMatch?.sport ?? null, official: targets.shot, nowMs: previewAt })
+    : null;
+  let gameHold = gamePreview?.hold ?? null;
+  if ((!gamePreview || !gameSyncHasWork(gamePreview)) && !shotPreview) return { gameHold };
+
+  const run = async (): Promise<{ gameHold: OfficialClockHoldReason | null }> => {
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          // Opnieuw plannen op de stand van nu: tussen de voorcontrole en dit moment kan een commando zijn uitgevoerd.
+          let state = await tx.displayState.findUnique({ where: { id: 1 } });
+          if (!state) return;
+          const match = state.matchId
+            ? await tx.match.findUnique({
+                where: { id: state.matchId },
+                select: { sport: true, currentPeriod: true, periodDurationSec: true },
+              })
+            : null;
+          if (targets.game) {
+            const plan = planGameClockSync({ state, match, official: targets.game, nowMs: Date.now() });
+            gameHold = plan.hold;
+            if (plan.before) state = await tx.displayState.update({ where: { id: 1 }, data: plan.before });
+            if (plan.command) {
+              await handleCommand({ type: plan.command }, tx);
+              state = (await tx.displayState.findUnique({ where: { id: 1 } })) ?? state;
+            }
+            if (plan.after) state = await tx.displayState.update({ where: { id: 1 }, data: plan.after });
+          }
+          if (targets.shot) {
+            const patch = planShotClockSync({
+              state,
+              sport: match?.sport ?? null,
+              official: targets.shot,
+              nowMs: Date.now(),
+            });
+            if (patch) await tx.displayState.update({ where: { id: 1 }, data: patch });
+          }
+        },
+        { maxWait: 10_000, timeout: 20_000 },
+      );
+      await broadcastDisplayState();
+      officialClockLastError = "";
+    } catch (err) {
+      // Zelfde fout bij elke poging (tien keer per seconde): één regel in het logboek volstaat.
+      const message = isCommandUserError(err) ? err.code : err instanceof Error ? err.message : String(err);
+      if (message !== officialClockLastError) {
+        officialClockLastError = message;
+        requireOpts().log(`[official-clock] bijsturen: ${message}`);
+      }
+    }
+    return { gameHold };
   };
   const next = commandQueue.then(run, run);
   commandQueue = next.catch(() => undefined);
