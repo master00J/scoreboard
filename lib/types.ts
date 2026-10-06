@@ -55,8 +55,8 @@ export type AppSettings = {
   /** Toon safe-zone overlay op stadiondisplay (handig tijdens setup van LED-cabinets). */
   displaySafeZoneVisible?: boolean;
   displaySafeZoneMarginPx?: number;
-  /** Interfacetaal: nl | en | fr. */
-  uiLocale?: "nl" | "en" | "fr" | "it";
+  /** Interfacetaal: nl | en | fr | it | de. */
+  uiLocale?: "nl" | "en" | "fr" | "it" | "de";
   /** JSON: sport → two_blocks | per_period | inplay_plus_breaks. Voetbal wordt genegeerd. */
   sponsorLayoutsJson?: string | null;
   /** JSON met zichtbare tabs en live-blokken per opgeslagen interfaceprofiel. */

@@ -24,6 +24,7 @@ const DEMO_ANNOUNCEMENTS: Record<string, string[]> = {
   en: ["Welcome to our stadium", "Car 1-ABC-123 is blocking the emergency exit"],
   fr: ["Bienvenue dans notre stade", "La voiture 1-ABC-123 bloque la sortie de secours"],
   it: ["Benvenuti nel nostro stadio", "L’auto 1-ABC-123 blocca l’uscita di emergenza"],
+  de: ["Willkommen in unserem Stadion", "Auto 1-ABC-123 blockiert den Notausgang"],
 };
 let webLivestreamSettings = { ...DEFAULT_LIVESTREAM_SETTINGS };
 

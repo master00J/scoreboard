@@ -1,4 +1,4 @@
-export type MenuLocale = "nl" | "en" | "fr" | "it";
+export type MenuLocale = "nl" | "en" | "fr" | "it" | "de";
 
 type MenuDict = Record<string, string>;
 
@@ -159,10 +159,49 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreFailed: "Ripristino non riuscito.",
     unknownError: "Errore sconosciuto",
   },
+  de: {
+    file: "Datei",
+    view: "Ansicht",
+    help: "Hilfe",
+    quit: "Beenden",
+    quitConfirmTitle: "Stadium Scoreboard beenden?",
+    quitConfirmMessage:
+      "Möchten Sie die Anwendung wirklich beenden? Ein laufendes Spiel bleibt in der Datenbank; beenden Sie es vorzugsweise zuerst über «Spiel beenden».",
+    quitConfirmCancel: "Abbrechen",
+    quitConfirmOk: "Beenden",
+    exportVenueBackup: "Venue-Backup exportieren (ZIP)…",
+    hideDisplay: "Anzeigefenster ausblenden",
+    showDisplay: "Anzeigefenster einblenden",
+    toggleFullscreen: "Anzeige-Vollbild ein/aus",
+    openLogs: "Protokollordner öffnen (Fehlerdiagnose)",
+    openUploads: "Uploads-Ordner öffnen",
+    reload: "Neu laden (aktives Fenster)",
+    reloadControl: "Bedienfeld neu laden",
+    reloadDisplay: "Stadionanzeige neu laden",
+    devtoolsControl: "DevTools (Bedienung)",
+    devtoolsDisplay: "DevTools (Anzeige)",
+    licenses: "Lizenzen und Open Source…",
+    backupTitle: "Venue-Backup",
+    backupFailed: "Export fehlgeschlagen.",
+    backupSaved: "Backup gespeichert.",
+    restoreVenueBackup: "Venue-Backup wiederherstellen (ZIP)…",
+    backupBusy: "Ein Backup oder eine Wiederherstellung läuft bereits. Warten Sie, bis sie abgeschlossen ist.",
+    backupSkippedIntro: "Diese Dateien sind nicht im Backup (gelöscht oder größer als 2 GB):",
+    restoreTitle: "Venue-Backup wiederherstellen",
+    restoreNotDuringMatch: "Ein Spiel läuft. Stellen Sie ein Backup vor oder nach dem Spiel wieder her.",
+    restoreUnpackFailed: "Die ZIP-Datei konnte nicht entpackt werden.",
+    restoreNoDatabase: "Dies ist kein Stadium-Scoreboard-Venue-Backup: Es enthält keine Datenbank.",
+    restoreNewerVersion: "Dieses Backup stammt von einer neueren Version der App ({{version}}). Aktualisieren Sie zuerst die App und versuchen Sie es erneut.",
+    restoreConfirmMessage: "Alles auf diesem PC durch das Backup ersetzen?",
+    restoreConfirmDetail: "Mannschaften, Spieler, Spiele, Sponsoren, Medien und Einstellungen werden durch das Backup vom {{date}} ersetzt. Was jetzt vorhanden ist, bleibt als Sicherheitskopie erhalten. Danach startet die App neu.",
+    restoreConfirmOk: "Wiederherstellen und neu starten",
+    restoreFailed: "Wiederherstellung fehlgeschlagen.",
+    unknownError: "Unbekannter Fehler",
+  },
 };
 
 export function normalizeMenuLocale(raw: unknown): MenuLocale {
-  return raw === "en" || raw === "fr" || raw === "it" ? raw : "nl";
+  return raw === "en" || raw === "fr" || raw === "it" || raw === "de" ? raw : "nl";
 }
 
 export function menuLabel(locale: MenuLocale, key: keyof (typeof MENUS)["nl"]): string {

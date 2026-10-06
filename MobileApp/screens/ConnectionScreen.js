@@ -2,7 +2,9 @@ import { useRef, useState } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, Chip, ConfirmButton, Field, Sheet, sharedStyles as s } from '../components/ui';
 import { colors } from '../lib/theme';
-import { useI18n } from '../lib/i18n';
+import { locales, useI18n } from '../lib/i18n';
+
+const LANGUAGE_LABELS = { nl: 'Nederlands', en: 'English', fr: 'Français', it: 'Italiano', de: 'Deutsch' };
 
 function ScannerPane({ onCode, onCancel }) {
   const { QrScanner } = require('./QrScanner');
@@ -60,7 +62,7 @@ export function ConnectionScreen({ controller:c, onConnected }) {
       {cfg.role==='operator' && (!c.isCloud||!cfg.cloudPairToken) && <Field label={t('connection.pin')} value={cfg.operatorPin} onChangeText={operatorPin=>c.updateConfig({operatorPin})} secureTextEntry keyboardType="number-pad" maxLength={12} editable={!c.authenticating}/>}
       <Button label={t('connection.connect')} loading={c.authenticating} disabled={!cfg.baseUrl.trim()} onPress={async()=>{if(await c.authenticate())onConnected();}}/>
     </Card>}
-    <Card title={t('common.language')}><View style={s.row}>{Object.entries({nl:'Nederlands',en:'English',fr:'Français',it:'Italiano'}).map(([value,label])=><Chip key={value} label={label} selected={locale===value} onPress={()=>setLocale(value)}/>)}</View></Card>
+    <Card title={t('common.language')}><View style={s.row}>{locales.map((value)=><Chip key={value} label={LANGUAGE_LABELS[value]} selected={locale===value} onPress={()=>setLocale(value)}/>)}</View></Card>
     <Sheet visible={scanner} title={t('connection.scan')} subtitle={t('connection.scanHint')} closeLabel={t('common.close')} onClose={()=>setScanner(false)}>
       {scanner && <ScannerPane onCancel={()=>setScanner(false)} onCode={(data)=>{
         if(scanned.current)return;scanned.current=true;setScanner(false);void apply(data);

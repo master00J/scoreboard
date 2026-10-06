@@ -16,20 +16,23 @@ const nl = flatten(JSON.parse(fs.readFileSync(path.join(root, "nl.json"), "utf8"
 const en = flatten(JSON.parse(fs.readFileSync(path.join(root, "en.json"), "utf8")));
 const fr = flatten(JSON.parse(fs.readFileSync(path.join(root, "fr.json"), "utf8")));
 const it = flatten(JSON.parse(fs.readFileSync(path.join(root, "it.json"), "utf8")));
+const de = flatten(JSON.parse(fs.readFileSync(path.join(root, "de.json"), "utf8")));
 
-const onlyNl = nl.filter((k) => !en.includes(k) || !fr.includes(k) || !it.includes(k));
+const onlyNl = nl.filter((k) => !en.includes(k) || !fr.includes(k) || !it.includes(k) || !de.includes(k));
 const onlyEn = en.filter((k) => !nl.includes(k));
 const onlyFr = fr.filter((k) => !nl.includes(k));
 const onlyIt = it.filter((k) => !nl.includes(k));
+const onlyDe = de.filter((k) => !nl.includes(k));
 
 console.log(JSON.stringify({
-  counts: { nl: nl.length, en: en.length, fr: fr.length, it: it.length },
+  counts: { nl: nl.length, en: en.length, fr: fr.length, it: it.length, de: de.length },
   setupKeys: nl.filter((k) => k.startsWith("setup.")).length,
-  parityOk: onlyNl.length === 0 && onlyEn.length === 0 && onlyFr.length === 0 && onlyIt.length === 0,
+  parityOk: onlyNl.length === 0 && onlyEn.length === 0 && onlyFr.length === 0 && onlyIt.length === 0 && onlyDe.length === 0,
   onlyNl,
   onlyEn,
   onlyFr,
   onlyIt,
+  onlyDe,
 }, null, 2));
 
-if (onlyNl.length || onlyEn.length || onlyFr.length || onlyIt.length) process.exit(1);
+if (onlyNl.length || onlyEn.length || onlyFr.length || onlyIt.length || onlyDe.length) process.exit(1);

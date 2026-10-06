@@ -1,4 +1,4 @@
-export const UI_LOCALES = ["nl", "en", "fr", "it"] as const;
+export const UI_LOCALES = ["nl", "en", "fr", "it", "de"] as const;
 export type UiLocale = (typeof UI_LOCALES)[number];
 export const DEFAULT_LOCALE: UiLocale = "nl";
 

@@ -5,6 +5,7 @@ import nl from "./locales/nl.json";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
 import itLocale from "./locales/it.json";
+import de from "./locales/de.json";
 
 type Tree = { [key: string]: string | Tree };
 
@@ -23,6 +24,7 @@ const locales: Record<string, Record<string, string>> = {
   en: flatten(en as Tree),
   fr: flatten(fr as Tree),
   it: flatten(itLocale as Tree),
+  de: flatten(de as Tree),
 };
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
@@ -37,7 +39,7 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 describe("taalbestanden", () => {
   it("hebben in elke taal dezelfde sleutels", () => {
     const base = Object.keys(locales.nl);
-    for (const code of ["en", "fr", "it"]) {
+    for (const code of ["en", "fr", "it", "de"]) {
       const keys = new Set(Object.keys(locales[code]));
       const missing = base.filter((key) => !keys.has(key));
       const extra = [...keys].filter((key) => !(key in locales.nl));

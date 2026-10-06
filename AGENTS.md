@@ -8,7 +8,7 @@ Electron + React desktop app that sports clubs run live on matchday. A crash or 
 - `app/control/`: control panel UI. `app/display/`: stadium screen. `app/stream/`: livestream overlay.
 - `lib/`: shared logic, with tests next to the code (`*.test.ts`).
 - `server/`: command handlers and database setup. `prisma/`: SQLite schema.
-- `lib/i18n/locales/{nl,en,fr,it}.json`: UI texts.
+- `lib/i18n/locales/{nl,en,fr,it,de}.json`: UI texts.
 
 ## Scoreboard layout
 
@@ -40,7 +40,7 @@ npm run electron:compile
 
 ## Rules
 
-- Every UI text goes through `t("…")` and exists in all four locale files. `node scripts/verify-i18n-parity.mjs` lists keys that are missing in a language.
+- Every UI text goes through `t("…")` and exists in all five locale files. `node scripts/verify-i18n-parity.mjs` lists keys that are missing in a language.
 - A new persistent field needs both the Prisma schema and an `addColumnIfMissing` line in `server/db-init.ts`, so existing club databases migrate on start.
 - Add or update a test in `lib/` or `server/` when you change logic.
 - A dialog opened from the control panel header must render outside the header (see `feature-request-button.tsx`): the header's backdrop blur traps `position: fixed` children.

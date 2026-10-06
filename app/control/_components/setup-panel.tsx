@@ -22,7 +22,7 @@ import { requestChangeLicense } from "@/lib/license-ui";
 import { useLicenseFeatures } from "@/lib/use-license-features";
 import { mediaUrl } from "@/lib/media-url";
 import { PREMATCH_MATCH_SPONSOR_LEAD_MS } from "@/lib/prematch-match-sponsor";
-import { normalizeUiLocale, type UiLocale } from "@/lib/i18n";
+import { normalizeUiLocale, UI_LOCALES, type UiLocale } from "@/lib/i18n";
 import { sportStartEventVars, tMatchStatus, tSportLabel } from "@/lib/i18n/t-phase";
 import { tPeriodLabel } from "@/lib/i18n/t-sport";
 import { SetupScoreboardTemplatesSection } from "./setup-scoreboard-templates";
@@ -197,10 +197,9 @@ export function SetupPanel() {
           value={currentLocale}
           onChange={(event) => void setUiLocale(normalizeUiLocale(event.target.value))}
         >
-          <option value="nl">{t("language.nl")}</option>
-          <option value="en">{t("language.en")}</option>
-          <option value="fr">{t("language.fr")}</option>
-          <option value="it">{t("language.it")}</option>
+          {UI_LOCALES.map((code) => (
+            <option key={code} value={code}>{t(`language.${code}`)}</option>
+          ))}
         </Select>
       </section>
       {isElectron ? (

@@ -41,7 +41,9 @@ export function ProofOfPlayPanel() {
         ? "fr-BE"
         : i18n.language === "en"
           ? "en-GB"
-          : "nl-BE";
+          : i18n.language === "de"
+            ? "de-DE"
+            : "nl-BE";
   const exportLabels = useMemo(() => proofOfPlayLabelsFromT(t), [t]);
 
   const { data: matches } = useApi<Match[]>("/api/matches");

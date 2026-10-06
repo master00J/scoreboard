@@ -4,11 +4,12 @@ import i18n from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import type { ReactNode } from "react";
 import { useEffect } from "react";
-import { DEFAULT_LOCALE, normalizeUiLocale, type UiLocale } from "./locales";
+import { DEFAULT_LOCALE, normalizeUiLocale, UI_LOCALES, type UiLocale } from "./locales";
 import nl from "./locales/nl.json";
 import en from "./locales/en.json";
 import fr from "./locales/fr.json";
 import it from "./locales/it.json";
+import de from "./locales/de.json";
 
 let initialized = false;
 
@@ -20,6 +21,7 @@ export function ensureI18n(locale: UiLocale = DEFAULT_LOCALE) {
         en: { translation: en },
         fr: { translation: fr },
         it: { translation: it },
+        de: { translation: de },
       },
       lng: locale,
       fallbackLng: {
@@ -27,6 +29,7 @@ export function ensureI18n(locale: UiLocale = DEFAULT_LOCALE) {
         en: ["en"],
         fr: ["fr", "en"],
         it: ["it", "en"],
+        de: ["de", "en"],
         default: ["en"],
       },
       initAsync: false,
@@ -57,5 +60,5 @@ export function I18nProvider({
   return <I18nextProvider i18n={i18n}>{children}</I18nextProvider>;
 }
 
-export { i18n, normalizeUiLocale, DEFAULT_LOCALE };
+export { i18n, normalizeUiLocale, DEFAULT_LOCALE, UI_LOCALES };
 export type { UiLocale };

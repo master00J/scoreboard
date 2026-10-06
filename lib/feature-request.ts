@@ -13,7 +13,7 @@ export const FEATURE_REQUEST_MAX_PHOTOS = 3;
 export const FEATURE_REQUEST_MAX_PHOTO_DATA_CHARS = 1_200_000;
 export const FEATURE_REQUEST_PHOTO_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
 
-const LOCALES = ["nl", "en", "fr", "it"] as const;
+const LOCALES = ["nl", "en", "fr", "it", "de"] as const;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PHOTO_DATA_URL_RE = /^data:(image\/(?:jpeg|png|webp));base64,[A-Za-z0-9+/]+={0,2}$/;
 
@@ -119,7 +119,7 @@ export function normalizeFeatureRequestInput(raw: unknown): FeatureRequestInput 
   const photos = normalizeFeatureRequestPhotos(rec.photos);
   if (photos === null) return null;
 
-  // i18next kan "nl-BE" geven; de site kent alleen de vier app-talen.
+  // i18next kan "nl-BE" geven; de site kent alleen de app-talen.
   const lang = typeof rec.locale === "string" ? rec.locale.trim().toLowerCase().slice(0, 2) : "";
   const locale = LOCALES.find((code) => code === lang);
 

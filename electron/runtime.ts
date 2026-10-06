@@ -81,7 +81,7 @@ type RuntimeOptions = {
   getDisplayWindow: () => BrowserWindow | null;
   getStreamWindow: () => BrowserWindow | null;
   log: (line: string) => void;
-  onUiLocaleChanged?: (locale: "nl" | "en" | "fr" | "it") => void;
+  onUiLocaleChanged?: (locale: "nl" | "en" | "fr" | "it" | "de") => void;
 };
 
 let opts: RuntimeOptions | null = null;
@@ -445,8 +445,8 @@ function clampLiveCyclePhasing(p: LiveCycleStored): LiveCycleStored {
   };
 }
 
-function normalizeUiLocale(raw: string | null | undefined): "nl" | "en" | "fr" | "it" {
-  return raw === "en" || raw === "fr" || raw === "it" ? raw : "nl";
+function normalizeUiLocale(raw: string | null | undefined): "nl" | "en" | "fr" | "it" | "de" {
+  return raw === "en" || raw === "fr" || raw === "it" || raw === "de" ? raw : "nl";
 }
 
 async function getAppSettings(): Promise<{
@@ -463,7 +463,7 @@ async function getAppSettings(): Promise<{
   displayScalingMode: "cover" | "contain" | "exact";
   displaySafeZoneVisible: boolean;
   displaySafeZoneMarginPx: number;
-  uiLocale: "nl" | "en" | "fr" | "it";
+  uiLocale: "nl" | "en" | "fr" | "it" | "de";
   sponsorLayoutsJson: string | null;
   interfaceProfilesJson: string | null;
   displayExtrasJson: string | null;
@@ -678,7 +678,7 @@ async function buildSettingsApiJson() {
   };
 }
 
-async function setUiLocale(locale: "nl" | "en" | "fr" | "it") {
+async function setUiLocale(locale: "nl" | "en" | "fr" | "it" | "de") {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "uiLocale" = ? WHERE "id" = 1`,
     locale,
@@ -690,7 +690,7 @@ async function setUiLocale(locale: "nl" | "en" | "fr" | "it") {
   }
 }
 
-export async function getUiLocale(): Promise<"nl" | "en" | "fr" | "it"> {
+export async function getUiLocale(): Promise<"nl" | "en" | "fr" | "it" | "de"> {
   const s = await getAppSettings();
   return normalizeUiLocale(s.uiLocale);
 }
@@ -1741,7 +1741,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           displaySafeZoneVisible?: boolean;
           displaySafeZoneMarginPx?: number;
           idleFallbackMediaId?: string | null;
-          uiLocale?: "nl" | "en" | "fr" | "it";
+          uiLocale?: "nl" | "en" | "fr" | "it" | "de";
           sponsorLayoutsJson?: string | null;
           interfaceProfilesJson?: string | null;
           displayExtrasJson?: string | null;

@@ -131,7 +131,7 @@ test("rejected desktop commands map known error codes to translated messages", (
   assert.deepEqual(limit, { key: "cmd.timeoutLimit", values: { limit: 2 } });
   assert.equal(commandErrorMessages.nl.cmd.timeoutLimit, "Time-outlimiet bereikt ({limit}) voor deze periode.");
   assert.equal(commandErrorMessages.en.cmd.periodOver, "The period is over (00:00). Choose the next period or set the time.");
-  for (const locale of ["nl", "en", "fr", "it"]) assert.equal(Object.keys(commandErrorMessages[locale].cmd).length, Object.keys(commandErrorMessages.nl.cmd).length);
+  for (const locale of ["nl", "en", "fr", "it", "de"]) assert.equal(Object.keys(commandErrorMessages[locale].cmd).length, Object.keys(commandErrorMessages.nl.cmd).length);
   assert.deepEqual(describeCommandError({ ok: false, error: "Iets onverwachts" }), { key: null, details: "Iets onverwachts" });
   assert.deepEqual(describeCommandError({ message: "Ongeldig command formaat." }), { key: null, details: "Ongeldig command formaat." });
   assert.deepEqual(describeCommandError(null), { key: null, details: null });
