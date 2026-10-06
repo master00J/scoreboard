@@ -32,8 +32,12 @@ describe("normalizeFeatureRequestInput", () => {
   });
 
   it("laat een onbekende taal weg in plaats van de aanvraag te weigeren", () => {
+    expect(normalizeFeatureRequestInput({ text: "Toon de teamfouten naast de score.", locale: "es" })).toEqual({
+      text: "Toon de teamfouten naast de score.",
+    });
     expect(normalizeFeatureRequestInput({ text: "Toon de teamfouten naast de score.", locale: "de" })).toEqual({
       text: "Toon de teamfouten naast de score.",
+      locale: "de",
     });
   });
 
