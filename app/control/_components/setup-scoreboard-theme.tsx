@@ -33,11 +33,11 @@ import {
   defaultLayoutRuleTemplateId,
   layoutRuleOverview,
   layoutRulesFromThemeJson,
-  pickLayoutRule,
   type LayoutPhase,
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
-import { sameVisualLayout, sanitizeTemplateThemeJson, templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
+import { sameVisualLayout, templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
+import { withLayoutPreviewMeta } from "@/lib/scoreboard-preview-match";
 import { SPORT_TYPES, normalizeSport, type SportType } from "@/lib/sports";
 import { canRedo, canUndo } from "@/lib/undo-history";
 import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
@@ -351,6 +351,8 @@ export function SetupScoreboardThemeSection({
   const [surface, setSurface] = useState<EditorSurface>("sponsor");
   const [layouts, setLayouts] = useState<ScoreboardTemplate[]>([]);
   const [tryUntil, setTryUntil] = useState<number | null>(null);
+  /** De sport die het canvas toont; "Probeer op scherm" neemt die mee. */
+  const [canvasSport, setCanvasSport] = useState<SportType | null>(null);
 
   const canvasWidth = Math.max(320, Number(settings?.displayCanvasWidth ?? 1920));
   const canvasHeight = Math.max(240, Number(settings?.displayCanvasHeight ?? 1080));
@@ -433,7 +435,10 @@ export function SetupScoreboardThemeSection({
   // "Probeer op scherm" loopt vanzelf af; zet de knop dan terug.
   useEffect(() => {
     if (!tryUntil) return;
-    const id = window.setTimeout(() => setTryUntil(null), Math.max(0, tryUntil - Date.now()));
+    const id = window.setTimeout(() => {
+      sentTryJsonRef.current = null;
+      setTryUntil(null);
+    }, Math.max(0, tryUntil - Date.now()));
     return () => window.clearTimeout(id);
   }, [tryUntil]);
 
@@ -447,26 +452,60 @@ export function SetupScoreboardThemeSection({
     return payload;
   }
 
+  /** Wat het stadionscherm bij "Probeer op scherm" toont: dit concept, op het vlak en de sport van het canvas. */
+  const tryPayloadJson = JSON.stringify(withLayoutPreviewMeta(themePayload(), { surface, sport: canvasSport }));
+  const sentTryJsonRef = useRef<string | null>(null);
+
+  async function sendTryPreview(json: string, seconds: number): Promise<number> {
+    const res = await fetch("/api/display/theme-preview", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ themeJson: json, seconds }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { until?: number };
+    if (!res.ok) throw new Error("preview");
+    sentTryJsonRef.current = json;
+    return data.until ?? Date.now() + seconds * 1000;
+  }
+
   async function tryOnScreen() {
     const seconds = 60;
     try {
-      const res = await fetch("/api/display/theme-preview", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ themeJson: JSON.stringify(themePayload()), seconds }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { until?: number };
-      if (!res.ok) throw new Error("preview");
-      setTryUntil(data.until ?? Date.now() + seconds * 1000);
+      setTryUntil(await sendTryPreview(tryPayloadJson, seconds));
       toast({ title: t("layoutEditor.tryStarted", { seconds }), variant: "success" });
     } catch {
       toast({ title: t("layoutEditor.tryFailed"), variant: "error" });
     }
   }
 
-  async function stopTryOnScreen() {
-    await fetch("/api/display/theme-preview", { method: "DELETE" }).catch(() => {});
+  // Tijdens de proef volgt het stadionscherm het canvas: slepen, ander vlak of andere sport.
+  useEffect(() => {
+    if (!tryUntil || sentTryJsonRef.current === tryPayloadJson) return;
+    const id = window.setTimeout(() => {
+      const seconds = Math.round((tryUntil - Date.now()) / 1000);
+      if (seconds < 5) return;
+      sendTryPreview(tryPayloadJson, seconds).then(setTryUntil, () => {});
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, [tryUntil, tryPayloadJson]);
+
+  // Wie de editor verlaat, laat geen proef op het stadionscherm achter.
+  useEffect(
+    () => () => {
+      if (sentTryJsonRef.current) void fetch("/api/display/theme-preview", { method: "DELETE" }).catch(() => {});
+    },
+    [],
+  );
+
+  /** Na opslaan toont het scherm de opgeslagen indeling, niet nog tot een minuut de proef. */
+  async function endTryPreview() {
+    sentTryJsonRef.current = null;
     setTryUntil(null);
+    await fetch("/api/display/theme-preview", { method: "DELETE" }).catch(() => {});
+  }
+
+  async function stopTryOnScreen() {
+    await endTryPreview();
     toast({ title: t("layoutEditor.tryStopped") });
   }
 
@@ -490,21 +529,9 @@ export function SetupScoreboardThemeSection({
       toast({ title: t("setup.themeSaveFailed"), variant: "error" });
       return;
     }
-    const rule = pickLayoutRule(rules, {
-      sport: previewSport ?? liveMatch?.sport,
-      status: liveMatch?.status,
-    });
-    const clubLayout = rule ? layouts.find((item) => item.id === rule.templateId && !item.isBuiltIn) : null;
-    if (clubLayout) {
-      await fetch(`/api/scoreboard-templates/${clubLayout.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ themeJson: sanitizeTemplateThemeJson(json) }),
-      }).catch(() => null);
-    }
     // De geschiedenis blijft staan, zodat ongedaan maken ook na opslaan nog kan.
     store().markSaved(json);
-    setTryUntil(null);
+    if (tryUntil) await endTryPreview();
     toast({ title: t("setup.themeSaved"), variant: "success" });
     reloadSettings();
   }
@@ -542,7 +569,7 @@ export function SetupScoreboardThemeSection({
       // Klaar met deze indeling: de editor toont weer de gewone indeling.
       store().reset(json, { theme: baseTheme, rules, repeatSponsorBudgetCycles });
     }
-    setTryUntil(null);
+    if (tryUntil) await endTryPreview();
     toast({ title: t("setup.themeLayoutSaved", { name: layout.name }), variant: "success" });
     void loadLayouts();
     reloadSettings();
@@ -791,6 +818,7 @@ export function SetupScoreboardThemeSection({
           awayTeam={awayTeam}
           liveMatch={liveMatch}
           initialSport={previewSport}
+          onPreviewSportChange={setCanvasSport}
           surface={surface}
           canvasWidth={canvasWidth}
           canvasHeight={canvasHeight}

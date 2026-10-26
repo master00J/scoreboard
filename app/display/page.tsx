@@ -15,7 +15,7 @@ import type { HornPayload } from "@/lib/desktop-bridge";
 import type { DisplayModeT } from "@/lib/validation/commands";
 import { useDisplayStore } from "@/lib/store";
 import { useLiveBreakSeconds, useLiveShotClockSeconds, useLiveTimeoutSeconds, useLiveTimerSeconds } from "@/lib/use-timer";
-import { getSportProfile, resolveDisplayShowClock, sportBreakLabel, sportClockSeconds, sportHasMainClock, sportPeriodLabel } from "@/lib/sports";
+import { getSportProfile, normalizeSport, resolveDisplayShowClock, sportBreakLabel, sportClockSeconds, sportHasMainClock, sportPeriodLabel } from "@/lib/sports";
 import type {
   AppSettings,
   Match,
@@ -94,13 +94,17 @@ import { LeftScoreboardLayout } from "./_modes/left-scoreboard-layout";
 import { CustomScoreboardLayout } from "./_modes/custom-scoreboard-layout";
 import { StripScoreboardLayout } from "./_modes/scoreboard-strip";
 import { MatchScoreboardFull } from "./_modes/match-scoreboard-full";
-import { ScoreboardLayoutBoard } from "./_modes/scoreboard-layout-board";
+import { ScoreboardSurfaceBoard } from "./_modes/scoreboard-layout-board";
 import {
   SCOREBOARD_PREVIEW_ADDED_TIME,
-  SCOREBOARD_PREVIEW_ELAPSED,
-  buildScoreboardPreviewMatch,
+  SCOREBOARD_PREVIEW_AWAY,
+  layoutPreviewMatch,
+  layoutPreviewMeta,
   layoutPreviewReplacesIdle,
+  sportPreviewElapsed,
+  sportPreviewShotClock,
   teamFromHomeBranding,
+  themeForPreviewSport,
 } from "@/lib/scoreboard-preview-match";
 import { GoalMode } from "./_modes/goal";
 import { SubstitutionMode } from "./_modes/substitution";
@@ -123,7 +127,7 @@ import {
   timeoutCoversDisplay,
 } from "@/lib/sponsor-playback-interruption";
 import { tMatchPeriod } from "@/lib/i18n/t-phase";
-import { tBoard } from "@/lib/i18n/t-sport";
+import { tBoard, tPeriodName } from "@/lib/i18n/t-sport";
 import { useTranslation } from "react-i18next";
 import { useResolvedSponsorWindow } from "@/lib/use-resolved-sponsor-window";
 import {
@@ -587,14 +591,19 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   const cardPlayer = activePlayer;
   const layoutPreviewActive = layoutPreviewReplacesIdle(themePreviewJson, mode);
-  const layoutPreviewMatch = useMemo(
-    () =>
-      match ??
-      buildScoreboardPreviewMatch({
-        home: teamFromHomeBranding(homeTeamBranding),
-      }),
-    [match, homeTeamBranding],
-  );
+  /** "Probeer op scherm": hetzelfde vlak, dezelfde sport en dezelfde stand als het editor-canvas. */
+  const layoutPreview = useMemo(() => {
+    if (!layoutPreviewActive) return null;
+    const meta = layoutPreviewMeta(themePreviewJson);
+    const sport = meta.sport ?? normalizeSport(match?.sport);
+    const picked = layoutPreviewMatch({
+      live: match,
+      sport,
+      home: match?.homeTeam ?? teamFromHomeBranding(homeTeamBranding),
+      away: match?.awayTeam ?? SCOREBOARD_PREVIEW_AWAY,
+    });
+    return { ...picked, surface: meta.surface, sport, theme: themeForPreviewSport(scoreboardTheme, sport) };
+  }, [layoutPreviewActive, themePreviewJson, match, homeTeamBranding, scoreboardTheme]);
   const period = tMatchPeriod(t, match);
   const scoreboardClock = sportClockSeconds(
     match?.sport,
@@ -1985,16 +1994,27 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         </ScoreFrame>
       )}
 
-      {state && layoutPreviewActive && (
-        <div className="absolute inset-0 z-[89] bg-black" data-layout-preview>
-          <ScoreboardLayoutBoard
-            theme={liveTheme}
-            match={layoutPreviewMatch}
-            elapsed={match ? scoreboardClock : SCOREBOARD_PREVIEW_ELAPSED}
-            running={match ? (state.timerRunning ?? false) : true}
-            period={match ? period : t("sports.period.half1")}
-            addedTime={match ? addedTimeMinutes : SCOREBOARD_PREVIEW_ADDED_TIME}
-            shotClock={match ? shotClock : 0}
+      {state && layoutPreview && (
+        <div className="absolute inset-0 z-[89] bg-black" data-layout-preview={layoutPreview.surface}>
+          <ScoreboardSurfaceBoard
+            surface={layoutPreview.surface}
+            theme={layoutPreview.theme}
+            match={layoutPreview.match}
+            elapsed={layoutPreview.live ? scoreboardClock : sportPreviewElapsed(layoutPreview.sport)}
+            running={layoutPreview.live ? (state.timerRunning ?? false) : true}
+            period={
+              layoutPreview.live
+                ? period
+                : tPeriodName(t, layoutPreview.sport, layoutPreview.match.currentPeriod)
+            }
+            addedTime={
+              layoutPreview.live
+                ? addedTimeMinutes
+                : getSportProfile(layoutPreview.sport).supportsInjuryTime
+                  ? SCOREBOARD_PREVIEW_ADDED_TIME
+                  : 0
+            }
+            shotClock={layoutPreview.live ? shotClock : sportPreviewShotClock(layoutPreview.sport)}
           />
         </div>
       )}

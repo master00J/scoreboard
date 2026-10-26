@@ -23,7 +23,7 @@ export const useToastStore = create<Store>((set) => ({
   push: (t) =>
     set((s) => ({
       toasts: [
-        ...s.toasts,
+        ...s.toasts.filter((item) => item.title !== t.title),
         { ...t, id: Math.random().toString(36).slice(2) },
       ],
     })),
@@ -56,7 +56,10 @@ function ToastCard({
   onDismiss: () => void;
 }) {
   useEffect(() => {
-    const id = setTimeout(onDismiss, toast.duration ?? 4000);
+    const id = setTimeout(
+      onDismiss,
+      toast.duration ?? (toast.variant === "error" ? 2800 : 1600),
+    );
     return () => clearTimeout(id);
   }, [onDismiss, toast.duration]);
 

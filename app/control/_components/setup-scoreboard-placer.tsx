@@ -3,10 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, Trash2 } from "lucide-react";
-import { CustomScoreboardLayout } from "@/app/display/_modes/custom-scoreboard-layout";
-import { LeftScoreboardLayout } from "@/app/display/_modes/left-scoreboard-layout";
-import { MatchScoreboardFull } from "@/app/display/_modes/match-scoreboard-full";
-import { StripScoreboardLayout } from "@/app/display/_modes/scoreboard-strip";
+import { ScoreboardSurfaceBoard } from "@/app/display/_modes/scoreboard-layout-board";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
@@ -15,7 +12,7 @@ import { isElectron, selectFilesViaDialog } from "@/lib/electron";
 import { tMatchPeriod } from "@/lib/i18n/t-phase";
 import { tPeriodName, tSportLabel } from "@/lib/i18n/t-sport";
 import { useDisplayStore } from "@/lib/store";
-import { useLiveTimerSeconds } from "@/lib/use-timer";
+import { useLiveShotClockSeconds, useLiveTimerSeconds } from "@/lib/use-timer";
 import {
   GRID_PCT,
   RESIZE_HANDLES,
@@ -46,15 +43,24 @@ import {
   type LayoutElementStyle,
 } from "@/lib/scoreboard-elements";
 import {
-  scoreboardEditorShowsLeftFrame,
   withSurfaceElements,
   type LayoutSlot,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
-import { SPORT_TYPES, getSportProfile, normalizeSport, resolveDisplayShowClock, type SportType } from "@/lib/sports";
+import {
+  SCOREBOARD_PREVIEW_ADDED_TIME,
+  SCOREBOARD_PREVIEW_AWAY,
+  SCOREBOARD_PREVIEW_HOME,
+  layoutPreviewMatch,
+  sportPreviewElapsed,
+  sportPreviewShotClock,
+  themeForPreviewSport,
+  type LayoutPreviewSurface,
+} from "@/lib/scoreboard-preview-match";
+import { SPORT_TYPES, getSportProfile, normalizeSport, sportClockSeconds, type SportType } from "@/lib/sports";
 import type { Match, Team } from "@/lib/types";
 
-export type EditorSurface = "sponsor" | "full";
+export type EditorSurface = LayoutPreviewSurface;
 
 /**
  * `live` = tussenstand tijdens slepen (de eigenaar maakt er bij `onGestureEnd` één stap van).
@@ -90,93 +96,6 @@ const HANDLE_CLASS: Record<ResizeHandle, string> = {
 type Drag =
   | { kind: "move"; id: string; startX: number; startY: number; box: LayoutSlot }
   | { kind: "resize"; id: string; startX: number; startY: number; box: LayoutSlot; handle: ResizeHandle };
-
-const FALLBACK_HOME: Team = {
-  id: "preview-home",
-  name: "Thuis",
-  shortName: "THU",
-  logoPath: null,
-  primaryColor: "#2563eb",
-  secondaryColor: "#1e3a8a",
-};
-
-const FALLBACK_AWAY: Team = {
-  id: "preview-away",
-  name: "Uit",
-  shortName: "UIT",
-  logoPath: null,
-  primaryColor: "#dc2626",
-  secondaryColor: "#7f1d1d",
-};
-
-/** Voorbeeldwedstrijd per sport, zodat sets, fouten, time-outs en shotclock in de editor te zien zijn. */
-function editorMatch(home: Team, away: Team, sport: SportType): Match {
-  const base: Match = {
-    id: "preview",
-    homeTeamId: home.id,
-    awayTeamId: away.id,
-    homeTeam: home,
-    awayTeam: away,
-    kickoffAt: null,
-    halfDurationSec: 2700,
-    halfBreakSec: 900,
-    sport,
-    currentPeriod: 1,
-    periodDurationSec: 2700,
-    homeTimeouts: 0,
-    awayTimeouts: 0,
-    homeFouls: 0,
-    awayFouls: 0,
-    homeSets: 0,
-    awaySets: 0,
-    status: "FIRST_HALF",
-    homeScore: 1,
-    awayScore: 0,
-    createdAt: new Date().toISOString(),
-  };
-  switch (sport) {
-    case "BASKETBALL":
-      return {
-        ...base,
-        currentPeriod: 2,
-        periodDurationSec: 600,
-        homeScore: 34,
-        awayScore: 31,
-        homeFouls: 3,
-        awayFouls: 5,
-        homeTimeouts: 1,
-        awayTimeouts: 2,
-        possessionArrow: "home",
-      };
-    case "FUTSAL":
-      return { ...base, currentPeriod: 2, periodDurationSec: 1200, homeScore: 3, awayScore: 2, homeFouls: 4, awayFouls: 6, homeTimeouts: 1 };
-    case "VOLLEYBALL":
-      return {
-        ...base,
-        currentPeriod: 4,
-        homeScore: 18,
-        awayScore: 21,
-        homeSets: 1,
-        awaySets: 2,
-        homeTimeouts: 1,
-        servingSide: "home",
-        setHistory: [
-          { home: 25, away: 22 },
-          { home: 20, away: 25 },
-          { home: 23, away: 25 },
-        ],
-      };
-    case "HOCKEY":
-      return { ...base, currentPeriod: 3, periodDurationSec: 900, homeScore: 2, awayScore: 2 };
-    default:
-      return base;
-  }
-}
-
-/** Klokstand in het voorbeeld; aftellende sporten tonen de resterende tijd. */
-function previewElapsed(sport: SportType): number {
-  return getSportProfile(sport).timerMode === "COUNT_DOWN" ? 437 : 512;
-}
 
 function toHex(raw: string | undefined, fallback: string): string {
   const s = (raw ?? "").trim();
@@ -281,17 +200,6 @@ function AlignGuides({
   );
 }
 
-function VideoPlate() {
-  return (
-    <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-black">
-      <div className="rounded border border-white/25 px-[4%] py-[2%] text-[min(8cqw,42px)] font-black tracking-[0.28em] text-white/55">
-        16:9
-      </div>
-      <div className="mt-[2%] text-[min(3.4cqw,22px)] uppercase tracking-[0.2em] text-white/35">Video</div>
-    </div>
-  );
-}
-
 type ColorKey =
   | "contentAreaBg"
   | "frameColorTop"
@@ -324,6 +232,7 @@ export function SetupScoreboardPlacer({
   awayTeam,
   liveMatch,
   initialSport,
+  onPreviewSportChange,
   surface,
   canvasWidth,
   canvasHeight,
@@ -341,6 +250,7 @@ export function SetupScoreboardPlacer({
   liveMatch?: Match | null;
   /** Sport van de actieve wedstrijd; daarna kiest de operator zelf. */
   initialSport?: string | null;
+  onPreviewSportChange?: (sport: SportType) => void;
   surface: EditorSurface;
   /** Schermformaat uit Scherminstellingen; het canvas en het 16:9-videovak rekenen hiermee. */
   canvasWidth: number;
@@ -349,6 +259,7 @@ export function SetupScoreboardPlacer({
 }) {
   const { t } = useTranslation();
   const liveElapsed = useLiveTimerSeconds();
+  const liveShotClock = useLiveShotClockSeconds();
   const timerRunning = useDisplayStore((state) => !!state.state?.timerRunning);
   const addedTimeMinutes = useDisplayStore((state) => Math.max(0, state.state?.addedTimeMinutes ?? 0));
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -365,6 +276,10 @@ export function SetupScoreboardPlacer({
   useEffect(() => {
     if (initialSport) setPreviewSport(normalizeSport(initialSport));
   }, [initialSport]);
+  // "Probeer op scherm" toont dezelfde sport als dit canvas.
+  useEffect(() => {
+    onPreviewSportChange?.(previewSport);
+  }, [previewSport, onPreviewSportChange]);
   const [selected, setSelected] = useState<string>(surface === "full" ? "home" : "sponsor");
 
   useEffect(() => {
@@ -392,31 +307,27 @@ export function SetupScoreboardPlacer({
   const mediaRatio = sixteenByNineHeightPct(1, canvasWidth, canvasHeight);
 
   const home = homeTeam ?? {
-    ...FALLBACK_HOME,
+    ...SCOREBOARD_PREVIEW_HOME,
     name: t("common.home"),
     shortName: t("common.home").slice(0, 3).toUpperCase(),
   };
   const away = awayTeam ?? {
-    ...FALLBACK_AWAY,
+    ...SCOREBOARD_PREVIEW_AWAY,
     name: t("common.away"),
     shortName: t("common.away").slice(0, 3).toUpperCase(),
   };
-  const usingLiveMatch = !!(liveMatch && normalizeSport(liveMatch.sport) === previewSport);
-  const match = usingLiveMatch
-    ? { ...liveMatch, homeTeam: home, awayTeam: away, sport: previewSport }
-    : editorMatch(home, away, previewSport);
+  const { match, live: usingLiveMatch } = layoutPreviewMatch({ live: liveMatch, sport: previewSport, home, away });
   const profile = getSportProfile(previewSport);
   /** Zelfde aanpassingen als het stadionscherm: geen klok of extra tijd bij sporten die dat niet kennen. */
-  const previewTheme: ResolvedScoreboardTheme = {
-    ...theme,
-    showClock: resolveDisplayShowClock(previewSport, theme.showClock),
-    fullShowAddedTime: profile.supportsInjuryTime ? theme.fullShowAddedTime : false,
-  };
+  const previewTheme = themeForPreviewSport(theme, previewSport);
   const period = usingLiveMatch ? tMatchPeriod(t, match) : tPeriodName(t, previewSport, match.currentPeriod);
-  const elapsed = usingLiveMatch ? liveElapsed : previewElapsed(previewSport);
+  // Live zoals het stadionscherm de klok toont: aftellende sporten tonen de resterende tijd.
+  const elapsed = usingLiveMatch
+    ? sportClockSeconds(previewSport, liveElapsed, match.periodDurationSec, match.currentPeriod ?? 1)
+    : sportPreviewElapsed(previewSport);
   const running = usingLiveMatch ? timerRunning : true;
-  const addedTime = usingLiveMatch ? addedTimeMinutes : profile.supportsInjuryTime ? 2 : 0;
-  const shotClock = profile.shotClockPresets.length > 0 ? 14 : 0;
+  const addedTime = usingLiveMatch ? addedTimeMinutes : profile.supportsInjuryTime ? SCOREBOARD_PREVIEW_ADDED_TIME : 0;
+  const shotClock = usingLiveMatch ? liveShotClock : sportPreviewShotClock(previewSport);
 
   function elementLabel(element: LayoutElement): string {
     if (isClassicElementId(element.id)) return t(`setup.themeSlot_${element.id}`);
@@ -724,53 +635,16 @@ export function SetupScoreboardPlacer({
                 visibility: previewScale > 0 ? "visible" : "hidden",
               }}
             >
-              {surface === "full" ? (
-                <MatchScoreboardFull
-                  match={match}
-                  elapsed={elapsed}
-                  running={running}
-                  period={period}
-                  addedTime={addedTime}
-                  shotClock={shotClock}
-                  theme={previewTheme}
-                />
-              ) : scoreboardEditorShowsLeftFrame(previewTheme) ? (
-                <LeftScoreboardLayout
-                  match={match}
-                  elapsed={elapsed}
-                  running={running}
-                  period={period}
-                  addedTime={addedTime}
-                  shotClock={shotClock}
-                  theme={previewTheme}
-                >
-                  <VideoPlate />
-                </LeftScoreboardLayout>
-              ) : previewTheme.layoutMode === "bottom-strip" ? (
-                <StripScoreboardLayout
-                  match={match}
-                  elapsed={elapsed}
-                  running={running}
-                  period={period}
-                  addedTime={addedTime}
-                  shotClock={shotClock}
-                  theme={previewTheme}
-                >
-                  <VideoPlate />
-                </StripScoreboardLayout>
-              ) : (
-                <CustomScoreboardLayout
-                  match={match}
-                  elapsed={elapsed}
-                  running={running}
-                  period={period}
-                  addedTime={addedTime}
-                  shotClock={shotClock}
-                  theme={previewTheme}
-                >
-                  <VideoPlate />
-                </CustomScoreboardLayout>
-              )}
+              <ScoreboardSurfaceBoard
+                surface={surface}
+                match={match}
+                elapsed={elapsed}
+                running={running}
+                period={period}
+                addedTime={addedTime}
+                shotClock={shotClock}
+                theme={previewTheme}
+              />
             </div>
 
             {showAlignGuides && (
