@@ -337,8 +337,12 @@ export function pickLayoutRule(
   rules: LayoutRule[],
   situation: { sport: unknown; status: string | null | undefined },
 ): LayoutRule | null {
-  const sport = normalizeSport(situation.sport);
-  const phase = layoutPhaseForStatus(situation.status);
+  return pickLayoutRuleForPhase(rules, situation.sport, layoutPhaseForStatus(situation.status));
+}
+
+/** Zoals `pickLayoutRule`, maar voor een fase in plaats van een wedstrijdstatus. */
+export function pickLayoutRuleForPhase(rules: LayoutRule[], sportRaw: unknown, phase: LayoutPhase): LayoutRule | null {
+  const sport = normalizeSport(sportRaw);
   let best: LayoutRule | null = null;
   let bestScore = -1;
   for (const rule of rules) {
@@ -351,4 +355,33 @@ export function pickLayoutRule(
     }
   }
   return best;
+}
+
+/** Wat het stadionscherm in één fase toont: de gewone indeling, of de opgeslagen indeling van een regel. */
+export type LayoutPhaseOverview = {
+  phase: LayoutPhase;
+  /** De regel die in deze fase geldt; `null` = de gewone indeling. */
+  rule: LayoutRule | null;
+  /** De regel verwijst naar een indeling die niet meer bestaat: het scherm toont dan de gewone indeling. */
+  missing: boolean;
+};
+
+/** Per fase welke indeling het scherm bij deze sport toont, zodat de editor dat kan uitleggen. */
+export function layoutRuleOverview(
+  rules: LayoutRule[],
+  sport: unknown,
+  templateIds: readonly string[],
+): LayoutPhaseOverview[] {
+  return LAYOUT_PHASES.map((phase) => {
+    const rule = pickLayoutRuleForPhase(rules, sport, phase);
+    return { phase, rule, missing: rule != null && !templateIds.includes(rule.templateId) };
+  });
+}
+
+/**
+ * De indeling die een nieuwe regel voorstelt: de eerste eigen indeling van de club. Een meegeleverd
+ * voorbeeld kiezen we nooit vanzelf, want dat zet zonder waarschuwing een andere vormgeving op het scherm.
+ */
+export function defaultLayoutRuleTemplateId(layouts: readonly { id: string; isBuiltIn: boolean }[]): string | null {
+  return layouts.find((layout) => !layout.isBuiltIn)?.id ?? null;
 }

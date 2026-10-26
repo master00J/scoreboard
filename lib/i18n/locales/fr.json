@@ -1221,7 +1221,12 @@
     "healthPlaybackRiskCodec": "Codec {{codec}} — peu fiable sur l’affichage",
     "healthPlaybackRiskPixel": "10 bits ou 4:2:2 — non pris en charge",
     "healthPreparing": "Conversion… {{done}}/{{total}}",
-    "healthPrepare": "Convertir les clips à risque"
+    "healthPrepare": "Convertir les clips à risque",
+    "themeSurfaceHint": "Avec Scoreboard + sponsors, l’écran alterne : pendant un clip sponsor vous voyez « Scoreboard + sponsoring », entre les clips le « Scoreboard plein écran ». Configurez donc les deux. Dans Arrière-plans, le fond commun du tableau s’applique aux deux, sauf si vous choisissez une image séparée.",
+    "themeLayoutSaved": "Enregistré dans « {{name}} ». L’écran utilise la nouvelle version partout où cette disposition s’applique.",
+    "themeLayoutSaveFailed": "Impossible d’enregistrer « {{name}} ». La disposition existe-t-elle encore dans la Bibliothèque de layouts ?",
+    "templatesUnsavedEditor": "Vous avez des modifications non enregistrées dans Organiser l’écran. Enregistrez-les d’abord ; sinon ce layout garde la version précédente, sans votre nouveau fond ni votre disposition.",
+    "templatesApplyDirtyConfirm": "Vous avez des modifications non enregistrées dans Organiser l’écran. Elles seront perdues si vous appliquez ce layout. Continuer quand même ?"
   },
   "bridge": {
     "title": "App mobile",
@@ -1743,7 +1748,24 @@
     "phase_post": "Après le match",
     "rulesLayout": "Disposition enregistrée",
     "rulesNoLayouts": "Enregistrez d'abord une disposition dans la Bibliothèque de layouts ; vous pourrez ensuite créer une règle ici.",
-    "rulesMissing": "(la disposition n'existe plus)"
+    "rulesMissing": "(la disposition n'existe plus)",
+    "rulesGroupOwn": "Vos dispositions",
+    "rulesGroupBuiltIn": "Exemples fournis",
+    "rulesOverviewTitle": "Ce que l’écran du stade affiche pour {{sport}}",
+    "rulesOverviewBase": "la disposition que vous modifiez ici",
+    "rulesOverviewMissing": "la disposition que vous modifiez ici (la disposition choisie n’existe plus)",
+    "rulesOverviewLayout": "disposition enregistrée « {{name}} »",
+    "overrideTitle": "L’écran du stade n’affiche pas toujours ce que vous voyez ici",
+    "overrideBody": "À cause d’une règle dans Disposition par situation, l’écran affiche pour {{sport}} dans ces phases une disposition enregistrée de la Bibliothèque de layouts. Ce que vous modifiez ici, fond compris, n’est pas visible dans ces phases.",
+    "overrideItem": "{{phases}} : « {{name}} »",
+    "overrideBuiltIn": "Il s’agit d’un exemple fourni avec les couleurs par défaut. Choisissez votre propre disposition dans Disposition par situation, ou supprimez la règle.",
+    "overrideEdit": "Modifier « {{name}} »",
+    "overrideEditDirtyConfirm": "Vos modifications non enregistrées ici seront remplacées par « {{name}} ». Vous pouvez les récupérer avec Annuler. Continuer ?",
+    "editingLayout": "Vous modifiez la disposition enregistrée « {{name}} » de la Bibliothèque de layouts. Enregistrer conserve vos modifications dans « {{name}} » ; la disposition habituelle reste inchangée. Vous voulez aussi utiliser « {{name}} » comme disposition habituelle ? Cliquez sur Appliquer dans la bibliothèque.",
+    "editingLayoutActive": "Vous modifiez « {{name}} », la disposition active en ce moment. Enregistrer met à jour la disposition active et « {{name}} » dans la Bibliothèque de layouts.",
+    "editingLayoutStop": "Retour à la disposition habituelle",
+    "editingLayoutStopConfirm": "Vos modifications non enregistrées de cette disposition seront perdues. Continuer ?",
+    "saveInLayout": "Enregistrer dans « {{name}} »"
   },
   "displayExtras": {
     "countdownLabel": "{{Start}} dans",

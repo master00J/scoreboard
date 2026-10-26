@@ -1221,7 +1221,12 @@
     "healthPlaybackRiskCodec": "Codec {{codec}} — niet betrouwbaar op het display",
     "healthPlaybackRiskPixel": "10-bit of 4:2:2 — niet ondersteund",
     "healthPreparing": "Omzetten… {{done}}/{{total}}",
-    "healthPrepare": "Risico-clips omzetten"
+    "healthPrepare": "Risico-clips omzetten",
+    "themeSurfaceHint": "Bij Scorebord + sponsors wisselt het scherm af: tijdens een sponsorclip zie je “Scorebord + sponsoring”, tussen de clips het “Volledig scorebord”. Stel dus beide in. Bij Achtergronden geldt de algemene scorebord-achtergrond voor allebei, tenzij je er een apart beeld voor kiest.",
+    "themeLayoutSaved": "Opgeslagen in “{{name}}”. Het scherm gebruikt de nieuwe versie overal waar die indeling geldt.",
+    "themeLayoutSaveFailed": "“{{name}}” kon niet opgeslagen worden. Bestaat de indeling nog in de Layout-bibliotheek?",
+    "templatesUnsavedEditor": "Je hebt niet-opgeslagen wijzigingen in Scherm indelen. Sla die eerst op; anders bewaart deze layout de vorige versie, zonder je nieuwe achtergrond of indeling.",
+    "templatesApplyDirtyConfirm": "Je hebt niet-opgeslagen wijzigingen in Scherm indelen. Die gaan verloren als je deze layout toepast. Toch doorgaan?"
   },
   "bridge": {
     "title": "Mobiele app",
@@ -1743,7 +1748,24 @@
     "phase_post": "Na de wedstrijd",
     "rulesLayout": "Opgeslagen indeling",
     "rulesNoLayouts": "Bewaar eerst een indeling in de Layout-bibliotheek; daarna kun je er hier een regel voor maken.",
-    "rulesMissing": "(indeling bestaat niet meer)"
+    "rulesMissing": "(indeling bestaat niet meer)",
+    "rulesGroupOwn": "Jouw indelingen",
+    "rulesGroupBuiltIn": "Meegeleverde voorbeelden",
+    "rulesOverviewTitle": "Wat het stadionscherm toont bij {{sport}}",
+    "rulesOverviewBase": "de indeling die je hier bewerkt",
+    "rulesOverviewMissing": "de indeling die je hier bewerkt (de gekozen indeling bestaat niet meer)",
+    "rulesOverviewLayout": "opgeslagen indeling “{{name}}”",
+    "overrideTitle": "Het stadionscherm toont niet altijd wat je hier ziet",
+    "overrideBody": "Door een regel bij Indeling per situatie zet het scherm bij {{sport}} in deze fases een opgeslagen indeling uit de Layout-bibliotheek op het scherm. Wat je hier aanpast, inclusief de achtergrond, zie je in die fases niet.",
+    "overrideItem": "{{phases}}: “{{name}}”",
+    "overrideBuiltIn": "Dit is een meegeleverd voorbeeld met standaardkleuren. Kies bij Indeling per situatie je eigen indeling, of verwijder de regel.",
+    "overrideEdit": "“{{name}}” bewerken",
+    "overrideEditDirtyConfirm": "Je niet-opgeslagen wijzigingen hier worden vervangen door “{{name}}”. Met ongedaan maken kun je ze terughalen. Doorgaan?",
+    "editingLayout": "Je bewerkt de opgeslagen indeling “{{name}}” uit de Layout-bibliotheek. Opslaan bewaart je wijzigingen in “{{name}}”; de gewone indeling blijft zoals ze is. Wil je “{{name}}” ook als gewone indeling gebruiken? Klik dan in de bibliotheek op Toepassen.",
+    "editingLayoutActive": "Je bewerkt “{{name}}”, de indeling die nu actief is. Opslaan werkt zowel de actieve indeling als “{{name}}” in de Layout-bibliotheek bij.",
+    "editingLayoutStop": "Terug naar de gewone indeling",
+    "editingLayoutStopConfirm": "Je niet-opgeslagen wijzigingen aan deze indeling gaan verloren. Doorgaan?",
+    "saveInLayout": "Opslaan in “{{name}}”"
   },
   "displayExtras": {
     "countdownLabel": "{{Start}} over",

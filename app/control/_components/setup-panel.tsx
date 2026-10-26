@@ -26,6 +26,7 @@ import { normalizeUiLocale, UI_LOCALES, type UiLocale } from "@/lib/i18n";
 import { sportStartEventVars, tMatchStatus, tSportLabel } from "@/lib/i18n/t-phase";
 import { tPeriodLabel } from "@/lib/i18n/t-sport";
 import { SetupScoreboardTemplatesSection } from "./setup-scoreboard-templates";
+import type { ScoreboardTemplate } from "@/lib/scoreboard-templates";
 import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
 import { SetupDisplayCanvasSection } from "./setup-display-canvas";
 import { OfficialClockSection } from "./setup-official-clock";
@@ -62,8 +63,8 @@ export function SetupPanel() {
   const [matchDialog, setMatchDialog] = useState(false);
   const [scheduleMatch, setScheduleMatch] = useState<Match | null>(null);
   const [visualsField, setVisualsField] = useState<VisualField | null>(null);
-  const [editLayoutJson, setEditLayoutJson] = useState<string | null>(null);
-  const consumeEditLayout = useCallback(() => setEditLayoutJson(null), []);
+  const [editLayout, setEditLayout] = useState<ScoreboardTemplate | null>(null);
+  const consumeEditLayout = useCallback(() => setEditLayout(null), []);
 
   async function setUiLocale(next: UiLocale) {
     const res = await fetch("/api/settings", {
@@ -556,7 +557,7 @@ export function SetupPanel() {
       <SetupScoreboardTemplatesSection
         settings={settings}
         reloadSettings={reloadSettings}
-        onEditLayout={setEditLayoutJson}
+        onEditLayout={setEditLayout}
       />
       <SetupScoreboardThemeSection
         settings={settings}
@@ -564,7 +565,7 @@ export function SetupPanel() {
         homeTeam={activeMatch?.homeTeam ?? homeTeam}
         awayTeam={activeMatch?.awayTeam ?? (teams ?? []).find((team) => team.id !== homeTeam?.id) ?? null}
         previewSport={activeMatch?.sport ?? null}
-        seedThemeJson={editLayoutJson}
+        seedLayout={editLayout}
         onSeedConsumed={consumeEditLayout}
       />
 

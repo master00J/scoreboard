@@ -1221,7 +1221,12 @@
     "healthPlaybackRiskCodec": "Codec {{codec}} — auf der Anzeige nicht zuverlässig",
     "healthPlaybackRiskPixel": "10-Bit oder 4:2:2 — nicht unterstützt",
     "healthPreparing": "Konvertieren… {{done}}/{{total}}",
-    "healthPrepare": "Risiko-Clips konvertieren"
+    "healthPrepare": "Risiko-Clips konvertieren",
+    "themeSurfaceHint": "Bei Scoreboard + Sponsoren wechselt der Bildschirm: Während eines Sponsorclips sehen Sie „Scoreboard + Sponsoring“, zwischen den Clips das „Volle Scoreboard“. Richten Sie also beides ein. Unter Hintergründe gilt der gemeinsame Scoreboard-Hintergrund für beide, außer Sie wählen ein eigenes Bild.",
+    "themeLayoutSaved": "In „{{name}}“ gespeichert. Der Bildschirm nutzt die neue Version überall, wo dieses Layout gilt.",
+    "themeLayoutSaveFailed": "„{{name}}“ konnte nicht gespeichert werden. Gibt es das Layout noch in der Layout-Bibliothek?",
+    "templatesUnsavedEditor": "Sie haben ungespeicherte Änderungen unter Bildschirm einteilen. Speichern Sie diese zuerst; sonst behält dieses Layout die vorige Version, ohne Ihren neuen Hintergrund oder Ihre Einteilung.",
+    "templatesApplyDirtyConfirm": "Sie haben ungespeicherte Änderungen unter Bildschirm einteilen. Sie gehen verloren, wenn Sie dieses Layout anwenden. Trotzdem fortfahren?"
   },
   "bridge": {
     "title": "Mobile App",
@@ -1743,7 +1748,24 @@
     "phase_post": "Nach dem Spiel",
     "rulesLayout": "Gespeichertes Layout",
     "rulesNoLayouts": "Speichern Sie zuerst ein Layout in der Layout-Bibliothek; danach können Sie hier eine Regel dafür erstellen.",
-    "rulesMissing": "(Layout existiert nicht mehr)"
+    "rulesMissing": "(Layout existiert nicht mehr)",
+    "rulesGroupOwn": "Ihre Layouts",
+    "rulesGroupBuiltIn": "Mitgelieferte Beispiele",
+    "rulesOverviewTitle": "Was der Stadionbildschirm bei {{sport}} zeigt",
+    "rulesOverviewBase": "das Layout, das Sie hier bearbeiten",
+    "rulesOverviewMissing": "das Layout, das Sie hier bearbeiten (das gewählte Layout existiert nicht mehr)",
+    "rulesOverviewLayout": "gespeichertes Layout „{{name}}“",
+    "overrideTitle": "Der Stadionbildschirm zeigt nicht immer, was Sie hier sehen",
+    "overrideBody": "Wegen einer Regel unter Layout pro Situation zeigt der Bildschirm bei {{sport}} in diesen Phasen ein gespeichertes Layout aus der Layout-Bibliothek. Was Sie hier ändern, auch der Hintergrund, ist in diesen Phasen nicht zu sehen.",
+    "overrideItem": "{{phases}}: „{{name}}“",
+    "overrideBuiltIn": "Das ist ein mitgeliefertes Beispiel mit Standardfarben. Wählen Sie unter Layout pro Situation Ihr eigenes Layout oder entfernen Sie die Regel.",
+    "overrideEdit": "„{{name}}“ bearbeiten",
+    "overrideEditDirtyConfirm": "Ihre ungespeicherten Änderungen hier werden durch „{{name}}“ ersetzt. Mit Rückgängig holen Sie sie zurück. Fortfahren?",
+    "editingLayout": "Sie bearbeiten das gespeicherte Layout „{{name}}“ aus der Layout-Bibliothek. Speichern legt Ihre Änderungen in „{{name}}“ ab; das normale Layout bleibt, wie es ist. Möchten Sie „{{name}}“ auch als normales Layout nutzen? Klicken Sie in der Bibliothek auf Anwenden.",
+    "editingLayoutActive": "Sie bearbeiten „{{name}}“, das gerade aktive Layout. Speichern aktualisiert sowohl das aktive Layout als auch „{{name}}“ in der Layout-Bibliothek.",
+    "editingLayoutStop": "Zurück zum normalen Layout",
+    "editingLayoutStopConfirm": "Ihre ungespeicherten Änderungen an diesem Layout gehen verloren. Fortfahren?",
+    "saveInLayout": "In „{{name}}“ speichern"
   },
   "displayExtras": {
     "countdownLabel": "{{Start}} in",

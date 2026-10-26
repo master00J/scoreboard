@@ -7,9 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
 import type { AppSettings } from "@/lib/types";
+import { layoutDraftIsDirty, useLayoutEditorStore } from "@/lib/layout-editor-store";
 import { mergeScoreboardTheme } from "@/lib/scoreboard-theme";
 import {
-  extractVisualTheme,
+  sameVisualLayout,
   templateMediaKind,
   type ScoreboardTemplate,
 } from "@/lib/scoreboard-templates";
@@ -27,7 +28,7 @@ export function SetupScoreboardTemplatesSection({
 }: {
   settings: AppSettings | null | undefined;
   reloadSettings: () => void;
-  onEditLayout?: (themeJson: string) => void;
+  onEditLayout?: (template: ScoreboardTemplate) => void;
 }) {
   const { t } = useTranslation();
   const [templates, setTemplates] = useState<ScoreboardTemplate[]>([]);
@@ -36,6 +37,8 @@ export function SetupScoreboardTemplatesSection({
   const [newName, setNewName] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [menuId, setMenuId] = useState<string | null>(null);
+  /** Niet-opgeslagen wijzigingen in Scherm indelen: die staan nog niet in de opgeslagen instellingen. */
+  const editorDirty = useLayoutEditorStore((state) => layoutDraftIsDirty(state.base, state.history?.present ?? null));
 
   const load = useCallback(async () => {
     try {
@@ -48,17 +51,16 @@ export function SetupScoreboardTemplatesSection({
     }
   }, []);
 
+  // Ook na opslaan in Scherm indelen: dat kan een indeling uit deze bibliotheek bijgewerkt hebben.
   useEffect(() => {
     void load();
-  }, [load]);
+  }, [load, settings?.scoreboardThemeJson]);
 
-  const currentVisual = useMemo(
-    () => JSON.stringify(extractVisualTheme(settings?.scoreboardThemeJson ?? null)),
-    [settings?.scoreboardThemeJson],
-  );
   const customTemplates = useMemo(() => templates.filter((tpl) => !tpl.isBuiltIn), [templates]);
 
   async function applyTemplate(tpl: ScoreboardTemplate) {
+    // Toepassen vervangt de opgeslagen indeling; de editor begint dan opnieuw en het concept is weg.
+    if (editorDirty && !confirm(t("setup.templatesApplyDirtyConfirm"))) return;
     setBusyId(tpl.id);
     setMenuId(null);
     try {
@@ -78,6 +80,12 @@ export function SetupScoreboardTemplatesSection({
     const name = newName.trim();
     if (!name) {
       toast({ title: t("setup.templatesNeedName"), variant: "error" });
+      return;
+    }
+    // De layout bewaart de opgeslagen instellingen. Zonder deze stop belandt de vorige versie in de
+    // bibliotheek, zonder de achtergrond of indeling die de club net in de editor maakte.
+    if (editorDirty) {
+      toast({ title: t("setup.templatesUnsavedEditor"), variant: "error" });
       return;
     }
     const res = await fetch("/api/scoreboard-templates", {
@@ -145,7 +153,7 @@ export function SetupScoreboardTemplatesSection({
             <p className="text-xs text-muted-foreground sm:col-span-2">{t("setup.templatesEmpty")}</p>
           ) : null}
           {customTemplates.map((tpl) => {
-            const isCurrent = JSON.stringify(extractVisualTheme(tpl.themeJson)) === currentVisual;
+            const isCurrent = sameVisualLayout(tpl.themeJson, settings?.scoreboardThemeJson);
             const kind = templateMediaKind(tpl.themeJson);
             const theme = mergeScoreboardTheme(tpl.themeJson);
             return (
@@ -197,7 +205,7 @@ export function SetupScoreboardTemplatesSection({
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        onEditLayout(tpl.themeJson);
+                        onEditLayout(tpl);
                         document.getElementById("scoreboard-layout-editor")?.scrollIntoView({
                           behavior: "smooth",
                           block: "start",
@@ -272,6 +280,11 @@ export function SetupScoreboardTemplatesSection({
           </div>
           <Button onClick={() => void saveCurrentAsTemplate()}>{t("setup.templatesSaveAs")}</Button>
         </div>
+        {editorDirty ? (
+          <p className="text-xs text-amber-200" data-templates-unsaved>
+            {t("setup.templatesUnsavedEditor")}
+          </p>
+        ) : null}
       </div>
     </section>
   );

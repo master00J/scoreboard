@@ -1221,7 +1221,12 @@
     "previousStep": "Indietro",
     "nextStep": "Avanti: controlla",
     "createAndStart": "Crea e avvia la partita",
-    "createForLater": "Salva partita"
+    "createForLater": "Salva partita",
+    "themeSurfaceHint": "Con Tabellone + sponsor lo schermo si alterna: durante una clip sponsor vedi “Scoreboard + sponsor”, tra le clip lo “Scoreboard intero”. Configura quindi entrambi. In Sfondi, lo sfondo condiviso del tabellone vale per entrambi, a meno che tu non scelga un’immagine separata.",
+    "themeLayoutSaved": "Salvato in “{{name}}”. Lo schermo usa la nuova versione ovunque valga quel layout.",
+    "themeLayoutSaveFailed": "Impossibile salvare “{{name}}”. Il layout esiste ancora nella Libreria layout?",
+    "templatesUnsavedEditor": "Hai modifiche non salvate in Disponi lo schermo. Salvale prima; altrimenti questo layout conserva la versione precedente, senza il nuovo sfondo o la nuova disposizione.",
+    "templatesApplyDirtyConfirm": "Hai modifiche non salvate in Disponi lo schermo. Andranno perse se applichi questo layout. Continuare comunque?"
   },
   "bridge": {
     "title": "App mobile",
@@ -1743,7 +1748,24 @@
     "phase_post": "Dopo la partita",
     "rulesLayout": "Layout salvato",
     "rulesNoLayouts": "Salva prima un layout nella Libreria layout; poi potrai creare qui una regola.",
-    "rulesMissing": "(il layout non esiste più)"
+    "rulesMissing": "(il layout non esiste più)",
+    "rulesGroupOwn": "I tuoi layout",
+    "rulesGroupBuiltIn": "Esempi inclusi",
+    "rulesOverviewTitle": "Cosa mostra lo schermo dello stadio per {{sport}}",
+    "rulesOverviewBase": "il layout che stai modificando qui",
+    "rulesOverviewMissing": "il layout che stai modificando qui (il layout scelto non esiste più)",
+    "rulesOverviewLayout": "layout salvato “{{name}}”",
+    "overrideTitle": "Lo schermo dello stadio non mostra sempre ciò che vedi qui",
+    "overrideBody": "A causa di una regola in Layout per situazione, per {{sport}} in queste fasi lo schermo mostra un layout salvato dalla Libreria layout. Ciò che modifichi qui, sfondo compreso, non è visibile in quelle fasi.",
+    "overrideItem": "{{phases}}: “{{name}}”",
+    "overrideBuiltIn": "È un esempio incluso con i colori predefiniti. Scegli il tuo layout in Layout per situazione, oppure rimuovi la regola.",
+    "overrideEdit": "Modifica “{{name}}”",
+    "overrideEditDirtyConfirm": "Le modifiche non salvate qui verranno sostituite da “{{name}}”. Puoi recuperarle con Annulla. Continuare?",
+    "editingLayout": "Stai modificando il layout salvato “{{name}}” dalla Libreria layout. Salvando, le modifiche vanno in “{{name}}”; il layout normale resta com’è. Vuoi usare “{{name}}” anche come layout normale? Clicca Applica nella libreria.",
+    "editingLayoutActive": "Stai modificando “{{name}}”, il layout attivo ora. Salvando aggiorni sia il layout attivo sia “{{name}}” nella Libreria layout.",
+    "editingLayoutStop": "Torna al layout normale",
+    "editingLayoutStopConfirm": "Le modifiche non salvate a questo layout andranno perse. Continuare?",
+    "saveInLayout": "Salva in “{{name}}”"
   },
   "displayExtras": {
     "countdownLabel": "{{Start}} tra",

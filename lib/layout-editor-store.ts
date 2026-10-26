@@ -24,11 +24,25 @@ export type LayoutEditorDraft = {
 /** Opeenvolgende wijzigingen van hetzelfde veld binnen deze tijd tellen als één stap. */
 export const COALESCE_MS = 900;
 
+/** Een opgeslagen indeling uit de Layout-bibliotheek die in de editor geopend is. */
+export type EditingLayoutTemplate = {
+  id: string;
+  name: string;
+  /** Was dit bij het openen ook de gewone (actieve) indeling? Dan werkt opslaan die mee bij. */
+  active: boolean;
+};
+
 type LayoutEditorState = {
   /** De opgeslagen thema-JSON waarop het concept gebaseerd is; `undefined` = nog niet geladen. */
   baseKey: string | undefined;
   base: LayoutEditorDraft | null;
   history: History<LayoutEditorDraft> | null;
+  /**
+   * Geopend via "Bewerken" in de Layout-bibliotheek: opslaan bewaart in die indeling, zodat een
+   * regel per sport of fase die ernaar verwijst de nieuwe versie op het scherm zet.
+   */
+  editingTemplate: EditingLayoutTemplate | null;
+  setEditingTemplate: (template: EditingLayoutTemplate | null) => void;
   /** Laatste wijziging met een samenvoegsleutel (typen, kleur kiezen, pijltje ingedrukt houden). */
   coalesce: { key: string; at: number } | null;
   /** Begint opnieuw vanaf de opgeslagen instellingen (eerste keer, of na opslaan / herladen). */
@@ -40,7 +54,7 @@ type LayoutEditorState = {
   commitGesture: (start: LayoutEditorDraft) => void;
   undo: () => void;
   redo: () => void;
-  /** Gooit alle wijzigingen weg en keert terug naar wat opgeslagen is. */
+  /** Gooit alle wijzigingen weg en keert terug naar wat opgeslagen is; de koppeling met een opgeslagen indeling vervalt. */
   discard: () => void;
   /** Na opslaan: de huidige stand is nu de opgeslagen stand; ongedaan maken blijft mogelijk. */
   markSaved: (baseKey: string) => void;
@@ -51,7 +65,10 @@ export const useLayoutEditorStore = create<LayoutEditorState>((set) => ({
   base: null,
   history: null,
   coalesce: null,
-  reset: (baseKey, draft) => set({ baseKey, base: draft, history: historyOf(draft), coalesce: null }),
+  editingTemplate: null,
+  setEditingTemplate: (editingTemplate) => set({ editingTemplate }),
+  reset: (baseKey, draft) =>
+    set({ baseKey, base: draft, history: historyOf(draft), coalesce: null, editingTemplate: null }),
   push: (next, coalesceKey) =>
     set((state) => {
       if (!state.history) return state;
@@ -71,7 +88,10 @@ export const useLayoutEditorStore = create<LayoutEditorState>((set) => ({
     ),
   undo: () => set((state) => (state.history ? { history: historyUndo(state.history), coalesce: null } : state)),
   redo: () => set((state) => (state.history ? { history: historyRedo(state.history), coalesce: null } : state)),
-  discard: () => set((state) => (state.base ? { history: historyOf(state.base), coalesce: null } : state)),
+  discard: () =>
+    set((state) =>
+      state.base ? { history: historyOf(state.base), coalesce: null, editingTemplate: null } : state,
+    ),
   markSaved: (baseKey) =>
     set((state) => (state.history ? { baseKey, base: state.history.present, coalesce: null } : state)),
 }));

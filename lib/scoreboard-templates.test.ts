@@ -3,6 +3,7 @@ import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
   extractVisualTheme,
+  sameVisualLayout,
   sanitizeTemplateThemeJson,
   templateMediaKind,
 } from "./scoreboard-templates";
@@ -10,6 +11,7 @@ import {
   mergeScoreboardTheme,
   reservedContentIsSixteenByNine,
   slotIsSixteenByNine,
+  themeForFreeformEdit,
 } from "./scoreboard-theme";
 
 describe("layout-templates bevatten alleen vormgeving", () => {
@@ -121,5 +123,25 @@ describe("meegeleverde layouts", () => {
       "builtin_minimal",
       "builtin_led-strip",
     ]);
+  });
+});
+
+describe("sameVisualLayout", () => {
+  it("ziet een compacte layout en dezelfde indeling voluit als gelijk", () => {
+    const compact = sanitizeTemplateThemeJson(JSON.stringify({ scoreColor: "#ff0000" }));
+    const full = JSON.stringify({
+      ...mergeScoreboardTheme(JSON.stringify({ scoreColor: "#ff0000" })),
+      layoutRules: [{ id: "r", sport: "*", phase: "play", templateId: "t" }],
+      sponsorRepeatBudgetCycles: true,
+    });
+    expect(sameVisualLayout(compact, full)).toBe(true);
+    expect(sameVisualLayout(null, "{}")).toBe(true);
+    // De editor bewaart een auto-indeling met de vakken op de plek van de L-balk.
+    expect(sameVisualLayout("{}", JSON.stringify(themeForFreeformEdit(mergeScoreboardTheme(null))))).toBe(true);
+  });
+
+  it("ziet een andere achtergrond of kleur als verschil", () => {
+    expect(sameVisualLayout("{}", JSON.stringify({ fullBackgroundPath: "uploads/zaal.jpg" }))).toBe(false);
+    expect(sameVisualLayout(JSON.stringify({ scoreColor: "#ff0000" }), JSON.stringify({ scoreColor: "#00ff00" }))).toBe(false);
   });
 });

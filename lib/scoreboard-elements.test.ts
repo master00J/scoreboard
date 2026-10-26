@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   createElement,
+  defaultLayoutRuleTemplateId,
   duplicateElement,
   elementsFromSlots,
   layoutPhaseForStatus,
+  layoutRuleOverview,
   layoutRulesFromThemeJson,
   moveElementLayer,
   normalizeElements,
@@ -244,5 +246,31 @@ describe("indeling per situatie", () => {
     ]);
     expect(layoutRulesFromThemeJson("geen json")).toEqual([]);
     expect(layoutRulesFromThemeJson(null)).toEqual([]);
+  });
+
+  it("laat per fase zien welke indeling het scherm toont", () => {
+    const rules = normalizeLayoutRules([
+      { id: "volley-play", sport: "VOLLEYBALL", phase: "play", templateId: "t-sets" },
+      { id: "break", sport: "*", phase: "break", templateId: "t-weg" },
+    ]);
+    const overview = layoutRuleOverview(rules, "VOLLEYBALL", ["t-sets"]);
+    expect(overview.map((row) => [row.phase, row.rule?.templateId ?? null, row.missing])).toEqual([
+      ["prematch", null, false],
+      ["play", "t-sets", false],
+      ["break", "t-weg", true],
+      ["post", null, false],
+    ]);
+    // Bij een andere sport geldt de volleybalregel niet.
+    expect(layoutRuleOverview(rules, "FOOTBALL", ["t-sets"])[1]!.rule).toBeNull();
+  });
+
+  it("stelt voor een nieuwe regel nooit vanzelf een meegeleverd voorbeeld voor", () => {
+    expect(
+      defaultLayoutRuleTemplateId([
+        { id: "builtin_standaard", isBuiltIn: true },
+        { id: "eigen", isBuiltIn: false },
+      ]),
+    ).toBe("eigen");
+    expect(defaultLayoutRuleTemplateId([{ id: "builtin_standaard", isBuiltIn: true }])).toBeNull();
   });
 });

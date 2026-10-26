@@ -2,6 +2,8 @@ import {
   DEFAULT_SCOREBOARD_THEME,
   SLOT_PRESETS,
   bottomBarForSixteenByNine,
+  mergeScoreboardTheme,
+  themeForFreeformEdit,
   type ResolvedScoreboardTheme,
   type ScoreboardTheme,
 } from "./scoreboard-theme";
@@ -89,6 +91,16 @@ export function applyTemplateToThemeJson(
     if (!fromTemplate && fromCurrent) next[key] = fromCurrent;
   }
   return JSON.stringify(next);
+}
+
+/**
+ * Zien twee thema-JSON's er op het scherm hetzelfde uit? Vergelijkt in de vorm waarin de editor een
+ * indeling bewaart, zodat een compact opgeslagen layout gelijk is aan dezelfde indeling voluit.
+ */
+export function sameVisualLayout(a: string | null | undefined, b: string | null | undefined): boolean {
+  const visual = (raw: string | null | undefined) =>
+    JSON.stringify(extractVisualTheme(JSON.stringify(themeForFreeformEdit(mergeScoreboardTheme(raw ?? null)))));
+  return visual(a) === visual(b);
 }
 
 /** Template-JSON opschonen voor opslag: alleen layout-keys, compact. */

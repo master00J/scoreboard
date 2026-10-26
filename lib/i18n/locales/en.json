@@ -1221,7 +1221,12 @@
     "healthPlaybackRiskCodec": "Codec {{codec}} — not reliable on the display",
     "healthPlaybackRiskPixel": "10-bit or 4:2:2 — not supported",
     "healthPreparing": "Converting… {{done}}/{{total}}",
-    "healthPrepare": "Convert risk clips"
+    "healthPrepare": "Convert risk clips",
+    "themeSurfaceHint": "With Scoreboard + sponsors the screen alternates: during a sponsor clip you see “Scoreboard + sponsoring”, between clips the “Full scoreboard”. So set up both. Under Backgrounds, the shared scoreboard background applies to both unless you pick a separate image.",
+    "themeLayoutSaved": "Saved in “{{name}}”. The screen uses the new version wherever that layout applies.",
+    "themeLayoutSaveFailed": "Could not save “{{name}}”. Does the layout still exist in the Layout library?",
+    "templatesUnsavedEditor": "You have unsaved changes in Arrange the screen. Save them first; otherwise this layout keeps the previous version, without your new background or arrangement.",
+    "templatesApplyDirtyConfirm": "You have unsaved changes in Arrange the screen. They are lost if you apply this layout. Continue anyway?"
   },
   "bridge": {
     "title": "Mobile app",
@@ -1743,7 +1748,24 @@
     "phase_post": "After the match",
     "rulesLayout": "Saved layout",
     "rulesNoLayouts": "First save a layout in the Layout library; after that you can create a rule for it here.",
-    "rulesMissing": "(layout no longer exists)"
+    "rulesMissing": "(layout no longer exists)",
+    "rulesGroupOwn": "Your layouts",
+    "rulesGroupBuiltIn": "Included examples",
+    "rulesOverviewTitle": "What the stadium screen shows for {{sport}}",
+    "rulesOverviewBase": "the layout you are editing here",
+    "rulesOverviewMissing": "the layout you are editing here (the chosen layout no longer exists)",
+    "rulesOverviewLayout": "saved layout “{{name}}”",
+    "overrideTitle": "The stadium screen does not always show what you see here",
+    "overrideBody": "Because of a rule under Layout per situation, the screen shows a saved layout from the Layout library for {{sport}} in these phases. What you change here, including the background, is not visible in those phases.",
+    "overrideItem": "{{phases}}: “{{name}}”",
+    "overrideBuiltIn": "This is an included example with default colours. Pick your own layout under Layout per situation, or remove the rule.",
+    "overrideEdit": "Edit “{{name}}”",
+    "overrideEditDirtyConfirm": "Your unsaved changes here will be replaced by “{{name}}”. You can get them back with undo. Continue?",
+    "editingLayout": "You are editing the saved layout “{{name}}” from the Layout library. Saving stores your changes in “{{name}}”; the regular layout stays as it is. Want to use “{{name}}” as the regular layout too? Click Apply in the library.",
+    "editingLayoutActive": "You are editing “{{name}}”, the layout that is active now. Saving updates both the active layout and “{{name}}” in the Layout library.",
+    "editingLayoutStop": "Back to the regular layout",
+    "editingLayoutStopConfirm": "Your unsaved changes to this layout will be lost. Continue?",
+    "saveInLayout": "Save in “{{name}}”"
   },
   "displayExtras": {
     "countdownLabel": "{{Start}} in",

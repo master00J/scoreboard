@@ -21,16 +21,23 @@ import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
 import { tSportLabel } from "@/lib/i18n/t-sport";
-import { layoutDraftIsDirty, useLayoutEditorStore, type LayoutEditorDraft } from "@/lib/layout-editor-store";
+import {
+  layoutDraftIsDirty,
+  useLayoutEditorStore,
+  type EditingLayoutTemplate,
+  type LayoutEditorDraft,
+} from "@/lib/layout-editor-store";
 import {
   LAYOUT_PHASES,
   LAYOUT_RULE_LIMIT,
+  defaultLayoutRuleTemplateId,
+  layoutRuleOverview,
   layoutRulesFromThemeJson,
   type LayoutPhase,
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
-import { templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
-import { SPORT_TYPES, type SportType } from "@/lib/sports";
+import { sameVisualLayout, templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
+import { SPORT_TYPES, normalizeSport, type SportType } from "@/lib/sports";
 import { canRedo, canUndo } from "@/lib/undo-history";
 import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
 
@@ -135,17 +142,32 @@ function swapOrder(order: LeftStripSegment[], i: number, seg: LeftStripSegment):
 function LayoutRulesSection({
   rules,
   layouts,
+  overviewSport,
   onChange,
   onFocus,
 }: {
   rules: LayoutRule[];
   layouts: ScoreboardTemplate[];
+  /** Voor deze sport toont het overzicht welke indeling het scherm per fase gebruikt. */
+  overviewSport: SportType;
   onChange: (next: LayoutRule[]) => void;
   onFocus: () => void;
 }) {
   const { t } = useTranslation();
   const update = (id: string, patch: Partial<LayoutRule>) =>
     onChange(rules.map((rule) => (rule.id === id ? { ...rule, ...patch } : rule)));
+  const ownLayouts = layouts.filter((layout) => !layout.isBuiltIn);
+  const builtInLayouts = layouts.filter((layout) => layout.isBuiltIn);
+  const newRuleTemplateId = defaultLayoutRuleTemplateId(layouts);
+  const layoutName = (id: string) => {
+    const layout = layouts.find((item) => item.id === id);
+    return layout ? templateDisplayName(layout) : null;
+  };
+  const overview = layoutRuleOverview(
+    rules,
+    overviewSport,
+    layouts.map((layout) => layout.id),
+  );
 
   return (
     <div
@@ -199,11 +221,24 @@ function LayoutRulesSection({
                 {layouts.some((layout) => layout.id === rule.templateId) ? null : (
                   <option value={rule.templateId}>{t("layoutEditor.rulesMissing")}</option>
                 )}
-                {layouts.map((layout) => (
-                  <option key={layout.id} value={layout.id}>
-                    {templateDisplayName(layout)}
-                  </option>
-                ))}
+                {ownLayouts.length > 0 ? (
+                  <optgroup label={t("layoutEditor.rulesGroupOwn")}>
+                    {ownLayouts.map((layout) => (
+                      <option key={layout.id} value={layout.id}>
+                        {templateDisplayName(layout)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
+                {builtInLayouts.length > 0 ? (
+                  <optgroup label={t("layoutEditor.rulesGroupBuiltIn")}>
+                    {builtInLayouts.map((layout) => (
+                      <option key={layout.id} value={layout.id}>
+                        {templateDisplayName(layout)}
+                      </option>
+                    ))}
+                  </optgroup>
+                ) : null}
               </Select>
               <Button
                 type="button"
@@ -218,7 +253,7 @@ function LayoutRulesSection({
           ))}
         </div>
       )}
-      {layouts.length === 0 ? (
+      {newRuleTemplateId == null ? (
         <p className="text-xs text-muted-foreground">{t("layoutEditor.rulesNoLayouts")}</p>
       ) : (
         <Button
@@ -233,7 +268,7 @@ function LayoutRulesSection({
                 id: "rule-" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
                 sport: "*",
                 phase: "*",
-                templateId: layouts[0].id,
+                templateId: newRuleTemplateId,
               },
             ])
           }
@@ -241,6 +276,27 @@ function LayoutRulesSection({
           {t("layoutEditor.rulesAdd")}
         </Button>
       )}
+      {rules.length > 0 ? (
+        <div className="rounded-md border border-border bg-muted/30 p-3" data-layout-rules-overview>
+          <div className="text-xs font-semibold">
+            {t("layoutEditor.rulesOverviewTitle", { sport: tSportLabel(t, overviewSport) })}
+          </div>
+          <ul className="mt-2 space-y-1 text-xs">
+            {overview.map((row) => (
+              <li key={row.phase} className="flex flex-wrap gap-x-2">
+                <span className="min-w-[9rem] text-muted-foreground">{t(`layoutEditor.phase_${row.phase}`)}</span>
+                <span className={row.rule && !row.missing ? "font-medium text-amber-200" : ""}>
+                  {!row.rule
+                    ? t("layoutEditor.rulesOverviewBase")
+                    : row.missing
+                      ? t("layoutEditor.rulesOverviewMissing")
+                      : t("layoutEditor.rulesOverviewLayout", { name: layoutName(row.rule.templateId) })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -251,7 +307,7 @@ export function SetupScoreboardThemeSection({
   homeTeam,
   awayTeam,
   previewSport,
-  seedThemeJson,
+  seedLayout,
   onSeedConsumed,
 }: {
   settings: AppSettings | null | undefined;
@@ -260,7 +316,8 @@ export function SetupScoreboardThemeSection({
   awayTeam?: Team | null;
   /** Sport van de actieve wedstrijd; het voorbeeld start daarmee. */
   previewSport?: string | null;
-  seedThemeJson?: string | null;
+  /** Gekozen via "Bewerken" in de Layout-bibliotheek. */
+  seedLayout?: ScoreboardTemplate | null;
   onSeedConsumed?: () => void;
 }) {
   const { t } = useTranslation();
@@ -280,6 +337,7 @@ export function SetupScoreboardThemeSection({
   );
   const history = useLayoutEditorStore((state) => state.history);
   const base = useLayoutEditorStore((state) => state.base);
+  const editingTemplate = useLayoutEditorStore((state) => state.editingTemplate);
   const store = useLayoutEditorStore.getState;
   const present = history?.present ?? savedDraft;
   const draft = present.theme;
@@ -342,11 +400,28 @@ export function SetupScoreboardThemeSection({
     store().reset(key, savedDraft);
   }, [settings, savedJson, savedDraft, store]);
 
+  /** Opent een opgeslagen indeling; opslaan bewaart de wijzigingen dan in die indeling. */
+  const openLayout = useCallback(
+    (layout: ScoreboardTemplate) => {
+      setDraft(themeForFreeformEdit(mergeScoreboardTheme(layout.themeJson)));
+      store().setEditingTemplate(
+        layout.isBuiltIn
+          ? null
+          : {
+              id: layout.id,
+              name: layout.name,
+              active: sameVisualLayout(layout.themeJson, savedJson),
+            },
+      );
+    },
+    [setDraft, store, savedJson],
+  );
+
   useEffect(() => {
-    if (!seedThemeJson) return;
-    setDraft(themeForFreeformEdit(mergeScoreboardTheme(seedThemeJson)));
+    if (!seedLayout) return;
+    openLayout(seedLayout);
     onSeedConsumed?.();
-  }, [seedThemeJson, onSeedConsumed, setDraft]);
+  }, [seedLayout, onSeedConsumed, openLayout]);
 
   useEffect(() => {
     void loadLayouts();
@@ -359,10 +434,10 @@ export function SetupScoreboardThemeSection({
     return () => window.clearTimeout(id);
   }, [tryUntil]);
 
-  function themePayload(): Record<string, unknown> {
+  function themePayload(theme: ResolvedScoreboardTheme = draft): Record<string, unknown> {
     const payload: Record<string, unknown> = {
-      ...draft,
-      layoutMode: draft.layoutMode,
+      ...theme,
+      layoutMode: theme.layoutMode,
     };
     if (repeatSponsorBudgetCycles) payload.sponsorRepeatBudgetCycles = true;
     if (rules.length > 0) payload.layoutRules = rules;
@@ -398,6 +473,10 @@ export function SetupScoreboardThemeSection({
   }
 
   async function save() {
+    if (editingTemplate) {
+      await saveLayout(editingTemplate);
+      return;
+    }
     const json = JSON.stringify(themePayload());
     const res = await fetch("/api/settings", {
       method: "PATCH",
@@ -415,6 +494,50 @@ export function SetupScoreboardThemeSection({
     reloadSettings();
   }
 
+  /**
+   * Bewaart de geopende bibliotheekindeling. Een regel per sport of fase zet die versie op het
+   * scherm, dus daar horen de wijzigingen. De gewone indeling volgt alleen als ze dezelfde was;
+   * regels en sponsorinstelling uit de editor worden wel bewaard.
+   */
+  async function saveLayout(layout: EditingLayoutTemplate) {
+    const layoutJson = JSON.stringify(themePayload());
+    const layoutRes = await fetch(`/api/scoreboard-templates/${layout.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ themeJson: layoutJson }),
+    }).catch(() => null);
+    if (!layoutRes?.ok) {
+      toast({ title: t("setup.themeLayoutSaveFailed", { name: layout.name }), variant: "error" });
+      return;
+    }
+    const baseTheme = layout.active ? draft : (base?.theme ?? savedDraft.theme);
+    const json = JSON.stringify(themePayload(baseTheme));
+    const res = await fetch("/api/settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scoreboardThemeJson: json }),
+    });
+    if (!res.ok) {
+      toast({ title: t("setup.themeSaveFailed"), variant: "error" });
+      return;
+    }
+    if (layout.active) {
+      store().markSaved(json);
+    } else {
+      // Klaar met deze indeling: de editor toont weer de gewone indeling.
+      store().reset(json, { theme: baseTheme, rules, repeatSponsorBudgetCycles });
+    }
+    setTryUntil(null);
+    toast({ title: t("setup.themeLayoutSaved", { name: layout.name }), variant: "success" });
+    void loadLayouts();
+    reloadSettings();
+  }
+
+  function stopEditingLayout() {
+    if (dirty && !confirm(t("layoutEditor.editingLayoutStopConfirm"))) return;
+    store().discard();
+  }
+
   async function resetDefault() {
     // Dit wist de opgeslagen indeling van de club; ongedaan maken kan daarna niet meer.
     if (!confirm(t("layoutEditor.resetConfirm"))) return;
@@ -429,6 +552,30 @@ export function SetupScoreboardThemeSection({
     }
     toast({ title: t("setup.themeResetOk"), variant: "success" });
     reloadSettings();
+  }
+
+  /** De sport waarvoor de editor uitlegt wat het scherm toont: de actieve wedstrijd, anders de eerste regel. */
+  const overviewSport = normalizeSport(previewSport ?? rules.find((rule) => rule.sport !== "*")?.sport);
+  /** Fases waarin een regel een andere opgeslagen indeling op het scherm zet dan wat hier open staat. */
+  const overriddenPhases = useMemo(() => {
+    const byLayout = new Map<string, { layout: ScoreboardTemplate; phases: LayoutPhase[] }>();
+    for (const row of layoutRuleOverview(
+      rules,
+      overviewSport,
+      layouts.map((layout) => layout.id),
+    )) {
+      if (!row.rule || row.missing || row.rule.templateId === editingTemplate?.id) continue;
+      const layout = layouts.find((item) => item.id === row.rule!.templateId)!;
+      const entry = byLayout.get(layout.id) ?? { layout, phases: [] };
+      entry.phases.push(row.phase);
+      byLayout.set(layout.id, entry);
+    }
+    return [...byLayout.values()];
+  }, [rules, overviewSport, layouts, editingTemplate?.id]);
+
+  function editOverriddenLayout(layout: ScoreboardTemplate) {
+    if (dirty && !confirm(t("layoutEditor.overrideEditDirtyConfirm", { name: layout.name }))) return;
+    openLayout(layout);
   }
 
   const num = (key: keyof ResolvedScoreboardTheme) => (
@@ -537,10 +684,57 @@ export function SetupScoreboardThemeSection({
             {t("setup.themeDefault")}
           </Button>
           <Button size="sm" onClick={() => void save()}>
-            {t("common.save")}
+            {editingTemplate ? t("layoutEditor.saveInLayout", { name: editingTemplate.name }) : t("common.save")}
           </Button>
         </div>
       </div>
+
+      {editingTemplate ? (
+        <div
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-500/50 bg-sky-500/10 px-4 py-3 text-sm"
+          data-layout-editing-template
+        >
+          <span>
+            {t(editingTemplate.active ? "layoutEditor.editingLayoutActive" : "layoutEditor.editingLayout", {
+              name: editingTemplate.name,
+            })}
+          </span>
+          <Button variant="ghost" size="sm" onClick={stopEditingLayout}>
+            {t("layoutEditor.editingLayoutStop")}
+          </Button>
+        </div>
+      ) : null}
+
+      {overriddenPhases.length > 0 ? (
+        <div
+          className="mb-4 space-y-2 rounded-lg border border-amber-500/60 bg-amber-500/10 px-4 py-3 text-sm"
+          data-layout-rule-override
+        >
+          <div className="font-semibold">{t("layoutEditor.overrideTitle")}</div>
+          <p className="text-xs leading-snug">
+            {t("layoutEditor.overrideBody", { sport: tSportLabel(t, overviewSport) })}
+          </p>
+          <ul className="space-y-2">
+            {overriddenPhases.map(({ layout, phases }) => (
+              <li key={layout.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                <span>
+                  {t("layoutEditor.overrideItem", {
+                    phases: phases.map((phase) => t(`layoutEditor.phase_${phase}`)).join(", "),
+                    name: templateDisplayName(layout),
+                  })}
+                </span>
+                {layout.isBuiltIn ? (
+                  <span className="text-muted-foreground">{t("layoutEditor.overrideBuiltIn")}</span>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => editOverriddenLayout(layout)}>
+                    {t("layoutEditor.overrideEdit", { name: layout.name })}
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <div className="mb-6 space-y-3 rounded-lg border border-border p-4">
         <div className="font-semibold text-sm">{t("setup.themePlacerTitle")}</div>
@@ -565,6 +759,7 @@ export function SetupScoreboardThemeSection({
             </button>
           ))}
         </div>
+        <p className="max-w-3xl text-xs text-muted-foreground">{t("setup.themeSurfaceHint")}</p>
         <SetupScoreboardPlacer
           theme={draft}
           onChange={setDraft}
@@ -590,6 +785,7 @@ export function SetupScoreboardThemeSection({
       <LayoutRulesSection
         rules={rules}
         layouts={layouts}
+        overviewSport={overviewSport}
         onChange={setRules}
         onFocus={() => void loadLayouts()}
       />
