@@ -10,7 +10,8 @@ import type { LayoutElement } from "@/lib/scoreboard-elements";
 import { formatSportClock, getSportProfile } from "@/lib/sports";
 import { ExtraElement, elementBoxStyle, elementInnerStyle } from "./layout-elements";
 import { TeamLogo } from "./scoreboard-strip";
-import { ShotClockReadout, SportMatchMeta, SportTeamExtras, useShotClockOff } from "./sport-score-extras";
+import { ShotClockReadout, SportMatchMeta, SportTeamExtras, teamExtrasFontSize, useShotClockOff } from "./sport-score-extras";
+import { TEAM_EXTRAS_LINE_EM } from "@/lib/team-extras-fit";
 
 /**
  * Volledig scherm tijdens de match zonder sponsorpaneel: thuis, klok en uit
@@ -220,6 +221,8 @@ function TeamScore({
   inner: CSSProperties | undefined;
 }) {
   if (!theme.showScores) return null;
+  // Hou plaats vrij voor sets en time-outs onder de score (86cqh = vak min marges en tussenruimte).
+  const extrasFont = teamExtrasFontSize(match, side);
   return (
     <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
       <div
@@ -229,7 +232,9 @@ function TeamScore({
         <div
           className="shrink-0 font-black tabular-nums leading-none"
           style={{
-            fontSize: `min(${theme.fullScorePx}px, 72cqh, 70cqw)`,
+            fontSize: extrasFont
+              ? `min(${theme.fullScorePx}px, 72cqh, 70cqw, calc(86cqh - ${TEAM_EXTRAS_LINE_EM} * ${extrasFont}))`
+              : `min(${theme.fullScorePx}px, 72cqh, 70cqw)`,
             color: element.style?.color ?? theme.scoreColor,
             textShadow: "0 8px 40px rgba(0,0,0,0.55)",
           }}

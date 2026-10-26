@@ -185,7 +185,12 @@ function TeamBlock({
         {score}
       </div>
       ) : null}
-      <SportTeamExtras match={match} side={side} fontSize={Math.max(28, theme.leftPeriodPx + 14)} />
+      <SportTeamExtras
+        match={match}
+        side={side}
+        fontSize={Math.max(28, theme.leftPeriodPx + 14)}
+        widthPx={theme.leftBarWidthPx}
+      />
     </div>
   );
 }

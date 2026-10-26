@@ -11,7 +11,8 @@ import { getSportProfile } from "@/lib/sports";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { ExtraElement, elementBoxStyle, elementInnerStyle } from "./layout-elements";
 import { TeamLogo } from "./scoreboard-strip";
-import { ShotClockReadout, SportMatchMeta, SportTeamExtras, useShotClockOff } from "./sport-score-extras";
+import { ShotClockReadout, SportMatchMeta, SportTeamExtras, teamExtrasFontSize, useShotClockOff } from "./sport-score-extras";
+import { TEAM_EXTRAS_LINE_EM } from "@/lib/team-extras-fit";
 
 export function CustomScoreboardLayout({
   match,
@@ -229,6 +230,8 @@ function TeamScoreChip({
   inner: CSSProperties | undefined;
 }) {
   if (!theme.showScores) return null;
+  // Hou plaats vrij voor sets en time-outs onder de score (82cqh = vak min marges en tussenruimte).
+  const extrasFont = teamExtrasFontSize(match, side, { compact: true });
   return (
     <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
       <div
@@ -238,7 +241,9 @@ function TeamScoreChip({
         <div
           className="shrink-0 font-black tabular-nums leading-none"
           style={{
-            fontSize: "min(72cqh, 58cqw, 220px)",
+            fontSize: extrasFont
+              ? `min(72cqh, 58cqw, 220px, calc(82cqh - ${TEAM_EXTRAS_LINE_EM} * ${extrasFont}))`
+              : "min(72cqh, 58cqw, 220px)",
             color: element.style?.color ?? theme.scoreColor,
             textShadow: "0 4px 18px rgba(0,0,0,0.45)",
           }}
