@@ -12,6 +12,7 @@ import {
   mergeScoreboardTheme,
   sponsorRepeatBudgetCyclesFromThemeJson,
   themeForFreeformEdit,
+  withLayoutMode,
   type LeftStripSegment,
   type ResolvedScoreboardTheme,
   type TeamStackOrder,
@@ -36,10 +37,17 @@ import {
   type LayoutPhase,
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
-import { sameVisualLayout, templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
+import {
+  BUILT_IN_TEMPLATES,
+  sameVisualLayout,
+  templateDisplayName,
+  themeFromExample,
+  type ScoreboardTemplate,
+} from "@/lib/scoreboard-templates";
 import { SPORT_TYPES, normalizeSport, type SportType } from "@/lib/sports";
 import { canRedo, canUndo } from "@/lib/undo-history";
 import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
+import { ScoreboardThemePreview } from "./setup-scoreboard-preview";
 
 const FONT_PRESETS = [
   {
@@ -348,6 +356,7 @@ export function SetupScoreboardThemeSection({
   const [surface, setSurface] = useState<EditorSurface>("sponsor");
   const [layouts, setLayouts] = useState<ScoreboardTemplate[]>([]);
   const [tryUntil, setTryUntil] = useState<number | null>(null);
+  const [showExamples, setShowExamples] = useState(false);
 
   const canvasWidth = Math.max(320, Number(settings?.displayCanvasWidth ?? 1920));
   const canvasHeight = Math.max(240, Number(settings?.displayCanvasHeight ?? 1080));
@@ -573,6 +582,14 @@ export function SetupScoreboardThemeSection({
     return [...byLayout.values()];
   }, [rules, overviewSport, layouts, editingTemplate?.id]);
 
+  /** Zet de plaatsing van een voorbeeld klaar; ongedaan maken kan, opslaan gebeurt pas met Opslaan. */
+  function loadExample(example: (typeof BUILT_IN_TEMPLATES)[number]) {
+    setDraft((d) => themeFromExample(d, example.theme));
+    setSurface("sponsor");
+    setShowExamples(false);
+    toast({ title: t("setup.themeExampleLoaded", { name: t(`setup.example_${example.key}`) }), variant: "success" });
+  }
+
   function editOverriddenLayout(layout: ScoreboardTemplate) {
     if (dirty && !confirm(t("layoutEditor.overrideEditDirtyConfirm", { name: layout.name }))) return;
     openLayout(layout);
@@ -737,7 +754,70 @@ export function SetupScoreboardThemeSection({
       ) : null}
 
       <div className="mb-6 space-y-3 rounded-lg border border-border p-4">
-        <div className="font-semibold text-sm">{t("setup.themePlacerTitle")}</div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="font-semibold text-sm">{t("setup.themeShapeTitle")}</div>
+            <p className="mt-1 max-w-3xl text-xs text-muted-foreground">{t("setup.themeShapeHint")}</p>
+          </div>
+          <Button
+            variant={showExamples ? "secondary" : "outline"}
+            size="sm"
+            aria-expanded={showExamples}
+            onClick={() => setShowExamples((open) => !open)}
+          >
+            {showExamples ? t("setup.themeExamplesClose") : t("setup.themeExamplesOpen")}
+          </Button>
+        </div>
+        {showExamples ? (
+          <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3" data-layout-examples>
+            <p className="text-xs text-muted-foreground">{t("setup.themeExamplesHint")}</p>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {BUILT_IN_TEMPLATES.map((example) => (
+                <button
+                  key={example.key}
+                  type="button"
+                  onClick={() => loadExample(example)}
+                  className="group space-y-2 rounded-lg border border-border p-2 text-left transition-colors hover:border-primary hover:bg-primary/5"
+                  data-layout-example={example.key}
+                >
+                  <ScoreboardThemePreview
+                    theme={themeFromExample(draft, example.theme)}
+                    homeTeam={homeTeam}
+                    awayTeam={awayTeam}
+                  />
+                  <div className="text-sm font-medium">{t(`setup.example_${example.key}`)}</div>
+                  <div className="text-[11px] leading-snug text-muted-foreground">
+                    {t(`setup.exampleHelp_${example.key}`)}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4" role="radiogroup" aria-label={t("setup.themeShapeTitle")}>
+          {SCOREBOARD_LAYOUT_MODES.filter((mode) => mode !== "full" || draft.layoutMode === "full").map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              role="radio"
+              aria-checked={draft.layoutMode === mode}
+              onClick={() => setDraft((d) => withLayoutMode(d, mode))}
+              className={`rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
+                draft.layoutMode === mode
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border hover:bg-muted/40"
+              }`}
+              data-layout-mode={mode}
+            >
+              <div className="font-semibold">{t(`setup.themeLayout_${mode}`)}</div>
+              <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                {t(`setup.themeLayoutHelp_${mode}`)}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="pt-2 font-semibold text-sm">{t("setup.themePlacerTitle")}</div>
         <div className="flex flex-wrap gap-2">
           {(
             [
@@ -760,6 +840,14 @@ export function SetupScoreboardThemeSection({
           ))}
         </div>
         <p className="max-w-3xl text-xs text-muted-foreground">{t("setup.themeSurfaceHint")}</p>
+        {surface === "sponsor" && draft.layoutMode !== "custom" ? (
+          <p
+            className="max-w-3xl rounded-md border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs"
+            data-layout-framed-hint
+          >
+            {t("setup.themeFramedHint", { shape: t(`setup.themeLayout_${draft.layoutMode}`) })}
+          </p>
+        ) : null}
         <SetupScoreboardPlacer
           theme={draft}
           onChange={setDraft}
@@ -865,26 +953,7 @@ export function SetupScoreboardThemeSection({
 
       <details className="rounded-lg border border-border p-4">
         <summary className="cursor-pointer font-semibold text-sm">{t("setup.themeAdvanced")}</summary>
-        <div className="mt-4 mb-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {SCOREBOARD_LAYOUT_MODES.map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              onClick={() => setDraft((d) => ({ ...d, layoutMode: mode }))}
-              className={`rounded-lg border px-3 py-3 text-left text-sm transition-colors ${
-                draft.layoutMode === mode
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border hover:bg-muted/40"
-              }`}
-            >
-              <div className="font-semibold">{t(`setup.themeLayout_${mode}`)}</div>
-              <div className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                {t(`setup.themeLayoutHelp_${mode}`)}
-              </div>
-            </button>
-          ))}
-        </div>
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="mt-4 grid gap-6 lg:grid-cols-2">
         <div className="space-y-4 rounded-lg border border-border p-4">
           <div className="font-semibold text-sm">{t("setup.themeFrameGrid")}</div>
           <div className="grid gap-3 sm:grid-cols-2">

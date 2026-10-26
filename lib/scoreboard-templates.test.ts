@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
+  BUILT_IN_TEMPLATES,
   extractVisualTheme,
   sameVisualLayout,
   sanitizeTemplateThemeJson,
   templateMediaKind,
+  themeFromExample,
 } from "./scoreboard-templates";
 import {
   mergeScoreboardTheme,
@@ -145,3 +147,47 @@ describe("sameVisualLayout", () => {
     expect(sameVisualLayout(JSON.stringify({ scoreColor: "#ff0000" }), JSON.stringify({ scoreColor: "#00ff00" }))).toBe(false);
   });
 });
+
+describe("themeFromExample", () => {
+  const example = (key: string) => BUILT_IN_TEMPLATES.find((tpl) => tpl.key === key)!.theme;
+  const club = themeForFreeformEdit(
+    mergeScoreboardTheme(
+      JSON.stringify({
+        scoreColor: "#ffcc00",
+        fontFamily: "Impact, sans-serif",
+        scoreboardBackgroundPath: "uploads/zaal.jpg",
+        layoutMode: "custom",
+        elements: {
+          sponsor: [
+            { id: "sponsor", type: "media", x: 20, y: 0, w: 80, h: 80 },
+            { id: "welkom", type: "text", text: "Welkom", x: 30, y: 85, w: 40, h: 10 },
+          ],
+          full: [{ id: "slogan", type: "text", text: "Hup", x: 40, y: 90, w: 20, h: 8 }],
+        },
+      }),
+    ),
+  );
+
+  it("neemt de plaatsing over en houdt de vormgeving van de club", () => {
+    const next = themeFromExample(club, example("standaard"));
+    expect(next.layoutMode).toBe("custom");
+    expect(next.slots.sponsor).toEqual({ x: 0, y: 0, w: 100, h: 100 });
+    expect(next.elements.sponsor.find((e) => e.id === "sponsor")).toMatchObject({ x: 0, y: 0, w: 100, h: 100 });
+    expect(next.scoreColor).toBe("#ffcc00");
+    expect(next.fontFamily).toBe("Impact, sans-serif");
+    expect(next.scoreboardBackgroundPath).toBe("uploads/zaal.jpg");
+    expect(next.elements.full.some((e) => e.id === "slogan")).toBe(true);
+  });
+
+  it("legt eigen elementen bovenop de video", () => {
+    const ids = themeFromExample(club, example("minimal")).elements.sponsor.map((e) => e.id);
+    expect(ids.indexOf("welkom")).toBeGreaterThan(ids.indexOf("sponsor"));
+  });
+
+  it("zet een L-balkvoorbeeld in de L-vorm", () => {
+    const next = themeFromExample(club, example("pro-league"));
+    expect(next.layoutMode).toBe("left-l");
+    expect(next.leftBarWidthPx).toBe(320);
+  });
+});
+

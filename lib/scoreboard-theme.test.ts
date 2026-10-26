@@ -12,6 +12,7 @@ import {
   slotIsSixteenByNine,
   slotsFromTheme,
   themeForFreeformEdit,
+  withLayoutMode,
 } from "./scoreboard-theme";
 
 describe("scoreboard theme personalization", () => {
@@ -181,3 +182,27 @@ describe("scoreboard theme personalization", () => {
     expect(scoreboardUsesLeftFrame(left, false)).toBe(true);
   });
 });
+
+describe("withLayoutMode", () => {
+  it("laat Vrij plaatsen beginnen op de plek van de L-balk, met eigen elementen erbij", () => {
+    const auto = mergeScoreboardTheme(
+      JSON.stringify({
+        layoutMode: "auto",
+        elements: { sponsor: [{ id: "welkom", type: "text", text: "Welkom", x: 30, y: 85, w: 40, h: 10 }] },
+      }),
+    );
+    const free = withLayoutMode(auto, "custom");
+    expect(free.layoutMode).toBe("custom");
+    expect(free.slots).toEqual(themeForFreeformEdit(auto).slots);
+    expect(free.elements.sponsor.at(-1)?.id).toBe("welkom");
+  });
+
+  it("verandert alleen de vorm bij andere keuzes", () => {
+    const custom = mergeScoreboardTheme(JSON.stringify({ layoutMode: "custom" }));
+    const strip = withLayoutMode(custom, "bottom-strip");
+    expect(strip.layoutMode).toBe("bottom-strip");
+    expect(strip.slots).toEqual(custom.slots);
+    expect(withLayoutMode(custom, "custom")).toEqual(custom);
+  });
+});
+

@@ -7,6 +7,7 @@ import {
   type ResolvedScoreboardTheme,
   type ScoreboardTheme,
 } from "./scoreboard-theme";
+import { isClassicElementId } from "./scoreboard-elements";
 
 const OVERLAY_SLOTS = SLOT_PRESETS.find((p) => p.id === "overlay")!.slots;
 const TOP_BAR_SLOTS = SLOT_PRESETS.find((p) => p.id === "topBar")!.slots;
@@ -101,6 +102,22 @@ export function sameVisualLayout(a: string | null | undefined, b: string | null 
   const visual = (raw: string | null | undefined) =>
     JSON.stringify(extractVisualTheme(JSON.stringify(themeForFreeformEdit(mergeScoreboardTheme(raw ?? null)))));
   return visual(a) === visual(b);
+}
+
+/**
+ * Zet de plaatsing van een meegeleverd voorbeeld in de editor. Kleuren, lettertype, achtergronden,
+ * het volledige scorebord en de eigen elementen van de club (tekst, afbeelding, …) blijven staan.
+ */
+export function themeFromExample(current: ResolvedScoreboardTheme, example: ScoreboardTheme): ResolvedScoreboardTheme {
+  const arranged = mergeScoreboardTheme(
+    JSON.stringify({ ...current, ...example, elements: { full: current.elements.full } }),
+  );
+  // Eigen elementen bovenop de klassieke vakken, anders verdwijnen ze achter de video.
+  const extras = current.elements.sponsor.filter((element) => !isClassicElementId(element.id));
+  return themeForFreeformEdit({
+    ...arranged,
+    elements: { ...arranged.elements, sponsor: [...arranged.elements.sponsor, ...extras] },
+  });
 }
 
 /** Template-JSON opschonen voor opslag: alleen layout-keys, compact. */

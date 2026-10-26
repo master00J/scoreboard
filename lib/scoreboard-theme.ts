@@ -3,6 +3,7 @@
 import {
   elementsFromFullSlots,
   elementsFromSlots,
+  isClassicElementId,
   normalizeBox,
   normalizeElements,
   slotsFromElements,
@@ -558,6 +559,21 @@ export function themeForFreeformEdit(theme: ResolvedScoreboardTheme): ResolvedSc
     elements: { ...theme.elements, sponsor: elementsFromSlots(slots) },
     // De kleuren blijven zoals ze zijn. `contentAreaBg` is ook de achtergrond van het volledige
     // scorebord: wie de editor opent en opslaat, mag dat scherm niet in de framekleur terugvinden.
+  };
+}
+
+/**
+ * Wisselt de vorm naast video en sponsors. Vrij plaatsen begint waar de vakken nu staan (L-balk of
+ * onderstrip), met de eigen elementen van de club erbij, zodat er niets verspringt of verdwijnt.
+ */
+export function withLayoutMode(theme: ResolvedScoreboardTheme, mode: ScoreboardLayoutMode): ResolvedScoreboardTheme {
+  if (mode !== "custom" || theme.layoutMode === "custom") return { ...theme, layoutMode: mode };
+  const framed = themeForFreeformEdit(theme);
+  const extras = theme.elements.sponsor.filter((element) => !isClassicElementId(element.id));
+  return {
+    ...framed,
+    layoutMode: "custom",
+    elements: { ...framed.elements, sponsor: [...framed.elements.sponsor, ...extras] },
   };
 }
 
