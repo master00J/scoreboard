@@ -3,6 +3,7 @@ import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
   extractVisualTheme,
+  resolveScoreboardThemeJson,
   sameVisualLayout,
   sanitizeTemplateThemeJson,
   templateMediaKind,
@@ -71,6 +72,69 @@ describe("layout-templates bevatten alleen vormgeving", () => {
     expect(extractVisualTheme("niet-json")).toEqual({});
     expect(extractVisualTheme(null)).toEqual({});
     expect(JSON.parse(applyTemplateToThemeJson(null, "{}"))).toEqual({});
+  });
+});
+
+describe("stadionscherm volgt de editor", () => {
+  it("zet de proefindeling op het scherm, zonder een regel", () => {
+    const preview = JSON.stringify({ layoutMode: "custom", slots: { clock: { x: 10, y: 10, w: 20, h: 20 } } });
+    expect(
+      resolveScoreboardThemeJson({
+        themeJson: JSON.stringify({ layoutMode: "auto", layoutRules: [{ id: "r", sport: "*", phase: "*", templateId: "builtin" }] }),
+        previewJson: preview,
+        sport: "VOLLEYBALL",
+        status: "FIRST_HALF",
+        templates: [{ id: "builtin", themeJson: JSON.stringify({ layoutMode: "left-l" }), isBuiltIn: true }],
+      }),
+    ).toBe(preview);
+  });
+
+  it("laat een meegeleverde L-balk een opgeslagen vrije indeling niet overschrijven", () => {
+    const saved = JSON.stringify({
+      layoutMode: "custom",
+      layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "builtin_l" }],
+    });
+    const resolved = JSON.parse(
+      resolveScoreboardThemeJson({
+        themeJson: saved,
+        sport: "VOLLEYBALL",
+        status: "FIRST_HALF",
+        templates: [{ id: "builtin_l", themeJson: JSON.stringify({ layoutMode: "left-l" }), isBuiltIn: true }],
+      }) ?? "{}",
+    );
+    expect(resolved.layoutMode).toBe("custom");
+  });
+
+  it("laat een eigen L-balk een opgeslagen vrije indeling niet overschrijven", () => {
+    const saved = JSON.stringify({
+      layoutMode: "custom",
+      layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "club_l" }],
+    });
+    const resolved = JSON.parse(
+      resolveScoreboardThemeJson({
+        themeJson: saved,
+        sport: "VOLLEYBALL",
+        status: "FIRST_HALF",
+        templates: [{ id: "club_l", themeJson: JSON.stringify({ layoutMode: "left-l" }), isBuiltIn: false }],
+      }) ?? "{}",
+    );
+    expect(resolved.layoutMode).toBe("custom");
+  });
+
+  it("past wel een eigen clubindeling uit een regel toe", () => {
+    const saved = JSON.stringify({
+      layoutMode: "auto",
+      layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "club" }],
+    });
+    const resolved = JSON.parse(
+      resolveScoreboardThemeJson({
+        themeJson: saved,
+        sport: "VOLLEYBALL",
+        status: "FIRST_HALF",
+        templates: [{ id: "club", themeJson: JSON.stringify({ layoutMode: "custom" }), isBuiltIn: false }],
+      }) ?? "{}",
+    );
+    expect(resolved.layoutMode).toBe("custom");
   });
 });
 

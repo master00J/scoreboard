@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Redo2, Undo2 } from "lucide-react";
-import type { AppSettings, Team } from "@/lib/types";
+import type { AppSettings, Match, Team } from "@/lib/types";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
 import {
@@ -33,10 +33,11 @@ import {
   defaultLayoutRuleTemplateId,
   layoutRuleOverview,
   layoutRulesFromThemeJson,
+  pickLayoutRule,
   type LayoutPhase,
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
-import { sameVisualLayout, templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
+import { sameVisualLayout, sanitizeTemplateThemeJson, templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
 import { SPORT_TYPES, normalizeSport, type SportType } from "@/lib/sports";
 import { canRedo, canUndo } from "@/lib/undo-history";
 import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
@@ -306,6 +307,7 @@ export function SetupScoreboardThemeSection({
   reloadSettings,
   homeTeam,
   awayTeam,
+  liveMatch,
   previewSport,
   seedLayout,
   onSeedConsumed,
@@ -314,6 +316,7 @@ export function SetupScoreboardThemeSection({
   reloadSettings: () => void;
   homeTeam?: Team | null;
   awayTeam?: Team | null;
+  liveMatch?: Match | null;
   /** Sport van de actieve wedstrijd; het voorbeeld start daarmee. */
   previewSport?: string | null;
   /** Gekozen via "Bewerken" in de Layout-bibliotheek. */
@@ -486,6 +489,18 @@ export function SetupScoreboardThemeSection({
     if (!res.ok) {
       toast({ title: t("setup.themeSaveFailed"), variant: "error" });
       return;
+    }
+    const rule = pickLayoutRule(rules, {
+      sport: previewSport ?? liveMatch?.sport,
+      status: liveMatch?.status,
+    });
+    const clubLayout = rule ? layouts.find((item) => item.id === rule.templateId && !item.isBuiltIn) : null;
+    if (clubLayout) {
+      await fetch(`/api/scoreboard-templates/${clubLayout.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ themeJson: sanitizeTemplateThemeJson(json) }),
+      }).catch(() => null);
     }
     // De geschiedenis blijft staan, zodat ongedaan maken ook na opslaan nog kan.
     store().markSaved(json);
@@ -774,6 +789,7 @@ export function SetupScoreboardThemeSection({
           onRedo={() => store().redo()}
           homeTeam={homeTeam}
           awayTeam={awayTeam}
+          liveMatch={liveMatch}
           initialSport={previewSport}
           surface={surface}
           canvasWidth={canvasWidth}

@@ -2,65 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Match, Team } from "@/lib/types";
+import type { Team } from "@/lib/types";
 import type { ResolvedScoreboardTheme } from "@/lib/scoreboard-theme";
-import { CustomScoreboardLayout } from "@/app/display/_modes/custom-scoreboard-layout";
-import { LeftScoreboardLayout } from "@/app/display/_modes/left-scoreboard-layout";
-import { MatchScoreboardFull } from "@/app/display/_modes/match-scoreboard-full";
-import { StripScoreboardLayout } from "@/app/display/_modes/scoreboard-strip";
+import { ScoreboardLayoutBoard } from "@/app/display/_modes/scoreboard-layout-board";
+import {
+  SCOREBOARD_PREVIEW_ADDED_TIME,
+  SCOREBOARD_PREVIEW_AWAY,
+  SCOREBOARD_PREVIEW_ELAPSED,
+  SCOREBOARD_PREVIEW_HOME,
+  buildScoreboardPreviewMatch,
+} from "@/lib/scoreboard-preview-match";
 
 /** Logisch canvas van het stadionscherm; previews schalen hiervandaan naar kaartbreedte. */
 const PREVIEW_CANVAS_W = 1920;
 const PREVIEW_CANVAS_H = 1080;
-
-function previewTeam(partial: Team | null | undefined, fallback: Team): Team {
-  if (!partial) return fallback;
-  return partial;
-}
-
-const FALLBACK_HOME: Team = {
-  id: "preview-home",
-  name: "Thuis",
-  shortName: "THU",
-  logoPath: null,
-  primaryColor: "#2563eb",
-  secondaryColor: "#1e3a8a",
-};
-
-const FALLBACK_AWAY: Team = {
-  id: "preview-away",
-  name: "Uit",
-  shortName: "UIT",
-  logoPath: null,
-  primaryColor: "#dc2626",
-  secondaryColor: "#7f1d1d",
-};
-
-function previewMatch(home?: Team | null, away?: Team | null): Match {
-  return {
-    id: "preview",
-    homeTeamId: "preview-home",
-    awayTeamId: "preview-away",
-    homeTeam: previewTeam(home, FALLBACK_HOME),
-    awayTeam: previewTeam(away, FALLBACK_AWAY),
-    kickoffAt: null,
-    halfDurationSec: 2700,
-    halfBreakSec: 900,
-    sport: "FOOTBALL",
-    currentPeriod: 1,
-    periodDurationSec: 2700,
-    homeTimeouts: 0,
-    awayTimeouts: 0,
-    homeFouls: 0,
-    awayFouls: 0,
-    homeSets: 0,
-    awaySets: 0,
-    status: "FIRST_HALF",
-    homeScore: 1,
-    awayScore: 0,
-    createdAt: new Date().toISOString(),
-  };
-}
 
 function PreviewSixteenByNinePlate() {
   return (
@@ -83,57 +38,34 @@ export function ScoreboardThemePreview({
   awayTeam?: Team | null;
 }) {
   const { t } = useTranslation();
-  const match = previewMatch(
-    homeTeam ?? { ...FALLBACK_HOME, name: t("common.home"), shortName: t("common.home").slice(0, 3).toUpperCase() },
-    awayTeam ?? { ...FALLBACK_AWAY, name: t("common.away"), shortName: t("common.away").slice(0, 3).toUpperCase() },
-  );
+  const match = buildScoreboardPreviewMatch({
+    home:
+      homeTeam ?? {
+        ...SCOREBOARD_PREVIEW_HOME,
+        name: t("common.home"),
+        shortName: t("common.home").slice(0, 3).toUpperCase(),
+      },
+    away:
+      awayTeam ?? {
+        ...SCOREBOARD_PREVIEW_AWAY,
+        name: t("common.away"),
+        shortName: t("common.away").slice(0, 3).toUpperCase(),
+      },
+  });
   const period = t("sports.period.half1");
-  const mode = theme.layoutMode;
   const video = <PreviewSixteenByNinePlate />;
-  const board =
-    mode === "custom" ? (
-      <CustomScoreboardLayout
-        match={match}
-        elapsed={512}
-        running
-        period={period}
-        addedTime={2}
-        theme={theme}
-      >
-        {video}
-      </CustomScoreboardLayout>
-    ) : mode === "auto" || mode === "left-l" ? (
-      <LeftScoreboardLayout
-        match={match}
-        elapsed={512}
-        running
-        period={period}
-        addedTime={2}
-        theme={theme}
-      >
-        {video}
-      </LeftScoreboardLayout>
-    ) : mode === "bottom-strip" ? (
-      <StripScoreboardLayout
-        match={match}
-        elapsed={512}
-        running
-        period={period}
-        addedTime={2}
-        theme={theme}
-      >
-        {video}
-      </StripScoreboardLayout>
-    ) : (
-      <MatchScoreboardFull
-        match={match}
-        elapsed={512}
-        running
-        period={period}
-        addedTime={2}
-        theme={theme}
-      />
-    );
+  const board = (
+    <ScoreboardLayoutBoard
+      theme={theme}
+      match={match}
+      elapsed={SCOREBOARD_PREVIEW_ELAPSED}
+      running
+      period={period}
+      addedTime={SCOREBOARD_PREVIEW_ADDED_TIME}
+    >
+      {video}
+    </ScoreboardLayoutBoard>
+  );
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-black">

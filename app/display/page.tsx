@@ -34,8 +34,8 @@ import {
   scoreboardUsesStrip,
   sponsorRepeatBudgetCyclesFromThemeJson,
 } from "@/lib/scoreboard-theme";
-import { layoutRulesFromThemeJson, pickLayoutRule } from "@/lib/scoreboard-elements";
-import { applyTemplateToThemeJson } from "@/lib/scoreboard-templates";
+import { layoutRulesFromThemeJson } from "@/lib/scoreboard-elements";
+import { resolveScoreboardThemeJson } from "@/lib/scoreboard-templates";
 import { mediaUrl } from "@/lib/media-url";
 import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
 import {
@@ -94,6 +94,14 @@ import { LeftScoreboardLayout } from "./_modes/left-scoreboard-layout";
 import { CustomScoreboardLayout } from "./_modes/custom-scoreboard-layout";
 import { StripScoreboardLayout } from "./_modes/scoreboard-strip";
 import { MatchScoreboardFull } from "./_modes/match-scoreboard-full";
+import { ScoreboardLayoutBoard } from "./_modes/scoreboard-layout-board";
+import {
+  SCOREBOARD_PREVIEW_ADDED_TIME,
+  SCOREBOARD_PREVIEW_ELAPSED,
+  buildScoreboardPreviewMatch,
+  layoutPreviewReplacesIdle,
+  teamFromHomeBranding,
+} from "@/lib/scoreboard-preview-match";
 import { GoalMode } from "./_modes/goal";
 import { SubstitutionMode } from "./_modes/substitution";
 import { CardMode } from "./_modes/card";
@@ -229,20 +237,27 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   const [themeJson, setThemeJson] = useState<string | null>(null);
-  /** "Probeer op scherm" vanuit de editor: tijdelijk, niet opgeslagen. */
-  const [themePreviewJson, setThemePreviewJson] = useState<string | null>(null);
-  const [layoutTemplates, setLayoutTemplates] = useState<Array<{ id: string; themeJson: string }>>([]);
+  /** Fallback als de socket-state de proef nog niet meeneemt. */
+  const [themePreviewFromSettings, setThemePreviewFromSettings] = useState<string | null>(null);
+  const themePreviewFromState = useDisplayStore((store) => store.state?.themePreviewJson ?? null);
+  const themePreviewJson = themePreviewFromState ?? themePreviewFromSettings;
+  const [layoutTemplates, setLayoutTemplates] = useState<Array<{ id: string; themeJson: string; isBuiltIn?: boolean }>>([]);
   /** Aftelklok naar de start en de mededeling van de operator. */
   const [displayExtras, setDisplayExtras] = useState<DisplayExtras>(DEFAULT_DISPLAY_EXTRAS);
-  /** Welke indeling nu geldt: de proefweergave, anders de regel voor deze sport en fase, anders de gewone. */
-  const scoreboardTheme = useMemo(() => {
-    if (themePreviewJson) return mergeScoreboardTheme(themePreviewJson);
-    const rule = match
-      ? pickLayoutRule(layoutRulesFromThemeJson(themeJson), { sport: match.sport, status: match.status })
-      : null;
-    const template = rule ? layoutTemplates.find((item) => item.id === rule.templateId) : null;
-    return mergeScoreboardTheme(template ? applyTemplateToThemeJson(themeJson, template.themeJson) : themeJson);
-  }, [themeJson, themePreviewJson, layoutTemplates, match?.sport, match?.status]);
+  /** Proef uit de editor, anders een eigen clubregel, anders de opgeslagen indeling. */
+  const scoreboardTheme = useMemo(
+    () =>
+      mergeScoreboardTheme(
+        resolveScoreboardThemeJson({
+          themeJson,
+          previewJson: themePreviewJson,
+          sport: match?.sport,
+          status: match?.status,
+          templates: layoutTemplates,
+        }),
+      ),
+    [themeJson, themePreviewJson, layoutTemplates, match?.sport, match?.status],
+  );
   const liveTheme = useMemo(() => {
     const profile = getSportProfile(match?.sport);
     return {
@@ -270,6 +285,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     logoUrl: null,
     media: null,
   });
+  const [homeTeamBranding, setHomeTeamBranding] = useState<AppSettings["homeTeamBranding"]>(null);
 
   useEffect(() => {
     if (previewIframe) return;
@@ -288,7 +304,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           window.dispatchEvent(new CustomEvent("arenacue:ui-locale", { detail: s.uiLocale }));
         }
         setThemeJson(s.scoreboardThemeJson ?? null);
-        setThemePreviewJson(s.scoreboardThemePreviewJson ?? null);
+        setThemePreviewFromSettings(s.scoreboardThemePreviewJson ?? null);
         if (layoutRulesFromThemeJson(s.scoreboardThemeJson ?? null).length > 0) {
           fetch("/api/scoreboard-templates")
             .then((r) => r.json())
@@ -322,6 +338,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         const logoUrl = s.homeTeamBranding?.logoPath
           ? mediaUrl(s.homeTeamBranding.logoPath)
           : null;
+        setHomeTeamBranding(s.homeTeamBranding ?? null);
         const im = s.idleFallbackMedia;
         setIdleEmptyFallback({
           logoUrl,
@@ -569,6 +586,15 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   }, [subIn, subOut, match]);
 
   const cardPlayer = activePlayer;
+  const layoutPreviewActive = layoutPreviewReplacesIdle(themePreviewJson, mode);
+  const layoutPreviewMatch = useMemo(
+    () =>
+      match ??
+      buildScoreboardPreviewMatch({
+        home: teamFromHomeBranding(homeTeamBranding),
+      }),
+    [match, homeTeamBranding],
+  );
   const period = tMatchPeriod(t, match);
   const scoreboardClock = sportClockSeconds(
     match?.sport,
@@ -1479,7 +1505,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       <AnimatePresence mode="sync">
         {!state && <IdleScreen key="ix" connecting={!connected} />}
 
-        {state && mode === "IDLE" && (() => {
+        {state && mode === "IDLE" && !layoutPreviewActive && (() => {
           if (idleMayPlayPrematchSponsors(match) && hasSponsorsForSectionOrWindow(sponsors, "prematch", match.status, sponsorWindow, match.sport)) {
             if (prematchDistView.phase === "sponsor") {
               return (
@@ -1529,6 +1555,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         {/* Sponsor-slides fullscreen wanneer gÃ©Ã©n actieve speelhelft (rust, prematch, â€¦). */}
         {state &&
           mode === "SPONSOR_ROTATION" &&
+          !layoutPreviewActive &&
           !(match && sponsorRotationBesideScoreboard(match.status)) &&
           !liveAutoHalftime && (
             <SponsorRotationLiveContent
@@ -1814,6 +1841,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         )}
 
       {activeScheduledCue &&
+        !layoutPreviewActive &&
         mode !== "BLACKOUT" &&
         !exclusiveFullscreen &&
         match &&
@@ -1910,7 +1938,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       {/* Speelhelft + “Scorebord + sponsors”: rotatie blijft gemount (decoder).
           Zonder clip: opacity-0 onder het volledige scorebord. Goal/kaart/één-off
           als overlay over het mediavlak. */}
-      {keepLiveSponsorBesideMounted && match && liveSponsorBesideContent && (
+      {keepLiveSponsorBesideMounted && !layoutPreviewActive && match && liveSponsorBesideContent && (
         <div
           className={
             showLiveSponsorBeside
@@ -1943,7 +1971,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       )}
 
       {/* Active-match modes: wrap content in the left-scoreboard / strip layout */}
-      {showScoreFrame && match && (!keepLiveSponsorBesideMounted || !showLiveSponsorBeside) && (
+      {showScoreFrame && !layoutPreviewActive && match && (!keepLiveSponsorBesideMounted || !showLiveSponsorBeside) && (
         <ScoreFrame
           match={match}
           elapsed={scoreboardClock}
@@ -1955,6 +1983,20 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         >
           <AnimatePresence mode="wait">{activeContent}</AnimatePresence>
         </ScoreFrame>
+      )}
+
+      {state && layoutPreviewActive && (
+        <div className="absolute inset-0 z-[89] bg-black" data-layout-preview>
+          <ScoreboardLayoutBoard
+            theme={liveTheme}
+            match={layoutPreviewMatch}
+            elapsed={match ? scoreboardClock : SCOREBOARD_PREVIEW_ELAPSED}
+            running={match ? (state.timerRunning ?? false) : true}
+            period={match ? period : t("sports.period.half1")}
+            addedTime={match ? addedTimeMinutes : SCOREBOARD_PREVIEW_ADDED_TIME}
+            shotClock={match ? shotClock : 0}
+          />
+        </div>
       )}
 
       {state?.externalCaptureToDisplay &&

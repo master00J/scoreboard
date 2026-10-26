@@ -819,7 +819,10 @@ async function resetAnnouncementOnStartup(): Promise<void> {
 
 async function touchState() {
   const state = await getStateRow();
-  const now = new Date();
+  let now = new Date();
+  if (state.updatedAt && now.getTime() <= state.updatedAt.getTime()) {
+    now = new Date(state.updatedAt.getTime() + 1);
+  }
   await prisma.displayState.update({
     where: { id: 1 },
     data: {
@@ -1010,7 +1013,12 @@ function rememberState(state: DisplayStateRow) {
 export async function getDisplaySnapshot() {
   const state = await getStateRow();
   rememberState(state);
-  return serializeDisplayState(state);
+  const preview = activeThemePreview();
+  return {
+    ...serializeDisplayState(state),
+    themePreviewJson: preview?.json ?? null,
+    themePreviewUntil: preview?.until ?? null,
+  };
 }
 
 export async function broadcastDisplayState() {
@@ -1212,7 +1220,12 @@ function startTickLoop() {
 
       if (mutated) {
         rememberState(state);
-        sendAll("display:state", serializeDisplayState(state));
+        const preview = activeThemePreview();
+        sendAll("display:state", {
+          ...serializeDisplayState(state),
+          themePreviewJson: preview?.json ?? null,
+          themePreviewUntil: preview?.until ?? null,
+        });
       }
       const clocksLive =
         state.timerRunning ||

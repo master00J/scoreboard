@@ -564,6 +564,7 @@ export function SetupPanel() {
         reloadSettings={reloadSettings}
         homeTeam={activeMatch?.homeTeam ?? homeTeam}
         awayTeam={activeMatch?.awayTeam ?? (teams ?? []).find((team) => team.id !== homeTeam?.id) ?? null}
+        liveMatch={activeMatch}
         previewSport={activeMatch?.sport ?? null}
         seedLayout={editLayout}
         onSeedConsumed={consumeEditLayout}

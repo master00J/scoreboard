@@ -3,9 +3,14 @@
 import type { CSSProperties } from "react";
 import type { Match } from "@/lib/types";
 import { formatShotClock, getSportProfile } from "@/lib/sports";
+import {
+  sportTeamExtraChips,
+  sportTeamExtrasCharCount,
+  sportTeamExtrasFitFontSize,
+} from "@/lib/sport-team-extras";
 import { useDisplayStore } from "@/lib/store";
 import { useLivePenaltySeconds } from "@/lib/use-timer";
-import { formatSetHistory, normalizeServingSide } from "@/lib/volleyball";
+import { formatSetHistory } from "@/lib/volleyball";
 
 /** Heeft deze sport iets extra's naast de score (sets, time-outs, fouten, service)? */
 export function sportHasTeamExtras(sport: unknown): boolean {
@@ -25,65 +30,54 @@ export function SportTeamExtras({
   /** Vaste LED-grootte in px, of een CSS-grootte voor een eigen vak. Zonder waarde schaalt het met de container. */
   fontSize?: number | string;
 }) {
-  const profile = getSportProfile(match.sport);
-  const timeouts = side === "home" ? match.homeTimeouts : match.awayTimeouts;
-  const fouls = side === "home" ? match.homeFouls : match.awayFouls;
-  const sets = side === "home" ? match.homeSets : match.awaySets;
-  const serving = profile.hasSets && normalizeServingSide(match.servingSide) === side;
-  const possession = profile.supportsPossessionArrow && match.possessionArrow === side;
-  const bonus =
-    profile.foulBonusFrom != null && fouls >= profile.foulBonusFrom
-      ? profile.id === "FUTSAL"
-        ? "PK"
-        : "BONUS"
-      : null;
-  if (
-    !profile.hasSets &&
-    profile.timeoutLimitForPeriod(1) <= 0 &&
-    !profile.statLabel &&
-    !serving &&
-    !possession
-  ) {
-    return null;
-  }
-  const size = typeof fontSize === "number" ? fontSize : compact && fontSize === undefined ? 32 : undefined;
-  const style: CSSProperties = size
-    ? { fontSize: size, gap: Math.max(6, Math.round(size * 0.28)) }
-    : { fontSize: typeof fontSize === "string" ? fontSize : "min(28cqh, 8cqw, 42px)", gap: "0.28em" };
+  const chips = sportTeamExtraChips(match, side);
+  if (chips.length === 0) return null;
+  const fitted = sportTeamExtrasFitFontSize(sportTeamExtrasCharCount(chips), compact);
+  const size = typeof fontSize === "number" ? fontSize : undefined;
+  const style: CSSProperties = {
+    fontSize: size ?? (typeof fontSize === "string" ? fontSize : fitted),
+    gap: size ? Math.max(6, Math.round(size * 0.28)) : "0.28em",
+    whiteSpace: "nowrap",
+    wordBreak: "keep-all",
+    overflowWrap: "normal",
+  };
   return (
     <div
-      className="flex w-full min-w-0 max-w-full flex-wrap items-center justify-center px-[2cqw] text-center font-black uppercase leading-none tracking-wide text-white"
+      className={`flex w-full min-w-0 max-w-full flex-nowrap items-center justify-center overflow-hidden px-[2cqw] text-center font-black uppercase leading-none text-white ${compact ? "tracking-normal" : "tracking-wide"}`}
       style={style}
     >
-      {possession ? (
-        <span aria-label="Volgend balbezit" className="text-amber-300" style={{ fontSize: "1.45em" }}>
-          {side === "home" ? "◀" : "▶"}
-        </span>
-      ) : null}
-      {serving ? (
-        <span className="rounded bg-amber-400 text-black" style={{ padding: "0.08em 0.35em" }}>
-          Serve
-        </span>
-      ) : null}
-      {profile.hasSets && <span>Sets {sets}</span>}
-      {profile.timeoutLimitForPeriod(1) > 0 && (
-        <span className="tabular-nums">
-          TO {timeouts}/{profile.timeoutLimitForPeriod(match.currentPeriod || 1)}
-        </span>
-      )}
-      {profile.statLabel && (
-        <span className="tabular-nums">
-          F {fouls}
-        </span>
-      )}
-      {bonus ? (
-        <span
-          className="rounded bg-red-600 text-white"
-          style={{ padding: "0.08em 0.4em", letterSpacing: "0.08em" }}
-        >
-          {bonus}
-        </span>
-      ) : null}
+      {chips.map((chip) => {
+        if (chip.kind === "possession") {
+          return (
+            <span key={chip.kind} aria-label="Volgend balbezit" className="shrink-0 text-amber-300" style={{ fontSize: "1.45em" }}>
+              {chip.text}
+            </span>
+          );
+        }
+        if (chip.kind === "serve") {
+          return (
+            <span key={chip.kind} className="shrink-0 rounded bg-amber-400 text-black" style={{ padding: "0.08em 0.35em" }}>
+              {chip.text}
+            </span>
+          );
+        }
+        if (chip.kind === "bonus") {
+          return (
+            <span
+              key={chip.kind}
+              className="shrink-0 rounded bg-red-600 text-white"
+              style={{ padding: "0.08em 0.4em", letterSpacing: "0.08em" }}
+            >
+              {chip.text}
+            </span>
+          );
+        }
+        return (
+          <span key={chip.kind} className="shrink-0 tabular-nums">
+            {chip.text}
+          </span>
+        );
+      })}
     </div>
   );
 }

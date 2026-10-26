@@ -113,8 +113,8 @@ export function ExtraElement({
     }
     case "teamExtras":
       content = (
-        <div className="w-full" style={{ color: text.color }}>
-          <SportTeamExtras match={match} side={element.side === "away" ? "away" : "home"} fontSize="min(58cqh, 9cqw)" />
+        <div className="w-full min-w-0" style={{ color: text.color, whiteSpace: "nowrap" }}>
+          <SportTeamExtras match={match} side={element.side === "away" ? "away" : "home"} />
         </div>
       );
       break;

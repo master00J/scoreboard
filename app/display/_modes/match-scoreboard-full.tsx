@@ -196,7 +196,11 @@ function TeamSide({
         style={{ gap: `${Math.min(theme.fullTeamStackGapPx, 10)}cqh`, ...inner }}
       >
         {stack}
-        {!theme.showScores ? <SportTeamExtras match={match} side={side} /> : null}
+        {!theme.showScores ? (
+          <div className="w-full min-w-0 shrink-0">
+            <SportTeamExtras match={match} side={side} compact />
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -236,7 +240,9 @@ function TeamScore({
         >
           {score}
         </div>
-        <SportTeamExtras match={match} side={side} />
+        <div className="w-full min-w-0 shrink-0">
+          <SportTeamExtras match={match} side={side} compact />
+        </div>
       </div>
     </div>
   );

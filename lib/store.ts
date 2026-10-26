@@ -39,8 +39,16 @@ export const useDisplayStore = create<Store>((set) => ({
   setState: (s) =>
     set((prev) => {
       if (isStaleDisplayState(s, prev.state)) return prev;
+      const state =
+        s && prev.state && s.themePreviewJson === undefined
+          ? {
+              ...s,
+              themePreviewJson: prev.state.themePreviewJson ?? null,
+              themePreviewUntil: s.themePreviewUntil ?? prev.state.themePreviewUntil ?? null,
+            }
+          : s;
       return {
-        state: s,
+        state,
         goalPickerDismissed:
           prev.state?.mode === "GOAL_INTRO_VIDEO" && s?.mode !== "GOAL_INTRO_VIDEO"
             ? false

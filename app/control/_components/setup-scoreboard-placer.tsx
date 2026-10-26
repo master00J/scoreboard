@@ -12,7 +12,10 @@ import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
+import { tMatchPeriod } from "@/lib/i18n/t-phase";
 import { tPeriodName, tSportLabel } from "@/lib/i18n/t-sport";
+import { useDisplayStore } from "@/lib/store";
+import { useLiveTimerSeconds } from "@/lib/use-timer";
 import {
   GRID_PCT,
   RESIZE_HANDLES,
@@ -156,7 +159,7 @@ function editorMatch(home: Team, away: Team, sport: SportType): Match {
         homeSets: 1,
         awaySets: 2,
         homeTimeouts: 1,
-        servingSide: "away",
+        servingSide: "home",
         setHistory: [
           { home: 25, away: 22 },
           { home: 20, away: 25 },
@@ -319,6 +322,7 @@ export function SetupScoreboardPlacer({
   onRedo,
   homeTeam,
   awayTeam,
+  liveMatch,
   initialSport,
   surface,
   canvasWidth,
@@ -333,6 +337,8 @@ export function SetupScoreboardPlacer({
   onRedo: () => void;
   homeTeam?: Team | null;
   awayTeam?: Team | null;
+  /** Actieve wedstrijd: serve, score en fase volgen het stadionscherm. */
+  liveMatch?: Match | null;
   /** Sport van de actieve wedstrijd; daarna kiest de operator zelf. */
   initialSport?: string | null;
   surface: EditorSurface;
@@ -342,6 +348,9 @@ export function SetupScoreboardPlacer({
   safeZonePx: number;
 }) {
   const { t } = useTranslation();
+  const liveElapsed = useLiveTimerSeconds();
+  const timerRunning = useDisplayStore((state) => !!state.state?.timerRunning);
+  const addedTimeMinutes = useDisplayStore((state) => Math.max(0, state.state?.addedTimeMinutes ?? 0));
   const canvasRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<Drag | null>(null);
   const altRef = useRef(false);
@@ -392,7 +401,10 @@ export function SetupScoreboardPlacer({
     name: t("common.away"),
     shortName: t("common.away").slice(0, 3).toUpperCase(),
   };
-  const match = editorMatch(home, away, previewSport);
+  const usingLiveMatch = !!(liveMatch && normalizeSport(liveMatch.sport) === previewSport);
+  const match = usingLiveMatch
+    ? { ...liveMatch, homeTeam: home, awayTeam: away, sport: previewSport }
+    : editorMatch(home, away, previewSport);
   const profile = getSportProfile(previewSport);
   /** Zelfde aanpassingen als het stadionscherm: geen klok of extra tijd bij sporten die dat niet kennen. */
   const previewTheme: ResolvedScoreboardTheme = {
@@ -400,7 +412,10 @@ export function SetupScoreboardPlacer({
     showClock: resolveDisplayShowClock(previewSport, theme.showClock),
     fullShowAddedTime: profile.supportsInjuryTime ? theme.fullShowAddedTime : false,
   };
-  const period = tPeriodName(t, previewSport, match.currentPeriod);
+  const period = usingLiveMatch ? tMatchPeriod(t, match) : tPeriodName(t, previewSport, match.currentPeriod);
+  const elapsed = usingLiveMatch ? liveElapsed : previewElapsed(previewSport);
+  const running = usingLiveMatch ? timerRunning : true;
+  const addedTime = usingLiveMatch ? addedTimeMinutes : profile.supportsInjuryTime ? 2 : 0;
   const shotClock = profile.shotClockPresets.length > 0 ? 14 : 0;
 
   function elementLabel(element: LayoutElement): string {
@@ -712,20 +727,20 @@ export function SetupScoreboardPlacer({
               {surface === "full" ? (
                 <MatchScoreboardFull
                   match={match}
-                  elapsed={previewElapsed(previewSport)}
-                  running
+                  elapsed={elapsed}
+                  running={running}
                   period={period}
-                  addedTime={2}
+                  addedTime={addedTime}
                   shotClock={shotClock}
                   theme={previewTheme}
                 />
               ) : scoreboardEditorShowsLeftFrame(previewTheme) ? (
                 <LeftScoreboardLayout
                   match={match}
-                  elapsed={previewElapsed(previewSport)}
-                  running
+                  elapsed={elapsed}
+                  running={running}
                   period={period}
-                  addedTime={2}
+                  addedTime={addedTime}
                   shotClock={shotClock}
                   theme={previewTheme}
                 >
@@ -734,10 +749,10 @@ export function SetupScoreboardPlacer({
               ) : previewTheme.layoutMode === "bottom-strip" ? (
                 <StripScoreboardLayout
                   match={match}
-                  elapsed={previewElapsed(previewSport)}
-                  running
+                  elapsed={elapsed}
+                  running={running}
                   period={period}
-                  addedTime={2}
+                  addedTime={addedTime}
                   shotClock={shotClock}
                   theme={previewTheme}
                 >
@@ -746,10 +761,10 @@ export function SetupScoreboardPlacer({
               ) : (
                 <CustomScoreboardLayout
                   match={match}
-                  elapsed={previewElapsed(previewSport)}
-                  running
+                  elapsed={elapsed}
+                  running={running}
                   period={period}
-                  addedTime={2}
+                  addedTime={addedTime}
                   shotClock={shotClock}
                   theme={previewTheme}
                 >

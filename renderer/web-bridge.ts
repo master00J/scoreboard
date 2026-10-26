@@ -360,6 +360,7 @@ function asIso(value: Date | string | null | undefined): string | null {
 
 function serializeDisplay(): SerializedDisplayState {
   const d = store.display;
+  const preview = store.themePreview && store.themePreview.until > Date.now() ? store.themePreview : null;
   return {
     ...d,
     timerStartedAt: asIso(d.timerStartedAt),
@@ -369,6 +370,8 @@ function serializeDisplay(): SerializedDisplayState {
     preMatchStartedAt: asIso(d.preMatchStartedAt),
     updatedAt: asIso(d.updatedAt) ?? nowIso(),
     sponsorPeriodBreakPending,
+    themePreviewJson: preview?.json ?? null,
+    themePreviewUntil: preview?.until ?? null,
   };
 }
 

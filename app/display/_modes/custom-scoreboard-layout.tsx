@@ -205,7 +205,11 @@ function TeamLogoChip({
             {team.shortName || team.name}
           </div>
         ) : null}
-        {!theme.showScores ? <SportTeamExtras match={match} side={side} compact /> : null}
+        {!theme.showScores ? (
+          <div className="w-full min-w-0 shrink-0">
+            <SportTeamExtras match={match} side={side} compact />
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -238,14 +242,16 @@ function TeamScoreChip({
         <div
           className="shrink-0 font-black tabular-nums leading-none"
           style={{
-            fontSize: "min(72cqh, 58cqw, 220px)",
+            fontSize: "min(62cqh, 58cqw, 220px)",
             color: element.style?.color ?? theme.scoreColor,
             textShadow: "0 4px 18px rgba(0,0,0,0.45)",
           }}
         >
           {score}
         </div>
-        <SportTeamExtras match={match} side={side} compact />
+        <div className="w-full min-w-0 shrink-0">
+          <SportTeamExtras match={match} side={side} compact />
+        </div>
       </div>
     </div>
   );

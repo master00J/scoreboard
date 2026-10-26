@@ -294,6 +294,9 @@ export type SerializedDisplayState = Omit<
   updatedAt: string;
   /** Alleen runtime: na sport:setPeriod, tot timer:start. Niet in Prisma. */
   sponsorPeriodBreakPending?: boolean;
+  /** "Probeer op scherm": zit niet in Prisma, wel op elke display:state. */
+  themePreviewJson?: string | null;
+  themePreviewUntil?: number | null;
 };
 
 function isoOrNull(value: Date | string | null | undefined): string | null {

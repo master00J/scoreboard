@@ -1,3 +1,4 @@
+import { layoutRulesFromThemeJson, pickLayoutRule } from "./scoreboard-elements";
 import {
   DEFAULT_SCOREBOARD_THEME,
   SLOT_PRESETS,
@@ -70,6 +71,39 @@ export function extractVisualTheme(raw: string | null | undefined): ScoreboardTh
     if (patch[key] !== undefined) out[key] = patch[key];
   }
   return out as ScoreboardTheme;
+}
+
+export type LayoutTemplateRef = {
+  id: string;
+  themeJson: string;
+  isBuiltIn?: boolean;
+};
+
+/**
+ * Welke JSON het stadionscherm nu moet tekenen.
+ * Een proef uit de editor wint. Een regel mag alleen een eigen clubindeling zetten,
+ * nooit een meegeleverd L-balkvoorbeeld over een opgeslagen vrije indeling.
+ */
+export function resolveScoreboardThemeJson(opts: {
+  themeJson: string | null | undefined;
+  previewJson?: string | null;
+  sport?: unknown;
+  status?: string | null;
+  templates?: readonly LayoutTemplateRef[];
+}): string | null {
+  if (opts.previewJson) return opts.previewJson;
+  const themeJson = opts.themeJson ?? null;
+  const rule = pickLayoutRule(layoutRulesFromThemeJson(themeJson), {
+    sport: opts.sport,
+    status: opts.status,
+  });
+  if (!rule) return themeJson;
+  const template = (opts.templates ?? []).find((item) => item.id === rule.templateId);
+  if (!template || template.isBuiltIn) return themeJson;
+  const savedMode = mergeScoreboardTheme(themeJson).layoutMode;
+  const templateMode = mergeScoreboardTheme(template.themeJson).layoutMode;
+  if (savedMode === "custom" && templateMode !== "custom") return themeJson;
+  return applyTemplateToThemeJson(themeJson, template.themeJson);
 }
 
 /**
