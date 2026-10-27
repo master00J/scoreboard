@@ -56,6 +56,7 @@ import {
   type LivestreamStatus,
 } from "../lib/livestream";
 import { guardChildPipes, writeWithBackpressure } from "../lib/child-pipe";
+import { FrameClock } from "../lib/frame-clock";
 import { naudioHelperCandidates } from "../lib/naudio-helper";
 import { sendZmqReq } from "./zmq-req";
 import { createBrowserAudioTap, type BrowserAudioTap } from "./browser-source-audio";
@@ -237,10 +238,13 @@ function programCapturePlan(
       "bgra",
       "-s",
       `${width}x${height}`,
+      // De pomp levert een vast aantal beeldjes per seconde (FrameClock): ffmpeg telt ze gewoon.
+      "-framerate",
+      String(fps),
       "-i",
       "pipe:0",
     ],
-    videoFilter: ["-vf", `setpts=(RTCTIME-RTCSTART)/1000000/TB,${scale}fps=${fps},format=yuv420p`],
+    videoFilter: ["-vf", `${scale}format=yuv420p`],
     pipeWidth: width,
     pipeHeight: height,
   };
@@ -836,59 +840,91 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       /* oudere Electron zonder paint-API */
     }
 
+    // Vast ritme (zie FrameClock): schilderen zet alleen het laatste beeld klaar, de klok bepaalt
+    // wanneer er een beeldje naar ffmpeg gaat. Vroeger viel elk beeld weg dat binnenkwam terwijl het
+    // vorige nog onderweg was, en kreeg elk beeldje de schommelende leestijd van ffmpeg.
+    const clock = new FrameClock(fps);
+    let latest: Electron.NativeImage | null = null;
+    let latestSent = true;
+    let lastBuf: Buffer | null = null;
     let writing = false;
     let paints = 0;
-    let drops = 0;
+    let overwritten = 0;
+    let repeats = 0;
+    let stalls = 0;
+    let catchingUp = false;
     let lastPaintAt = 0;
-    let lastDropLogAt = 0;
+    let lastStatsAt = 0;
     let subscribed = false;
     const pumpStarted = performance.now();
     const frameMs = Math.max(8, Math.round(1000 / fps));
     const staleMs = frameMs * 2.5;
     const live = () => gen === pumpGeneration && !pumpAbort;
 
+    const logStats = (now: number) => {
+      if (lastStatsAt > 0 && now - lastStatsAt < 10_000) return;
+      lastStatsAt = now;
+      deps.log(
+        `[livestream] beeld ${clock.framesSent} verstuurd in ${((now - pumpStarted) / 1000).toFixed(1)}s · ${paints} geschilderd · ${repeats} herhaald · ${overwritten} overgeslagen · ${stalls} haperingen`,
+      );
+    };
+
+    const toFrameBuffer = (image: Electron.NativeImage): Buffer => {
+      const size = image.getSize();
+      const frame =
+        size.width !== width || size.height !== height ? image.resize({ width, height, quality: "good" }) : image;
+      return frame.toBitmap();
+    };
+
+    /** Stuurt alle beeldjes die volgens de klok verschuldigd zijn; één schrijver tegelijk. */
+    const pumpFrames = async () => {
+      if (writing) return;
+      writing = true;
+      try {
+        while (live()) {
+          const proc = child;
+          if (!proc || proc.killed || !proc.stdin.writable || win.isDestroyed()) break;
+          const now = performance.now();
+          if (!clock.started) {
+            if (!latest) break;
+            clock.start(now);
+          }
+          const behind = clock.behind(now);
+          if (behind === 0) break;
+          if (behind > 2 && !catchingUp) {
+            // De hoofddraad hing langer dan twee beeldjes: inhalen met herhaalde beeldjes. Dat is een
+            // echte hapering in de stream; alleen die telt (één keer per keer) in de gezondheidsmelding.
+            stalls += 1;
+            health = { ...health, paintDrops: stalls };
+          }
+          catchingUp = behind > 1;
+          if (latest && !latestSent) {
+            lastBuf = toFrameBuffer(latest);
+            latestSent = true;
+          } else {
+            repeats += 1;
+          }
+          if (!lastBuf || lastBuf.length === 0) break;
+          await writeWithBackpressure(proc.stdin, lastBuf);
+          clock.markSent();
+          logStats(performance.now());
+        }
+      } catch {
+        /* write kan falen tijdens stop of reconnect */
+      } finally {
+        writing = false;
+      }
+    };
+
     const pushFrame = (image: Electron.NativeImage) => {
       if (!live() || image.isEmpty()) return;
       lastPaintAt = performance.now();
       emitPreview(image);
-      if (writing) {
-        drops += 1;
-        health = { ...health, paintDrops: drops };
-        const now = performance.now();
-        if (drops === 1 || now - lastDropLogAt >= 10_000) {
-          lastDropLogAt = now;
-          deps.log(
-            `[livestream] paint drop ${drops} (backpressure) na ${((now - pumpStarted) / 1000).toFixed(1)}s`,
-          );
-        }
-        return;
-      }
-      const proc = child;
-      if (!proc || proc.killed || !proc.stdin.writable || win.isDestroyed()) return;
       paints += 1;
-      if (paints === 1 || paints === fps * 10 || paints === fps * 60) {
-        deps.log(
-          `[livestream] paint ${paints} frames in ${((performance.now() - pumpStarted) / 1000).toFixed(1)}s drops=${drops}`,
-        );
-      }
-      writing = true;
-      void (async () => {
-        try {
-          let frame = image;
-          const size = frame.getSize();
-          if (size.width !== width || size.height !== height) {
-            frame = frame.resize({ width, height, quality: "best" });
-          }
-          const buf = frame.toBitmap();
-          if (live() && proc.stdin.writable && buf.length > 0) {
-            await writeWithBackpressure(proc.stdin, buf);
-          }
-        } catch {
-          /* write kan falen tijdens stop of reconnect */
-        } finally {
-          writing = false;
-        }
-      })();
+      if (!latestSent) overwritten += 1;
+      latest = image;
+      latestSent = false;
+      void pumpFrames();
     };
 
     const onPaint = (_event: unknown, _dirty: unknown, image: Electron.NativeImage) => {
@@ -910,6 +946,8 @@ export function createLivestreamController(deps: Deps): LivestreamController {
 
     const tick = setInterval(() => {
       if (!live() || win.isDestroyed()) return;
+      // Ook zonder nieuw beeld (stilstaand scorebord) blijft het ritme lopen: het vorige beeld gaat mee.
+      void pumpFrames();
       if (lastPaintAt > 0 && performance.now() - lastPaintAt < staleMs) {
         return;
       }
