@@ -83,6 +83,24 @@ describe("buildRtmpDestination", () => {
     ).toBe("rtmps://live.restream.io/live/re_abc");
   });
 
+  it("stuurt Facebook versleuteld naar de vaste server, ook als de club de hele URL plakt", () => {
+    const key = "FB-1234567890123456-0-AbCdEfGh_ij";
+    const expected = `rtmps://live-api-s.facebook.com:443/rtmp/${key}`;
+    expect(buildRtmpDestination({ ...base, platform: "facebook", streamKey: key })).toBe(expected);
+    expect(buildRtmpDestination({ ...base, platform: "facebook", streamKey: ` ${expected} ` })).toBe(expected);
+    expect(
+      buildRtmpDestination({ ...base, platform: "facebook", streamKey: "123456?s_bl=1&s_sc=789&a=AbC" }),
+    ).toBe("rtmps://live-api-s.facebook.com:443/rtmp/123456?s_bl=1&s_sc=789&a=AbC");
+    expect(() => buildRtmpDestination({ ...base, platform: "facebook", streamKey: "" })).toThrow();
+  });
+
+  it("onthoudt Facebook als gekozen platform", () => {
+    expect(mergeLivestreamSettings({ platform: "facebook", platform2: "facebook" })).toMatchObject({
+      platform: "facebook",
+      platform2: "facebook",
+    });
+  });
+
   it("weiger ongeldige keys", () => {
     expect(() =>
       buildRtmpDestination({
@@ -137,6 +155,12 @@ describe("maskRtmpDestination", () => {
   it("verbergt de streamkey", () => {
     expect(maskRtmpDestination("rtmp://a.rtmp.youtube.com/live2/secret-key")).toBe(
       "rtmp://a.rtmp.youtube.com/live2/***",
+    );
+  });
+
+  it("verbergt ook een Facebook-key met parameters", () => {
+    expect(maskRtmpDestination("rtmps://live-api-s.facebook.com:443/rtmp/123456?s_sc=789&a=AbC")).toBe(
+      "rtmps://live-api-s.facebook.com:443/rtmp/***",
     );
   });
 });

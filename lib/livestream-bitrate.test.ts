@@ -3,6 +3,7 @@ import {
   bitrateAdvice,
   bitrateOptionsKbps,
   bitrateVerdict,
+  FACEBOOK_MAX_KBPS,
   TWITCH_MAX_KBPS,
 } from "./livestream-bitrate";
 
@@ -25,6 +26,19 @@ describe("bitrateAdvice", () => {
     const advice = bitrateAdvice("1920x1080", 60, "twitch");
     expect(advice.recommendedKbps).toBeLessThanOrEqual(TWITCH_MAX_KBPS);
     expect(advice.maximumKbps).toBeLessThanOrEqual(TWITCH_MAX_KBPS);
+  });
+
+  it("kapt af op de Facebook-limiet", () => {
+    const advice = bitrateAdvice("1920x1080", 60, "facebook");
+    expect(advice.recommendedKbps).toBe(FACEBOOK_MAX_KBPS);
+    expect(advice.maximumKbps).toBe(FACEBOOK_MAX_KBPS);
+    expect(bitrateAdvice("1920x1080", 30, "facebook").recommendedKbps).toBe(8000);
+  });
+
+  it("neemt bij twee bestemmingen de strengste grens", () => {
+    expect(bitrateAdvice("1920x1080", 60, ["youtube", "facebook"]).maximumKbps).toBe(FACEBOOK_MAX_KBPS);
+    expect(bitrateAdvice("1920x1080", 60, ["facebook", "twitch"]).maximumKbps).toBe(TWITCH_MAX_KBPS);
+    expect(bitrateAdvice("1920x1080", 60, ["youtube", "custom"])).toEqual(bitrateAdvice("1920x1080", 60));
   });
 });
 
