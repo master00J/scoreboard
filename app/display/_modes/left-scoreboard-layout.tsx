@@ -7,6 +7,7 @@ import { mediaUrl } from "@/lib/media-url";
 import {
   type ResolvedScoreboardTheme,
   frameGradientCss,
+  leftFrameClipPath,
   mergeScoreboardTheme,
   scoreboardSurfaceBackgroundPath,
 } from "@/lib/scoreboard-theme";
@@ -59,11 +60,15 @@ export function LeftScoreboardLayout({
         className="absolute bottom-0 z-[15]"
         style={{ left: barW - 2, right: 0, height: barH, background: grad }}
       />
+      {/* Het beeld ligt over het hele canvas, maar alleen de L-balk toont het: boven de framekleuren
+          (een transparant beeld laat die doorschijnen), onder de teksten en niet over de sponsorclip. */}
       {frameSrc ? (
         <img
           src={frameSrc}
           alt=""
-          className="pointer-events-none absolute inset-0 z-[1] h-full w-full object-cover"
+          data-frame-background
+          className="pointer-events-none absolute inset-0 z-[16] h-full w-full object-cover"
+          style={{ clipPath: leftFrameClipPath(barW, barH) }}
         />
       ) : null}
 
