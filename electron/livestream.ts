@@ -238,13 +238,13 @@ function programCapturePlan(
       "bgra",
       "-s",
       `${width}x${height}`,
-      // De pomp levert een vast aantal beeldjes per seconde (FrameClock): ffmpeg telt ze gewoon.
-      "-framerate",
-      String(fps),
       "-i",
       "pipe:0",
     ],
-    videoFilter: ["-vf", `${scale}format=yuv420p`],
+    // ffmpeg stempelt elk beeldje bij aankomst. De pomp levert ze in een vast ritme (FrameClock), dus
+    // die tijden schommelen nauwelijks. Beeldjes tellen (-framerate) liet de video lopen terwijl een
+    // microfoon nog opende: geluid liep dan ±1,5 s voor. Met de aankomsttijd valt dat weg zoals vroeger.
+    videoFilter: ["-vf", `setpts=(RTCTIME-RTCSTART)/1000000/TB,${scale}fps=${fps},format=yuv420p`],
     pipeWidth: width,
     pipeHeight: height,
   };

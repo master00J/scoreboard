@@ -2,8 +2,8 @@
  * Vast beeldritme voor de livestream, zoals OBS: een klok bepaalt hoeveel beeldjes er naar ffmpeg
  * moeten, niet het toevallige moment waarop de app een beeld schildert.
  *
- * ffmpeg telt de beeldjes (`-framerate`), dus het aantal verstuurde beeldjes ís de tijd van de
- * video. Zolang dat aantal de klok volgt, loopt beeld gelijk met geluid. Komt er geen nieuw beeld,
+ * Het ritme blijft gelijk met de klok, zodat ffmpeg (dat elk beeldje bij aankomst stempelt) een
+ * gelijkmatige stroom krijgt en niets hoeft weg te gooien of te verdubbelen. Komt er geen nieuw beeld,
  * dan gaat het vorige nog eens mee; achterstand wordt ingehaald in plaats van weggegooid.
  */
 export class FrameClock {
