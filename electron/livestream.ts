@@ -889,8 +889,9 @@ export function createLivestreamController(deps: Deps): LivestreamController {
             if (!latest) break;
             clock.start(now);
           }
+          const fresh = Boolean(latest && !latestSent);
+          if (!clock.shouldSend(now, fresh)) break;
           const behind = clock.behind(now);
-          if (behind === 0) break;
           if (behind > 2 && !catchingUp) {
             // De hoofddraad hing langer dan twee beeldjes: inhalen met herhaalde beeldjes. Dat is een
             // echte hapering in de stream; alleen die telt (één keer per keer) in de gezondheidsmelding.
@@ -898,7 +899,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
             health = { ...health, paintDrops: stalls };
           }
           catchingUp = behind > 1;
-          if (latest && !latestSent) {
+          if (fresh && latest) {
             lastBuf = toFrameBuffer(latest);
             latestSent = true;
           } else {

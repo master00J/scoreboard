@@ -31,9 +31,20 @@ export class FrameClock {
     return Math.floor(((nowMs - this.startMs) * this.fps) / 1000) + 1;
   }
 
-  /** Moet er nu (nog) een beeldje naar ffmpeg? */
+  /** Hoeveel beeldjes de stream achterloopt op de klok. */
   behind(nowMs: number): number {
     return Math.max(0, this.due(nowMs) - this.sent);
+  }
+
+  /**
+   * Mag er nu een beeldje weg? Een vers beeld gaat meteen, zolang de stream daarmee hooguit één
+   * beeldje voorloopt: anders wacht het op een tik die op Windows te laat komt, wordt het door het
+   * volgende beeld overschreven en moet er later een herhaald worden. Zonder vers beeld vult de klok
+   * alleen gaten op met het vorige beeld.
+   */
+  shouldSend(nowMs: number, fresh: boolean): boolean {
+    if (this.startMs == null) return fresh;
+    return this.sent < this.due(nowMs) + (fresh ? 1 : 0);
   }
 
   markSent(): void {
