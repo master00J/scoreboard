@@ -1364,6 +1364,7 @@
     "monitorSame": "Choisissez ci-dessous ce qui vient ensuite.",
     "switcherNeedsSetup": "À régler…",
     "needsStreamKey": "Indiquez d’abord une clé de stream dans Réglages.",
+    "errorWasapiHelper": "Le canal audio {{devices}} ne peut pas être capturé, le stream n’a donc pas démarré. Choisissez une autre source dans Réglages → Audio ou retirez ce canal.",
     "liveShort": "LIVE",
     "audioFollowTitle": "Audio de cette source",
     "audioFollowHelp": "Quand cette source est au program : mute ou active automatiquement certains canaux. Inchangé laisse le fader.",

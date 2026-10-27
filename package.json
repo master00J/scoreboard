@@ -146,6 +146,18 @@
         "filter": [
           "ffmpeg.exe"
         ]
+      },
+      {
+        "from": "vendor/naudio",
+        "to": "naudio",
+        "filter": [
+          "NAudio.dll",
+          "LICENSE.txt"
+        ]
+      },
+      {
+        "from": "electron/wasapi-loopback-capture.cs",
+        "to": "naudio/wasapi-loopback-capture.cs"
       }
     ]
   },

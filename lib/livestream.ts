@@ -49,6 +49,26 @@ export function isWasapiAudioDevice(device: string): boolean {
   return device.startsWith(WASAPI_DEVICE_PREFIX);
 }
 
+const WASAPI_HELPER_ERROR_PREFIX = "wasapi-helper:";
+
+/**
+ * Startfout als GoXLR- of systeemgeluid niet opgenomen kan worden. De hoofdprocesmelding draagt de
+ * kanaalnamen mee; de bediening vertaalt ze met `parseWasapiHelperError`.
+ */
+export function wasapiHelperError(devices: string[]): string {
+  return `${WASAPI_HELPER_ERROR_PREFIX}${JSON.stringify(devices)}`;
+}
+
+export function parseWasapiHelperError(error: string | null | undefined): string[] | null {
+  if (!error?.startsWith(WASAPI_HELPER_ERROR_PREFIX)) return null;
+  try {
+    const parsed = JSON.parse(error.slice(WASAPI_HELPER_ERROR_PREFIX.length)) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export function isBrowserAudioDevice(device: string): boolean {
   return device.startsWith(BROWSER_AUDIO_PREFIX);
 }

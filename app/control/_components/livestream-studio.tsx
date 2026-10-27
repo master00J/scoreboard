@@ -38,6 +38,7 @@ import {
   sourceAudioDevices,
   audioDeviceLabel,
   mergeStreamScoreWidget,
+  parseWasapiHelperError,
   type LivestreamAudioChannel,
   type LivestreamAudioFollowAction,
   type LivestreamVideoInput,
@@ -594,6 +595,14 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   };
 
   const locked = status.running;
+  /** Bekende startfouten vertaald; andere meldingen komen zoals ffmpeg of het hoofdproces ze geeft. */
+  const livestreamErrorText = (error: string) => {
+    const wasapiDevices = parseWasapiHelperError(error);
+    if (wasapiDevices) {
+      return t("livestream.errorWasapiHelper", { devices: wasapiDevices.join(", ") });
+    }
+    return error;
+  };
   const destinationReady =
     settings.platform === "custom"
       ? Boolean(settings.customUrl.trim() && settings.streamKey.trim())
@@ -1017,7 +1026,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       )}
       {status.error &&
       !/^(Beeld opnieuw|Bronwissel)/.test(status.error) ? (
-        <div className="text-xs text-destructive">{status.error}</div>
+        <div className="text-xs text-destructive">{livestreamErrorText(status.error)}</div>
       ) : null}
     </div>
   );

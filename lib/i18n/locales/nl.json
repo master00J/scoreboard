@@ -1364,6 +1364,7 @@
     "monitorNow": "Nu in beeld",
     "monitorSame": "Kies hieronder wat hierna komt.",
     "needsStreamKey": "Vul eerst een streamkey in bij Instellen.",
+    "errorWasapiHelper": "Geluidskanaal {{devices}} kan niet worden opgenomen, daarom is de stream niet gestart. Kies onder Instellen → Audio een andere bron of verwijder dit kanaal.",
     "liveShort": "LIVE",
     "audioFollowTitle": "Audio bij deze bron",
     "audioFollowHelp": "Als deze beeldbron program is: mute of zet specifieke audio automatisch aan. Ongewijzigd laat de fader staan.",

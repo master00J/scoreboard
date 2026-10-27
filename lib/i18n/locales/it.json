@@ -1364,6 +1364,7 @@
     "monitorSame": "Scegli sotto cosa viene dopo.",
     "switcherNeedsSetup": "Da impostare…",
     "needsStreamKey": "Inserisci prima una stream key in Imposta.",
+    "errorWasapiHelper": "Il canale audio {{devices}} non può essere acquisito, quindi la diretta non è partita. Scegli un’altra sorgente in Impostazioni → Audio o rimuovi questo canale.",
     "liveShort": "LIVE",
     "audioFollowTitle": "Audio di questa sorgente",
     "audioFollowHelp": "Quando questa sorgente è in program: muta o attiva automaticamente alcuni canali. Invariato lascia il fader.",
