@@ -45,6 +45,7 @@ import {
   looksLikeDestinationFail,
   looksLikeNonEncoderFail,
   STREAM_AUDIO_BITRATE_K,
+  STREAM_AUDIO_RESAMPLE,
   STREAM_AUDIO_SAMPLE_RATE,
   type LivestreamAudioDevice,
   type LivestreamCameraDevice,
@@ -1326,7 +1327,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       String(STREAM_AUDIO_SAMPLE_RATE),
       "-ac",
       "2",
-      ...(audioPlan.filterComplex ? [] : ["-af", "aresample=async=1:first_pts=0"]),
+      ...(audioPlan.filterComplex ? [] : ["-af", STREAM_AUDIO_RESAMPLE]),
       ...ffmpegOutputArgs(dests),
     ];
 

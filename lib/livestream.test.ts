@@ -425,6 +425,31 @@ describe("helpers", () => {
 });
 
 describe("audio mixer", () => {
+  it("geeft geluid uit een pijp de wandklok als tijd, zodat het beeld er niet op wacht", () => {
+    const args = buildAudioMixPlan([{ id: "a1", device: "wasapi:Music (TC-Helicon GoXLR)", volume: 100, muted: false }], 100)
+      .inputArgs;
+    const input = args.indexOf("-i");
+    expect(args.slice(0, input)).toEqual(
+      expect.arrayContaining(["-use_wallclock_as_timestamps", "1", "-thread_queue_size", "1024"]),
+    );
+    expect(args.indexOf("-use_wallclock_as_timestamps")).toBeLessThan(args.indexOf("-f"));
+  });
+
+  it("stuurt het geluid stevig bij naar de klok, niet met 1 sample per seconde", () => {
+    const single = buildAudioMixPlan([{ id: "a1", device: "Mic", volume: 100, muted: false }], 100);
+    const mix = buildAudioMixPlan(
+      [
+        { id: "a1", device: "Mic", volume: 100, muted: false },
+        { id: "a2", device: "wasapi:Music (TC-Helicon GoXLR)", volume: 100, muted: false },
+      ],
+      100,
+    );
+    for (const plan of [single, mix]) {
+      expect(plan.filterComplex).toContain("aresample=async=1000:first_pts=0");
+      expect(plan.filterComplex).not.toContain("async=1:");
+    }
+  });
+
   it("neemt mute en master mee in de gain", () => {
     expect(audioChannelGain({ id: "a1", device: "Mic", volume: 80, muted: false }, 50)).toBeCloseTo(0.4);
     expect(audioChannelGain({ id: "a1", device: "Mic", volume: 80, muted: true }, 100)).toBe(0);

@@ -4,6 +4,7 @@
 //    of: --list
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
@@ -17,6 +18,8 @@ internal static class Program
     private const int SampleRate = 48000;
     private const int MonitorLatencyMs = 20;
     private const int MonitorRingMs = 30;
+    // Zo lang zonder echte data telt het apparaat als stil.
+    private const int SilenceAfterMs = 40;
     private static readonly object Gate = new object();
 
     private static int Main(string[] args)
@@ -119,15 +122,23 @@ internal static class Program
             pipe.WaitForConnection();
             using (var capture = new WasapiLoopbackCapture(device))
             {
-                var silence = new byte[SampleRate * 4 / 50];
-                var lastWrite = DateTime.UtcNow;
+                // Loopback levert niets zolang er niets speelt. Stilte vult dan precies de verstreken
+                // tijd op (samples geschreven tegenover de klok); vaste blokjes leverden te weinig,
+                // waardoor ffmpeg op het geluid wachtte en beeldjes liet vallen.
+                var clock = Stopwatch.StartNew();
+                long framesWritten = 0;
+                long lastDataMs = 0;
                 capture.DataAvailable += delegate(object sender, WaveInEventArgs e)
                 {
                     var pcm = ToS16Stereo(e.Buffer, e.BytesRecorded, capture.WaveFormat);
                     lock (Gate)
                     {
-                        if (pcm.Length > 0) pipe.Write(pcm, 0, pcm.Length);
-                        lastWrite = DateTime.UtcNow;
+                        if (pcm.Length > 0)
+                        {
+                            pipe.Write(pcm, 0, pcm.Length);
+                            framesWritten += pcm.Length / 4;
+                        }
+                        lastDataMs = clock.ElapsedMilliseconds;
                     }
                 };
                 capture.StartRecording();
@@ -136,11 +147,14 @@ internal static class Program
                     Thread.Sleep(10);
                     lock (Gate)
                     {
-                        if ((DateTime.UtcNow - lastWrite).TotalMilliseconds > 25)
-                        {
-                            pipe.Write(silence, 0, silence.Length);
-                            lastWrite = DateTime.UtcNow;
-                        }
+                        var nowMs = clock.ElapsedMilliseconds;
+                        if (nowMs - lastDataMs <= SilenceAfterMs) continue;
+                        var missing = nowMs * SampleRate / 1000 - framesWritten;
+                        if (missing <= 0) continue;
+                        missing = Math.Min(missing, SampleRate / 10);
+                        var silence = new byte[missing * 4];
+                        pipe.Write(silence, 0, silence.Length);
+                        framesWritten += missing;
                     }
                 }
             }
