@@ -1987,11 +1987,13 @@ function registerIpc() {
     if (result.canceled) return { library: await music.load(), failed: [] };
     return music.importFiles(result.filePaths);
   });
-  ipcMain.handle("desktop:getCaptureSources", async () => {
+  ipcMain.handle("desktop:getCaptureSources", async (_event, opts?: { thumbnails?: unknown }) => {
+    // Miniaturen = een schermafdruk van elk venster in dit proces (±300 ms stil). Zonder: alleen opsommen.
+    const thumbnails = opts?.thumbnails !== false;
     const sources = await desktopCapturer.getSources({
       types: ["window", "screen"],
-      fetchWindowIcons: true,
-      thumbnailSize: { width: 400, height: 225 },
+      fetchWindowIcons: thumbnails,
+      thumbnailSize: thumbnails ? { width: 400, height: 225 } : { width: 0, height: 0 },
     });
     return sources.map((s) => ({
       id: s.id,
