@@ -41,6 +41,58 @@ describe("vast beeldritme voor de livestream", () => {
     expect(Math.abs(clock.framesSent - 30 * 3_600)).toBeLessThanOrEqual(1);
   });
 
+  it("stuurt een vers beeld meteen, ook net vóór zijn beurt, en herhaalt alleen bij een gat", () => {
+    const clock = new FrameClock(30);
+    // Schilderen op 30 Hz met wat speling; de timer tikt grof (zoals op Windows).
+    const paints = Array.from({ length: 300 }, (_, i) => i * (1000 / 30) + ((i * 7) % 11) - 5);
+    let repeats = 0;
+    let fresh = 0;
+    let overwritten = 0;
+    let pending = false;
+    let next = 0;
+    // Zoals de pomp: een vers beeld wacht als "laatste beeld" tot het mag; een nieuwer overschrijft het.
+    const pump = (now: number) => {
+      while (true) {
+        if (!clock.started) {
+          if (!pending) return;
+          clock.start(now);
+        }
+        if (!clock.shouldSend(now, pending)) return;
+        clock.markSent();
+        if (pending) {
+          fresh++;
+          pending = false;
+        } else {
+          repeats++;
+        }
+      }
+    };
+    for (let now = 0; now <= 10_000; now += 1) {
+      while (next < paints.length && paints[next] <= now) {
+        next++;
+        if (pending) overwritten++;
+        pending = true;
+        pump(now);
+      }
+      if (now % 16 === 0) pump(now);
+    }
+    // Vrijwel elk geschilderd beeld komt in de stream; de klok hoeft bijna niets te herhalen.
+    expect(fresh).toBeGreaterThanOrEqual(295);
+    expect(overwritten).toBeLessThanOrEqual(5);
+    expect(repeats).toBeLessThanOrEqual(5);
+  });
+
+  it("loopt hooguit één beeldje voor op de klok", () => {
+    const clock = new FrameClock(30);
+    clock.start(0);
+    let sent = 0;
+    while (clock.shouldSend(0, true)) {
+      clock.markSent();
+      sent++;
+    }
+    expect(sent).toBe(2);
+  });
+
   it("start maar één keer", () => {
     const clock = new FrameClock(25);
     clock.start(100);
