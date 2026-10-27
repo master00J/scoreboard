@@ -17,8 +17,29 @@ import {
   restackRundownWindows,
   rundownCycleIndex,
   rundownCycleSec,
+  rundownPhasesForSport,
+  rundownSport,
   wrapRundownElapsed,
 } from "./scheduled-media-cue";
+
+describe("rundown per sport", () => {
+  it("laat een volleybalclub vooraf plannen zonder lopende wedstrijd", () => {
+    expect(rundownSport(null, "VOLLEYBALL")).toBe("VOLLEYBALL");
+    expect(rundownSport(undefined, null)).toBe("FOOTBALL");
+    expect(rundownSport(null, "CURLING")).toBe("FOOTBALL");
+  });
+
+  it("volgt de sport van de lopende wedstrijd", () => {
+    expect(rundownSport("volleyball", "FOOTBALL")).toBe("VOLLEYBALL");
+    expect(rundownSport("BASKETBALL", "VOLLEYBALL")).toBe("BASKETBALL");
+  });
+
+  it("toont verlenging alleen bij sporten die verlenging kennen", () => {
+    expect(rundownPhasesForSport("VOLLEYBALL")).toEqual(["PREMATCH", "FIRST_HALF", "SECOND_HALF", "POST_MATCH"]);
+    expect(rundownPhasesForSport("FOOTBALL")).toContain("EXTRA_TIME");
+    expect(rundownPhasesForSport("BASKETBALL")).toContain("EXTRA_TIME");
+  });
+});
 
 describe("scheduled media cue window", () => {
   it("negeert eindtijd die niet na start ligt", () => {

@@ -48,7 +48,14 @@ import {
 import { ChevronDown, Film, Plus } from "lucide-react";
 import type { TFunction } from "i18next";
 import { isDisplayPlaybackRisk } from "@/lib/media-playback-compat";
-import { cueRundownPhaseKey, restackRundownWindows } from "@/lib/scheduled-media-cue";
+import {
+  RUNDOWN_PHASES,
+  cueRundownPhaseKey,
+  restackRundownWindows,
+  rundownPhasesForSport,
+  rundownSport,
+  type RundownPhase,
+} from "@/lib/scheduled-media-cue";
 import { getSportProfile, normalizeSport, SPORT_TYPES, type SportType } from "@/lib/sports";
 import {
   mergeSportBudgetsJson,
@@ -96,7 +103,16 @@ async function prepareMediaPlayback(t: TFunction, mediaId: string): Promise<bool
   return true;
 }
 
-const SCHEDULED_CUE_PHASES = ["PREMATCH", "FIRST_HALF", "SECOND_HALF", "EXTRA_TIME", "POST_MATCH"] as const;
+/** Per pc onthouden, zoals de favorieten: de sport waarvoor de operator de Rundown plant. */
+const RUNDOWN_SPORT_KEY = "arenacue:rundown-sport";
+
+function readRundownSport(): string | null {
+  try {
+    return window.localStorage.getItem(RUNDOWN_SPORT_KEY);
+  } catch {
+    return null;
+  }
+}
 
 const MEDIA_PHASE_I18N: Record<string, string> = {
   prematch: "media.phasePrematch",
@@ -456,7 +472,7 @@ export function MediaPanel() {
           <ScheduledCuesSection
             media={libraryMedia}
             cues={scheduledCues}
-            sport={activeMatch?.sport}
+            activeSport={activeMatch?.sport}
             onChange={reloadScheduledCues}
           />
         </TabsContent>
@@ -468,16 +484,23 @@ export function MediaPanel() {
 function ScheduledCuesSection({
   media,
   cues,
-  sport,
+  activeSport,
   onChange,
 }: {
   media: MediaItem[];
   cues: ScheduledMediaCue[];
-  sport?: string | null;
+  /** Sport van de lopende wedstrijd; zonder wedstrijd kiest de operator zelf. */
+  activeSport?: string | null;
   onChange: () => void;
 }) {
   const { t } = useTranslation();
-  const wallClockCues = sport ? getSportProfile(sport).timerMode === "NONE" : false;
+  const [sport, setSport] = useState<SportType>(() => rundownSport(activeSport, readRundownSport()));
+  // Een gestarte wedstrijd bepaalt de sport; daarna kan de operator nog wisselen.
+  useEffect(() => {
+    if (activeSport) setSport(normalizeSport(activeSport));
+  }, [activeSport]);
+  const phaseOptions = useMemo(() => rundownPhasesForSport(sport), [sport]);
+  const wallClockCues = getSportProfile(sport).timerMode === "NONE";
   const activeMedia = media
     .filter((m) => m.active)
     .sort((a, b) => {
@@ -487,7 +510,20 @@ function ScheduledCuesSection({
   const generalMedia = activeMedia.filter((m) => !m.sponsorId);
   const sponsorMedia = activeMedia.filter((m) => !!m.sponsorId);
   const [mediaId, setMediaId] = useState(activeMedia[0]?.id ?? "");
-  const [matchStatus, setMatchStatus] = useState<(typeof SCHEDULED_CUE_PHASES)[number]>("FIRST_HALF");
+  const [matchStatus, setMatchStatus] = useState<RundownPhase>("FIRST_HALF");
+  // Volleybal kent geen verlenging: blijf niet op een fase staan die er niet is.
+  useEffect(() => {
+    if (!phaseOptions.includes(matchStatus)) setMatchStatus("FIRST_HALF");
+  }, [phaseOptions, matchStatus]);
+
+  function chooseSport(next: SportType) {
+    setSport(next);
+    try {
+      window.localStorage.setItem(RUNDOWN_SPORT_KEY, next);
+    } catch {
+      // Zonder opslag kiest de operator de sport de volgende keer opnieuw.
+    }
+  }
   const [timeText, setTimeText] = useState("12:00");
   const [startSec, setStartSec] = useState(0);
   const [endSec, setEndSec] = useState(15);
@@ -511,7 +547,7 @@ function ScheduledCuesSection({
 
   const phaseCues = useMemo(() => {
     const groups = new Map<string, ScheduledMediaCue[]>();
-    for (const key of SCHEDULED_CUE_PHASES) groups.set(key, []);
+    for (const key of RUNDOWN_PHASES) groups.set(key, []);
     for (const cue of cues) {
       const key = cueRundownPhaseKey(cue.matchStatus);
       if (!groups.has(key)) groups.set(key, []);
@@ -684,6 +720,7 @@ function ScheduledCuesSection({
       </div>
 
       <div className="grid gap-3 rounded-xl border border-border bg-background/60 p-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="inline-flex w-fit rounded-lg bg-muted p-1" role="group" aria-label={t("media.cueScheduleType")}>
           <button
             type="button"
@@ -701,6 +738,22 @@ function ScheduledCuesSection({
           >
             {t("media.cueRepeat")}
           </button>
+        </div>
+        <label className="flex items-center gap-2 text-xs">
+          <span className="text-muted-foreground">{t("media.cueSport")}</span>
+          <Select
+            value={sport}
+            onChange={(e) => chooseSport(e.target.value as SportType)}
+            className="h-8 w-40 text-xs"
+            aria-label={t("media.cueSport")}
+          >
+            {SPORT_TYPES.map((sportId) => (
+              <option key={sportId} value={sportId}>
+                {t(`sports.${sportId}`)}
+              </option>
+            ))}
+          </Select>
+        </label>
         </div>
 
       <div className={`grid gap-2 md:items-end ${scheduleMode === "repeat" ? "md:grid-cols-[minmax(220px,1fr)_150px_110px_110px_110px_auto]" : "md:grid-cols-[minmax(260px,1fr)_170px_140px_auto]"}`}>
@@ -738,7 +791,7 @@ function ScheduledCuesSection({
             onChange={(e) => setMatchStatus(e.target.value as typeof matchStatus)}
             className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
           >
-            {SCHEDULED_CUE_PHASES.map((p) => (
+            {phaseOptions.map((p) => (
               <option key={p} value={p}>{tMatchStatus(t, p, sport) || t(`phases.${p}`)}</option>
             ))}
           </select>
@@ -820,7 +873,7 @@ function ScheduledCuesSection({
             {t("media.cuesEmpty")}
           </div>
         ) : (
-          SCHEDULED_CUE_PHASES.map((phase) => {
+          RUNDOWN_PHASES.map((phase) => {
             const list = phaseCues.get(phase) ?? [];
             if (list.length === 0) return null;
             return (
@@ -842,7 +895,7 @@ function ScheduledCuesSection({
                   </div>
                   {phase === "PREMATCH" ? (
                     <p className="text-[11px] font-normal text-muted-foreground">
-                      {t("media.cuePrematchKickoffHint")}
+                      {t(sport === "FOOTBALL" || sport === "FUTSAL" ? "media.cuePrematchKickoffHint" : "media.cuePrematchStartHint")}
                     </p>
                   ) : wallClockCues && (phase === "FIRST_HALF" || phase === "SECOND_HALF") ? (
                     <p className="text-[11px] font-normal text-muted-foreground">

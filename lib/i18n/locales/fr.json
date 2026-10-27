@@ -573,6 +573,7 @@
     "cueGeneralMediaGroup": "Médias généraux (sans sponsor)",
     "cueSponsorMediaGroup": "Médias sponsors",
     "cuePhase": "Phase",
+    "cueSport": "Sport",
     "cueTime": "Heure de début",
     "cueEveryMinutes": "Toutes les (min)",
     "cueUntil": "Jusqu’à",
@@ -684,6 +685,7 @@
     "cueRundownCount": "{{count}} clip(s)",
     "cueLoop": "Boucler cette rundown",
     "cuePrematchKickoffHint": "Avec coup d’envoi : 0:00 = début de la fenêtre avant-match, fin au coup d’envoi. Fenêtre vide = clips juste avant le coup d’envoi.",
+    "cuePrematchStartHint": "Avec un début programmé : 0:00 = début de la fenêtre avant-match, fin au début du match. Fenêtre vide = clips juste avant le début.",
     "cueWindow": "{{start}} – {{end}}"
   },
   "reports": {
