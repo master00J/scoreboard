@@ -753,3 +753,34 @@ export function scoreboardUsesStrip(theme: Pick<ResolvedScoreboardTheme, "layout
 export function scoreboardUsesCustom(theme: Pick<ResolvedScoreboardTheme, "layoutMode">): boolean {
   return theme.layoutMode === "custom";
 }
+
+/**
+ * Naast een sponsorclip: vrij overlay-frame i.p.v. de rode L-balk.
+ * Ook bij auto/full als de club alleen het set-beeld zette en geen L-balkbeeld.
+ */
+export function scoreboardBesideUsesOverlay(
+  theme: Pick<ResolvedScoreboardTheme, "layoutMode" | "leftFrameBackgroundPath" | "fullBackgroundPath">,
+): boolean {
+  if (theme.layoutMode === "custom") return true;
+  if (theme.layoutMode === "left-l" || theme.layoutMode === "bottom-strip") return false;
+  return !theme.leftFrameBackgroundPath && !!theme.fullBackgroundPath;
+}
+
+/**
+ * Beeld achter een vlak. Eerst het beeld van dat vlak, daarna de algemene, daarna het andere
+ * vlak. Zo blijft een achtergrond die alleen bij “volledig scorebord / tijdens de set” staat
+ * ook zichtbaar zodra scorebord + sponsor het andere frame tekent.
+ */
+export function scoreboardSurfaceBackgroundPath(
+  theme: Pick<
+    ResolvedScoreboardTheme,
+    "scoreboardBackgroundPath" | "fullBackgroundPath" | "leftFrameBackgroundPath"
+  >,
+  surface: "full" | "sponsor",
+): string {
+  const shared = theme.scoreboardBackgroundPath;
+  if (surface === "full") {
+    return theme.fullBackgroundPath || shared || theme.leftFrameBackgroundPath;
+  }
+  return theme.leftFrameBackgroundPath || shared || theme.fullBackgroundPath;
+}

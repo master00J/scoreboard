@@ -29,7 +29,7 @@ import type {
 } from "@/lib/types";
 import {
   mergeScoreboardTheme,
-  scoreboardUsesCustom,
+  scoreboardBesideUsesOverlay,
   scoreboardUsesLeftFrame,
   scoreboardUsesStrip,
   sponsorRepeatBudgetCyclesFromThemeJson,
@@ -1264,7 +1264,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const useCustomLayout =
     !playFullscreenBoard &&
     allowScoreFrame &&
-    scoreboardUsesCustom(scoreboardTheme) &&
+    scoreboardBesideUsesOverlay(scoreboardTheme) &&
     !!match;
   const useStripLayout =
     !playFullscreenBoard &&

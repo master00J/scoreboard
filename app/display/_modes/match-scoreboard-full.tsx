@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { StableClockText } from "@/components/stable-clock-text";
 import type { Match } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
-import { type ResolvedScoreboardTheme, mergeScoreboardTheme } from "@/lib/scoreboard-theme";
+import { type ResolvedScoreboardTheme, mergeScoreboardTheme, scoreboardSurfaceBackgroundPath } from "@/lib/scoreboard-theme";
 import type { LayoutElement } from "@/lib/scoreboard-elements";
 import { formatSportClock, getSportProfile } from "@/lib/sports";
 import { ExtraElement, elementBoxStyle, elementInnerStyle } from "./layout-elements";
@@ -36,7 +36,7 @@ export function MatchScoreboardFull({
   const theme = themeProp ?? mergeScoreboardTheme(null);
   const shotOff = useShotClockOff();
   const showShot = getSportProfile(match.sport).shotClockPresets.length > 0 && !shotOff;
-  const backgroundSrc = mediaUrl(theme.fullBackgroundPath || theme.scoreboardBackgroundPath);
+  const backgroundSrc = mediaUrl(scoreboardSurfaceBackgroundPath(theme, "full"));
 
   return (
     <motion.div

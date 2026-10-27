@@ -215,6 +215,19 @@ export function normalizeElements(
   return out;
 }
 
+/**
+ * Vrije extra's (beeld, tekst, …) van het volledige set-vlak horen ook op het sponsorvlak,
+ * anders verdwijnt een geüploade achtergrond of clubbeeld zodra scorebord + sponsor start.
+ * Klassieke vakken blijven die van het sponsorvlak: daar zit het mediavak.
+ */
+export function sponsorSurfaceElements(elements: LayoutElements): LayoutElement[] {
+  const used = new Set(elements.sponsor.map((element) => element.id));
+  const extras = elements.full.filter(
+    (element) => !isClassicElementId(element.id) && !used.has(element.id),
+  );
+  return extras.length === 0 ? elements.sponsor : [...extras, ...elements.sponsor];
+}
+
 /** Plek van de klassieke vakken, voor code en oudere versies die nog met `slots` werken. */
 export function slotsFromElements<T extends Partial<Record<LayoutSlotId, LayoutSlot>>>(
   elements: LayoutElement[],

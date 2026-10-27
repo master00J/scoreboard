@@ -10,6 +10,7 @@ import { mediaUrl } from "@/lib/media-url";
 import {
   frameGradientCss,
   mergeScoreboardTheme,
+  scoreboardSurfaceBackgroundPath,
   type ResolvedScoreboardTheme,
 } from "@/lib/scoreboard-theme";
 import { ShotClockReadout, SportMatchMeta, SportTeamExtras, useShotClockOff } from "./sport-score-extras";
@@ -39,7 +40,7 @@ export function ScoreboardStrip({
   const showShot = getSportProfile(match.sport).shotClockPresets.length > 0 && !shotOff;
   const extrasPx = Math.max(30, Math.round(theme.stripScorePx * 0.32));
   const offscreen = placement === "top" ? -theme.stripHeightPx : theme.stripHeightPx;
-  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath || theme.scoreboardBackgroundPath);
+  const frameSrc = mediaUrl(scoreboardSurfaceBackgroundPath(theme, "sponsor"));
   return (
     <motion.div
       key={`scoreboard-strip-${placement}`}

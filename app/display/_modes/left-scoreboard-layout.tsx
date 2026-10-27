@@ -8,6 +8,7 @@ import {
   type ResolvedScoreboardTheme,
   frameGradientCss,
   mergeScoreboardTheme,
+  scoreboardSurfaceBackgroundPath,
 } from "@/lib/scoreboard-theme";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { TeamLogo } from "./scoreboard-strip";
@@ -43,7 +44,7 @@ export function LeftScoreboardLayout({
   const barW = theme.leftBarWidthPx;
   const barH = theme.bottomBarHeightPx;
   const grad = frameGradientCss(theme);
-  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath || theme.scoreboardBackgroundPath);
+  const frameSrc = mediaUrl(scoreboardSurfaceBackgroundPath(theme, "sponsor"));
 
   return (
     <div

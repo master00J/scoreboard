@@ -11,6 +11,7 @@ import {
   normalizeElements,
   normalizeLayoutRules,
   pickLayoutRule,
+  sponsorSurfaceElements,
   sixteenByNineHeightPct,
   slotsFromElements,
 } from "./scoreboard-elements";
@@ -88,6 +89,24 @@ describe("normalizeElements", () => {
     expect(out.filter((e) => e.id === "el-2")).toEqual([{ id: "el-2", type: "teamName", side: "away", x: 1, y: 1, w: 10, h: 10 }]);
     expect(out.some((e) => e.id === "el-1")).toBe(false);
     expect(out).toHaveLength(8);
+  });
+
+  it("zet vrije beelden van het set-vlak ook op het sponsorvlak", () => {
+    const theme = mergeScoreboardTheme(
+      JSON.stringify({
+        elements: {
+          full: [
+            { id: "home", type: "teamLogo", side: "home", x: 5, y: 5, w: 20, h: 20 },
+            { id: "bg-1", type: "image", src: "/uploads/zaal.png", x: 0, y: 0, w: 100, h: 100 },
+          ],
+          sponsor: [{ id: "home", type: "teamLogo", side: "home", x: 2, y: 6, w: 18, h: 28 }],
+        },
+      }),
+    );
+    const list = sponsorSurfaceElements(theme.elements);
+    expect(list[0]).toMatchObject({ id: "bg-1", type: "image", src: "/uploads/zaal.png" });
+    expect(list.find((e) => e.id === "home")).toMatchObject({ x: 2, y: 6 });
+    expect(list.filter((e) => e.id === "home")).toHaveLength(1);
   });
 
   it("kent op het volledige scorebord geen sponsorvak", () => {

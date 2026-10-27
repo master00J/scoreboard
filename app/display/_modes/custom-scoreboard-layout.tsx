@@ -5,8 +5,8 @@ import { StableClockText } from "@/components/stable-clock-text";
 import { formatSportClock } from "@/lib/sports";
 import type { Match } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
-import { mergeScoreboardTheme, type ResolvedScoreboardTheme } from "@/lib/scoreboard-theme";
-import type { LayoutElement } from "@/lib/scoreboard-elements";
+import { mergeScoreboardTheme, scoreboardSurfaceBackgroundPath, type ResolvedScoreboardTheme } from "@/lib/scoreboard-theme";
+import { sponsorSurfaceElements, type LayoutElement } from "@/lib/scoreboard-elements";
 import { getSportProfile } from "@/lib/sports";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { ExtraElement, elementBoxStyle, elementInnerStyle } from "./layout-elements";
@@ -38,7 +38,8 @@ export function CustomScoreboardLayout({
   const showShot = profile.shotClockPresets.length > 0 && !useShotClockOff();
   const showClockBlock =
     theme.showClock || theme.fullShowPeriod || profile.hasSets || profile.shotClockPresets.length > 0;
-  const frameSrc = mediaUrl(theme.leftFrameBackgroundPath || theme.scoreboardBackgroundPath);
+  const frameSrc = mediaUrl(scoreboardSurfaceBackgroundPath(theme, "sponsor"));
+  const surfaceElements = sponsorSurfaceElements(theme.elements);
 
   return (
     <div className="absolute inset-0" style={{ fontFamily: theme.fontFamily, background: theme.contentAreaBg }}>
@@ -49,7 +50,7 @@ export function CustomScoreboardLayout({
           className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
         />
       ) : null}
-      {theme.elements.sponsor.map((element, index) => {
+      {surfaceElements.map((element, index) => {
         if (element.hidden) return null;
         const box = elementBoxStyle(element, index);
         const inner = elementInnerStyle(element);

@@ -6,6 +6,8 @@ import {
   largestSixteenByNineSlot,
   mergeScoreboardTheme,
   reservedContentIsSixteenByNine,
+  scoreboardBesideUsesOverlay,
+  scoreboardSurfaceBackgroundPath,
   scoreboardUsesCustom,
   scoreboardUsesLeftFrame,
   scoreboardUsesStrip,
@@ -179,5 +181,34 @@ describe("scoreboard theme personalization", () => {
     expect(scoreboardUsesLeftFrame(auto, true)).toBe(true);
     const left = mergeScoreboardTheme(JSON.stringify({ layoutMode: "left-l" }));
     expect(scoreboardUsesLeftFrame(left, false)).toBe(true);
+  });
+
+  it("zet een set-achtergrond ook op het sponsorvlak als daar geen eigen beeld staat", () => {
+    const onlyFull = mergeScoreboardTheme(JSON.stringify({ fullBackgroundPath: "/uploads/set.png" }));
+    expect(scoreboardSurfaceBackgroundPath(onlyFull, "full")).toBe("/uploads/set.png");
+    expect(scoreboardSurfaceBackgroundPath(onlyFull, "sponsor")).toBe("/uploads/set.png");
+    expect(scoreboardBesideUsesOverlay(onlyFull)).toBe(true);
+
+    const both = mergeScoreboardTheme(
+      JSON.stringify({
+        fullBackgroundPath: "/uploads/set.png",
+        leftFrameBackgroundPath: "/uploads/l.png",
+      }),
+    );
+    expect(scoreboardSurfaceBackgroundPath(both, "full")).toBe("/uploads/set.png");
+    expect(scoreboardSurfaceBackgroundPath(both, "sponsor")).toBe("/uploads/l.png");
+    expect(scoreboardBesideUsesOverlay(both)).toBe(false);
+
+    const shared = mergeScoreboardTheme(JSON.stringify({ scoreboardBackgroundPath: "/uploads/all.png" }));
+    expect(scoreboardSurfaceBackgroundPath(shared, "full")).toBe("/uploads/all.png");
+    expect(scoreboardSurfaceBackgroundPath(shared, "sponsor")).toBe("/uploads/all.png");
+    expect(scoreboardBesideUsesOverlay(shared)).toBe(false);
+
+    expect(scoreboardBesideUsesOverlay(mergeScoreboardTheme(JSON.stringify({ layoutMode: "custom" })))).toBe(true);
+    expect(
+      scoreboardBesideUsesOverlay(
+        mergeScoreboardTheme(JSON.stringify({ layoutMode: "left-l", fullBackgroundPath: "/uploads/set.png" })),
+      ),
+    ).toBe(false);
   });
 });
