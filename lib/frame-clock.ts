@@ -1,0 +1,42 @@
+/**
+ * Vast beeldritme voor de livestream, zoals OBS: een klok bepaalt hoeveel beeldjes er naar ffmpeg
+ * moeten, niet het toevallige moment waarop de app een beeld schildert.
+ *
+ * ffmpeg telt de beeldjes (`-framerate`), dus het aantal verstuurde beeldjes ís de tijd van de
+ * video. Zolang dat aantal de klok volgt, loopt beeld gelijk met geluid. Komt er geen nieuw beeld,
+ * dan gaat het vorige nog eens mee; achterstand wordt ingehaald in plaats van weggegooid.
+ */
+export class FrameClock {
+  private startMs: number | null = null;
+  private sent = 0;
+
+  constructor(private readonly fps: number) {}
+
+  /** De klok start bij het eerste beeldje dat echt verstuurd wordt. */
+  start(nowMs: number): void {
+    if (this.startMs == null) this.startMs = nowMs;
+  }
+
+  get started(): boolean {
+    return this.startMs != null;
+  }
+
+  get framesSent(): number {
+    return this.sent;
+  }
+
+  /** Hoeveel beeldjes er op dit moment verstuurd hadden moeten zijn (het lopende beeldje inbegrepen). */
+  due(nowMs: number): number {
+    if (this.startMs == null) return 0;
+    return Math.floor(((nowMs - this.startMs) * this.fps) / 1000) + 1;
+  }
+
+  /** Moet er nu (nog) een beeldje naar ffmpeg? */
+  behind(nowMs: number): number {
+    return Math.max(0, this.due(nowMs) - this.sent);
+  }
+
+  markSent(): void {
+    this.sent += 1;
+  }
+}
