@@ -800,6 +800,11 @@ export function parseDshowAudioDevices(text: string): LivestreamAudioDevice[] {
 /** YouTube/Twitch: 48 kHz stereo AAC. */
 export const STREAM_AUDIO_SAMPLE_RATE = 48000;
 export const STREAM_AUDIO_BITRATE_K = 160;
+/**
+ * Houdt geluid gelijk met de klok: gaatjes worden stilte, een teveel valt weg. `async=1` stuurde
+ * maar 1 sample per seconde bij, veel te weinig voor een live bron die soms stokt.
+ */
+export const STREAM_AUDIO_RESAMPLE = "aresample=async=1000:first_pts=0";
 /** dshow USB-audio: 80–100 ms is stabieler dan 50 ms. */
 export const DSHOW_AUDIO_BUFFER_MS = 80;
 
@@ -928,12 +933,21 @@ export function dshowAudioInputArgs(deviceName: string): string[] {
   ];
 }
 
+/**
+ * Geluid uit een pijp (GoXLR/systeemgeluid, browserbron) krijgt de wandklok als tijd, net als het
+ * beeld. Telt ffmpeg de tijd in samples, dan wacht het op elk tekort aan geluid en laat de beeldpomp
+ * intussen beeldjes vallen: haperend beeld en geluid, oplopend tot bijna niets.
+ */
 export function wasapiLoopbackInputArgs(deviceName: string): string[] {
   const display = audioDeviceDisplayName(deviceName);
   if (!isSafeDshowDeviceName(display)) {
     throw new Error("Ongeldig audio-apparaat");
   }
   return [
+    "-thread_queue_size",
+    "1024",
+    "-use_wallclock_as_timestamps",
+    "1",
     "-f",
     "s16le",
     "-ar",
@@ -1322,7 +1336,7 @@ export function buildAudioMixPlan(
     return {
       label: `dshow ${armed[0].device} vol=${audioChannelGain(armed[0], masterVolume)}`,
       inputArgs,
-      filterComplex: `${pads[0]};[a0]aresample=async=1:first_pts=0[aout]`,
+      filterComplex: `${pads[0]};[a0]${STREAM_AUDIO_RESAMPLE}[aout]`,
       audioMap: "[aout]",
     };
   }
@@ -1331,7 +1345,7 @@ export function buildAudioMixPlan(
   return {
     label: `mix ${armed.map((c) => c.device).join(" + ")}`,
     inputArgs,
-    filterComplex: `${pads.join(";")};${mixInputs}amix=inputs=${armed.length}:duration=longest:dropout_transition=2:normalize=0,aresample=async=1:first_pts=0[aout]`,
+    filterComplex: `${pads.join(";")};${mixInputs}amix=inputs=${armed.length}:duration=longest:dropout_transition=2:normalize=0,${STREAM_AUDIO_RESAMPLE}[aout]`,
     audioMap: "[aout]",
   };
 }
