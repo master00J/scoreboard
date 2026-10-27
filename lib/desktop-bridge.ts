@@ -238,7 +238,8 @@ export type ElectronBridge = {
     matchId: string;
     format: ExportFormat;
   }) => Promise<{ canceled: boolean; filePath?: string }>;
-  getDesktopCaptureSources: () => Promise<DesktopCaptureSourceInfo[]>;
+  /** `thumbnails: false` somt alleen vensters en schermen op, zonder schermafdrukken (goedkoop). */
+  getDesktopCaptureSources: (opts?: { thumbnails?: boolean }) => Promise<DesktopCaptureSourceInfo[]>;
   reportSponsorClipStart: (payload: SponsorTelemetryClipStart) => Promise<{ ok: boolean }>;
   reportSponsorClipEnd: (payload: SponsorTelemetryClipEnd) => Promise<{ ok: boolean }>;
   reportSponsorClipProgress: (payload: SponsorTelemetryClipProgress) => Promise<{ ok: boolean }>;

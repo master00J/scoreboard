@@ -8,6 +8,7 @@ import { sendCommand } from "@/lib/use-socket";
 import { isElectron } from "@/lib/electron";
 import type { DesktopCaptureSourceInfo } from "@/lib/desktop-bridge";
 import { ExternalCaptureVideo } from "@/components/external-capture-video";
+import { keepCaptureThumbnails } from "@/lib/desktop-capture-sources";
 import { enumerateCameraCaptureOptions } from "@/lib/enumerate-camera-capture-options";
 import {
   AlertTriangle,
@@ -59,12 +60,17 @@ export function ExternalCapturePanel() {
       }
       if (!opts.silent) setLoadingSources(true);
       try {
+        // De stille verversing haalt geen miniaturen: die vragen een schermafdruk van elk venster en
+        // legden het hoofdproces elke 5 s stil (haperende livestream). Bekende miniaturen blijven staan.
         const [deskList, cameras] = await Promise.all([
-          window.electronAPI.getDesktopCaptureSources(),
+          window.electronAPI.getDesktopCaptureSources({ thumbnails: !opts.silent }),
           enumerateCameraCaptureOptions(),
         ]);
-        setSources([
-          ...deskList.map<UnifiedCaptureSource>((s) => ({ ...s, category: "desktop" })),
+        setSources((previous) => [
+          ...keepCaptureThumbnails(deskList, previous).map<UnifiedCaptureSource>((s) => ({
+            ...s,
+            category: "desktop",
+          })),
           ...cameras.map<UnifiedCaptureSource>((c) => ({
             id: c.id,
             name: c.name,
@@ -87,7 +93,10 @@ export function ExternalCapturePanel() {
   useEffect(() => {
     if (!isElectron) return;
     void refreshSources();
-    const id = window.setInterval(() => void refreshSources({ silent: true }), SOURCE_REFRESH_MS);
+    const id = window.setInterval(() => {
+      if (document.hidden) return;
+      void refreshSources({ silent: true });
+    }, SOURCE_REFRESH_MS);
     return () => window.clearInterval(id);
   }, [refreshSources]);
 
