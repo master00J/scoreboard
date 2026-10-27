@@ -204,8 +204,12 @@ function DestinationFields({
       >
         <option value="youtube">{t("livestream.youtube")}</option>
         <option value="twitch">{t("livestream.twitch")}</option>
+        <option value="facebook">{t("livestream.facebook")}</option>
         <option value="custom">{t("livestream.custom")}</option>
       </Select>
+      {platform === "facebook" && (
+        <p className="text-[11px] leading-snug text-muted-foreground">{t("livestream.facebookHint")}</p>
+      )}
       {platform === "custom" && (
         <>
           <Label htmlFor={`${prefix}-url`}>{t("livestream.customUrl")}</Label>
@@ -594,13 +598,14 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     settings.platform === "custom"
       ? Boolean(settings.customUrl.trim() && settings.streamKey.trim())
       : Boolean(settings.streamKey.trim());
-  const advice = bitrateAdvice(settings.resolution, settings.fps, settings.platform);
-  const bitrateOptions = bitrateOptionsKbps(settings.resolution, settings.fps, settings.platform);
+  const outputPlatforms = settings.dualEnabled ? [settings.platform, settings.platform2] : [settings.platform];
+  const advice = bitrateAdvice(settings.resolution, settings.fps, outputPlatforms);
+  const bitrateOptions = bitrateOptionsKbps(settings.resolution, settings.fps, outputPlatforms);
   const verdict = bitrateVerdict(
     settings.bitrateKbps,
     settings.resolution,
     settings.fps,
-    settings.platform,
+    outputPlatforms,
   );
   const sourceLocked = busy;
   const health = status.health ?? DEFAULT_LIVESTREAM_HEALTH;

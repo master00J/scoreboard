@@ -10,7 +10,7 @@ import { defaultStreamDeckSlots, mergeStreamDeckSlots, type StreamDeckSlot } fro
 export type { StreamScoreWidgetDesign, StreamScoreWidgetSettings };
 export { mergeStreamScoreWidget, sixteenByNineScaleFilter } from "./stream-score-widget";
 
-export type LivestreamPlatform = "youtube" | "twitch" | "custom";
+export type LivestreamPlatform = "youtube" | "twitch" | "facebook" | "custom";
 
 export type LivestreamSource = "camera" | "display" | "browser" | "media";
 
@@ -280,6 +280,8 @@ export const DEFAULT_LIVESTREAM_STATUS: LivestreamStatus = {
 
 export const YOUTUBE_RTMP_BASE = "rtmp://a.rtmp.youtube.com/live2";
 export const TWITCH_RTMP_BASE = "rtmp://live.twitch.tv/app";
+/** Facebook Live aanvaardt alleen versleutelde streams (RTMPS op poort 443). */
+export const FACEBOOK_RTMPS_BASE = "rtmps://live-api-s.facebook.com:443/rtmp";
 
 export const DEFAULT_STREAM_PLAY_LAYOUT: StreamLayerLayout = {
   score: true,
@@ -390,7 +392,7 @@ export function parseEncoderPref(value: unknown): LivestreamEncoderPref {
 }
 
 export function parsePlatform(value: unknown): LivestreamPlatform {
-  if (value === "twitch" || value === "custom" || value === "youtube") return value;
+  if (value === "twitch" || value === "facebook" || value === "custom" || value === "youtube") return value;
   return "youtube";
 }
 
@@ -977,6 +979,12 @@ export function isSafeRtmpUrl(url: string): boolean {
   }
 }
 
+/** Plakt een club de hele server-URL uit Live Producer in het sleutelveld, dan telt alleen de sleutel. */
+export function facebookStreamKey(key: string): string {
+  const match = /^rtmps?:\/\/[^/]*facebook\.com(?::\d+)?\/rtmp\/(.+)$/i.exec(key.trim());
+  return match ? match[1]! : key.trim();
+}
+
 export function buildRtmpDestinationFor(
   platform: LivestreamPlatform,
   streamKey: string,
@@ -992,6 +1000,9 @@ export function buildRtmpDestinationFor(
   }
   if (platform === "twitch") {
     return `${TWITCH_RTMP_BASE}/${key}`;
+  }
+  if (platform === "facebook") {
+    return `${FACEBOOK_RTMPS_BASE}/${facebookStreamKey(key)}`;
   }
 
   const base = customUrl.trim().replace(/\/+$/, "");
