@@ -1,5 +1,4 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import type { Writable } from "node:stream";
 import fs from "node:fs";
 import path from "node:path";
 import { screen, type BrowserWindow } from "electron";
@@ -55,6 +54,7 @@ import {
   type LivestreamSettings,
   type LivestreamStatus,
 } from "../lib/livestream";
+import { guardChildPipes, writeWithBackpressure } from "../lib/child-pipe";
 import { naudioHelperCandidates } from "../lib/naudio-helper";
 import { sendZmqReq } from "./zmq-req";
 import { createBrowserAudioTap, type BrowserAudioTap } from "./browser-source-audio";
@@ -477,16 +477,6 @@ function sanitizeLogLine(line: string): string {
     .replace(/rtmps?:\/\/\S+/gi, (url) => maskRtmpDestination(url))
     .replace(/[A-Za-z0-9_-]{20,}/g, "***")
     .trim();
-}
-
-function writeWithBackpressure(stdin: Writable, buf: Buffer): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const ok = stdin.write(buf, (err) => {
-      if (err) reject(err);
-    });
-    if (ok) resolve();
-    else stdin.once("drain", () => resolve());
-  });
 }
 
 type LiveSession = {
@@ -1115,6 +1105,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       windowsHide: true,
       cwd: path.dirname(exe),
     });
+    guardChildPipes(proc, (pipe, err) => deps.log(`[livestream] meter ${pipe}: ${err.message}`));
     let buf = "";
     proc.stdout.on("data", (chunk: Buffer) => {
       buf += chunk.toString("utf8");
@@ -1189,6 +1180,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         [wasapiLoopbackPipeName(channel.device), audioDeviceDisplayName(channel.device)],
         { windowsHide: true, cwd: path.dirname(exe) },
       );
+      guardChildPipes(proc, (pipe, err) => deps.log(`[livestream] wasapi ${pipe}: ${err.message}`));
       proc.stderr.on("data", (chunk: Buffer) => {
         const text = chunk.toString("utf8").trim();
         if (text) deps.log(`[livestream] wasapi ${audioDeviceDisplayName(channel.device)}: ${text}`);
@@ -1245,6 +1237,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       windowsHide: true,
       cwd: path.dirname(exe),
     });
+    guardChildPipes(proc, (pipe, err) => deps.log(`[livestream] monitor ${pipe}: ${err.message}`));
     proc.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString("utf8").trim();
       if (text) deps.log(`[livestream] monitor: ${text}`);
@@ -1345,6 +1338,8 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       windowsHide: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    // Stopt ffmpeg terwijl de pomp nog schrijft, dan is dat een mislukte poging, geen app-crash.
+    guardChildPipes(proc, (pipe, err) => deps.log(`[livestream] ffmpeg ${pipe}: ${err.message}`));
     child = proc;
     encoder = useEncoder;
     attemptStderr = "";
