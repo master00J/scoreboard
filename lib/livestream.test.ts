@@ -425,14 +425,16 @@ describe("helpers", () => {
 });
 
 describe("audio mixer", () => {
-  it("geeft geluid uit een pijp de wandklok als tijd, zodat het beeld er niet op wacht", () => {
+  it("leest geluid uit een pijp meteen en telt de tijd in samples, zonder wandklok per pakje", () => {
     const args = buildAudioMixPlan([{ id: "a1", device: "wasapi:Music (TC-Helicon GoXLR)", volume: 100, muted: false }], 100)
       .inputArgs;
     const input = args.indexOf("-i");
     expect(args.slice(0, input)).toEqual(
-      expect.arrayContaining(["-use_wallclock_as_timestamps", "1", "-thread_queue_size", "1024"]),
+      expect.arrayContaining(["-thread_queue_size", "1024", "-probesize", "32", "-analyzeduration", "0"]),
     );
-    expect(args.indexOf("-use_wallclock_as_timestamps")).toBeLessThan(args.indexOf("-f"));
+    expect(args.indexOf("-analyzeduration")).toBeLessThan(args.indexOf("-f"));
+    // De wandklok per pakje gaf schommelende tijden en daarmee haperend geluid.
+    expect(args).not.toContain("-use_wallclock_as_timestamps");
   });
 
   it("stuurt het geluid stevig bij naar de klok, niet met 1 sample per seconde", () => {
