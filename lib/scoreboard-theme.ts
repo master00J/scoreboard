@@ -755,15 +755,13 @@ export function scoreboardUsesCustom(theme: Pick<ResolvedScoreboardTheme, "layou
 }
 
 /**
- * Naast een sponsorclip: vrij overlay-frame i.p.v. de rode L-balk.
- * Ook bij auto/full als de club alleen het set-beeld zette en geen L-balkbeeld.
+ * Het deel van het canvas dat de L-balk bedekt: de linkerkolom en de onderrail. De achtergrond van
+ * het L-frame wordt hierop geknipt, zodat hij boven de framekleuren ligt maar nooit over de sponsorclip.
  */
-export function scoreboardBesideUsesOverlay(
-  theme: Pick<ResolvedScoreboardTheme, "layoutMode" | "leftFrameBackgroundPath" | "fullBackgroundPath">,
-): boolean {
-  if (theme.layoutMode === "custom") return true;
-  if (theme.layoutMode === "left-l" || theme.layoutMode === "bottom-strip") return false;
-  return !theme.leftFrameBackgroundPath && !!theme.fullBackgroundPath;
+export function leftFrameClipPath(barWidthPx: number, bottomBarHeightPx: number): string {
+  const w = Math.max(0, Math.round(barWidthPx));
+  const h = Math.max(0, Math.round(bottomBarHeightPx));
+  return `polygon(0 0, ${w}px 0, ${w}px calc(100% - ${h}px), 100% calc(100% - ${h}px), 100% 100%, 0 100%)`;
 }
 
 /**

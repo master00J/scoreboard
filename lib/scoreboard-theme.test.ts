@@ -6,7 +6,7 @@ import {
   largestSixteenByNineSlot,
   mergeScoreboardTheme,
   reservedContentIsSixteenByNine,
-  scoreboardBesideUsesOverlay,
+  leftFrameClipPath,
   scoreboardSurfaceBackgroundPath,
   scoreboardUsesCustom,
   scoreboardUsesLeftFrame,
@@ -187,7 +187,6 @@ describe("scoreboard theme personalization", () => {
     const onlyFull = mergeScoreboardTheme(JSON.stringify({ fullBackgroundPath: "/uploads/set.png" }));
     expect(scoreboardSurfaceBackgroundPath(onlyFull, "full")).toBe("/uploads/set.png");
     expect(scoreboardSurfaceBackgroundPath(onlyFull, "sponsor")).toBe("/uploads/set.png");
-    expect(scoreboardBesideUsesOverlay(onlyFull)).toBe(true);
 
     const both = mergeScoreboardTheme(
       JSON.stringify({
@@ -197,18 +196,31 @@ describe("scoreboard theme personalization", () => {
     );
     expect(scoreboardSurfaceBackgroundPath(both, "full")).toBe("/uploads/set.png");
     expect(scoreboardSurfaceBackgroundPath(both, "sponsor")).toBe("/uploads/l.png");
-    expect(scoreboardBesideUsesOverlay(both)).toBe(false);
 
     const shared = mergeScoreboardTheme(JSON.stringify({ scoreboardBackgroundPath: "/uploads/all.png" }));
     expect(scoreboardSurfaceBackgroundPath(shared, "full")).toBe("/uploads/all.png");
     expect(scoreboardSurfaceBackgroundPath(shared, "sponsor")).toBe("/uploads/all.png");
-    expect(scoreboardBesideUsesOverlay(shared)).toBe(false);
+  });
 
-    expect(scoreboardBesideUsesOverlay(mergeScoreboardTheme(JSON.stringify({ layoutMode: "custom" })))).toBe(true);
-    expect(
-      scoreboardBesideUsesOverlay(
-        mergeScoreboardTheme(JSON.stringify({ layoutMode: "left-l", fullBackgroundPath: "/uploads/set.png" })),
-      ),
-    ).toBe(false);
+  it("houdt de L-balk bij een eigen achtergrond: alleen het frame-type kiest de weergave", () => {
+    for (const json of [
+      { fullBackgroundPath: "/uploads/set.png" },
+      { scoreboardBackgroundPath: "/uploads/all.png" },
+      { leftFrameBackgroundPath: "/uploads/l.png" },
+    ]) {
+      const theme = mergeScoreboardTheme(JSON.stringify(json));
+      expect(scoreboardUsesCustom(theme)).toBe(false);
+      expect(scoreboardUsesLeftFrame(theme, true)).toBe(true);
+    }
+    expect(scoreboardUsesCustom(mergeScoreboardTheme(JSON.stringify({ layoutMode: "custom" })))).toBe(true);
+  });
+
+  it("knipt de L-balkachtergrond op de kolom en de onderrail, niet op de sponsorclip", () => {
+    expect(leftFrameClipPath(280, 280)).toBe(
+      "polygon(0 0, 280px 0, 280px calc(100% - 280px), 100% calc(100% - 280px), 100% 100%, 0 100%)",
+    );
+    expect(leftFrameClipPath(300.4, -5)).toBe(
+      "polygon(0 0, 300px 0, 300px calc(100% - 0px), 100% calc(100% - 0px), 100% 100%, 0 100%)",
+    );
   });
 });

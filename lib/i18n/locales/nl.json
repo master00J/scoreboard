@@ -573,6 +573,7 @@
     "cueGeneralMediaGroup": "Algemene media (geen sponsor)",
     "cueSponsorMediaGroup": "Media van sponsors",
     "cuePhase": "Fase",
+    "cueSport": "Sport",
     "cueTime": "Starttijd",
     "cueEveryMinutes": "Elke (min)",
     "cueUntil": "Tot tijd",
@@ -684,6 +685,7 @@
     "cueRundownCount": "{{count}} clip(s)",
     "cueLoop": "Loop deze rundown",
     "cuePrematchKickoffHint": "Met geplande aftrap: 0:00 = start van het prematch-venster, einde op aftrap. Leeg venster = clips lopen net voor de aftrap.",
+    "cuePrematchStartHint": "Met een geplande start: 0:00 = start van het prematch-venster, einde bij de start van de wedstrijd. Leeg venster = clips lopen net voor de start.",
     "cueWindow": "{{start}} – {{end}}"
   },
   "reports": {

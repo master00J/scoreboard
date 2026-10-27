@@ -2,11 +2,7 @@
 
 import type { ReactNode } from "react";
 import type { Match } from "@/lib/types";
-import {
-  scoreboardBesideUsesOverlay,
-  scoreboardEditorShowsLeftFrame,
-  type ResolvedScoreboardTheme,
-} from "@/lib/scoreboard-theme";
+import { scoreboardEditorShowsLeftFrame, type ResolvedScoreboardTheme } from "@/lib/scoreboard-theme";
 import type { LayoutPreviewSurface } from "@/lib/scoreboard-preview-match";
 import { CustomScoreboardLayout } from "./custom-scoreboard-layout";
 import { LeftScoreboardLayout } from "./left-scoreboard-layout";
@@ -51,7 +47,6 @@ export function ScoreboardSurfaceBoard({
   const props = { match, elapsed, running, period, addedTime, shotClock, theme };
   if (surface === "full") return <MatchScoreboardFull {...props} />;
   const video = <SponsorVideoPlate />;
-  if (scoreboardBesideUsesOverlay(theme)) return <CustomScoreboardLayout {...props}>{video}</CustomScoreboardLayout>;
   if (scoreboardEditorShowsLeftFrame(theme)) return <LeftScoreboardLayout {...props}>{video}</LeftScoreboardLayout>;
   if (theme.layoutMode === "bottom-strip") return <StripScoreboardLayout {...props}>{video}</StripScoreboardLayout>;
   return <CustomScoreboardLayout {...props}>{video}</CustomScoreboardLayout>;
@@ -86,9 +81,6 @@ export function ScoreboardLayoutBoard({
     case "full":
       return <MatchScoreboardFull {...props} />;
     default:
-      if (scoreboardBesideUsesOverlay(theme)) {
-        return <CustomScoreboardLayout {...props}>{children}</CustomScoreboardLayout>;
-      }
       return <LeftScoreboardLayout {...props}>{children}</LeftScoreboardLayout>;
   }
 }

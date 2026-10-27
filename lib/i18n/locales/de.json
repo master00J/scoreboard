@@ -573,6 +573,7 @@
     "cueGeneralMediaGroup": "Allgemeine Medien (kein Sponsor)",
     "cueSponsorMediaGroup": "Sponsormedien",
     "cuePhase": "Phase",
+    "cueSport": "Sportart",
     "cueTime": "Startzeit",
     "cueEveryMinutes": "Alle (min)",
     "cueUntil": "Bis",
@@ -684,6 +685,7 @@
     "cueRundownCount": "{{count}} Clip(s)",
     "cueLoop": "Diesen Ablaufplan wiederholen",
     "cuePrematchKickoffHint": "Mit geplantem Anpfiff: 0:00 = Beginn des Fensters vor dem Spiel, Ende beim Anpfiff. Leeres Fenster = Clips laufen kurz vor dem Anpfiff.",
+    "cuePrematchStartHint": "Mit geplantem Beginn: 0:00 = Beginn des Fensters vor dem Spiel, Ende bei Spielbeginn. Leeres Fenster = Clips laufen kurz vor Spielbeginn.",
     "cueWindow": "{{start}} – {{end}}"
   },
   "reports": {

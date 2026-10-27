@@ -1,3 +1,5 @@
+import { SPORT_TYPES, getSportProfile, normalizeSport, type SportType } from "./sports";
+
 /** Optionele eindtijd op de matchklok. Null = oud gedrag (video tot einde, foto via durationSec). */
 export function cueEndSec(cue: {
   triggerSec: number;
@@ -257,6 +259,28 @@ export function cueWindowExpired(
 ): boolean {
   const end = cueEndSec(cue);
   return end != null && elapsed >= end;
+}
+
+/** De fases van de Rundown, in de volgorde van een wedstrijd. */
+export const RUNDOWN_PHASES = ["PREMATCH", "FIRST_HALF", "SECOND_HALF", "EXTRA_TIME", "POST_MATCH"] as const;
+export type RundownPhase = (typeof RUNDOWN_PHASES)[number];
+
+/** Fases die je voor deze sport kunt kiezen: zonder verlenging (volleybal, hockey) geen verlenging. */
+export function rundownPhasesForSport(sport: unknown): RundownPhase[] {
+  const hasOvertime = getSportProfile(sport).maxOvertimePeriods > 0;
+  return RUNDOWN_PHASES.filter((phase) => phase !== "EXTRA_TIME" || hasOvertime);
+}
+
+/**
+ * Voor welke sport de Rundown fases en tijden toont. Een lopende wedstrijd beslist; zonder wedstrijd
+ * de sport die de operator hier laatst koos, zodat een volleybalclub vooraf kan plannen.
+ */
+export function rundownSport(activeSport: unknown, rememberedSport: unknown): SportType {
+  if (activeSport) return normalizeSport(activeSport);
+  if (typeof rememberedSport === "string" && SPORT_TYPES.includes(rememberedSport as SportType)) {
+    return rememberedSport as SportType;
+  }
+  return "FOOTBALL";
 }
 
 /** Groepeert Setup+Voor wedstrijd en Einde+Na wedstrijd als één rundown. */

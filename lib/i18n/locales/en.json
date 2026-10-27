@@ -573,6 +573,7 @@
     "cueGeneralMediaGroup": "General media (no sponsor)",
     "cueSponsorMediaGroup": "Sponsor media",
     "cuePhase": "Phase",
+    "cueSport": "Sport",
     "cueTime": "Start time",
     "cueEveryMinutes": "Every (min)",
     "cueUntil": "Until time",
@@ -684,6 +685,7 @@
     "cueRundownCount": "{{count}} clip(s)",
     "cueLoop": "Loop this rundown",
     "cuePrematchKickoffHint": "With a scheduled kick-off: 0:00 = start of the prematch window, end at kick-off. Empty window = clips play just before kick-off.",
+    "cuePrematchStartHint": "With a scheduled start: 0:00 = start of the prematch window, ending when the match starts. Empty window = clips play just before the start.",
     "cueWindow": "{{start}} – {{end}}"
   },
   "reports": {
