@@ -1362,6 +1362,7 @@
     "monitorSame": "Choose below what comes next.",
     "switcherNeedsSetup": "Set up first…",
     "needsStreamKey": "Add a stream key in Setup first.",
+    "errorWasapiHelper": "The audio channel {{devices}} can’t be captured, so the stream didn’t start. Pick another source under Setup → Audio or remove this channel.",
     "liveShort": "LIVE",
     "audioFollowTitle": "Audio for this input",
     "audioFollowHelp": "When this video input is program: mute or unmute specific audio automatically. Leave keeps the fader as-is.",

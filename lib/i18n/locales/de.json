@@ -1362,6 +1362,7 @@
     "monitorSame": "Wählen Sie unten, was als Nächstes kommt.",
     "switcherNeedsSetup": "Zuerst einrichten…",
     "needsStreamKey": "Fügen Sie zuerst unter Setup einen Stream-Key hinzu.",
+    "errorWasapiHelper": "Der Audiokanal {{devices}} kann nicht aufgenommen werden, deshalb wurde der Stream nicht gestartet. Wähle unter Setup → Audio eine andere Quelle oder entferne diesen Kanal.",
     "liveShort": "LIVE",
     "audioFollowTitle": "Audio für diesen Eingang",
     "audioFollowHelp": "Wenn dieser Videoeingang Programm ist: bestimmte Audios automatisch stummschalten oder einschalten. Belassen lässt den Regler unverändert.",

@@ -11,6 +11,7 @@ import {
   ffmpegOutputArgs,
   isRtmpDestination,
   maskRtmpDestination,
+  wasapiHelperError,
   mergeLivestreamSettings,
   resolveActiveVideoInput,
   resolvePreviewVideoInput,
@@ -54,6 +55,7 @@ import {
   type LivestreamSettings,
   type LivestreamStatus,
 } from "../lib/livestream";
+import { naudioHelperCandidates } from "../lib/naudio-helper";
 import { sendZmqReq } from "./zmq-req";
 import { createBrowserAudioTap, type BrowserAudioTap } from "./browser-source-audio";
 
@@ -369,21 +371,20 @@ function listDshowVideoDevices(ffmpegPath: string): Promise<LivestreamCameraDevi
   return listDshowDevices(ffmpegPath).then((d) => d.video);
 }
 
-function wasapiLoopbackSourcePath(): string {
-  const fromCwd = path.join(process.cwd(), "electron", "wasapi-loopback-capture.cs");
-  if (fs.existsSync(fromCwd)) return fromCwd;
-  return path.join(__dirname, "wasapi-loopback-capture.cs");
+/** Eerste bestaand pad; anders het eerste, zodat de controles hieronder netjes "ontbreekt" geven. */
+function firstExisting(candidates: string[]): string {
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0]!;
 }
 
-function naudioDllPath(): string {
-  const fromCwd = path.join(process.cwd(), "vendor", "naudio", "NAudio.dll");
-  if (fs.existsSync(fromCwd)) return fromCwd;
-  return path.join(__dirname, "..", "vendor", "naudio", "NAudio.dll");
-}
-
-function ensureWasapiLoopbackExe(userDataDir: string): Promise<string | null> {
-  const src = wasapiLoopbackSourcePath();
-  const dllSrc = naudioDllPath();
+function ensureWasapiLoopbackExe(deps: Deps): Promise<string | null> {
+  const userDataDir = deps.userDataDir();
+  const files = naudioHelperCandidates({
+    resourcesPath: deps.resourcesPath(),
+    appRoot: deps.appRoot(),
+    cwd: process.cwd(),
+  });
+  const src = firstExisting(files.source);
+  const dllSrc = firstExisting(files.dll);
   const exe = path.join(userDataDir, "wasapi-loopback-capture.exe");
   const dllDest = path.join(userDataDir, "NAudio.dll");
   if (!fs.existsSync(dllSrc)) return Promise.resolve(null);
@@ -1017,6 +1018,19 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     },
   });
 
+  /**
+   * Een geluidskanaal start niet: opnieuw proberen helpt niet en zou de melding alleen verbergen.
+   * Stream en opname stoppen; `error` blijft staan tot de operator iets anders kiest.
+   */
+  const stopAfterAudioFailure = () => {
+    userWantsLive = false;
+    userWantsRecord = false;
+    recordFile = null;
+    sessionArmed = false;
+    lastSession = null;
+    emit();
+  };
+
   const clearReconnect = () => {
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
@@ -1147,7 +1161,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       emitAudioMeters();
       return;
     }
-    const exe = await ensureWasapiLoopbackExe(deps.userDataDir());
+    const exe = await ensureWasapiLoopbackExe(deps);
     if (!exe) {
       deps.log("[livestream] GoXLR-meter: NAudio-helper ontbreekt");
       return;
@@ -1165,9 +1179,9 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       isWasapiAudioDevice(channel.device),
     );
     if (needed.length === 0) return;
-    const exe = await ensureWasapiLoopbackExe(deps.userDataDir());
+    const exe = await ensureWasapiLoopbackExe(deps);
     if (!exe) {
-      throw new Error("GoXLR-kanalen (Game/Music/System) kunnen niet worden opgenomen");
+      throw new Error(wasapiHelperError(needed.map((channel) => audioDeviceDisplayName(channel.device))));
     }
     for (const channel of needed) {
       const proc = spawn(
@@ -1220,7 +1234,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       return;
     }
     stopMonitor();
-    const exe = await ensureWasapiLoopbackExe(deps.userDataDir());
+    const exe = await ensureWasapiLoopbackExe(deps);
     if (!exe) {
       deps.log("[livestream] monitor: helper ontbreekt");
       return;
@@ -1431,8 +1445,19 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     return { ...session, programWindow: opened.programWindow };
   };
 
-  const spawnSession = async (session: LiveSession) => {
-    await startWasapiLoopbacks();
+  /**
+   * "audio": een gekozen geluidskanaal kan niet starten. Een andere encoder of beeldbron lost dat
+   * niet op, dus de start stopt meteen met die melding in `error` in plaats van stil te falen.
+   */
+  const spawnSession = async (session: LiveSession): Promise<"ok" | "fail" | "audio"> => {
+    try {
+      await startWasapiLoopbacks();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      deps.log(`[livestream] audio kan niet starten: ${error}`);
+      emit();
+      return "audio";
+    }
     spawnFfmpeg(session.ffmpegPath, session.dests, session.encoder, session.plan, session.audioPlan);
     const proc = child;
     if (!proc) return "fail" as const;
@@ -1459,6 +1484,10 @@ export function createLivestreamController(deps: Deps): LivestreamController {
           if (!startedAt) startedAt = new Date().toISOString();
           deps.log("[livestream] reconnect geslaagd");
           emit();
+          return;
+        }
+        if (result === "audio") {
+          stopAfterAudioFailure();
           return;
         }
         deps.log("[livestream] reconnect mislukt");
@@ -1519,6 +1548,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
             : ["libx264", "h264_nvenc"]
           : [settings.encoder];
       let ok = false;
+      let audioFailed = false;
       outer: for (const plan of plans) {
         if (!encoding()) break;
         for (const audioPlan of audioPlans) {
@@ -1548,9 +1578,17 @@ export function createLivestreamController(deps: Deps): LivestreamController {
               ok = true;
               break outer;
             }
+            if (result === "audio") {
+              audioFailed = true;
+              break outer;
+            }
             await killChild();
           }
         }
+      }
+      if (audioFailed) {
+        stopAfterAudioFailure();
+        return;
       }
       if (!ok) {
         error = lastLogLine || "Bronwissel mislukt — opnieuw verbinden…";
@@ -1643,7 +1681,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       return mergeLivestreamAudioDevices(dshow, windows, sourceAudioDevices(settings.videoInputs));
     },
     listAudioOutputs: async () => {
-      const exe = await ensureWasapiLoopbackExe(deps.userDataDir());
+      const exe = await ensureWasapiLoopbackExe(deps);
       if (!exe) return [];
       return new Promise((resolve) => {
         execFile(exe, ["--list"], { windowsHide: true, cwd: path.dirname(exe) }, (err, stdout) => {
@@ -1718,6 +1756,8 @@ export function createLivestreamController(deps: Deps): LivestreamController {
 
       if (!encoding()) return getStatus();
 
+      /** Fout die elke volgende poging ook zou krijgen (geluidskanaal); die blijft in beeld staan. */
+      let startError: string | null = null;
       const encoders: LivestreamEncoder[] =
         settings.encoder === "auto" ? ["h264_nvenc", "libx264"] : [settings.encoder];
       outer: for (const plan of plans) {
@@ -1748,6 +1788,10 @@ export function createLivestreamController(deps: Deps): LivestreamController {
               if (!startedAt) startedAt = new Date().toISOString();
               break outer;
             }
+            if (result === "audio") {
+              startError = error;
+              break outer;
+            }
             const failText = attemptStderr || lastLogLine || "";
             deps.log(`[livestream] poging mislukt (${plan.label}/${audioPlan.label}/${useEncoder}) — volgende`);
             await killChild();
@@ -1768,7 +1812,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
           sessionArmed = false;
           lastSession = null;
         }
-        error = lastLogLine || "FFmpeg kon de stream niet starten";
+        error = startError ?? (lastLogLine || "FFmpeg kon de stream niet starten");
         emit();
       }
       return getStatus();
