@@ -934,9 +934,10 @@ export function dshowAudioInputArgs(deviceName: string): string[] {
 }
 
 /**
- * Geluid uit een pijp (GoXLR/systeemgeluid, browserbron) krijgt de wandklok als tijd, net als het
- * beeld. Telt ffmpeg de tijd in samples, dan wacht het op elk tekort aan geluid en laat de beeldpomp
- * intussen beeldjes vallen: haperend beeld en geluid, oplopend tot bijna niets.
+ * Geluid uit een pijp (GoXLR/systeemgeluid, browserbron). De helper levert precies realtime aan, dus
+ * de tijd telt in samples: dat blijft vloeiend. De wandklok per pakje gaf schommelende tijden waarop
+ * aresample stiltes invoegde en samples weggooide, hoorbaar als haperend geluid. Geen analyse van de
+ * invoer: ffmpeg las anders eerst seconden geluid in en liet het beeld zolang wachten.
  */
 export function wasapiLoopbackInputArgs(deviceName: string): string[] {
   const display = audioDeviceDisplayName(deviceName);
@@ -946,8 +947,10 @@ export function wasapiLoopbackInputArgs(deviceName: string): string[] {
   return [
     "-thread_queue_size",
     "1024",
-    "-use_wallclock_as_timestamps",
-    "1",
+    "-probesize",
+    "32",
+    "-analyzeduration",
+    "0",
     "-f",
     "s16le",
     "-ar",

@@ -3,6 +3,7 @@
 //    of: --meter <friendlyDeviceName>
 //    of: --list
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -20,6 +21,8 @@ internal static class Program
     private const int MonitorRingMs = 30;
     // Zo lang zonder echte data telt het apparaat als stil.
     private const int SilenceAfterMs = 40;
+    // Ruim 5 s geluid in de pijp, zodat ffmpeg met horten kan lezen zonder dat de schrijver vastloopt.
+    private const int PipeBufferBytes = 1 << 20;
     private static readonly object Gate = new object();
 
     private static int Main(string[] args)
@@ -115,19 +118,22 @@ internal static class Program
 
     private static int RunPipe(string pipeName, MMDevice device)
     {
-        using (var pipe = new NamedPipeServerStream(pipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte))
+        using (var pipe = new NamedPipeServerStream(
+            pipeName, PipeDirection.Out, 1, PipeTransmissionMode.Byte, PipeOptions.None, 0, PipeBufferBytes))
         {
             Console.Error.WriteLine("ready");
             Console.Error.Flush();
             pipe.WaitForConnection();
             using (var capture = new WasapiLoopbackCapture(device))
+            using (var queue = new BlockingCollection<byte[]>())
             {
-                // Loopback levert niets zolang er niets speelt. Stilte vult dan precies de verstreken
-                // tijd op (samples geschreven tegenover de klok); vaste blokjes leverden te weinig,
-                // waardoor ffmpeg op het geluid wachtte en beeldjes liet vallen.
+                // Opvangen en schrijven zijn gescheiden. ffmpeg leest de pijp met horten en stoten zodra
+                // het ook beeld verwerkt; schreef de opvang zelf naar de pijp, dan blokkeerde ze en ging
+                // er geluid van Windows verloren: hoorbare haperingen.
                 var clock = Stopwatch.StartNew();
-                long framesWritten = 0;
+                long framesQueued = 0;
                 long lastDataMs = 0;
+                var broken = false;
                 capture.DataAvailable += delegate(object sender, WaveInEventArgs e)
                 {
                     var pcm = ToS16Stereo(e.Buffer, e.BytesRecorded, capture.WaveFormat);
@@ -135,28 +141,45 @@ internal static class Program
                     {
                         if (pcm.Length > 0)
                         {
-                            pipe.Write(pcm, 0, pcm.Length);
-                            framesWritten += pcm.Length / 4;
+                            queue.Add(pcm);
+                            framesQueued += pcm.Length / 4;
                         }
                         lastDataMs = clock.ElapsedMilliseconds;
                     }
                 };
+                var writer = new Thread(delegate()
+                {
+                    try
+                    {
+                        foreach (var chunk in queue.GetConsumingEnumerable()) pipe.Write(chunk, 0, chunk.Length);
+                    }
+                    catch (Exception)
+                    {
+                        broken = true;
+                    }
+                });
+                writer.IsBackground = true;
+                writer.Start();
                 capture.StartRecording();
-                while (pipe.IsConnected)
+                while (pipe.IsConnected && !broken)
                 {
                     Thread.Sleep(10);
                     lock (Gate)
                     {
+                        // Loopback levert niets zolang er niets speelt: vul dan precies de verstreken
+                        // tijd met stilte, zodat ffmpeg nooit op geluid hoeft te wachten.
                         var nowMs = clock.ElapsedMilliseconds;
                         if (nowMs - lastDataMs <= SilenceAfterMs) continue;
-                        var missing = nowMs * SampleRate / 1000 - framesWritten;
+                        var missing = nowMs * SampleRate / 1000 - framesQueued;
                         if (missing <= 0) continue;
                         missing = Math.Min(missing, SampleRate / 10);
-                        var silence = new byte[missing * 4];
-                        pipe.Write(silence, 0, silence.Length);
-                        framesWritten += missing;
+                        queue.Add(new byte[missing * 4]);
+                        framesQueued += missing;
                     }
                 }
+                capture.StopRecording();
+                queue.CompleteAdding();
+                writer.Join(500);
             }
         }
         return 0;
