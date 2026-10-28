@@ -1,7 +1,7 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { screen, type BrowserWindow } from "electron";
+import { nativeImage, type BrowserWindow } from "electron";
 import {
   clampBitrateKbps,
   DEFAULT_LIVESTREAM_HEALTH,
@@ -14,6 +14,7 @@ import {
   mergeLivestreamSettings,
   resolveActiveVideoInput,
   resolvePreviewVideoInput,
+  programSourceKey,
   videoInputPreviewKey,
   parseDshowAudioDevices,
   parseDshowVideoDevices,
@@ -57,6 +58,17 @@ import {
 } from "../lib/livestream";
 import { guardChildPipes, writeWithBackpressure } from "../lib/child-pipe";
 import { FrameClock } from "../lib/frame-clock";
+import {
+  blendBgra,
+  drawOverBgra,
+  isNearlyBlackBgra,
+  TRANSITION_WAIT_FOR_PICTURE_MS,
+  letterboxRect,
+  placeBgra,
+  solidBgra,
+  transitionMix,
+  type StreamTransitionKind,
+} from "../lib/stream-transition";
 import { naudioHelperCandidates } from "../lib/naudio-helper";
 import { sendZmqReq } from "./zmq-req";
 import { createBrowserAudioTap, type BrowserAudioTap } from "./browser-source-audio";
@@ -114,6 +126,8 @@ type Deps = {
   recordDir: () => string;
   appRoot: () => string;
   resourcesPath: () => string;
+  /** Logo van de eigen club voor de overgangskaart; null = effen kaart. */
+  clubLogoPath?: () => Promise<string | null>;
   log: (line: string) => void;
 };
 
@@ -199,23 +213,6 @@ function windowIsOffscreen(win: BrowserWindow): boolean {
     /* oudere Electron */
   }
   return false;
-}
-
-async function probeWindowFrameSize(win: BrowserWindow): Promise<{ width: number; height: number }> {
-  try {
-    const image = await win.webContents.capturePage();
-    if (!image.isEmpty()) {
-      const size = image.getSize();
-      if (size.width >= 2 && size.height >= 2) {
-        return { width: even(size.width), height: even(size.height) };
-      }
-    }
-  } catch {
-    /* fallback op DIP × scaleFactor */
-  }
-  const [w, h] = win.getContentSize();
-  const factor = screen.getDisplayMatching(win.getBounds()).scaleFactor || 1;
-  return { width: even(Math.round(w * factor)), height: even(Math.round(h * factor)) };
 }
 
 function programCapturePlan(
@@ -499,6 +496,8 @@ type LiveSession = {
 const HEALTH_WAIT_MS = 15_000;
 const PROGRAM_READY_TIMEOUT_MS = 8_000;
 const RECONNECT_MAX_DELAY_MS = 15_000;
+/** Achtergrond van de overgangskaart met het clublogo. */
+const TRANSITION_CARD_COLOR = "#0b0f17";
 
 export function createLivestreamController(deps: Deps): LivestreamController {
   let settings = readSettings(settingsPath(deps.userDataDir()));
@@ -518,6 +517,11 @@ export function createLivestreamController(deps: Deps): LivestreamController {
   let pumpAbort = false;
   let pumpGeneration = 0;
   let paintCleanup: (() => void) | null = null;
+  /** Bediening van de lopende beeldpomp: bron wisselen zonder ffmpeg te herstarten. */
+  let programPump: {
+    hold: () => void;
+    switchTo: (win: BrowserWindow, kind: StreamTransitionKind, durationMs: number, card: Buffer | null) => void;
+  } | null = null;
   let sourcePreviewCleanup: (() => void) | null = null;
   let sourcePreviewGen = 0;
   let liveDestinations: string[] = [];
@@ -810,12 +814,42 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       return { ok: false, error: "Display-venster is niet beschikbaar" };
     }
     if (!display.isVisible()) display.show();
-    const src = await probeWindowFrameSize(display);
+    // Zelfde invoerformaat als elke andere bron (de pomp zet zwarte randen bij een andere verhouding),
+    // zodat wisselen van en naar het stadionscherm ffmpeg niet herstart.
     return {
       ok: true,
       programWindow: display,
-      plans: [programCapturePlan(src.width, src.height, settings.fps, outSize.width, outSize.height)],
+      plans: [programCapturePlan(outSize.width, outSize.height, settings.fps)],
     };
+  };
+
+  /** Kaart met het clublogo voor de logo-overgang; zonder logo een effen donkere kaart. */
+  let cardCache: { key: string; buf: Buffer } | null = null;
+  const transitionCard = async (outSize: { width: number; height: number }): Promise<Buffer> => {
+    const logo = deps.clubLogoPath ? await deps.clubLogoPath().catch(() => null) : null;
+    const key = `${logo ?? ""}|${outSize.width}x${outSize.height}`;
+    if (cardCache?.key === key) return cardCache.buf;
+    const card = Buffer.from(solidBgra(outSize.width, outSize.height, TRANSITION_CARD_COLOR));
+    if (logo) {
+      const image = nativeImage.createFromPath(logo);
+      if (!image.isEmpty()) {
+        const size = image.getSize();
+        const box = letterboxRect(size.width, size.height, Math.round(outSize.width * 0.5), Math.round(outSize.height * 0.5));
+        const fitted = image.resize({ width: box.w, height: box.h, quality: "best" });
+        const fittedSize = fitted.getSize();
+        drawOverBgra(
+          card,
+          outSize.width,
+          fitted.toBitmap(),
+          fittedSize.width,
+          fittedSize.height,
+          Math.floor((outSize.width - fittedSize.width) / 2),
+          Math.floor((outSize.height - fittedSize.height) / 2),
+        );
+      }
+    }
+    cardCache = { key, buf: card };
+    return card;
   };
 
   const stopPump = () => {
@@ -825,20 +859,11 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     paintCleanup = null;
   };
 
-  const startPump = (win: BrowserWindow, width: number, height: number, fps: number) => {
+  const startPump = (initialWin: BrowserWindow, width: number, height: number, fps: number) => {
     stopPump();
     const gen = pumpGeneration;
     pumpAbort = false;
-    if (win.isDestroyed()) return;
-    const offscreen = windowIsOffscreen(win);
-    try {
-      win.webContents.setFrameRate(fps);
-      if (offscreen && typeof win.webContents.startPainting === "function" && !win.webContents.isPainting()) {
-        win.webContents.startPainting();
-      }
-    } catch {
-      /* oudere Electron zonder paint-API */
-    }
+    if (initialWin.isDestroyed()) return;
 
     // Vast ritme (zie FrameClock): schilderen zet alleen het laatste beeld klaar, de klok bepaalt
     // wanneer er een beeldje naar ffmpeg gaat. Vroeger viel elk beeld weg dat binnenkwam terwijl het
@@ -846,6 +871,9 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     const clock = new FrameClock(fps);
     let latest: Electron.NativeImage | null = null;
     let latestSent = true;
+    /** Laatste beeld van de huidige bron (op uitvoerformaat). */
+    let sourceBuf: Buffer | null = null;
+    /** Laatste beeld dat echt naar ffmpeg ging: de bron, of een mengbeeld tijdens een overgang. */
     let lastBuf: Buffer | null = null;
     let writing = false;
     let paints = 0;
@@ -855,11 +883,27 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     let catchingUp = false;
     let lastPaintAt = 0;
     let lastStatsAt = 0;
-    let subscribed = false;
     const pumpStarted = performance.now();
     const frameMs = Math.max(8, Math.round(1000 / fps));
     const staleMs = frameMs * 2.5;
     const live = () => gen === pumpGeneration && !pumpAbort;
+
+    /**
+     * Wisselen zonder ffmpeg te herstarten. `from` is het bevroren laatste beeld van de oude bron; de
+     * overgang start pas bij het eerste beeld van de nieuwe bron, zodat ze nooit naar zwart vloeit.
+     */
+    let transition: {
+      kind: StreamTransitionKind;
+      durationMs: number;
+      from: Buffer;
+      card: Buffer | null;
+      requestedAt: number;
+      startedAt: number | null;
+    } | null = null;
+
+    let win: BrowserWindow | null = null;
+    let offscreen = false;
+    let subscribed = false;
 
     const logStats = (now: number) => {
       if (lastStatsAt > 0 && now - lastStatsAt < 10_000) return;
@@ -869,12 +913,46 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       );
     };
 
+    /**
+     * Elk beeld op het uitvoerformaat, zodat ffmpeg bij een wissel niet hoeft te herstarten. Een bron
+     * met een andere verhouding (een breed LED-scherm) krijgt zwarte randen, zoals ffmpeg dat deed.
+     */
     const toFrameBuffer = (image: Electron.NativeImage): Buffer => {
       const size = image.getSize();
-      const frame =
-        size.width !== width || size.height !== height ? image.resize({ width, height, quality: "good" }) : image;
-      return frame.toBitmap();
+      if (size.width === width && size.height === height) return image.toBitmap();
+      const rect = letterboxRect(size.width, size.height, width, height);
+      if (rect.w === width && rect.h === height) {
+        return image.resize({ width, height, quality: "good" }).toBitmap();
+      }
+      const canvas = Buffer.alloc(width * height * 4);
+      const fitted = image.resize({ width: rect.w, height: rect.h, quality: "good" });
+      const fittedSize = fitted.getSize();
+      placeBgra(canvas, width, fitted.toBitmap(), fittedSize.width, fittedSize.height, rect.x, rect.y);
+      return canvas;
     };
+
+    /** Het beeld dat nu naar ffmpeg moet: de bron, of tijdens een overgang een mengbeeld. */
+    const outputFrame = (now: number): Buffer | null => {
+      if (!transition) return sourceBuf;
+      if (transition.startedAt == null) return transition.from;
+      const mix = transitionMix(transition.kind, now - transition.startedAt, transition.durationMs);
+      if (mix.done) {
+        transition = null;
+        return sourceBuf;
+      }
+      const card = transition.card ?? solidBlack();
+      const layer = (name: "from" | "card" | "to"): Buffer =>
+        name === "from" ? transition!.from : name === "card" ? card : (sourceBuf ?? transition!.from);
+      if (mix.t <= 0) return layer(mix.a);
+      if (mix.t >= 1) return layer(mix.b);
+      // Nieuw mengbeeld per beeldje: ffmpeg kan het vorige nog aan het lezen zijn.
+      const out = Buffer.alloc(width * height * 4);
+      blendBgra(out, layer(mix.a), layer(mix.b), mix.t);
+      return out;
+    };
+
+    let black: Buffer | null = null;
+    const solidBlack = () => (black ??= Buffer.from(solidBgra(width, height, "#000000")));
 
     /** Stuurt alle beeldjes die volgens de klok verschuldigd zijn; één schrijver tegelijk. */
     const pumpFrames = async () => {
@@ -883,7 +961,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       try {
         while (live()) {
           const proc = child;
-          if (!proc || proc.killed || !proc.stdin.writable || win.isDestroyed()) break;
+          if (!proc || proc.killed || !proc.stdin.writable) break;
           const now = performance.now();
           if (!clock.started) {
             if (!latest) break;
@@ -900,11 +978,23 @@ export function createLivestreamController(deps: Deps): LivestreamController {
           }
           catchingUp = behind > 1;
           if (fresh && latest) {
-            lastBuf = toFrameBuffer(latest);
+            const frame = toFrameBuffer(latest);
             latestSent = true;
-          } else {
+            if (transition && transition.startedAt == null) {
+              // Een camera die opstart, levert eerst zwart (ook na zijn "klaar"-melding). Blijf het
+              // oude beeld tonen tot er echt beeld is, anders vloeit de overgang naar zwart.
+              const waitedMs = now - transition.requestedAt;
+              if (!isNearlyBlackBgra(frame) || waitedMs >= TRANSITION_WAIT_FOR_PICTURE_MS) {
+                sourceBuf = frame;
+                transition.startedAt = now;
+              }
+            } else {
+              sourceBuf = frame;
+            }
+          } else if (!transition) {
             repeats += 1;
           }
+          lastBuf = outputFrame(now) ?? lastBuf;
           if (!lastBuf || lastBuf.length === 0) break;
           await writeWithBackpressure(proc.stdin, lastBuf);
           clock.markSent();
@@ -917,6 +1007,9 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       }
     };
 
+    let sourceGen = 0;
+    let detachSource: () => void = () => {};
+
     const pushFrame = (image: Electron.NativeImage) => {
       if (!live() || image.isEmpty()) return;
       lastPaintAt = performance.now();
@@ -928,66 +1021,118 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       void pumpFrames();
     };
 
-    const onPaint = (_event: unknown, _dirty: unknown, image: Electron.NativeImage) => {
-      pushFrame(image);
-    };
-
-    if (offscreen) {
-      win.webContents.on("paint", onPaint);
-    } else {
+    /** Koppelt de pomp aan het venster van een bron; beelden van een vorige bron tellen niet meer mee. */
+    const attachSource = (next: BrowserWindow) => {
+      detachSource();
+      if (next.isDestroyed()) return;
+      const myGen = ++sourceGen;
+      win = next;
+      offscreen = windowIsOffscreen(next);
+      subscribed = false;
       try {
-        win.webContents.beginFrameSubscription(false, (image) => {
-          pushFrame(image);
-        });
-        subscribed = true;
+        next.webContents.setFrameRate(fps);
+        if (offscreen && typeof next.webContents.startPainting === "function" && !next.webContents.isPainting()) {
+          next.webContents.startPainting();
+        }
       } catch {
-        subscribed = false;
+        /* oudere Electron zonder paint-API */
       }
-    }
-
-    const tick = setInterval(() => {
-      if (!live() || win.isDestroyed()) return;
-      // Ook zonder nieuw beeld (stilstaand scorebord) blijft het ritme lopen: het vorige beeld gaat mee.
-      void pumpFrames();
-      if (lastPaintAt > 0 && performance.now() - lastPaintAt < staleMs) {
-        return;
+      const onImage = (image: Electron.NativeImage) => {
+        if (myGen === sourceGen) pushFrame(image);
+      };
+      const onPaint = (_event: unknown, _dirty: unknown, image: Electron.NativeImage) => onImage(image);
+      if (offscreen) {
+        next.webContents.on("paint", onPaint);
+      } else {
+        try {
+          next.webContents.beginFrameSubscription(false, (image) => onImage(image));
+          subscribed = true;
+        } catch {
+          subscribed = false;
+        }
       }
       try {
-        win.webContents.invalidate();
+        next.webContents.invalidate();
       } catch {
         /* ignore */
       }
       if (!offscreen) {
-        void win.webContents
+        void next.webContents
           .capturePage()
-          .then((image) => pushFrame(image))
+          .then((image) => onImage(image))
+          .catch(() => undefined);
+      }
+      const wasSubscribed = subscribed;
+      detachSource = () => {
+        sourceGen += 1;
+        if (!next.isDestroyed()) {
+          next.webContents.removeListener("paint", onPaint);
+          if (wasSubscribed) {
+            try {
+              next.webContents.endFrameSubscription();
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        if (win === next) win = null;
+        detachSource = () => {};
+      };
+    };
+
+    const tick = setInterval(() => {
+      if (!live()) return;
+      // Ook zonder nieuw beeld (stilstaand scorebord, of een bron die nog opstart) blijft het ritme
+      // lopen: het vorige beeld gaat mee.
+      void pumpFrames();
+      const current = win;
+      if (!current || current.isDestroyed()) return;
+      if (lastPaintAt > 0 && performance.now() - lastPaintAt < staleMs) {
+        return;
+      }
+      try {
+        current.webContents.invalidate();
+      } catch {
+        /* ignore */
+      }
+      if (!offscreen) {
+        const myGen = sourceGen;
+        void current.webContents
+          .capturePage()
+          .then((image) => {
+            if (myGen === sourceGen) pushFrame(image);
+          })
           .catch(() => undefined);
       }
     }, frameMs);
 
-    try {
-      win.webContents.invalidate();
-    } catch {
-      /* ignore */
-    }
-    if (!offscreen) {
-      void win.webContents
-        .capturePage()
-        .then((image) => pushFrame(image))
-        .catch(() => undefined);
-    }
+    attachSource(initialWin);
+
+    programPump = {
+      hold: () => {
+        // Laatste beeld vasthouden terwijl de nieuwe bron opstart; de klok blijft het herhalen.
+        detachSource();
+        latest = null;
+        latestSent = true;
+      },
+      switchTo: (next, kind, durationMs, card) => {
+        const from = lastBuf ?? sourceBuf;
+        // Ook een cut gaat via de overgang (met duur 0): zo wacht ook die op echt beeld van de nieuwe bron.
+        transition = from
+          ? { kind, durationMs: kind === "cut" ? 0 : durationMs, from, card, requestedAt: performance.now(), startedAt: null }
+          : null;
+        sourceBuf = transition ? null : sourceBuf;
+        latest = null;
+        latestSent = true;
+        attachSource(next);
+        deps.log(`[livestream] bron gewisseld zonder herstart (${kind}${kind === "cut" ? "" : ` ${durationMs} ms`})`);
+      },
+    };
+
     paintCleanup = () => {
       clearInterval(tick);
-      if (!win.isDestroyed()) {
-        win.webContents.removeListener("paint", onPaint);
-        if (subscribed) {
-          try {
-            win.webContents.endFrameSubscription();
-          } catch {
-            /* ignore */
-          }
-        }
-      }
+      detachSource();
+      programPump = null;
     };
   };
 
@@ -1631,7 +1776,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         scheduleReconnect();
         return;
       }
-      deps.log("[livestream] bron gewisseld");
+      deps.log("[livestream] beeld opnieuw gestart");
       emit();
     } finally {
       if (epoch === captureEpoch) switchingSource = false;
@@ -1642,6 +1787,52 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     ) {
       void restartLiveCapture();
     }
+  };
+
+  /**
+   * Bron wisselen tijdens live zonder ffmpeg te herstarten: het laatste beeld blijft staan, de nieuwe
+   * bron wordt klaargezet en daarna gaat de pomp over met de gekozen overgang. De verbinding met
+   * YouTube of Facebook blijft open; vroeger viel de stream bij elke cut even weg.
+   */
+  const switchProgramLive = async () => {
+    if (!encoding()) return;
+    if (!programPump || !ffmpegAlive()) {
+      await restartLiveCapture();
+      return;
+    }
+    const epoch = ++captureEpoch;
+    switchingSource = true;
+    const target = programSourceKey(settings);
+    lastLogLine = "Bron wisselen…";
+    emit();
+    try {
+      programPump.hold();
+      const outSize = resolutionSize(settings.resolution);
+      const [opened, card] = await Promise.all([
+        openProgramCapture(outSize),
+        settings.transition === "logo" ? transitionCard(outSize) : Promise.resolve(null),
+      ]);
+      if (epoch !== captureEpoch || !encoding()) return;
+      if (!opened.ok) {
+        // Het laatste beeld blijft in de stream staan; de melding zegt wat er mis is.
+        error = opened.error;
+        emit();
+        return;
+      }
+      if (!programPump) {
+        await restartLiveCapture();
+        return;
+      }
+      programPump.switchTo(opened.programWindow, settings.transition, settings.transitionMs, card);
+      if (lastSession) lastSession = { ...lastSession, programWindow: opened.programWindow };
+      pumpedPreviewInputId = settings.activeVideoInputId;
+      error = null;
+      emit();
+    } finally {
+      if (epoch === captureEpoch) switchingSource = false;
+    }
+    void syncBrowserPreview();
+    if (encoding() && programSourceKey(settings) !== target) void switchProgramLive();
   };
 
   const applyLiveGains = async (next: LivestreamSettings) => {
@@ -1666,14 +1857,12 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       const prev = settings;
       settings = mergeLivestreamSettings({ ...settings, ...partial });
       writeSettings(settingsPath(deps.userDataDir()), settings);
-      const sourceChanged =
-        prev.source !== settings.source ||
-        prev.cameraDevice !== settings.cameraDevice ||
-        resolveActiveVideoInput(prev).browserUrl !== resolveActiveVideoInput(settings).browserUrl ||
-        resolveActiveVideoInput(prev).mediaPath !== resolveActiveVideoInput(settings).mediaPath ||
-        resolveActiveVideoInput(prev).mediaLoop !== resolveActiveVideoInput(settings).mediaLoop ||
+      // Programma (wat live gaat) en voorbeeld apart: een ander voorbeeld kiezen raakt de stream niet.
+      const programChanged = programSourceKey(prev) !== programSourceKey(settings);
+      const previewChanged =
         videoInputPreviewKey(resolvePreviewVideoInput(prev)) !==
-          videoInputPreviewKey(resolvePreviewVideoInput(settings));
+        videoInputPreviewKey(resolvePreviewVideoInput(settings));
+      const sourceChanged = programChanged || previewChanged;
       if (
         streamOverlayChanged(prev, settings) ||
         sourceChanged ||
@@ -1691,12 +1880,18 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         audioMonitorProcessKey(prev) !== audioMonitorProcessKey(settings) ||
         JSON.stringify(audioMonitorGains(prev)) !== JSON.stringify(audioMonitorGains(settings));
       if (monitorChanged) void syncMonitor();
-      if (encoding() && (sourceChanged || devicesChanged) && !switchingSource) {
+      if (encoding() && devicesChanged && !switchingSource) {
+        // Andere geluidsapparaten vragen een nieuwe ffmpeg-opdracht.
         void restartLiveCapture();
-      } else if (encoding() && gainsChanged) {
-        void applyLiveGains(settings);
-      } else if (!encoding()) {
-        void syncBrowserPreview();
+      } else if (encoding() && programChanged && !switchingSource) {
+        void switchProgramLive();
+        if (gainsChanged) void applyLiveGains(settings);
+      } else if (encoding() && switchingSource) {
+        // Loopt er al een wissel: die kijkt aan het eind of de bron intussen weer veranderde.
+        if (gainsChanged) void applyLiveGains(settings);
+      } else {
+        if (encoding() && gainsChanged) void applyLiveGains(settings);
+        if (!encoding() || previewChanged) void syncBrowserPreview();
       }
       syncBrowserAudioTaps();
       return settings;

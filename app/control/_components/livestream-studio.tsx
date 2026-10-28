@@ -74,6 +74,7 @@ import { LivestreamLayoutEditor } from "@/app/control/_components/livestream-lay
 import { StreamScoreWidgetEditor } from "@/app/control/_components/stream-score-widget-editor";
 import { LivestreamAudioMixer } from "@/app/control/_components/livestream-audio-mixer";
 import { syncLegacyFromManualLayout } from "@/lib/stream-layer-layout";
+import { STREAM_TRANSITIONS, transitionDurationOptions } from "@/lib/stream-transition";
 import { sendCommand } from "@/lib/use-socket";
 import {
   STREAM_DECK_HTTP_PORT,
@@ -1108,7 +1109,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center gap-2">
             <div
               ref={previewBoxRef}
-              className="aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-3.5rem)/2)]"
+              className="aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-6rem)/2)]"
             >
               <StudioMonitor
                 label={t("livestream.monitorNext")}
@@ -1122,19 +1123,54 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                 )}
               </StudioMonitor>
             </div>
-            <button
-              type="button"
-              disabled={busy || !previewVideo || previewVideo.id === settings.activeVideoInputId}
-              onClick={() => {
-                if (previewVideo) takeInput(previewVideo);
-              }}
-              className="h-10 min-w-[3.5rem] shrink-0 rounded-md bg-zinc-200 text-xs font-black tracking-wide text-zinc-900 hover:bg-white disabled:opacity-40"
-            >
-              {t("livestream.switcherCut")}
-            </button>
+            <div className="flex w-[5.5rem] shrink-0 flex-col items-stretch gap-1" data-transition-controls>
+              <button
+                type="button"
+                disabled={busy || !previewVideo || previewVideo.id === settings.activeVideoInputId}
+                onClick={() => {
+                  if (previewVideo) takeInput(previewVideo);
+                }}
+                title={t("livestream.transitionTakeHint")}
+                className="h-10 rounded-md bg-zinc-200 text-xs font-black uppercase tracking-wide text-zinc-900 hover:bg-white disabled:opacity-40"
+              >
+                {t(`livestream.transition_${settings.transition}`)}
+              </button>
+              <div className="grid grid-cols-3 gap-0.5" role="group" aria-label={t("livestream.transition")}>
+                {STREAM_TRANSITIONS.map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    aria-pressed={settings.transition === kind}
+                    title={t(`livestream.transitionHint_${kind}`)}
+                    onClick={() => void persist({ transition: kind })}
+                    className={`h-6 rounded text-[9px] font-semibold uppercase ${
+                      settings.transition === kind
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    }`}
+                  >
+                    {t(`livestream.transitionShort_${kind}`)}
+                  </button>
+                ))}
+              </div>
+              {settings.transition !== "cut" ? (
+                <Select
+                  aria-label={t("livestream.transitionDuration")}
+                  className="h-6 px-1 text-[10px]"
+                  value={String(settings.transitionMs)}
+                  onChange={(e) => void persist({ transitionMs: Number(e.target.value) })}
+                >
+                  {transitionDurationOptions(settings.transitionMs).map((ms) => (
+                    <option key={ms} value={ms}>
+                      {(ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s
+                    </option>
+                  ))}
+                </Select>
+              ) : null}
+            </div>
             <div
               ref={programBoxRef}
-              className="aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-3.5rem)/2)]"
+              className="aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-6rem)/2)]"
             >
               <StudioMonitor
                 label={t("livestream.monitorNow")}
