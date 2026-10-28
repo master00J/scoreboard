@@ -6,6 +6,13 @@ import {
   type StreamScoreWidgetSettings,
 } from "./stream-score-widget";
 import { defaultStreamDeckSlots, mergeStreamDeckSlots, type StreamDeckSlot } from "./stream-deck";
+import {
+  DEFAULT_TRANSITION,
+  DEFAULT_TRANSITION_MS,
+  clampTransitionMs,
+  parseStreamTransition,
+  type StreamTransitionKind,
+} from "./stream-transition";
 
 export type { StreamScoreWidgetDesign, StreamScoreWidgetSettings };
 export { mergeStreamScoreWidget, sixteenByNineScaleFilter } from "./stream-score-widget";
@@ -235,6 +242,9 @@ export type LivestreamSettings = {
   scoreWidgetDesigns: StreamScoreWidgetDesign[];
   /** Studio-monitor in de control-app. Uit = minder CPU/GPU. */
   studioPreview: boolean;
+  /** Overgang bij het wisselen van bron tijdens live: cut, fade of via de kaart met het clublogo. */
+  transition: StreamTransitionKind;
+  transitionMs: number;
   /** Eigen Stream Deck-knoppen (volgorde = F13… en /key/1…). */
   streamDeckSlots: StreamDeckSlot[];
   /** Map voor opnames. Leeg = Videos/ArenaCue. */
@@ -388,6 +398,8 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
   scoreWidget: DEFAULT_STREAM_SCORE_WIDGET,
   scoreWidgetDesigns: [],
   studioPreview: true,
+  transition: DEFAULT_TRANSITION,
+  transitionMs: DEFAULT_TRANSITION_MS,
   streamDeckSlots: defaultStreamDeckSlots(),
   recordDir: "",
 };
@@ -598,6 +610,20 @@ export function videoInputPreviewKey(input: LivestreamVideoInput | null | undefi
   return `${input.id}:${input.kind}:${input.browserUrl}:${input.mediaPath}:${input.mediaLoop ? 1 : 0}`;
 }
 
+/**
+ * Wat er live in beeld gaat. Verandert dit, dan wisselt de stream van bron (met overgang); verandert
+ * alleen het voorbeeld, dan blijft de stream ongemoeid.
+ */
+export function programSourceKey(
+  settings: Pick<LivestreamSettings, "source" | "cameraDevice" | "videoInputs" | "activeVideoInputId">,
+): string {
+  const input = settings.videoInputs.find((item) => item.id === settings.activeVideoInputId) ?? settings.videoInputs[0];
+  const camera = settings.source === "camera" ? settings.cameraDevice : "";
+  const browser = settings.source === "browser" ? (input?.browserUrl ?? "") : "";
+  const media = settings.source === "media" ? `${input?.mediaPath ?? ""}:${input?.mediaLoop ? 1 : 0}` : "";
+  return `${settings.source}|${camera}|${browser}|${media}`;
+}
+
 export function applyVideoInputSelection(
   settings: LivestreamSettings,
   inputId: string,
@@ -700,6 +726,8 @@ export function mergeLivestreamSettings(raw: Partial<LivestreamSettings> | null 
     scoreWidget: mergeStreamScoreWidget(r.scoreWidget),
     scoreWidgetDesigns: mergeScoreWidgetDesigns(r.scoreWidgetDesigns),
     studioPreview: typeof r.studioPreview === "boolean" ? r.studioPreview : d.studioPreview,
+    transition: parseStreamTransition(r.transition),
+    transitionMs: clampTransitionMs(r.transitionMs ?? d.transitionMs),
     streamDeckSlots: Array.isArray(r.streamDeckSlots) ? mergeStreamDeckSlots(r.streamDeckSlots) : d.streamDeckSlots,
     recordDir: sanitizeRecordDir(r.recordDir ?? d.recordDir),
   };

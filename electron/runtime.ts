@@ -605,6 +605,22 @@ async function startThemePreview(json: string, seconds: number): Promise<number>
   return until;
 }
 
+/** Bestand van het logo van de eigen club, voor de overgangskaart in de livestream. */
+export async function clubLogoFilePath(): Promise<string | null> {
+  const s = await getAppSettings();
+  if (!s.homeTeamId) return null;
+  const team = await prisma.team.findUnique({ where: { id: s.homeTeamId }, select: { logoPath: true } });
+  const stored = team?.logoPath?.trim();
+  if (!stored) return null;
+  let resolved = stored;
+  if (stored.startsWith("/uploads/")) {
+    const uploadsDir = process.env.STADIUM_UPLOADS_DIR;
+    if (!uploadsDir) return null;
+    resolved = path.join(uploadsDir, stored.replace(/^\/uploads\//, ""));
+  }
+  return path.isAbsolute(resolved) && fs.existsSync(resolved) ? resolved : null;
+}
+
 async function buildSettingsApiJson() {
   const s = await getAppSettings();
   const preview = activeThemePreview();

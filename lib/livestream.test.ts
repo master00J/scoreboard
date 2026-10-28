@@ -4,6 +4,7 @@ import {
   type LivestreamVideoInput,
   buildRtmpDestination,
   buildRtmpDestinations,
+  programSourceKey,
   clampBitrateKbps,
   escapeTeeUrl,
   ffmpegOutputArgs,
@@ -560,5 +561,33 @@ describe("audio mixer", () => {
         { id: "a3", device: "Mic", volume: 80, muted: false },
       ]).map((c) => c.id),
     ).toEqual(["a2"]);
+  });
+});
+
+describe("live wisselen van bron", () => {
+  const inputs = [
+    { id: "cam", name: "Camera", kind: "camera" as const, cameraDevice: "BRIO", browserUrl: "", mediaPath: "", mediaLoop: false, audioFollow: {} },
+    { id: "led", name: "LED", kind: "display" as const, cameraDevice: "", browserUrl: "", mediaPath: "", mediaLoop: false, audioFollow: {} },
+    { id: "clip", name: "Clip", kind: "media" as const, cameraDevice: "", browserUrl: "", mediaPath: "/uploads/a.mp4", mediaLoop: true, audioFollow: {} },
+  ];
+  const base = { ...DEFAULT_LIVESTREAM_SETTINGS, videoInputs: inputs, activeVideoInputId: "cam", source: "camera" as const, cameraDevice: "BRIO" };
+
+  it("ziet een andere bron in programma als een wissel", () => {
+    expect(programSourceKey(base)).not.toBe(programSourceKey({ ...base, activeVideoInputId: "led", source: "display" }));
+    expect(programSourceKey(base)).not.toBe(programSourceKey({ ...base, cameraDevice: "Elgato" }));
+    expect(programSourceKey({ ...base, activeVideoInputId: "clip", source: "media" })).not.toBe(
+      programSourceKey({
+        ...base,
+        activeVideoInputId: "clip",
+        source: "media",
+        videoInputs: inputs.map((input) => (input.id === "clip" ? { ...input, mediaPath: "/uploads/b.mp4" } : input)),
+      }),
+    );
+  });
+
+  it("negeert een ander voorbeeld: dat raakt de stream niet", () => {
+    const ledNext = { ...base, previewVideoInputId: "led" };
+    const clipNext = { ...base, previewVideoInputId: "clip" };
+    expect(programSourceKey(ledNext)).toBe(programSourceKey(clipNext));
   });
 });

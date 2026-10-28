@@ -2019,6 +2019,7 @@ function registerIpc() {
       recordDir: () => path.join(app.getPath("videos"), "ArenaCue"),
       appRoot,
       resourcesPath: () => process.resourcesPath,
+      clubLogoPath: async () => (runtime ? runtime.clubLogoFilePath() : null),
       log: bootLog,
     });
   }
