@@ -21,8 +21,12 @@ internal static class Program
     private const int MonitorRingMs = 30;
     // Zo lang zonder echte data telt het apparaat als stil.
     private const int SilenceAfterMs = 40;
-    // Ruim 5 s geluid in de pijp, zodat ffmpeg met horten kan lezen zonder dat de schrijver vastloopt.
-    private const int PipeBufferBytes = 1 << 20;
+    // Kleine pijpbuffer (±40 ms): alles wat erin zit, is vertraging tussen beeld en geluid.
+    private const int PipeBufferBytes = 8 * 1024;
+    // Loopt de wachtrij hierboven uit (bij de start, terwijl ffmpeg zijn andere bronnen opent, of als
+    // ffmpeg even niet leest), dan valt het oudste geluid weg tot er KeepBacklogMs over is.
+    private const int MaxBacklogMs = 150;
+    private const int KeepBacklogMs = 20;
     private static readonly object Gate = new object();
 
     private static int Main(string[] args)
@@ -133,6 +137,7 @@ internal static class Program
                 var clock = Stopwatch.StartNew();
                 long framesQueued = 0;
                 long lastDataMs = 0;
+                long backlogFrames = 0;
                 var broken = false;
                 capture.DataAvailable += delegate(object sender, WaveInEventArgs e)
                 {
@@ -143,15 +148,34 @@ internal static class Program
                         {
                             queue.Add(pcm);
                             framesQueued += pcm.Length / 4;
+                            Interlocked.Add(ref backlogFrames, pcm.Length / 4);
                         }
                         lastDataMs = clock.ElapsedMilliseconds;
                     }
                 };
                 var writer = new Thread(delegate()
                 {
+                    // ffmpeg telt geluid in samples: wat hier blijft hangen, wordt vaste vertraging. Bij de
+                    // start opent ffmpeg nog een microfoon (±0,6 s) terwijl dit geluid al binnenkomt; zonder
+                    // grens liep het GoXLR-geluid daardoor tot 780 ms achter op het beeld.
+                    var maxBacklog = (long)SampleRate * MaxBacklogMs / 1000;
+                    var keepBacklog = (long)SampleRate * KeepBacklogMs / 1000;
                     try
                     {
-                        foreach (var chunk in queue.GetConsumingEnumerable()) pipe.Write(chunk, 0, chunk.Length);
+                        foreach (var chunk in queue.GetConsumingEnumerable())
+                        {
+                            Interlocked.Add(ref backlogFrames, -(chunk.Length / 4));
+                            if (Interlocked.Read(ref backlogFrames) > maxBacklog)
+                            {
+                                byte[] stale;
+                                while (Interlocked.Read(ref backlogFrames) > keepBacklog && queue.TryTake(out stale))
+                                {
+                                    Interlocked.Add(ref backlogFrames, -(stale.Length / 4));
+                                }
+                                continue;
+                            }
+                            pipe.Write(chunk, 0, chunk.Length);
+                        }
                     }
                     catch (Exception)
                     {
