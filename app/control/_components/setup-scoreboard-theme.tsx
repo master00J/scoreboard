@@ -37,7 +37,12 @@ import {
   type LayoutPhase,
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
-import { sameVisualLayout, templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
+import {
+  layoutsToUpdateOnSave,
+  sameVisualLayout,
+  templateDisplayName,
+  type ScoreboardTemplate,
+} from "@/lib/scoreboard-templates";
 import { withLayoutPreviewMeta } from "@/lib/scoreboard-preview-match";
 import { SPORT_TYPES, type SportType } from "@/lib/sports";
 import { canRedo, canUndo } from "@/lib/undo-history";
@@ -521,6 +526,27 @@ export function SetupScoreboardThemeSection({
       return;
     }
     const json = JSON.stringify(themePayload());
+    // Een regel kan deze indeling tijdens de wedstrijd vervangen door een bibliotheekindeling.
+    // Dan is alleen dit bewaren zinloos werk: bied aan om die indeling mee bij te werken.
+    const alsoUpdate = layoutsToUpdateOnSave(overriddenPhases, json);
+    const alsoUpdateNames = alsoUpdate.map((layout) => `“${templateDisplayName(layout)}”`).join(", ");
+    const updateOverriding =
+      alsoUpdate.length > 0 &&
+      confirm(t("layoutEditor.alsoUpdateConfirm", { sport: tSportLabel(t, overviewSport), names: alsoUpdateNames }));
+    if (updateOverriding) {
+      for (const layout of alsoUpdate) {
+        const layoutRes = await fetch(`/api/scoreboard-templates/${layout.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ themeJson: json }),
+        }).catch(() => null);
+        if (!layoutRes?.ok) {
+          // Stoppen vóór /api/settings: anders staat het scherm op een half doorgevoerde wijziging.
+          toast({ title: t("setup.themeLayoutSaveFailed", { name: templateDisplayName(layout) }), variant: "error" });
+          return;
+        }
+      }
+    }
     const res = await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -533,7 +559,13 @@ export function SetupScoreboardThemeSection({
     // De geschiedenis blijft staan, zodat ongedaan maken ook na opslaan nog kan.
     store().markSaved(json);
     if (tryUntil) await endTryPreview();
-    toast({ title: t("setup.themeSaved"), variant: "success" });
+    toast({
+      title: updateOverriding
+        ? t("setup.themeSavedWithLayouts", { names: alsoUpdateNames })
+        : t("setup.themeSaved"),
+      variant: "success",
+    });
+    if (updateOverriding) void loadLayouts();
     reloadSettings();
   }
 

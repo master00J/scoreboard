@@ -3,6 +3,7 @@ import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
   extractVisualTheme,
+  layoutsToUpdateOnSave,
   resolveScoreboardThemeJson,
   sameVisualLayout,
   sanitizeTemplateThemeJson,
@@ -207,5 +208,39 @@ describe("sameVisualLayout", () => {
   it("ziet een andere achtergrond of kleur als verschil", () => {
     expect(sameVisualLayout("{}", JSON.stringify({ fullBackgroundPath: "uploads/zaal.jpg" }))).toBe(false);
     expect(sameVisualLayout(JSON.stringify({ scoreColor: "#ff0000" }), JSON.stringify({ scoreColor: "#00ff00" }))).toBe(false);
+  });
+});
+
+describe("layoutsToUpdateOnSave", () => {
+  const template = (over: Partial<Parameters<typeof layoutsToUpdateOnSave>[0][number]["layout"]> = {}) => ({
+    id: "eigen",
+    name: "Volleybal",
+    label: null,
+    themeJson: JSON.stringify({ leftBarWidthPx: 280 }),
+    isBuiltIn: false,
+    sortIndex: 0,
+    ...over,
+  });
+
+  it("biedt de eigen indeling aan die de wedstrijd anders zou tonen", () => {
+    const current = JSON.stringify({ leftBarWidthPx: 420 });
+    const out = layoutsToUpdateOnSave([{ layout: template() }], current);
+    expect(out.map((layout) => layout.id)).toEqual(["eigen"]);
+  });
+
+  it("laat meegeleverde voorbeelden staan — de server weigert die", () => {
+    const current = JSON.stringify({ leftBarWidthPx: 420 });
+    expect(layoutsToUpdateOnSave([{ layout: template({ id: "builtin", isBuiltIn: true }) }], current)).toEqual([]);
+  });
+
+  it("vraagt niets als de indeling al hetzelfde beeld geeft", () => {
+    const same = JSON.stringify({ leftBarWidthPx: 280 });
+    expect(layoutsToUpdateOnSave([{ layout: template({ themeJson: same }) }], same)).toEqual([]);
+  });
+
+  it("noemt dezelfde indeling één keer, ook als meerdere fases ernaar wijzen", () => {
+    const current = JSON.stringify({ leftBarWidthPx: 420 });
+    const rows = [{ layout: template() }, { layout: template() }];
+    expect(layoutsToUpdateOnSave(rows, current)).toHaveLength(1);
   });
 });

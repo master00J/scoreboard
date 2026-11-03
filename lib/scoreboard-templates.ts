@@ -290,3 +290,26 @@ export function builtInTemplateRows(): {
     sortIndex: i,
   }));
 }
+
+/**
+ * De bibliotheekindelingen die bij het opslaan van de gewone indeling moeten meeveranderen.
+ *
+ * Een regel bij "Indeling per situatie" zet zo'n indeling tijdens de wedstrijd op het scherm in
+ * plaats van wat je net bewaarde. Meegeleverde voorbeelden vallen af (de server weigert ze), en
+ * indelingen die al hetzelfde beeld geven ook — anders zou de editor om toestemming vragen voor
+ * een wijziging die niets doet.
+ */
+export function layoutsToUpdateOnSave(
+  overridden: readonly { layout: ScoreboardTemplate }[],
+  currentThemeJson: string,
+): ScoreboardTemplate[] {
+  const seen = new Set<string>();
+  const out: ScoreboardTemplate[] = [];
+  for (const { layout } of overridden) {
+    if (layout.isBuiltIn || seen.has(layout.id)) continue;
+    if (sameVisualLayout(layout.themeJson, currentThemeJson)) continue;
+    seen.add(layout.id);
+    out.push(layout);
+  }
+  return out;
+}
