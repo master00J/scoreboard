@@ -528,7 +528,7 @@ export function SetupScoreboardThemeSection({
     const json = JSON.stringify(themePayload());
     // Een regel kan deze indeling tijdens de wedstrijd vervangen door een bibliotheekindeling.
     // Dan is alleen dit bewaren zinloos werk: bied aan om die indeling mee bij te werken.
-    const alsoUpdate = layoutsToUpdateOnSave(overriddenPhases, json);
+    const alsoUpdate = layoutsToUpdateOnSave(overriddenPhases, json, { rules, sport: overviewSport });
     const alsoUpdateNames = alsoUpdate.map((layout) => `“${templateDisplayName(layout)}”`).join(", ");
     const updateOverriding =
       alsoUpdate.length > 0 &&

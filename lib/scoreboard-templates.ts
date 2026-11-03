@@ -1,4 +1,4 @@
-import { layoutRulesFromThemeJson, pickLayoutRule } from "./scoreboard-elements";
+import { layoutRulesFromThemeJson, pickLayoutRule, type LayoutRule } from "./scoreboard-elements";
 import {
   DEFAULT_SCOREBOARD_THEME,
   SLOT_PRESETS,
@@ -8,6 +8,7 @@ import {
   type ResolvedScoreboardTheme,
   type ScoreboardTheme,
 } from "./scoreboard-theme";
+import type { SportType } from "./sports";
 
 const OVERLAY_SLOTS = SLOT_PRESETS.find((p) => p.id === "overlay")!.slots;
 const TOP_BAR_SLOTS = SLOT_PRESETS.find((p) => p.id === "topBar")!.slots;
@@ -298,18 +299,35 @@ export function builtInTemplateRows(): {
  * plaats van wat je net bewaarde. Meegeleverde voorbeelden vallen af (de server weigert ze), en
  * indelingen die al hetzelfde beeld geven ook — anders zou de editor om toestemming vragen voor
  * een wijziging die niets doet.
+ *
+ * Alleen een indeling die de gewone indeling de hele wedstrijd vervangt, komt in aanmerking. Een
+ * indeling voor één fase (een eigen rustbeeld) of voor een andere sport is een bewuste keuze van
+ * de club: die overschrijven met de gewone indeling zou dat ontwerp wissen, en ongedaan maken
+ * haalt een bibliotheekindeling niet terug. Daar blijft het bij de waarschuwing in de editor.
  */
 export function layoutsToUpdateOnSave(
   overridden: readonly { layout: ScoreboardTemplate }[],
   currentThemeJson: string,
+  situation: { rules: readonly LayoutRule[]; sport: SportType },
 ): ScoreboardTemplate[] {
   const seen = new Set<string>();
   const out: ScoreboardTemplate[] = [];
   for (const { layout } of overridden) {
     if (layout.isBuiltIn || seen.has(layout.id)) continue;
+    if (!replacesWholeMatch(layout.id, situation)) continue;
     if (sameVisualLayout(layout.themeJson, currentThemeJson)) continue;
     seen.add(layout.id);
     out.push(layout);
   }
   return out;
+}
+
+/** Elke regel die naar deze indeling wijst, geldt in alle fases, voor deze sport of voor alle sporten. */
+function replacesWholeMatch(
+  templateId: string,
+  { rules, sport }: { rules: readonly LayoutRule[]; sport: SportType },
+): boolean {
+  return rules.every(
+    (rule) => rule.templateId !== templateId || (rule.phase === "*" && (rule.sport === "*" || rule.sport === sport)),
+  );
 }

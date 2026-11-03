@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { LayoutRule } from "./scoreboard-elements";
 import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
@@ -222,25 +223,64 @@ describe("layoutsToUpdateOnSave", () => {
     ...over,
   });
 
+  const current = JSON.stringify({ leftBarWidthPx: 420 });
+  const rule = (templateId: string, sport: LayoutRule["sport"], phase: LayoutRule["phase"]): LayoutRule => ({
+    id: `${templateId}-${sport}-${phase}`,
+    sport,
+    phase,
+    templateId,
+  });
+  /** Volleybal toont "eigen" de hele wedstrijd in plaats van de gewone indeling. */
+  const wholeMatch = { rules: [rule("eigen", "VOLLEYBALL", "*")], sport: "VOLLEYBALL" as const };
+
   it("biedt de eigen indeling aan die de wedstrijd anders zou tonen", () => {
-    const current = JSON.stringify({ leftBarWidthPx: 420 });
-    const out = layoutsToUpdateOnSave([{ layout: template() }], current);
+    const out = layoutsToUpdateOnSave([{ layout: template() }], current, wholeMatch);
     expect(out.map((layout) => layout.id)).toEqual(["eigen"]);
   });
 
   it("laat meegeleverde voorbeelden staan — de server weigert die", () => {
-    const current = JSON.stringify({ leftBarWidthPx: 420 });
-    expect(layoutsToUpdateOnSave([{ layout: template({ id: "builtin", isBuiltIn: true }) }], current)).toEqual([]);
+    const situation = { rules: [rule("builtin", "VOLLEYBALL", "*")], sport: "VOLLEYBALL" as const };
+    expect(layoutsToUpdateOnSave([{ layout: template({ id: "builtin", isBuiltIn: true }) }], current, situation)).toEqual([]);
   });
 
   it("vraagt niets als de indeling al hetzelfde beeld geeft", () => {
     const same = JSON.stringify({ leftBarWidthPx: 280 });
-    expect(layoutsToUpdateOnSave([{ layout: template({ themeJson: same }) }], same)).toEqual([]);
+    expect(layoutsToUpdateOnSave([{ layout: template({ themeJson: same }) }], same, wholeMatch)).toEqual([]);
   });
 
   it("noemt dezelfde indeling één keer, ook als meerdere fases ernaar wijzen", () => {
-    const current = JSON.stringify({ leftBarWidthPx: 420 });
     const rows = [{ layout: template() }, { layout: template() }];
-    expect(layoutsToUpdateOnSave(rows, current)).toHaveLength(1);
+    expect(layoutsToUpdateOnSave(rows, current, wholeMatch)).toHaveLength(1);
+  });
+
+  it("laat een eigen indeling voor één fase staan, zoals een rustbeeld", () => {
+    // Regressie 0.1.47: elke keer bewaren bood aan om het rustbeeld te overschrijven met de gewone indeling.
+    const situation = { rules: [rule("eigen", "VOLLEYBALL", "break")], sport: "VOLLEYBALL" as const };
+    expect(layoutsToUpdateOnSave([{ layout: template() }], current, situation)).toEqual([]);
+  });
+
+  it("laat een indeling staan die ook een andere sport gebruikt", () => {
+    const situation = {
+      rules: [rule("eigen", "VOLLEYBALL", "*"), rule("eigen", "FOOTBALL", "*")],
+      sport: "VOLLEYBALL" as const,
+    };
+    expect(layoutsToUpdateOnSave([{ layout: template() }], current, situation)).toEqual([]);
+  });
+
+  it("een regel voor alle sporten en alle fases vervangt de gewone indeling overal", () => {
+    const situation = { rules: [rule("eigen", "*", "*")], sport: "VOLLEYBALL" as const };
+    expect(layoutsToUpdateOnSave([{ layout: template() }], current, situation).map((layout) => layout.id)).toEqual([
+      "eigen",
+    ]);
+  });
+
+  it("biedt alleen de wedstrijdindeling aan als er ook een eigen rustbeeld is", () => {
+    const rust = template({ id: "rust", name: "Rust", themeJson: JSON.stringify({ leftBarWidthPx: 120 }) });
+    const situation = {
+      rules: [rule("eigen", "VOLLEYBALL", "*"), rule("rust", "VOLLEYBALL", "break")],
+      sport: "VOLLEYBALL" as const,
+    };
+    const out = layoutsToUpdateOnSave([{ layout: template() }, { layout: rust }], current, situation);
+    expect(out.map((layout) => layout.id)).toEqual(["eigen"]);
   });
 });
