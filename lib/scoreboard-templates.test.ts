@@ -259,6 +259,25 @@ describe("layoutsToUpdateOnSave", () => {
     expect(layoutsToUpdateOnSave([{ layout: template() }], current, situation)).toEqual([]);
   });
 
+  it("biedt de indeling aan die alleen tijdens het spel geldt", () => {
+    // Regressie 0.1.48: een regel "volleybal, tijdens het spel" kreeg geen vraag meer, en de wedstrijd
+    // bleef de oude indeling tonen hoe vaak de club ook bewaarde.
+    const situation = { rules: [rule("eigen", "VOLLEYBALL", "play")], sport: "VOLLEYBALL" as const };
+    expect(layoutsToUpdateOnSave([{ layout: template() }], current, situation).map((layout) => layout.id)).toEqual([
+      "eigen",
+    ]);
+  });
+
+  it("laat een indeling voor alle fases staan als een regel voor het spel haar opzijzet", () => {
+    const spel = template({ id: "spel", name: "Spel", themeJson: JSON.stringify({ leftBarWidthPx: 160 }) });
+    const situation = {
+      rules: [rule("eigen", "VOLLEYBALL", "*"), rule("spel", "VOLLEYBALL", "play")],
+      sport: "VOLLEYBALL" as const,
+    };
+    const out = layoutsToUpdateOnSave([{ layout: template() }, { layout: spel }], current, situation);
+    expect(out.map((layout) => layout.id)).toEqual(["spel"]);
+  });
+
   it("laat een indeling staan die ook een andere sport gebruikt", () => {
     const situation = {
       rules: [rule("eigen", "VOLLEYBALL", "*"), rule("eigen", "FOOTBALL", "*")],
