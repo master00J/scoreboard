@@ -33,12 +33,13 @@ import {
   defaultLayoutRuleTemplateId,
   layoutRuleOverview,
   layoutRulesFromThemeJson,
+  overviewSportForEditor,
   type LayoutPhase,
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
 import { sameVisualLayout, templateDisplayName, type ScoreboardTemplate } from "@/lib/scoreboard-templates";
 import { withLayoutPreviewMeta } from "@/lib/scoreboard-preview-match";
-import { SPORT_TYPES, normalizeSport, type SportType } from "@/lib/sports";
+import { SPORT_TYPES, type SportType } from "@/lib/sports";
 import { canRedo, canUndo } from "@/lib/undo-history";
 import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
 
@@ -596,8 +597,8 @@ export function SetupScoreboardThemeSection({
     reloadSettings();
   }
 
-  /** De sport waarvoor de editor uitlegt wat het scherm toont: de actieve wedstrijd, anders de eerste regel. */
-  const overviewSport = normalizeSport(previewSport ?? rules.find((rule) => rule.sport !== "*")?.sport);
+  /** De sport waarvoor de editor uitlegt wat het scherm toont: het canvas, anders de actieve wedstrijd. */
+  const overviewSport = overviewSportForEditor({ canvasSport, matchSport: previewSport, rules });
   /** Fases waarin een regel een andere opgeslagen indeling op het scherm zet dan wat hier open staat. */
   const overriddenPhases = useMemo(() => {
     const byLayout = new Map<string, { layout: ScoreboardTemplate; phases: LayoutPhase[] }>();

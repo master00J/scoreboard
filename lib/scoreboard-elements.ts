@@ -385,3 +385,23 @@ export function layoutRuleOverview(
 export function defaultLayoutRuleTemplateId(layouts: readonly { id: string; isBuiltIn: boolean }[]): string | null {
   return layouts.find((layout) => !layout.isBuiltIn)?.id ?? null;
 }
+
+/**
+ * De sport waarvoor de editor uitlegt wat het stadionscherm toont.
+ *
+ * Het canvas wint: dat is de sport die de gebruiker nu voor zich heeft. Daarna de lopende wedstrijd,
+ * en pas als laatste de eerste regel in de lijst. Die laatste gok stond eerder vooraan en liet een
+ * override voor een andere sport stil voorbijgaan: wie de volleybalindeling bewerkte terwijl er een
+ * voetbalregel bovenaan stond, kreeg de waarschuwing voor voetbal te zien — en dus niet dat zijn
+ * opgeslagen volleybalindeling tijdens de wedstrijd door een regel vervangen zou worden.
+ */
+export function overviewSportForEditor(input: {
+  canvasSport?: unknown;
+  matchSport?: unknown;
+  rules: readonly LayoutRule[];
+}): SportType {
+  for (const candidate of [input.canvasSport, input.matchSport]) {
+    if (candidate != null && String(candidate).trim() !== "") return normalizeSport(candidate);
+  }
+  return normalizeSport(input.rules.find((rule) => rule.sport !== "*")?.sport);
+}

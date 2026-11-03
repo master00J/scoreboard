@@ -10,6 +10,7 @@ import {
   moveElementLayer,
   normalizeElements,
   normalizeLayoutRules,
+  overviewSportForEditor,
   pickLayoutRule,
   sixteenByNineHeightPct,
   slotsFromElements,
@@ -272,5 +273,34 @@ describe("indeling per situatie", () => {
       ]),
     ).toBe("eigen");
     expect(defaultLayoutRuleTemplateId([{ id: "builtin_standaard", isBuiltIn: true }])).toBeNull();
+  });
+});
+
+describe("overviewSportForEditor", () => {
+  const rules = [
+    { id: "r-voetbal", sport: "FOOTBALL" as const, phase: "*" as const, templateId: "t-voetbal" },
+    { id: "r-volley", sport: "VOLLEYBALL" as const, phase: "*" as const, templateId: "t-volley" },
+  ];
+
+  it("volgt het canvas, zodat de override-waarschuwing over de bewerkte sport gaat", () => {
+    // Meldingsgeval 0.1.46: volleybalindeling bewerken terwijl een voetbalregel bovenaan staat.
+    // Zonder het canvas koos de editor voetbal en bleef de volleybal-override onzichtbaar.
+    expect(overviewSportForEditor({ canvasSport: "VOLLEYBALL", rules })).toBe("VOLLEYBALL");
+    expect(overviewSportForEditor({ canvasSport: "VOLLEYBALL", matchSport: "FOOTBALL", rules })).toBe("VOLLEYBALL");
+  });
+
+  it("valt zonder canvas terug op de lopende wedstrijd en daarna op de eerste regel", () => {
+    expect(overviewSportForEditor({ matchSport: "BASKETBALL", rules })).toBe("BASKETBALL");
+    expect(overviewSportForEditor({ rules })).toBe("FOOTBALL");
+  });
+
+  it("negeert lege waarden in plaats van ze als sport te lezen", () => {
+    expect(overviewSportForEditor({ canvasSport: null, matchSport: "", rules })).toBe("FOOTBALL");
+    expect(overviewSportForEditor({ canvasSport: "   ", matchSport: "VOLLEYBALL", rules })).toBe("VOLLEYBALL");
+  });
+
+  it("slaat regels voor elke sport over bij het zoeken naar een terugval", () => {
+    const anySport = [{ id: "r", sport: "*" as const, phase: "*" as const, templateId: "t" }];
+    expect(overviewSportForEditor({ rules: anySport })).toBe("FOOTBALL");
   });
 });
