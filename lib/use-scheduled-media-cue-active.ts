@@ -23,6 +23,7 @@ import {
   wrapRundownElapsed,
 } from "@/lib/scheduled-media-cue";
 import { getSportProfile } from "@/lib/sports";
+import { scheduledCueLiveProgramActive } from "@/lib/live-cycle-settings";
 
 type Options = {
   match: Match | null;
@@ -211,12 +212,11 @@ export function useScheduledMediaCueActive({
   useEffect(() => {
     if (skip) return;
     if (!state || !match || mode === "BLACKOUT") return;
-    const liveProgramMode =
-      mode === "SPONSOR_ROTATION" ||
-      (usesLiveWallClock && mode === "MATCH") ||
-      (holdLiveWallOnBreak && (mode === "HALFTIME" || mode === "MATCH"));
+    // "Alleen scorebord" is een harde opt-out, ook voor Volleybal zonder wedstrijdklok.
+    // Een lopende cue verdwijnt hieronder bij de wissel naar MATCH.
+    const liveProgramMode = scheduledCueLiveProgramActive(mode, holdLiveWallOnBreak);
     if (!liveProgramMode) {
-      if (activeScheduledCue && !holdLiveWallOnBreak) setActiveScheduledCue(null);
+      if (activeScheduledCue) setActiveScheduledCue(null);
       return;
     }
     if (holdLiveWallOnBreak) return;

@@ -526,13 +526,11 @@ export function SetupScoreboardThemeSection({
       return;
     }
     const json = JSON.stringify(themePayload());
-    // Een regel kan deze indeling tijdens de wedstrijd vervangen door een bibliotheekindeling.
-    // Dan is alleen dit bewaren zinloos werk: bied aan om die indeling mee bij te werken.
-    const alsoUpdate = layoutsToUpdateOnSave(overriddenPhases, json, { rules, sport: overviewSport });
+    // Een regel kan deze indeling tijdens de wedstrijd vervangen. Die wedstrijd-indeling
+    // gaat automatisch mee, anders blijft het scherm de oude bibliotheekversie tonen.
+    const alsoUpdate = playLayoutsToSync;
     const alsoUpdateNames = alsoUpdate.map((layout) => `“${templateDisplayName(layout)}”`).join(", ");
-    const updateOverriding =
-      alsoUpdate.length > 0 &&
-      confirm(t("layoutEditor.alsoUpdateConfirm", { sport: tSportLabel(t, overviewSport), names: alsoUpdateNames }));
+    const updateOverriding = alsoUpdate.length > 0;
     if (updateOverriding) {
       for (const layout of alsoUpdate) {
         const layoutRes = await fetch(`/api/scoreboard-templates/${layout.id}`, {
@@ -648,6 +646,19 @@ export function SetupScoreboardThemeSection({
     return [...byLayout.values()];
   }, [rules, overviewSport, layouts, editingTemplate?.id]);
 
+  /** Bibliotheekindelingen die het wedstrijdscherm anders zouden blijven tonen. */
+  const playLayoutsToSync = useMemo(
+    () =>
+      layoutsToUpdateOnSave(overriddenPhases, JSON.stringify(themePayload()), {
+        rules,
+        sport: overviewSport,
+      }),
+    [overriddenPhases, draft, rules, overviewSport, repeatSponsorBudgetCycles],
+  );
+  const playLayoutsToSyncNames = playLayoutsToSync
+    .map((layout) => `“${templateDisplayName(layout)}”`)
+    .join(", ");
+
   function editOverriddenLayout(layout: ScoreboardTemplate) {
     if (dirty && !confirm(t("layoutEditor.overrideEditDirtyConfirm", { name: layout.name }))) return;
     openLayout(layout);
@@ -759,7 +770,11 @@ export function SetupScoreboardThemeSection({
             {t("setup.themeDefault")}
           </Button>
           <Button size="sm" onClick={() => void save()}>
-            {editingTemplate ? t("layoutEditor.saveInLayout", { name: editingTemplate.name }) : t("common.save")}
+            {editingTemplate
+              ? t("layoutEditor.saveInLayout", { name: editingTemplate.name })
+              : playLayoutsToSync.length > 0
+                ? t("layoutEditor.saveLiveWithLayouts", { names: playLayoutsToSyncNames })
+                : t("layoutEditor.saveLive")}
           </Button>
         </div>
       </div>

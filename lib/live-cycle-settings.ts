@@ -61,6 +61,24 @@ export function isLivePlayingMatchStatus(status: string | undefined): boolean {
   );
 }
 
+/** Automatische reclame/rundown mag een expliciete keuze voor alleen scorebord niet overschrijven. */
+export function automaticSponsorMediaAllowed(mode: string): boolean {
+  return mode === "SPONSOR_ROTATION";
+}
+
+/**
+ * Mag de rundown/geplande media een clip starten of laten doorlopen?
+ * «Alleen scorebord» (MATCH) is altijd uit, ook bij volleybal zonder wedstrijdklok.
+ * Rust-overlay (HALFTIME) mag een lopende wandklok-cue houden, maar alleen als het scherm
+ * echt in rust-modus staat — niet als de operator MATCH heeft gekozen.
+ */
+export function scheduledCueLiveProgramActive(
+  mode: string,
+  holdLiveWallOnBreak = false,
+): boolean {
+  return automaticSponsorMediaAllowed(mode) || (holdLiveWallOnBreak && mode === "HALFTIME");
+}
+
 /** Operatorvoorkeur «Scorebord + sponsors» vs. alleen scorebord. */
 export function preferredLiveDisplayMode(
   preferSponsorRotation: boolean | number | null | undefined,

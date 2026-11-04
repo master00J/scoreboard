@@ -233,7 +233,7 @@ describe("layoutsToUpdateOnSave", () => {
   /** Volleybal toont "eigen" de hele wedstrijd in plaats van de gewone indeling. */
   const wholeMatch = { rules: [rule("eigen", "VOLLEYBALL", "*")], sport: "VOLLEYBALL" as const };
 
-  it("biedt de eigen indeling aan die de wedstrijd anders zou tonen", () => {
+  it("kiest de eigen indeling die de wedstrijd anders zou tonen", () => {
     const out = layoutsToUpdateOnSave([{ layout: template() }], current, wholeMatch);
     expect(out.map((layout) => layout.id)).toEqual(["eigen"]);
   });
@@ -260,7 +260,7 @@ describe("layoutsToUpdateOnSave", () => {
   });
 
   it("biedt de indeling aan die alleen tijdens het spel geldt", () => {
-    // Regressie 0.1.48: een regel "volleybal, tijdens het spel" kreeg geen vraag meer, en de wedstrijd
+    // Regressie 0.1.48: een regel "volleybal, tijdens het spel" werd overgeslagen, en de wedstrijd
     // bleef de oude indeling tonen hoe vaak de club ook bewaarde.
     const situation = { rules: [rule("eigen", "VOLLEYBALL", "play")], sport: "VOLLEYBALL" as const };
     expect(layoutsToUpdateOnSave([{ layout: template() }], current, situation).map((layout) => layout.id)).toEqual([

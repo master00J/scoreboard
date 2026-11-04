@@ -66,6 +66,7 @@ import {
 } from "@/lib/sponsor-schedule-clock";
 import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
+import { automaticSponsorMediaAllowed } from "@/lib/live-cycle-settings";
 import { useScheduledCueTelemetry } from "@/lib/use-scheduled-cue-telemetry";
 import { cueHasClockWindow, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 import {
@@ -721,12 +722,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
    * anders speelt de clip zonder telemetry (budget/HUD) terwijl rotatie eronder telt.
    */
   const prematchMatchSponsorOverlay = useMemo(() => {
-    if (!prematchMatchSponsorShow) return false;
+    if (!automaticSponsorMediaAllowed(mode) || !prematchMatchSponsorShow) return false;
     if (prematchSpreadActive && hasSponsorsForSectionOrWindow(sponsors, "prematch", match?.status, sponsorWindow, match?.sport)) {
       return false;
     }
     return true;
-  }, [prematchMatchSponsorShow, prematchSpreadActive, sponsors, match, sponsorWindow]);
+  }, [mode, prematchMatchSponsorShow, prematchSpreadActive, sponsors, match, sponsorWindow]);
 
   const matchSponsorPinProps = useMemo(
     () => ({
@@ -1365,7 +1366,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     !!state &&
     !!match &&
     sponsorBesideConfigured &&
-    (mode === "SPONSOR_ROTATION" || sponsorInterrupted) &&
+    // MATCH mag ook tijdens de afbouw van een vorige cue geen sponsorpaneel tonen.
+    (mode === "SPONSOR_ROTATION" || (mode !== "MATCH" && sponsorInterrupted)) &&
     liveSponsorBesideContent != null;
   const besideInterruptOverlay = isBesideInterruptOverlay(mode, !!activeMedia);
   const exclusiveFullscreen = isExclusiveFullscreenDisplayMode(mode);
@@ -1851,6 +1853,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
       {activeScheduledCue &&
         !layoutPreviewActive &&
+        mode !== "MATCH" &&
         mode !== "BLACKOUT" &&
         !exclusiveFullscreen &&
         match &&

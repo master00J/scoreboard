@@ -293,12 +293,12 @@ export function builtInTemplateRows(): {
 }
 
 /**
- * De bibliotheekindelingen die bij het opslaan van de gewone indeling moeten meeveranderen.
+ * De bibliotheekindelingen die bij het opslaan van de gewone indeling automatisch meegaan.
  *
  * Een regel bij "Indeling per situatie" zet zo'n indeling tijdens de wedstrijd op het scherm in
  * plaats van wat je net bewaarde. Meegeleverde voorbeelden vallen af (de server weigert ze), en
- * indelingen die al hetzelfde beeld geven ook — anders zou de editor om toestemming vragen voor
- * een wijziging die niets doet.
+ * indelingen die al hetzelfde beeld geven ook — anders zou opslaan een wijziging schrijven
+ * die niets doet.
  *
  * Alleen de indeling die tijdens het spel zelf op het scherm staat, komt in aanmerking: dat is wat
  * de club "in de wedstrijd" ziet, of de regel nu voor alle fases geldt of alleen voor het spel. Een

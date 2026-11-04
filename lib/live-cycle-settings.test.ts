@@ -1,9 +1,34 @@
 import { describe, expect, it } from "vitest";
 import {
+  automaticSponsorMediaAllowed,
   oneOffMediaHoldMs,
   periodStartHoldsFullScoreboard,
   programmedDisplayMode,
+  scheduledCueLiveProgramActive,
 } from "./live-cycle-settings";
+
+describe("automaticSponsorMediaAllowed", () => {
+  it("laat automatische sponsors alleen toe in de expliciete sponsormodus", () => {
+    expect(automaticSponsorMediaAllowed("SPONSOR_ROTATION")).toBe(true);
+    for (const mode of ["MATCH", "IDLE", "SPONSOR", "HALFTIME", "BLACKOUT"]) {
+      expect(automaticSponsorMediaAllowed(mode)).toBe(false);
+    }
+  });
+});
+
+describe("scheduledCueLiveProgramActive", () => {
+  it("houdt rundown uit op alleen-scorebord, ook tijdens volleybal-rust", () => {
+    expect(scheduledCueLiveProgramActive("MATCH")).toBe(false);
+    expect(scheduledCueLiveProgramActive("MATCH", true)).toBe(false);
+    expect(scheduledCueLiveProgramActive("IDLE")).toBe(false);
+  });
+
+  it("laat rundown toe in live-sponsors of echte rust-overlay", () => {
+    expect(scheduledCueLiveProgramActive("SPONSOR_ROTATION")).toBe(true);
+    expect(scheduledCueLiveProgramActive("HALFTIME", true)).toBe(true);
+    expect(scheduledCueLiveProgramActive("HALFTIME")).toBe(false);
+  });
+});
 
 describe("programmedDisplayMode", () => {
   it("kiest scorebord + sponsors tijdens een speelhelft", () => {
