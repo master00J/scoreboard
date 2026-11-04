@@ -31,16 +31,17 @@ import {
   LAYOUT_PHASES,
   LAYOUT_RULE_LIMIT,
   defaultLayoutRuleTemplateId,
-  layoutRuleOverview,
   layoutRulesFromThemeJson,
   overviewSportForEditor,
   type LayoutPhase,
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
 import {
+  layoutPhasePlans,
   layoutsToUpdateOnSave,
   sameVisualLayout,
   templateDisplayName,
+  type LayoutPhasePlan,
   type ScoreboardTemplate,
 } from "@/lib/scoreboard-templates";
 import { withLayoutPreviewMeta } from "@/lib/scoreboard-preview-match";
@@ -150,11 +151,14 @@ function LayoutRulesSection({
   rules,
   layouts,
   overviewSport,
+  plans,
   onChange,
   onFocus,
 }: {
   rules: LayoutRule[];
   layouts: ScoreboardTemplate[];
+  /** Wat het scherm per fase echt toont; dezelfde bron als het stadionscherm. */
+  plans: LayoutPhasePlan[];
   /** Voor deze sport toont het overzicht welke indeling het scherm per fase gebruikt. */
   overviewSport: SportType;
   onChange: (next: LayoutRule[]) => void;
@@ -166,15 +170,7 @@ function LayoutRulesSection({
   const ownLayouts = layouts.filter((layout) => !layout.isBuiltIn);
   const builtInLayouts = layouts.filter((layout) => layout.isBuiltIn);
   const newRuleTemplateId = defaultLayoutRuleTemplateId(layouts);
-  const layoutName = (id: string) => {
-    const layout = layouts.find((item) => item.id === id);
-    return layout ? templateDisplayName(layout) : null;
-  };
-  const overview = layoutRuleOverview(
-    rules,
-    overviewSport,
-    layouts.map((layout) => layout.id),
-  );
+  // Geen eigen oordeel over wat het scherm toont: dat komt via `plans` uit layoutPhasePlans.
 
   return (
     <div
@@ -289,16 +285,21 @@ function LayoutRulesSection({
             {t("layoutEditor.rulesOverviewTitle", { sport: tSportLabel(t, overviewSport) })}
           </div>
           <ul className="mt-2 space-y-1 text-xs">
-            {overview.map((row) => (
+            {plans.map((row) => (
               <li key={row.phase} className="flex flex-wrap gap-x-2">
                 <span className="min-w-[9rem] text-muted-foreground">{t(`layoutEditor.phase_${row.phase}`)}</span>
-                <span className={row.rule && !row.missing ? "font-medium text-amber-200" : ""}>
-                  {!row.rule
-                    ? t("layoutEditor.rulesOverviewBase")
-                    : row.missing
-                      ? t("layoutEditor.rulesOverviewMissing")
-                      : t("layoutEditor.rulesOverviewLayout", { name: layoutName(row.rule.templateId) })}
+                <span className={row.shows === "layout" ? "font-medium text-amber-200" : ""}>
+                  {row.shows === "layout" && row.layout
+                    ? t("layoutEditor.rulesOverviewLayout", { name: templateDisplayName(row.layout) })
+                    : t("layoutEditor.rulesOverviewBase")}
                 </span>
+                {row.blocked ? (
+                  <span className="text-muted-foreground">
+                    {t(`layoutEditor.rulesIgnored_${row.blocked}`, {
+                      name: row.layout ? templateDisplayName(row.layout) : "",
+                    })}
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -411,9 +412,16 @@ export function SetupScoreboardThemeSection({
     store().reset(key, savedDraft);
   }, [settings, savedJson, savedDraft, store]);
 
-  /** Opent een opgeslagen indeling; opslaan bewaart de wijzigingen dan in die indeling. */
+  /**
+   * Opent een opgeslagen indeling; opslaan bewaart de wijzigingen dan in die indeling.
+   *
+   * Geeft false zolang de editor nog geen geschiedenis heeft. `setDraft` zou dan stil niets doen
+   * terwijl de balk wel "je bewerkt X" meldt — en Opslaan schreef vervolgens de gewone indeling
+   * over X heen. Canvas en balk bewegen nu samen, of geen van beide.
+   */
   const openLayout = useCallback(
     (layout: ScoreboardTemplate) => {
+      if (!store().history?.present) return false;
       setDraft(themeForFreeformEdit(mergeScoreboardTheme(layout.themeJson)));
       store().setEditingTemplate(
         layout.isBuiltIn
@@ -424,15 +432,17 @@ export function SetupScoreboardThemeSection({
               active: sameVisualLayout(layout.themeJson, savedJson),
             },
       );
+      return true;
     },
     [setDraft, store, savedJson],
   );
 
+  // De bibliotheek haalt haar lijst los van `settings` op, dus "Bewerken" kan aankomen voordat de
+  // editor klaar is. `history` in de deps: zodra die er is, draait dit effect opnieuw en lukt het.
   useEffect(() => {
     if (!seedLayout) return;
-    openLayout(seedLayout);
-    onSeedConsumed?.();
-  }, [seedLayout, onSeedConsumed, openLayout]);
+    if (openLayout(seedLayout)) onSeedConsumed?.();
+  }, [seedLayout, history, onSeedConsumed, openLayout]);
 
   useEffect(() => {
     void loadLayouts();
@@ -632,21 +642,25 @@ export function SetupScoreboardThemeSection({
   /** De sport waarvoor de editor uitlegt wat het scherm toont: het canvas, anders de actieve wedstrijd. */
   const overviewSport = overviewSportForEditor({ canvasSport, matchSport: previewSport, rules });
   /** Fases waarin een regel een andere opgeslagen indeling op het scherm zet dan wat hier open staat. */
+  /** Wat het stadionscherm per fase echt toont. Eén bron voor het overzicht en de waarschuwing. */
+  const phasePlans = useMemo(
+    () => layoutPhasePlans({ rules, sport: overviewSport, layouts, savedThemeJson: JSON.stringify(themePayload()) }),
+    // themePayload hangt van het hele concept af; draft is de waarde die de uitkomst bepaalt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rules, overviewSport, layouts, draft],
+  );
+
+  /** Alleen fases waar een regel de indeling hier echt vervangt. Genegeerde regels waarschuwen niet. */
   const overriddenPhases = useMemo(() => {
     const byLayout = new Map<string, { layout: ScoreboardTemplate; phases: LayoutPhase[] }>();
-    for (const row of layoutRuleOverview(
-      rules,
-      overviewSport,
-      layouts.map((layout) => layout.id),
-    )) {
-      if (!row.rule || row.missing || row.rule.templateId === editingTemplate?.id) continue;
-      const layout = layouts.find((item) => item.id === row.rule!.templateId)!;
-      const entry = byLayout.get(layout.id) ?? { layout, phases: [] };
+    for (const row of phasePlans) {
+      if (row.shows !== "layout" || !row.layout || row.layout.id === editingTemplate?.id) continue;
+      const entry = byLayout.get(row.layout.id) ?? { layout: row.layout, phases: [] };
       entry.phases.push(row.phase);
-      byLayout.set(layout.id, entry);
+      byLayout.set(row.layout.id, entry);
     }
     return [...byLayout.values()];
-  }, [rules, overviewSport, layouts, editingTemplate?.id]);
+  }, [phasePlans, editingTemplate?.id]);
 
   function editOverriddenLayout(layout: ScoreboardTemplate) {
     if (dirty && !confirm(t("layoutEditor.overrideEditDirtyConfirm", { name: layout.name }))) return;
@@ -863,6 +877,7 @@ export function SetupScoreboardThemeSection({
         rules={rules}
         layouts={layouts}
         overviewSport={overviewSport}
+        plans={phasePlans}
         onChange={setRules}
         onFocus={() => void loadLayouts()}
       />

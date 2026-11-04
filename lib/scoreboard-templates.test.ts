@@ -4,6 +4,8 @@ import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
   extractVisualTheme,
+  layoutPhasePlans,
+  layoutRuleEffect,
   layoutsToUpdateOnSave,
   resolveScoreboardThemeJson,
   sameVisualLayout,
@@ -91,7 +93,7 @@ describe("stadionscherm volgt de editor", () => {
     ).toBe(preview);
   });
 
-  it("laat een meegeleverde L-balk een opgeslagen vrije indeling niet overschrijven", () => {
+  it("voert een regel naar een meegeleverd voorbeeld gewoon uit", () => {
     const saved = JSON.stringify({
       layoutMode: "custom",
       layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "builtin_l" }],
@@ -104,10 +106,11 @@ describe("stadionscherm volgt de editor", () => {
         templates: [{ id: "builtin_l", themeJson: JSON.stringify({ layoutMode: "left-l" }), isBuiltIn: true }],
       }) ?? "{}",
     );
-    expect(resolved.layoutMode).toBe("custom");
+    // Wie dit bewust instelt, krijgt het. De editor legt vooraf uit wat de regel doet.
+    expect(resolved.layoutMode).toBe("left-l");
   });
 
-  it("laat een eigen L-balk een opgeslagen vrije indeling niet overschrijven", () => {
+  it("voert een regel naar een eigen L-balk uit, ook over een vrij geplaatste indeling", () => {
     const saved = JSON.stringify({
       layoutMode: "custom",
       layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "club_l" }],
@@ -120,7 +123,7 @@ describe("stadionscherm volgt de editor", () => {
         templates: [{ id: "club_l", themeJson: JSON.stringify({ layoutMode: "left-l" }), isBuiltIn: false }],
       }) ?? "{}",
     );
-    expect(resolved.layoutMode).toBe("custom");
+    expect(resolved.layoutMode).toBe("left-l");
   });
 
   it("past wel een eigen clubindeling uit een regel toe", () => {
@@ -301,5 +304,61 @@ describe("layoutsToUpdateOnSave", () => {
     };
     const out = layoutsToUpdateOnSave([{ layout: template() }, { layout: rust }], current, situation);
     expect(out.map((layout) => layout.id)).toEqual(["eigen"]);
+  });
+});
+
+describe("layoutRuleEffect — één bron voor scherm en uitleg", () => {
+  const eigen = (over: Record<string, unknown> = {}) => ({
+    id: "eigen", name: "VOLLEY OUD", label: null, isBuiltIn: false, sortIndex: 0,
+    themeJson: JSON.stringify({ layoutMode: "custom", frameColorTop: "#00ff00", ...over }),
+  });
+  const vrij = JSON.stringify({ layoutMode: "custom", frameColorTop: "#ff0000" });
+
+  it("voert elke regel uit die naar een bestaande indeling wijst", () => {
+    // Een regel die iemand bewust aanmaakt hoort te werken; daar dienen regels voor.
+    expect(layoutRuleEffect({ template: eigen(), savedThemeJson: vrij })).toEqual({ applies: true });
+    expect(layoutRuleEffect({ template: { ...eigen(), isBuiltIn: true }, savedThemeJson: vrij })).toEqual({
+      applies: true,
+    });
+    expect(layoutRuleEffect({ template: eigen({ layoutMode: "left-l" }), savedThemeJson: vrij })).toEqual({
+      applies: true,
+    });
+  });
+
+  it("kan niets tonen als de gekozen indeling verdwenen is", () => {
+    expect(layoutRuleEffect({ template: null, savedThemeJson: vrij })).toEqual({ applies: false, blocked: "missing" });
+  });
+
+  it("het overzicht zegt hetzelfde als wat het scherm tekent", () => {
+    const ingebouwd = { ...eigen(), isBuiltIn: true };
+    const rules = [{ id: "r", sport: "VOLLEYBALL" as const, phase: "prematch" as const, templateId: "eigen" }];
+    const thema = JSON.stringify({ layoutMode: "custom", frameColorTop: "#ff0000", layoutRules: rules });
+
+    const plan = layoutPhasePlans({ rules, sport: "VOLLEYBALL", layouts: [ingebouwd], savedThemeJson: thema })
+      .find((row) => row.phase === "prematch")!;
+    expect(plan.shows).toBe("layout");
+    expect(plan.blocked).toBeNull();
+
+    const getekend = resolveScoreboardThemeJson({
+      themeJson: thema, sport: "VOLLEYBALL", status: "PREMATCH", templates: [ingebouwd],
+    });
+    expect(getekend).not.toBe(thema);
+    expect(mergeScoreboardTheme(getekend).frameColorTop).toBe("#00ff00");
+  });
+
+  it("een verdwenen indeling laat het overzicht de bewerkte indeling noemen", () => {
+    const rules = [{ id: "r", sport: "VOLLEYBALL" as const, phase: "play" as const, templateId: "weg" }];
+    const thema = JSON.stringify({ layoutMode: "custom", layoutRules: rules });
+    const plan = layoutPhasePlans({ rules, sport: "VOLLEYBALL", layouts: [], savedThemeJson: thema })
+      .find((row) => row.phase === "play")!;
+    expect(plan.shows).toBe("editor");
+    expect(plan.blocked).toBe("missing");
+  });
+
+  it("biedt bij opslaan geen meegeleverd voorbeeld aan: de server weigert dat te schrijven", () => {
+    const rules = [{ id: "r", sport: "VOLLEYBALL" as const, phase: "play" as const, templateId: "eigen" }];
+    const situation = { rules, sport: "VOLLEYBALL" as const };
+    expect(layoutsToUpdateOnSave([{ layout: { ...eigen(), isBuiltIn: true } }], vrij, situation)).toEqual([]);
+    expect(layoutsToUpdateOnSave([{ layout: eigen() }], vrij, situation).map((l) => l.id)).toEqual(["eigen"]);
   });
 });
