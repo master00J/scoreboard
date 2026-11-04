@@ -123,6 +123,31 @@ describe("stadionscherm volgt de editor", () => {
     expect(resolved.layoutMode).toBe("custom");
   });
 
+  it("laat een eigen custom-regel een opgeslagen vrije indeling niet overschrijven", () => {
+    const saved = JSON.stringify({
+      layoutMode: "custom",
+      slots: { home: { x: 8, y: 8, w: 20, h: 20 } },
+      layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "partitita" }],
+    });
+    const resolved = mergeScoreboardTheme(
+      resolveScoreboardThemeJson({
+        themeJson: saved,
+        sport: "VOLLEYBALL",
+        status: "FIRST_HALF",
+        templates: [
+          {
+            id: "partitita",
+            themeJson: JSON.stringify({ layoutMode: "custom", leftBarWidthPx: 320 }),
+            isBuiltIn: false,
+          },
+        ],
+      }),
+    );
+    expect(resolved.layoutMode).toBe("custom");
+    expect(resolved.slots.home.x).toBe(8);
+    expect(resolved.leftBarWidthPx).not.toBe(320);
+  });
+
   it("past wel een eigen clubindeling uit een regel toe", () => {
     const saved = JSON.stringify({
       layoutMode: "auto",

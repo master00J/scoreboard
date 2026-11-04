@@ -40,11 +40,12 @@ export const useDisplayStore = create<Store>((set) => ({
     set((prev) => {
       if (isStaleDisplayState(s, prev.state)) return prev;
       const state =
-        s && prev.state && s.themePreviewJson === undefined
+        s && prev.state && (s.themePreviewJson === undefined || s.scoreboardThemeJson === undefined)
           ? {
               ...s,
-              themePreviewJson: prev.state.themePreviewJson ?? null,
+              themePreviewJson: s.themePreviewJson ?? prev.state.themePreviewJson ?? null,
               themePreviewUntil: s.themePreviewUntil ?? prev.state.themePreviewUntil ?? null,
+              scoreboardThemeJson: s.scoreboardThemeJson ?? prev.state.scoreboardThemeJson ?? null,
             }
           : s;
       return {

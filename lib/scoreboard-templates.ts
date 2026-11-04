@@ -4,6 +4,7 @@ import {
   SLOT_PRESETS,
   bottomBarForSixteenByNine,
   mergeScoreboardTheme,
+  scoreboardUsesCustom,
   themeForFreeformEdit,
   type ResolvedScoreboardTheme,
   type ScoreboardTheme,
@@ -94,6 +95,10 @@ export function resolveScoreboardThemeJson(opts: {
 }): string | null {
   if (opts.previewJson) return opts.previewJson;
   const themeJson = opts.themeJson ?? null;
+  const saved = mergeScoreboardTheme(themeJson);
+  // Vrij geplaatst canvas is de live-indeling. Een bibliotheekregel (PARTITITA) mag die
+  // niet vervangen, ook niet als die zelf layoutMode custom heeft.
+  if (scoreboardUsesCustom(saved)) return themeJson;
   const rule = pickLayoutRule(layoutRulesFromThemeJson(themeJson), {
     sport: opts.sport,
     status: opts.status,
@@ -101,9 +106,6 @@ export function resolveScoreboardThemeJson(opts: {
   if (!rule) return themeJson;
   const template = (opts.templates ?? []).find((item) => item.id === rule.templateId);
   if (!template || template.isBuiltIn) return themeJson;
-  const savedMode = mergeScoreboardTheme(themeJson).layoutMode;
-  const templateMode = mergeScoreboardTheme(template.themeJson).layoutMode;
-  if (savedMode === "custom" && templateMode !== "custom") return themeJson;
   return applyTemplateToThemeJson(themeJson, template.themeJson);
 }
 

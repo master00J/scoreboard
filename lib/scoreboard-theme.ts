@@ -3,6 +3,7 @@
 import {
   elementsFromFullSlots,
   elementsFromSlots,
+  isClassicElementId,
   normalizeBox,
   normalizeElements,
   slotsFromElements,
@@ -542,15 +543,81 @@ export function scoreboardEditorShowsLeftFrame(
   return theme.layoutMode === "auto" || theme.layoutMode === "left-l";
 }
 
+function boxesClose(a: LayoutSlot, b: LayoutSlot, eps = 1.5): boolean {
+  return (
+    Math.abs(a.x - b.x) <= eps &&
+    Math.abs(a.y - b.y) <= eps &&
+    Math.abs(a.w - b.w) <= eps &&
+    Math.abs(a.h - b.h) <= eps
+  );
+}
+
+function sponsorElementsMatchSlots(
+  elements: ResolvedScoreboardTheme["elements"]["sponsor"],
+  slots: ScoreboardSlots,
+): boolean {
+  for (const id of LAYOUT_SLOT_IDS) {
+    const el = elements.find((item) => item.id === id);
+    if (!el || !boxesClose(el, slots[id])) return false;
+  }
+  return true;
+}
+
+/**
+ * Vrije canvas-vakken die geen standaard overlay, L-balk of onderstrip zijn.
+ * Clubs slaan die soms op met `layoutMode: auto`; de editor toont ze wel, het stadionscherm
+ * negeerde ze tot nu toe.
+ */
+export function themeHasDesignedSponsorLayout(
+  theme: Pick<
+    ResolvedScoreboardTheme,
+    "elements" | "leftBarWidthPx" | "bottomBarHeightPx" | "stripHeightPx"
+  >,
+): boolean {
+  const sponsor = theme.elements.sponsor;
+  if (!sponsor.length) return false;
+  if (sponsor.some((el) => !isClassicElementId(el.id))) return true;
+  if (sponsorElementsMatchSlots(sponsor, normalizeSlots(DEFAULT_SLOTS))) return false;
+  if (sponsorElementsMatchSlots(sponsor, slotsFromLeftFrame(theme.leftBarWidthPx, theme.bottomBarHeightPx))) {
+    return false;
+  }
+  if (sponsorElementsMatchSlots(sponsor, slotsFromStrip(theme.stripHeightPx))) return false;
+  return true;
+}
+
+/** JSON voor opslaan: geen meegesleepte `layoutRules` uit een oud thema. */
+export function scoreboardThemeSavePayload(
+  theme: ResolvedScoreboardTheme,
+  opts: { rules?: LayoutRule[]; repeatSponsorBudgetCycles?: boolean } = {},
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    ...theme,
+    layoutMode: themeHasDesignedSponsorLayout(theme) ? "custom" : theme.layoutMode,
+  };
+  delete payload.layoutRules;
+  if (opts.repeatSponsorBudgetCycles) payload.sponsorRepeatBudgetCycles = true;
+  else delete payload.sponsorRepeatBudgetCycles;
+  if (opts.rules && opts.rules.length > 0) payload.layoutRules = opts.rules;
+  return payload;
+}
+
 /**
  * Draft voor de canvas-editor: vakken die het huidige frame volgen.
  * `auto` en `left-l` blijven dat frame tot je een vak versleept (`withSurfaceElements` maakt dan custom).
+ * Een al ontworpen canvas onder auto/L wordt niet meer overschreven door de L-balk.
  */
 export function themeForFreeformEdit(theme: ResolvedScoreboardTheme): ResolvedScoreboardTheme {
-  const slots = slotsFromTheme(theme);
   if (theme.layoutMode === "custom") {
-    return { ...theme, slots };
+    return { ...theme, slots: slotsFromTheme(theme) };
   }
+  if (themeHasDesignedSponsorLayout(theme)) {
+    return {
+      ...theme,
+      layoutMode: "custom",
+      slots: slotsFromElements(theme.elements.sponsor, theme.slots),
+    };
+  }
+  const slots = slotsFromTheme(theme);
   return {
     ...theme,
     slots,
@@ -652,9 +719,26 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
   const bottom = patch.bottomBarHeightPx != null
     ? clamp(Math.round(patch.bottomBarHeightPx), 120, 600)
     : bar;
+  const stripHeightPx = clamp(
+    Math.round(patch.stripHeightPx ?? DEFAULT_SCOREBOARD_THEME.stripHeightPx),
+    120,
+    280,
+  );
+  const resolvedMode = normalizeLayoutMode(patch.layoutMode);
+  const layoutMode =
+    resolvedMode !== "bottom-strip" &&
+    themeHasDesignedSponsorLayout({
+      elements,
+      leftBarWidthPx: bar,
+      bottomBarHeightPx: bottom,
+      stripHeightPx,
+    })
+      ? "custom"
+      : resolvedMode;
+  const { layoutRules: _omitLayoutRules, ...patchVisual } = patch;
   return {
     ...DEFAULT_SCOREBOARD_THEME,
-    ...patch,
+    ...patchVisual,
     leftBarWidthPx: bar,
     bottomBarHeightPx: bottom,
     leftColumnOrder: normalizeOrder(patch.leftColumnOrder),
@@ -704,7 +788,7 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
       72,
     ),
     fullTeamNameUppercase: patch.fullTeamNameUppercase !== false,
-    layoutMode: normalizeLayoutMode(patch.layoutMode),
+    layoutMode,
     fullTeamStackOrder: normalizeTeamStackOrder(patch.fullTeamStackOrder),
     showLogos: patch.showLogos !== false,
     showScores: patch.showScores !== false,
@@ -714,7 +798,7 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
     slots: slotsFromElements(elements.sponsor, slots),
     fullSlots: slotsFromElements(elements.full, fullSlots),
     elements,
-    stripHeightPx: clamp(Math.round(patch.stripHeightPx ?? DEFAULT_SCOREBOARD_THEME.stripHeightPx), 120, 280),
+    stripHeightPx,
     stripLogoPx: clamp(Math.round(patch.stripLogoPx ?? DEFAULT_SCOREBOARD_THEME.stripLogoPx), 64, 200),
     stripScorePx: clamp(Math.round(patch.stripScorePx ?? DEFAULT_SCOREBOARD_THEME.stripScorePx), 48, 200),
     stripTimerPx: clamp(Math.round(patch.stripTimerPx ?? DEFAULT_SCOREBOARD_THEME.stripTimerPx), 36, 120),
@@ -736,12 +820,14 @@ export function frameGradientCss(t: ResolvedScoreboardTheme): string {
   return `linear-gradient(180deg, ${t.frameColorTop} 0%, ${t.frameColorMid} 55%, ${t.frameColorBot} 100%)`;
 }
 
+type LayoutModeTheme = Pick<
+  ResolvedScoreboardTheme,
+  "layoutMode" | "elements" | "leftBarWidthPx" | "bottomBarHeightPx" | "stripHeightPx"
+>;
+
 /** L-frame: geforceerd, of automatisch naast sponsors/interrupts. */
-export function scoreboardUsesLeftFrame(
-  theme: Pick<ResolvedScoreboardTheme, "layoutMode">,
-  autoLeft: boolean,
-): boolean {
-  if (theme.layoutMode === "custom" || theme.layoutMode === "bottom-strip") return false;
+export function scoreboardUsesLeftFrame(theme: LayoutModeTheme, autoLeft: boolean): boolean {
+  if (scoreboardUsesCustom(theme) || theme.layoutMode === "bottom-strip") return false;
   if (theme.layoutMode === "left-l") return true;
   return autoLeft;
 }
@@ -750,8 +836,19 @@ export function scoreboardUsesStrip(theme: Pick<ResolvedScoreboardTheme, "layout
   return theme.layoutMode === "bottom-strip";
 }
 
-export function scoreboardUsesCustom(theme: Pick<ResolvedScoreboardTheme, "layoutMode">): boolean {
-  return theme.layoutMode === "custom";
+export function scoreboardUsesCustom(theme: LayoutModeTheme): boolean {
+  if (theme.layoutMode === "custom") return true;
+  if (theme.layoutMode === "bottom-strip") return false;
+  return themeHasDesignedSponsorLayout(theme);
+}
+
+/** Zelfde keuze als "Probeer op scherm" voor het vlak naast de sponsorclip. */
+export function scoreboardLiveBesideKind(
+  theme: LayoutModeTheme,
+): "custom" | "strip" | "left" {
+  if (scoreboardUsesCustom(theme)) return "custom";
+  if (theme.layoutMode === "bottom-strip") return "strip";
+  return "left";
 }
 
 /**

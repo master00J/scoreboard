@@ -297,6 +297,8 @@ export type SerializedDisplayState = Omit<
   /** "Probeer op scherm": zit niet in Prisma, wel op elke display:state. */
   themePreviewJson?: string | null;
   themePreviewUntil?: number | null;
+  /** Opgeslagen schermindeling: zelfde kanaal als de proef, zodat live niet op /api/settings hoeft te wachten. */
+  scoreboardThemeJson?: string | null;
 };
 
 function isoOrNull(value: Date | string | null | undefined): string | null {

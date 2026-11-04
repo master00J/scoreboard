@@ -13,7 +13,9 @@ import {
   scoreboardUsesStrip,
   slotIsSixteenByNine,
   slotsFromTheme,
+  scoreboardThemeSavePayload,
   themeForFreeformEdit,
+  themeHasDesignedSponsorLayout,
 } from "./scoreboard-theme";
 
 describe("scoreboard theme personalization", () => {
@@ -222,5 +224,58 @@ describe("scoreboard theme personalization", () => {
     expect(leftFrameClipPath(300.4, -5)).toBe(
       "polygon(0 0, 300px 0, 300px calc(100% - 0px), 100% calc(100% - 0px), 100% 100%, 0 100%)",
     );
+  });
+
+  it("leest een vrij geplaatst canvas ook als layoutMode auto is blijven staan", () => {
+    const theme = mergeScoreboardTheme(
+      JSON.stringify({
+        layoutMode: "auto",
+        elements: {
+          sponsor: [
+            { id: "home", type: "teamLogo", side: "home", x: 4.9, y: 0, w: 28.3, h: 18.5 },
+            { id: "homeScore", type: "teamScore", side: "home", x: 4.9, y: 20, w: 28.3, h: 12 },
+            { id: "away", type: "teamLogo", side: "away", x: 4.9, y: 40, w: 28.3, h: 18.5 },
+            { id: "awayScore", type: "teamScore", side: "away", x: 4.9, y: 60, w: 28.3, h: 12 },
+            { id: "clock", type: "clock", x: 4.9, y: 74, w: 28.3, h: 8, hidden: true },
+            { id: "shotClock", type: "shotClock", x: 4.9, y: 84, w: 28.3, h: 8, hidden: true },
+            { id: "sponsor", type: "media", x: 37.9, y: 18.8, w: 59.9, h: 51.9 },
+          ],
+        },
+      }),
+    );
+    expect(theme.layoutMode).toBe("custom");
+    expect(themeHasDesignedSponsorLayout(theme)).toBe(true);
+    expect(scoreboardUsesCustom(theme)).toBe(true);
+    expect(scoreboardUsesLeftFrame(theme, true)).toBe(false);
+    const edit = themeForFreeformEdit(theme);
+    expect(edit.layoutMode).toBe("custom");
+    expect(edit.elements.sponsor.find((el) => el.id === "sponsor")).toMatchObject({
+      x: 37.9,
+      y: 18.8,
+      w: 59.9,
+      h: 51.9,
+    });
+  });
+
+  it("schrijft verwijderde layoutregels niet mee terug bij opslaan", () => {
+    const leaked = {
+      ...mergeScoreboardTheme(JSON.stringify({ layoutMode: "custom" })),
+      layoutRules: [{ id: "r", sport: "volleyball", phase: "play", templateId: "partitita" }],
+    } as ReturnType<typeof mergeScoreboardTheme> & { layoutRules: unknown[] };
+    const payload = scoreboardThemeSavePayload(leaked, { rules: [] });
+    expect(payload.layoutRules).toBeUndefined();
+    const kept = scoreboardThemeSavePayload(leaked, {
+      rules: [{ id: "r", sport: "volleyball", phase: "play", templateId: "partitita" }],
+    });
+    expect(kept.layoutRules).toEqual([
+      { id: "r", sport: "volleyball", phase: "play", templateId: "partitita" },
+    ]);
+  });
+
+  it("houdt automatisch + L-balk als de vakken het standaardframe zijn", () => {
+    const theme = mergeScoreboardTheme(JSON.stringify({ layoutMode: "auto" }));
+    expect(themeHasDesignedSponsorLayout(theme)).toBe(false);
+    expect(scoreboardUsesCustom(theme)).toBe(false);
+    expect(scoreboardUsesLeftFrame(theme, true)).toBe(true);
   });
 });

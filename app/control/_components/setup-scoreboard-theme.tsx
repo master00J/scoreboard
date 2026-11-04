@@ -10,6 +10,8 @@ import {
   SCOREBOARD_LAYOUT_MODES,
   TEAM_STACK_ORDERS,
   mergeScoreboardTheme,
+  scoreboardThemeSavePayload,
+  slotsFromTheme,
   sponsorRepeatBudgetCyclesFromThemeJson,
   themeForFreeformEdit,
   type LeftStripSegment,
@@ -32,6 +34,7 @@ import {
   LAYOUT_RULE_LIMIT,
   defaultLayoutRuleTemplateId,
   layoutRuleOverview,
+  elementsFromSlots,
   layoutRulesFromThemeJson,
   overviewSportForEditor,
   type LayoutPhase,
@@ -449,13 +452,7 @@ export function SetupScoreboardThemeSection({
   }, [tryUntil]);
 
   function themePayload(theme: ResolvedScoreboardTheme = draft): Record<string, unknown> {
-    const payload: Record<string, unknown> = {
-      ...theme,
-      layoutMode: theme.layoutMode,
-    };
-    if (repeatSponsorBudgetCycles) payload.sponsorRepeatBudgetCycles = true;
-    if (rules.length > 0) payload.layoutRules = rules;
-    return payload;
+    return scoreboardThemeSavePayload(theme, { rules, repeatSponsorBudgetCycles });
   }
 
   /** Wat het stadionscherm bij "Probeer op scherm" toont: dit concept, op het vlak en de sport van het canvas. */
@@ -568,9 +565,8 @@ export function SetupScoreboardThemeSection({
   }
 
   /**
-   * Bewaart de geopende bibliotheekindeling. Een regel per sport of fase zet die versie op het
-   * scherm, dus daar horen de wijzigingen. De gewone indeling volgt alleen als ze dezelfde was;
-   * regels en sponsorinstelling uit de editor worden wel bewaard.
+   * Bewaart de geopende bibliotheekindeling én zet het canvas op het stadionscherm.
+   * Zonder regel zou alleen de bibliotheek bijwerken en de muur de oude L-balk blijven tonen.
    */
   async function saveLayout(layout: EditingLayoutTemplate) {
     const layoutJson = JSON.stringify(themePayload());
@@ -583,8 +579,9 @@ export function SetupScoreboardThemeSection({
       toast({ title: t("setup.themeLayoutSaveFailed", { name: layout.name }), variant: "error" });
       return;
     }
-    const baseTheme = layout.active ? draft : (base?.theme ?? savedDraft.theme);
-    const json = JSON.stringify(themePayload(baseTheme));
+    // "Opslaan op scherm" zet dit canvas live. Zonder regel ziet het stadionscherm anders
+    // alleen de oude instelling, ook als de bibliotheek wel bijgewerkt is.
+    const json = JSON.stringify(themePayload());
     const res = await fetch("/api/settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -594,12 +591,7 @@ export function SetupScoreboardThemeSection({
       toast({ title: t("setup.themeSaveFailed"), variant: "error" });
       return;
     }
-    if (layout.active) {
-      store().markSaved(json);
-    } else {
-      // Klaar met deze indeling: de editor toont weer de gewone indeling.
-      store().reset(json, { theme: baseTheme, rules, repeatSponsorBudgetCycles });
-    }
+    store().markSaved(json);
     if (tryUntil) await endTryPreview();
     toast({ title: t("setup.themeLayoutSaved", { name: layout.name }), variant: "success" });
     void loadLayouts();
@@ -962,7 +954,20 @@ export function SetupScoreboardThemeSection({
             <button
               key={mode}
               type="button"
-              onClick={() => setDraft((d) => ({ ...d, layoutMode: mode }))}
+              onClick={() =>
+                setDraft((d) => {
+                  if (mode === "auto" || mode === "left-l" || mode === "bottom-strip") {
+                    const slots = slotsFromTheme({ ...d, layoutMode: mode });
+                    return {
+                      ...d,
+                      layoutMode: mode,
+                      slots,
+                      elements: { ...d.elements, sponsor: elementsFromSlots(slots) },
+                    };
+                  }
+                  return { ...d, layoutMode: mode };
+                })
+              }
               className={`rounded-lg border px-3 py-3 text-left text-sm transition-colors ${
                 draft.layoutMode === mode
                   ? "border-primary bg-primary/10 text-foreground"
