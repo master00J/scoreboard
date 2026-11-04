@@ -103,6 +103,7 @@
       ]
     },
     "nsis": {
+      "artifactName": "Stadium-Scoreboard-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "installerLanguages": [

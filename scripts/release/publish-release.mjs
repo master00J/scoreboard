@@ -2,7 +2,7 @@
  * Release-stappen tegen arenacue.be, gebruikt door .github/workflows/release-win.yml.
  *
  *   node scripts/release/publish-release.mjs preflight   mag deze versie uit? (vóór de build)
- *   node scripts/release/publish-release.mjs upload      zet dist/Stadium-Scoreboard.exe achter de downloadknop
+ *   node scripts/release/publish-release.mjs upload      zet de NSIS-installer achter de downloadknop
  *   node scripts/release/publish-release.mjs announce    meld de versie: updatebanner in de app + updatemail
  *
  * De versie komt uit package.json. De site geeft eenmalige upload-URL's terug, zodat hier geen
@@ -12,18 +12,26 @@
  *      RELEASE_TITLE, RELEASE_NOTES, RELEASE_BUILT_SHA, RELEASE_RUN_URL (announce).
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const EXE = path.join(root, "dist", "Stadium-Scoreboard.exe");
-const MIN_EXE_BYTES = 50 * 1024 * 1024;
-const UPLOAD_ATTEMPTS = 3;
-
 const site = (process.env.ARENACUE_SITE_URL?.trim() || "https://arenacue.be").replace(/\/+$/, "");
 const token = process.env.ARENACUE_CI_TOKEN?.trim() ?? "";
 const version = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8")).version;
+
+function releaseInstallerPath() {
+  const named = path.join(root, "dist", `Stadium-Scoreboard-Setup-${version}.exe`);
+  const nsisDefault = path.join(root, "dist", `Stadium Scoreboard Setup ${version}.exe`);
+  if (existsSync(named)) return named;
+  if (existsSync(nsisDefault)) return nsisDefault;
+  return named;
+}
+
+const EXE = releaseInstallerPath();
+const MIN_EXE_BYTES = 50 * 1024 * 1024;
+const UPLOAD_ATTEMPTS = 3;
 
 function fail(message) {
   console.error(`[release] ${message}`);
