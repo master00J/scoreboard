@@ -1,4 +1,4 @@
-import type { ResolvedScoreboardTheme } from "./scoreboard-theme";
+import { scoreboardUsesCustom, type ResolvedScoreboardTheme } from "./scoreboard-theme";
 import { SPORT_TYPES, getSportProfile, normalizeSport, resolveDisplayShowClock, type SportType } from "./sports";
 import type { AppSettings, Match, Team } from "./types";
 
@@ -89,6 +89,21 @@ export function layoutPreviewReplacesIdle(
 
 /** Het vlak dat de editor toont: het scorebord naast een sponsorclip, of het volledige scorebord. */
 export type LayoutPreviewSurface = "sponsor" | "full";
+
+/**
+ * Kaart in de layoutbibliotheek: een vrije/volledige indeling toont het complete scorebord,
+ * geen L-balk met 16:9-gat. L-frame en onderbalk blijven het vlak naast de clip.
+ */
+export function layoutLibraryPreviewSurface(
+  theme: Pick<
+    ResolvedScoreboardTheme,
+    "layoutMode" | "elements" | "leftBarWidthPx" | "bottomBarHeightPx" | "stripHeightPx"
+  >,
+): LayoutPreviewSurface {
+  if (theme.layoutMode === "bottom-strip") return "sponsor";
+  if (theme.layoutMode === "full" || scoreboardUsesCustom(theme)) return "full";
+  return "sponsor";
+}
 
 export type LayoutPreviewMeta = { surface: LayoutPreviewSurface; sport: SportType | null };
 

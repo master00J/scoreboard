@@ -5,6 +5,7 @@ import {
   SCOREBOARD_PREVIEW_AWAY,
   SCOREBOARD_PREVIEW_HOME,
   buildScoreboardPreviewMatch,
+  layoutLibraryPreviewSurface,
   layoutPreviewMatch,
   layoutPreviewMeta,
   layoutPreviewReplacesIdle,
@@ -78,6 +79,17 @@ describe("probeer op scherm toont wat het canvas toont", () => {
     const none = layoutPreviewMatch({ live: null, sport: "VOLLEYBALL", home, away });
     expect(none.live).toBe(false);
     expect(none.match.setHistory?.length).toBeGreaterThan(0);
+  });
+
+  it("toont in de bibliotheek het volledige scorebord voor een vrije indeling", () => {
+    const custom = mergeScoreboardTheme(JSON.stringify({ layoutMode: "custom" }));
+    const full = mergeScoreboardTheme(JSON.stringify({ layoutMode: "full" }));
+    const left = mergeScoreboardTheme(JSON.stringify({ layoutMode: "left-l" }));
+    const strip = mergeScoreboardTheme(JSON.stringify({ layoutMode: "bottom-strip" }));
+    expect(layoutLibraryPreviewSurface(custom)).toBe("full");
+    expect(layoutLibraryPreviewSurface(full)).toBe("full");
+    expect(layoutLibraryPreviewSurface(left)).toBe("sponsor");
+    expect(layoutLibraryPreviewSurface(strip)).toBe("sponsor");
   });
 
   it("verbergt klok en extra tijd zoals het stadionscherm", () => {

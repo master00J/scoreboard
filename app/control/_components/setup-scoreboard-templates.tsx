@@ -9,6 +9,7 @@ import { toast } from "@/components/ui/toast";
 import type { AppSettings } from "@/lib/types";
 import { layoutDraftIsDirty, useLayoutEditorStore } from "@/lib/layout-editor-store";
 import { mergeScoreboardTheme } from "@/lib/scoreboard-theme";
+import { teamFromHomeBranding } from "@/lib/scoreboard-preview-match";
 import {
   sameVisualLayout,
   templateMediaKind,
@@ -150,7 +151,7 @@ export function SetupScoreboardTemplatesSection({
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {customTemplates.length === 0 ? (
-            <p className="text-xs text-muted-foreground sm:col-span-2">{t("setup.templatesEmpty")}</p>
+            <p className="text-xs text-muted-foreground">{t("setup.templatesEmpty")}</p>
           ) : null}
           {customTemplates.map((tpl) => {
             const isCurrent = sameVisualLayout(tpl.themeJson, settings?.scoreboardThemeJson);
@@ -169,7 +170,12 @@ export function SetupScoreboardTemplatesSection({
                       {t("common.active")}
                     </span>
                   ) : null}
-                  <ScoreboardThemePreview theme={theme} />
+                  <ScoreboardThemePreview
+                    theme={theme}
+                    homeTeam={teamFromHomeBranding(settings?.homeTeamBranding)}
+                    canvasWidth={settings?.displayCanvasWidth}
+                    canvasHeight={settings?.displayCanvasHeight}
+                  />
                 </div>
 
                 <div className="flex items-start justify-between gap-2">
