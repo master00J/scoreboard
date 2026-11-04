@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  automaticSponsorMediaAllowed,
   oneOffMediaHoldMs,
   periodStartHoldsFullScoreboard,
   programmedDisplayMode,
 } from "./live-cycle-settings";
+
+describe("automaticSponsorMediaAllowed", () => {
+  it("laat automatische sponsors alleen toe in de expliciete sponsormodus", () => {
+    expect(automaticSponsorMediaAllowed("SPONSOR_ROTATION")).toBe(true);
+    for (const mode of ["MATCH", "IDLE", "SPONSOR", "HALFTIME", "BLACKOUT"]) {
+      expect(automaticSponsorMediaAllowed(mode)).toBe(false);
+    }
+  });
+});
 
 describe("programmedDisplayMode", () => {
   it("kiest scorebord + sponsors tijdens een speelhelft", () => {

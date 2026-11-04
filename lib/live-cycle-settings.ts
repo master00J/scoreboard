@@ -61,6 +61,11 @@ export function isLivePlayingMatchStatus(status: string | undefined): boolean {
   );
 }
 
+/** Automatische reclame/rundown mag een expliciete keuze voor alleen scorebord niet overschrijven. */
+export function automaticSponsorMediaAllowed(mode: string): boolean {
+  return mode === "SPONSOR_ROTATION";
+}
+
 /** Operatorvoorkeur «Scorebord + sponsors» vs. alleen scorebord. */
 export function preferredLiveDisplayMode(
   preferSponsorRotation: boolean | number | null | undefined,
