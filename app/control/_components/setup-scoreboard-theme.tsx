@@ -412,9 +412,16 @@ export function SetupScoreboardThemeSection({
     store().reset(key, savedDraft);
   }, [settings, savedJson, savedDraft, store]);
 
-  /** Opent een opgeslagen indeling; opslaan bewaart de wijzigingen dan in die indeling. */
+  /**
+   * Opent een opgeslagen indeling; opslaan bewaart de wijzigingen dan in die indeling.
+   *
+   * Geeft false zolang de editor nog geen geschiedenis heeft. `setDraft` zou dan stil niets doen
+   * terwijl de balk wel "je bewerkt X" meldt — en Opslaan schreef vervolgens de gewone indeling
+   * over X heen. Canvas en balk bewegen nu samen, of geen van beide.
+   */
   const openLayout = useCallback(
     (layout: ScoreboardTemplate) => {
+      if (!store().history?.present) return false;
       setDraft(themeForFreeformEdit(mergeScoreboardTheme(layout.themeJson)));
       store().setEditingTemplate(
         layout.isBuiltIn
@@ -425,15 +432,17 @@ export function SetupScoreboardThemeSection({
               active: sameVisualLayout(layout.themeJson, savedJson),
             },
       );
+      return true;
     },
     [setDraft, store, savedJson],
   );
 
+  // De bibliotheek haalt haar lijst los van `settings` op, dus "Bewerken" kan aankomen voordat de
+  // editor klaar is. `history` in de deps: zodra die er is, draait dit effect opnieuw en lukt het.
   useEffect(() => {
     if (!seedLayout) return;
-    openLayout(seedLayout);
-    onSeedConsumed?.();
-  }, [seedLayout, onSeedConsumed, openLayout]);
+    if (openLayout(seedLayout)) onSeedConsumed?.();
+  }, [seedLayout, history, onSeedConsumed, openLayout]);
 
   useEffect(() => {
     void loadLayouts();
