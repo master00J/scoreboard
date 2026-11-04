@@ -4,6 +4,8 @@ import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
   extractVisualTheme,
+  layoutPhasePlans,
+  layoutRuleEffect,
   layoutsToUpdateOnSave,
   resolveScoreboardThemeJson,
   sameVisualLayout,
@@ -301,5 +303,59 @@ describe("layoutsToUpdateOnSave", () => {
     };
     const out = layoutsToUpdateOnSave([{ layout: template() }, { layout: rust }], current, situation);
     expect(out.map((layout) => layout.id)).toEqual(["eigen"]);
+  });
+});
+
+describe("layoutRuleEffect — één bron voor scherm en uitleg", () => {
+  const eigen = (over: Record<string, unknown> = {}) => ({
+    id: "eigen", name: "VOLLEY OUD", label: null, isBuiltIn: false, sortIndex: 0,
+    themeJson: JSON.stringify({ layoutMode: "custom", frameColorTop: "#00ff00", ...over }),
+  });
+  const vrij = JSON.stringify({ layoutMode: "custom", frameColorTop: "#ff0000" });
+  const vast = JSON.stringify({ layoutMode: "left-l", frameColorTop: "#ff0000" });
+
+  it("laat een eigen indeling de opgeslagen indeling vervangen", () => {
+    expect(layoutRuleEffect({ template: eigen(), savedThemeJson: vrij })).toEqual({ applies: true });
+  });
+
+  it("blokkeert een ontbrekende, een meegeleverde, en een vast frame over vrij plaatsen", () => {
+    expect(layoutRuleEffect({ template: null, savedThemeJson: vrij })).toEqual({ applies: false, blocked: "missing" });
+    expect(layoutRuleEffect({ template: { ...eigen(), isBuiltIn: true }, savedThemeJson: vrij })).toEqual({
+      applies: false, blocked: "builtIn",
+    });
+    expect(layoutRuleEffect({ template: eigen({ layoutMode: "left-l" }), savedThemeJson: vrij })).toEqual({
+      applies: false, blocked: "freeform",
+    });
+    // Zonder vrij plaatsen mag een vast frame wel.
+    expect(layoutRuleEffect({ template: eigen({ layoutMode: "left-l" }), savedThemeJson: vast })).toEqual({
+      applies: true,
+    });
+  });
+
+  it("het overzicht zegt hetzelfde als wat het scherm tekent", () => {
+    // Meldingsgeval: regel naar een meegeleverd voorbeeld. Het overzicht beweerde dat dat voorbeeld
+    // getoond werd; het scherm toonde de bewerkte indeling. Nu komen ze uit dezelfde functie.
+    const ingebouwd = { ...eigen(), isBuiltIn: true };
+    const rules = [{ id: "r", sport: "VOLLEYBALL" as const, phase: "prematch" as const, templateId: "eigen" }];
+    const thema = JSON.stringify({ layoutMode: "custom", frameColorTop: "#ff0000", layoutRules: rules });
+
+    const plan = layoutPhasePlans({ rules, sport: "VOLLEYBALL", layouts: [ingebouwd], savedThemeJson: thema })
+      .find((row) => row.phase === "prematch")!;
+    expect(plan.shows).toBe("editor");
+    expect(plan.blocked).toBe("builtIn");
+
+    const getekend = resolveScoreboardThemeJson({
+      themeJson: thema, sport: "VOLLEYBALL", status: "PREMATCH", templates: [ingebouwd],
+    });
+    expect(getekend).toBe(thema);
+  });
+
+  it("vraagt bij opslaan niets voor een regel die toch genegeerd wordt", () => {
+    const rules = [{ id: "r", sport: "VOLLEYBALL" as const, phase: "play" as const, templateId: "eigen" }];
+    const situation = { rules, sport: "VOLLEYBALL" as const };
+    // Vast frame over vrij plaatsen: de regel doet niets, dus de bibliotheek overschrijven slaat nergens op.
+    expect(layoutsToUpdateOnSave([{ layout: eigen({ layoutMode: "left-l" }) }], vrij, situation)).toEqual([]);
+    // Dezelfde regel met een vrije indeling slaat wel toe, en dan hoort de vraag er juist wel te zijn.
+    expect(layoutsToUpdateOnSave([{ layout: eigen() }], vrij, situation).map((l) => l.id)).toEqual(["eigen"]);
   });
 });

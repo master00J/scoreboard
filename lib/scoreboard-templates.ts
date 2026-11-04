@@ -1,4 +1,11 @@
-import { layoutRulesFromThemeJson, pickLayoutRule, pickLayoutRuleForPhase, type LayoutRule } from "./scoreboard-elements";
+import {
+  LAYOUT_PHASES,
+  layoutRulesFromThemeJson,
+  pickLayoutRule,
+  pickLayoutRuleForPhase,
+  type LayoutPhase,
+  type LayoutRule,
+} from "./scoreboard-elements";
 import {
   DEFAULT_SCOREBOARD_THEME,
   SLOT_PRESETS,
@@ -80,6 +87,69 @@ export type LayoutTemplateRef = {
   isBuiltIn?: boolean;
 };
 
+/** Waarom een regel de opgeslagen indeling niet vervangt. */
+export type LayoutRuleBlocked =
+  /** De gekozen indeling staat niet meer in de bibliotheek. */
+  | "missing"
+  /** Een meegeleverd voorbeeld; dat mag nooit over een eigen indeling heen. */
+  | "builtIn"
+  /** De club plaatste zelf vrij; een vast frame uit de bibliotheek wist dat ontwerp niet. */
+  | "freeform";
+
+export type LayoutRuleEffect = { applies: true } | { applies: false; blocked: LayoutRuleBlocked };
+
+/**
+ * Of een regel de opgeslagen indeling echt vervangt.
+ *
+ * Dit is de enige plek waar dat besloten wordt. Het stadionscherm, het overzicht in de editor,
+ * de waarschuwing en de vraag bij opslaan lezen allemaal hier: zo kan de uitleg in de editor niet
+ * meer iets anders beweren dan wat het scherm doet. Eerder raadde elk van die plekken apart, en
+ * alleen het scherm had gelijk.
+ */
+export function layoutRuleEffect(input: {
+  template: LayoutTemplateRef | null | undefined;
+  savedThemeJson: string | null | undefined;
+}): LayoutRuleEffect {
+  const { template } = input;
+  if (!template) return { applies: false, blocked: "missing" };
+  if (template.isBuiltIn) return { applies: false, blocked: "builtIn" };
+  const savedMode = mergeScoreboardTheme(input.savedThemeJson ?? null).layoutMode;
+  const templateMode = mergeScoreboardTheme(template.themeJson).layoutMode;
+  if (savedMode === "custom" && templateMode !== "custom") return { applies: false, blocked: "freeform" };
+  return { applies: true };
+}
+
+export type LayoutPhasePlan = {
+  phase: LayoutPhase;
+  /** De indeling waar de regel naar wijst, ook als die niets doet. Null = geen regel voor deze fase. */
+  layout: ScoreboardTemplate | null;
+  /** Wat het stadionscherm in deze fase werkelijk toont. */
+  shows: "editor" | "layout";
+  /** Gevuld wanneer er wél een regel is maar die niets doet. */
+  blocked: LayoutRuleBlocked | null;
+};
+
+/**
+ * Per fase wat het stadionscherm bij deze sport echt toont. Voedt zowel het overzicht als de
+ * waarschuwing in de editor, zodat die twee niet uit elkaar kunnen lopen.
+ */
+export function layoutPhasePlans(input: {
+  rules: readonly LayoutRule[];
+  sport: SportType;
+  layouts: readonly ScoreboardTemplate[];
+  savedThemeJson: string | null | undefined;
+}): LayoutPhasePlan[] {
+  return LAYOUT_PHASES.map((phase) => {
+    const rule = pickLayoutRuleForPhase([...input.rules], input.sport, phase);
+    if (!rule) return { phase, layout: null, shows: "editor" as const, blocked: null };
+    const layout = input.layouts.find((item) => item.id === rule.templateId) ?? null;
+    const effect = layoutRuleEffect({ template: layout, savedThemeJson: input.savedThemeJson });
+    return effect.applies
+      ? { phase, layout, shows: "layout" as const, blocked: null }
+      : { phase, layout, shows: "editor" as const, blocked: effect.blocked };
+  });
+}
+
 /**
  * Welke JSON het stadionscherm nu moet tekenen.
  * Een proef uit de editor wint. Een regel mag alleen een eigen clubindeling zetten,
@@ -100,11 +170,8 @@ export function resolveScoreboardThemeJson(opts: {
   });
   if (!rule) return themeJson;
   const template = (opts.templates ?? []).find((item) => item.id === rule.templateId);
-  if (!template || template.isBuiltIn) return themeJson;
-  const savedMode = mergeScoreboardTheme(themeJson).layoutMode;
-  const templateMode = mergeScoreboardTheme(template.themeJson).layoutMode;
-  if (savedMode === "custom" && templateMode !== "custom") return themeJson;
-  return applyTemplateToThemeJson(themeJson, template.themeJson);
+  if (!layoutRuleEffect({ template, savedThemeJson: themeJson }).applies) return themeJson;
+  return applyTemplateToThemeJson(themeJson, template!.themeJson);
 }
 
 /**
@@ -314,7 +381,10 @@ export function layoutsToUpdateOnSave(
   const seen = new Set<string>();
   const out: ScoreboardTemplate[] = [];
   for (const { layout } of overridden) {
-    if (layout.isBuiltIn || seen.has(layout.id)) continue;
+    if (seen.has(layout.id)) continue;
+    // Slaat de regel na dit opslaan uberhaupt toe? Zo niet, dan toont het scherm straks gewoon
+    // wat je bewaart en valt er niets te vragen.
+    if (!layoutRuleEffect({ template: layout, savedThemeJson: currentThemeJson }).applies) continue;
     if (!shownDuringPlay(layout.id, situation)) continue;
     if (sameVisualLayout(layout.themeJson, currentThemeJson)) continue;
     seen.add(layout.id);

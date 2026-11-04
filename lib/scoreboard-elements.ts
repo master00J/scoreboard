@@ -380,7 +380,8 @@ export function layoutRuleOverview(
 
 /**
  * De indeling die een nieuwe regel voorstelt: de eerste eigen indeling van de club. Een meegeleverd
- * voorbeeld kiezen we nooit vanzelf, want dat zet zonder waarschuwing een andere vormgeving op het scherm.
+ * voorbeeld stellen we nooit voor, want een regel die daarnaar wijst doet niets: `layoutRuleEffect`
+ * laat een voorbeeld nooit over een eigen indeling heen gaan.
  */
 export function defaultLayoutRuleTemplateId(layouts: readonly { id: string; isBuiltIn: boolean }[]): string | null {
   return layouts.find((layout) => !layout.isBuiltIn)?.id ?? null;
