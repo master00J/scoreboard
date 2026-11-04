@@ -93,7 +93,7 @@ describe("stadionscherm volgt de editor", () => {
     ).toBe(preview);
   });
 
-  it("laat een meegeleverde L-balk een opgeslagen vrije indeling niet overschrijven", () => {
+  it("voert een regel naar een meegeleverd voorbeeld gewoon uit", () => {
     const saved = JSON.stringify({
       layoutMode: "custom",
       layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "builtin_l" }],
@@ -106,10 +106,11 @@ describe("stadionscherm volgt de editor", () => {
         templates: [{ id: "builtin_l", themeJson: JSON.stringify({ layoutMode: "left-l" }), isBuiltIn: true }],
       }) ?? "{}",
     );
-    expect(resolved.layoutMode).toBe("custom");
+    // Wie dit bewust instelt, krijgt het. De editor legt vooraf uit wat de regel doet.
+    expect(resolved.layoutMode).toBe("left-l");
   });
 
-  it("laat een eigen L-balk een opgeslagen vrije indeling niet overschrijven", () => {
+  it("voert een regel naar een eigen L-balk uit, ook over een vrij geplaatste indeling", () => {
     const saved = JSON.stringify({
       layoutMode: "custom",
       layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "club_l" }],
@@ -122,7 +123,7 @@ describe("stadionscherm volgt de editor", () => {
         templates: [{ id: "club_l", themeJson: JSON.stringify({ layoutMode: "left-l" }), isBuiltIn: false }],
       }) ?? "{}",
     );
-    expect(resolved.layoutMode).toBe("custom");
+    expect(resolved.layoutMode).toBe("left-l");
   });
 
   it("past wel een eigen clubindeling uit een regel toe", () => {
@@ -312,50 +313,52 @@ describe("layoutRuleEffect — één bron voor scherm en uitleg", () => {
     themeJson: JSON.stringify({ layoutMode: "custom", frameColorTop: "#00ff00", ...over }),
   });
   const vrij = JSON.stringify({ layoutMode: "custom", frameColorTop: "#ff0000" });
-  const vast = JSON.stringify({ layoutMode: "left-l", frameColorTop: "#ff0000" });
 
-  it("laat een eigen indeling de opgeslagen indeling vervangen", () => {
+  it("voert elke regel uit die naar een bestaande indeling wijst", () => {
+    // Een regel die iemand bewust aanmaakt hoort te werken; daar dienen regels voor.
     expect(layoutRuleEffect({ template: eigen(), savedThemeJson: vrij })).toEqual({ applies: true });
-  });
-
-  it("blokkeert een ontbrekende, een meegeleverde, en een vast frame over vrij plaatsen", () => {
-    expect(layoutRuleEffect({ template: null, savedThemeJson: vrij })).toEqual({ applies: false, blocked: "missing" });
     expect(layoutRuleEffect({ template: { ...eigen(), isBuiltIn: true }, savedThemeJson: vrij })).toEqual({
-      applies: false, blocked: "builtIn",
+      applies: true,
     });
     expect(layoutRuleEffect({ template: eigen({ layoutMode: "left-l" }), savedThemeJson: vrij })).toEqual({
-      applies: false, blocked: "freeform",
-    });
-    // Zonder vrij plaatsen mag een vast frame wel.
-    expect(layoutRuleEffect({ template: eigen({ layoutMode: "left-l" }), savedThemeJson: vast })).toEqual({
       applies: true,
     });
   });
 
+  it("kan niets tonen als de gekozen indeling verdwenen is", () => {
+    expect(layoutRuleEffect({ template: null, savedThemeJson: vrij })).toEqual({ applies: false, blocked: "missing" });
+  });
+
   it("het overzicht zegt hetzelfde als wat het scherm tekent", () => {
-    // Meldingsgeval: regel naar een meegeleverd voorbeeld. Het overzicht beweerde dat dat voorbeeld
-    // getoond werd; het scherm toonde de bewerkte indeling. Nu komen ze uit dezelfde functie.
     const ingebouwd = { ...eigen(), isBuiltIn: true };
     const rules = [{ id: "r", sport: "VOLLEYBALL" as const, phase: "prematch" as const, templateId: "eigen" }];
     const thema = JSON.stringify({ layoutMode: "custom", frameColorTop: "#ff0000", layoutRules: rules });
 
     const plan = layoutPhasePlans({ rules, sport: "VOLLEYBALL", layouts: [ingebouwd], savedThemeJson: thema })
       .find((row) => row.phase === "prematch")!;
-    expect(plan.shows).toBe("editor");
-    expect(plan.blocked).toBe("builtIn");
+    expect(plan.shows).toBe("layout");
+    expect(plan.blocked).toBeNull();
 
     const getekend = resolveScoreboardThemeJson({
       themeJson: thema, sport: "VOLLEYBALL", status: "PREMATCH", templates: [ingebouwd],
     });
-    expect(getekend).toBe(thema);
+    expect(getekend).not.toBe(thema);
+    expect(mergeScoreboardTheme(getekend).frameColorTop).toBe("#00ff00");
   });
 
-  it("vraagt bij opslaan niets voor een regel die toch genegeerd wordt", () => {
+  it("een verdwenen indeling laat het overzicht de bewerkte indeling noemen", () => {
+    const rules = [{ id: "r", sport: "VOLLEYBALL" as const, phase: "play" as const, templateId: "weg" }];
+    const thema = JSON.stringify({ layoutMode: "custom", layoutRules: rules });
+    const plan = layoutPhasePlans({ rules, sport: "VOLLEYBALL", layouts: [], savedThemeJson: thema })
+      .find((row) => row.phase === "play")!;
+    expect(plan.shows).toBe("editor");
+    expect(plan.blocked).toBe("missing");
+  });
+
+  it("biedt bij opslaan geen meegeleverd voorbeeld aan: de server weigert dat te schrijven", () => {
     const rules = [{ id: "r", sport: "VOLLEYBALL" as const, phase: "play" as const, templateId: "eigen" }];
     const situation = { rules, sport: "VOLLEYBALL" as const };
-    // Vast frame over vrij plaatsen: de regel doet niets, dus de bibliotheek overschrijven slaat nergens op.
-    expect(layoutsToUpdateOnSave([{ layout: eigen({ layoutMode: "left-l" }) }], vrij, situation)).toEqual([]);
-    // Dezelfde regel met een vrije indeling slaat wel toe, en dan hoort de vraag er juist wel te zijn.
+    expect(layoutsToUpdateOnSave([{ layout: { ...eigen(), isBuiltIn: true } }], vrij, situation)).toEqual([]);
     expect(layoutsToUpdateOnSave([{ layout: eigen() }], vrij, situation).map((l) => l.id)).toEqual(["eigen"]);
   });
 });

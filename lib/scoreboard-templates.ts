@@ -89,12 +89,8 @@ export type LayoutTemplateRef = {
 
 /** Waarom een regel de opgeslagen indeling niet vervangt. */
 export type LayoutRuleBlocked =
-  /** De gekozen indeling staat niet meer in de bibliotheek. */
-  | "missing"
-  /** Een meegeleverd voorbeeld; dat mag nooit over een eigen indeling heen. */
-  | "builtIn"
-  /** De club plaatste zelf vrij; een vast frame uit de bibliotheek wist dat ontwerp niet. */
-  | "freeform";
+  /** De gekozen indeling staat niet meer in de bibliotheek. Het enige geval dat overblijft. */
+  "missing";
 
 export type LayoutRuleEffect = { applies: true } | { applies: false; blocked: LayoutRuleBlocked };
 
@@ -102,21 +98,21 @@ export type LayoutRuleEffect = { applies: true } | { applies: false; blocked: La
  * Of een regel de opgeslagen indeling echt vervangt.
  *
  * Dit is de enige plek waar dat besloten wordt. Het stadionscherm, het overzicht in de editor,
- * de waarschuwing en de vraag bij opslaan lezen allemaal hier: zo kan de uitleg in de editor niet
- * meer iets anders beweren dan wat het scherm doet. Eerder raadde elk van die plekken apart, en
- * alleen het scherm had gelijk.
+ * de waarschuwing en de vraag bij opslaan lezen allemaal hier, zodat de uitleg niet iets anders
+ * kan beweren dan wat het scherm doet.
+ *
+ * Een regel die iemand bewust aanmaakt, wordt uitgevoerd. Eerder weigerde het scherm stilletjes
+ * een meegeleverd voorbeeld, en ook een vast frame over een vrij geplaatste indeling. Dat was
+ * bedoeld als bescherming tegen een misklik, maar het negeerde een uitgesproken keuze en de
+ * dropdown bood die keuzes wel gewoon aan. De bescherming zit nu waar ze hoort: de editor legt
+ * vooraf uit wat een regel doet. Alleen een indeling die niet meer bestaat kan niets tonen.
  */
 export function layoutRuleEffect(input: {
   template: LayoutTemplateRef | null | undefined;
   savedThemeJson: string | null | undefined;
 }): LayoutRuleEffect {
-  const { template } = input;
-  if (!template) return { applies: false, blocked: "missing" };
-  if (template.isBuiltIn) return { applies: false, blocked: "builtIn" };
-  const savedMode = mergeScoreboardTheme(input.savedThemeJson ?? null).layoutMode;
-  const templateMode = mergeScoreboardTheme(template.themeJson).layoutMode;
-  if (savedMode === "custom" && templateMode !== "custom") return { applies: false, blocked: "freeform" };
-  return { applies: true };
+  void input.savedThemeJson;
+  return input.template ? { applies: true } : { applies: false, blocked: "missing" };
 }
 
 export type LayoutPhasePlan = {
@@ -382,8 +378,8 @@ export function layoutsToUpdateOnSave(
   const out: ScoreboardTemplate[] = [];
   for (const { layout } of overridden) {
     if (seen.has(layout.id)) continue;
-    // Slaat de regel na dit opslaan uberhaupt toe? Zo niet, dan toont het scherm straks gewoon
-    // wat je bewaart en valt er niets te vragen.
+    // Een meegeleverd voorbeeld toont het scherm wel, maar de server weigert het te overschrijven.
+    if (layout.isBuiltIn) continue;
     if (!layoutRuleEffect({ template: layout, savedThemeJson: currentThemeJson }).applies) continue;
     if (!shownDuringPlay(layout.id, situation)) continue;
     if (sameVisualLayout(layout.themeJson, currentThemeJson)) continue;
