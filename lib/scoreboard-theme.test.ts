@@ -260,15 +260,15 @@ describe("scoreboard theme personalization", () => {
   it("schrijft verwijderde layoutregels niet mee terug bij opslaan", () => {
     const leaked = {
       ...mergeScoreboardTheme(JSON.stringify({ layoutMode: "custom" })),
-      layoutRules: [{ id: "r", sport: "volleyball", phase: "play", templateId: "partitita" }],
+      layoutRules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "partitita" }],
     } as ReturnType<typeof mergeScoreboardTheme> & { layoutRules: unknown[] };
     const payload = scoreboardThemeSavePayload(leaked, { rules: [] });
     expect(payload.layoutRules).toBeUndefined();
     const kept = scoreboardThemeSavePayload(leaked, {
-      rules: [{ id: "r", sport: "volleyball", phase: "play", templateId: "partitita" }],
+      rules: [{ id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "partitita" }],
     });
     expect(kept.layoutRules).toEqual([
-      { id: "r", sport: "volleyball", phase: "play", templateId: "partitita" },
+      { id: "r", sport: "VOLLEYBALL", phase: "play", templateId: "partitita" },
     ]);
   });
 
