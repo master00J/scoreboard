@@ -1,6 +1,7 @@
 import http from "http";
 import { globalShortcut } from "electron";
-import { applyVideoInputSelection } from "../lib/livestream";
+import { applyScenePreview, takeScene } from "../lib/livestream";
+import { sceneInputId } from "../lib/stream-scenes";
 import {
   parseStreamDeckPath,
   STREAM_DECK_BINDINGS,
@@ -41,30 +42,21 @@ export function startStreamDeck(options: {
         return runAction(slot.action);
       }
       if (action.id === "input" || action.id === "preview") {
+        // Knop N = scène N. Na de overstap naar scènes is dat dezelfde volgorde als de bronnen.
         const settings = options.livestream.getSettings();
-        const input = settings.videoInputs[action.index - 1];
-        if (!input) return { ok: false, error: `Geen bron ${action.index}` };
+        const scene = settings.scenes[action.index - 1];
+        if (!scene) return { ok: false, error: `Geen scène ${action.index}` };
         if (action.id === "preview") {
-          options.livestream.saveSettings({ previewVideoInputId: input.id });
+          options.livestream.saveSettings(applyScenePreview(settings, scene.id));
         } else {
-          const nextPreview =
-            settings.videoInputs.find((item) => item.id !== input.id)?.id ?? input.id;
-          options.livestream.saveSettings({
-            ...applyVideoInputSelection(settings, input.id),
-            previewVideoInputId: nextPreview,
-          });
+          options.livestream.saveSettings(takeScene(settings, scene.id));
         }
         return { ok: true };
       }
       if (action.id === "cut") {
         const settings = options.livestream.getSettings();
-        const id = settings.previewVideoInputId || settings.activeVideoInputId;
-        const nextPreview =
-          settings.videoInputs.find((item) => item.id !== id)?.id ?? id;
-        options.livestream.saveSettings({
-          ...applyVideoInputSelection(settings, id),
-          previewVideoInputId: nextPreview,
-        });
+        const id = settings.previewSceneId || settings.activeSceneId;
+        options.livestream.saveSettings(takeScene(settings, id));
         return { ok: true };
       }
       if (action.id === "stream") {
@@ -136,11 +128,11 @@ export function startStreamDeck(options: {
       const status = options.livestream.getStatus();
       const programIndex = Math.max(
         1,
-        settings.videoInputs.findIndex((input) => input.id === settings.activeVideoInputId) + 1,
+        settings.scenes.findIndex((scene) => scene.id === settings.activeSceneId) + 1,
       );
       const previewIndex = Math.max(
         1,
-        settings.videoInputs.findIndex((input) => input.id === settings.previewVideoInputId) + 1,
+        settings.scenes.findIndex((scene) => scene.id === settings.previewSceneId) + 1,
       );
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -160,14 +152,18 @@ export function startStreamDeck(options: {
             action: slot.action,
             accelerator: STREAM_DECK_SLOT_ACCELERATORS[index] ?? "",
           })),
-          inputs: settings.videoInputs.map((input, index) => ({
-            index: index + 1,
-            id: input.id,
-            name: input.name,
-            kind: input.kind,
-            program: input.id === settings.activeVideoInputId,
-            preview: input.id === settings.previewVideoInputId,
-          })),
+          // Heet nog "inputs" voor de plug-in; elke knop is nu een scène.
+          inputs: settings.scenes.map((scene, index) => {
+            const input = settings.videoInputs.find((item) => item.id === sceneInputId(scene));
+            return {
+              index: index + 1,
+              id: scene.id,
+              name: scene.name || input?.name || "",
+              kind: input?.kind ?? "camera",
+              program: scene.id === settings.activeSceneId,
+              preview: scene.id === settings.previewSceneId,
+            };
+          }),
           bindings: STREAM_DECK_BINDINGS,
         }),
       );

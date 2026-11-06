@@ -15,6 +15,8 @@ import {
   resolveActiveVideoInput,
   resolvePreviewVideoInput,
   programSourceKey,
+  programSceneChanged,
+  pumpProgramLayer,
   videoInputPreviewKey,
   parseDshowAudioDevices,
   parseDshowVideoDevices,
@@ -74,6 +76,7 @@ import {
   transitionMix,
   type StreamTransitionKind,
 } from "../lib/stream-transition";
+import { layerPlacement, type StreamSceneLayer } from "../lib/stream-scenes";
 import { naudioHelperCandidates } from "../lib/naudio-helper";
 import { sendZmqReq } from "./zmq-req";
 import { createBrowserAudioTap, type BrowserAudioTap } from "./browser-source-audio";
@@ -565,6 +568,8 @@ export function createLivestreamController(deps: Deps): LivestreamController {
   let programPump: {
     hold: () => void;
     switchTo: (win: BrowserWindow, kind: StreamTransitionKind, durationMs: number, card: Buffer | null) => void;
+    /** Zelfde bron, andere scène (bv. ingezoomd): overgang zonder de bron opnieuw te openen. */
+    restyle: (kind: StreamTransitionKind, durationMs: number, card: Buffer | null) => void;
   } | null = null;
   let sourcePreviewCleanup: (() => void) | null = null;
   let sourcePreviewGen = 0;
@@ -973,6 +978,8 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       card: Buffer | null;
       requestedAt: number;
       startedAt: number | null;
+      /** Wachten op een niet-zwart beeld (een camera die opstart). Niet bij dezelfde bron in een ander kader. */
+      waitForPicture: boolean;
     } | null = null;
 
     let win: BrowserWindow | null = null;
@@ -992,6 +999,12 @@ export function createLivestreamController(deps: Deps): LivestreamController {
      * met een andere verhouding (een breed LED-scherm) krijgt zwarte randen, zoals ffmpeg dat deed.
      */
     const toFrameBuffer = (image: Electron.NativeImage): Buffer => {
+      // Kader uit de scène (website, mediabestand, LED). Zonder kader: precies zoals vroeger.
+      const layer = pumpProgramLayer(settings);
+      return layer ? framedFrameBuffer(image, layer) : plainFrameBuffer(image);
+    };
+
+    const plainFrameBuffer = (image: Electron.NativeImage): Buffer => {
       const size = image.getSize();
       if (size.width === width && size.height === height) return image.toBitmap();
       const rect = letterboxRect(size.width, size.height, width, height);
@@ -1003,6 +1016,47 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       const fittedSize = fitted.getSize();
       placeBgra(canvas, width, fitted.toBitmap(), fittedSize.width, fittedSize.height, rect.x, rect.y);
       return canvas;
+    };
+
+    /**
+     * Bron in het kader van zijn scènelaag: bijsnijden en schalen doet Electron (Skia), wij kopiëren
+     * alleen rijen op het zwarte canvas. Gaat er iets mis, dan het beeld zoals zonder kader: liever
+     * een onbewerkt beeld dan een gat in de stream.
+     */
+    const framedFrameBuffer = (image: Electron.NativeImage, layer: StreamSceneLayer): Buffer => {
+      const canvas = Buffer.alloc(width * height * 4);
+      if (!layer.visible) return canvas;
+      try {
+        const size = image.getSize();
+        const placed = layerPlacement(size.width, size.height, layer, width, height);
+        if (!placed) return canvas;
+        const { src, dst } = placed;
+        let piece =
+          src.x === 0 && src.y === 0 && src.w === size.width && src.h === size.height
+            ? image
+            : image.crop({ x: src.x, y: src.y, width: src.w, height: src.h });
+        const pieceSize = piece.getSize();
+        if (pieceSize.width !== dst.w || pieceSize.height !== dst.h) {
+          piece = piece.resize({ width: dst.w, height: dst.h, quality: "good" });
+        }
+        const fitted = piece.getSize();
+        const w = Math.min(fitted.width, width - dst.x);
+        const h = Math.min(fitted.height, height - dst.y);
+        if (w <= 0 || h <= 0) return canvas;
+        const bitmap = piece.toBitmap();
+        if (w === fitted.width) {
+          placeBgra(canvas, width, bitmap, w, h, dst.x, dst.y);
+        } else {
+          // Skia rondde een pixel naar boven af: rij voor rij, alleen wat in beeld past.
+          for (let row = 0; row < h; row++) {
+            const from = row * fitted.width * 4;
+            bitmap.copy(canvas, ((dst.y + row) * width + dst.x) * 4, from, from + w * 4);
+          }
+        }
+        return canvas;
+      } catch {
+        return plainFrameBuffer(image);
+      }
     };
 
     /** Het beeld dat nu naar ffmpeg moet: de bron, of tijdens een overgang een mengbeeld. */
@@ -1061,7 +1115,11 @@ export function createLivestreamController(deps: Deps): LivestreamController {
               // Een camera die opstart, levert eerst zwart (ook na zijn "klaar"-melding). Blijf het
               // oude beeld tonen tot er echt beeld is, anders vloeit de overgang naar zwart.
               const waitedMs = now - transition.requestedAt;
-              if (!isNearlyBlackBgra(frame) || waitedMs >= TRANSITION_WAIT_FOR_PICTURE_MS) {
+              if (
+                !transition.waitForPicture ||
+                !isNearlyBlackBgra(frame) ||
+                waitedMs >= TRANSITION_WAIT_FOR_PICTURE_MS
+              ) {
                 sourceBuf = frame;
                 transition.startedAt = now;
               }
@@ -1199,13 +1257,44 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         const from = lastBuf ?? sourceBuf;
         // Ook een cut gaat via de overgang (met duur 0): zo wacht ook die op echt beeld van de nieuwe bron.
         transition = from
-          ? { kind, durationMs: kind === "cut" ? 0 : durationMs, from, card, requestedAt: performance.now(), startedAt: null }
+          ? {
+              kind,
+              durationMs: kind === "cut" ? 0 : durationMs,
+              from,
+              card,
+              requestedAt: performance.now(),
+              startedAt: null,
+              waitForPicture: true,
+            }
           : null;
         sourceBuf = transition ? null : sourceBuf;
         latest = null;
         latestSent = true;
         attachSource(next);
         deps.log(`[livestream] bron gewisseld zonder herstart (${kind}${kind === "cut" ? "" : ` ${durationMs} ms`})`);
+      },
+      restyle: (kind, durationMs, card) => {
+        const current = win;
+        if (!current || current.isDestroyed()) return;
+        const from = lastBuf ?? sourceBuf;
+        // Het eerste nieuwe beeld heeft het kader van de nieuwe scène (CSS in de pagina, of
+        // pumpProgramLayer hier); vanaf dat beeld loopt de overgang.
+        transition = from
+          ? {
+              kind,
+              durationMs: kind === "cut" ? 0 : durationMs,
+              from,
+              card,
+              requestedAt: performance.now(),
+              startedAt: null,
+              waitForPicture: false,
+            }
+          : null;
+        sourceBuf = transition ? null : sourceBuf;
+        latest = null;
+        latestSent = true;
+        attachSource(current);
+        deps.log(`[livestream] scène gewisseld, zelfde bron (${kind}${kind === "cut" ? "" : ` ${durationMs} ms`})`);
       },
     };
 
@@ -1927,6 +2016,15 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     if (encoding() && programSourceKey(settings) !== target) void switchProgramLive();
   };
 
+  /** Andere scène met dezelfde bron: alleen het kader verandert, met de gekozen overgang. */
+  const restyleProgramLive = async () => {
+    if (!encoding() || !programPump) return;
+    const outSize = resolutionSize(settings.resolution);
+    const kind = settings.transition;
+    const card = kind === "logo" ? await transitionCard(outSize).catch(() => null) : null;
+    programPump?.restyle(kind, settings.transitionMs, card);
+  };
+
   const applyLiveGains = async (next: LivestreamSettings) => {
     if (!encoding() || !ffmpegAlive()) return;
     for (const cmd of audioGainCommands(next)) {
@@ -1955,11 +2053,15 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         videoInputPreviewKey(resolvePreviewVideoInput(prev)) !==
         videoInputPreviewKey(resolvePreviewVideoInput(settings));
       const sourceChanged = programChanged || previewChanged;
+      const sceneChanged = programSceneChanged(prev, settings);
       if (
         streamOverlayChanged(prev, settings) ||
         sourceChanged ||
         prev.activeVideoInputId !== settings.activeVideoInputId ||
         prev.previewVideoInputId !== settings.previewVideoInputId ||
+        sceneChanged ||
+        prev.previewSceneId !== settings.previewSceneId ||
+        JSON.stringify(prev.scenes) !== JSON.stringify(settings.scenes) ||
         JSON.stringify(prev.streamDeckSlots) !== JSON.stringify(settings.streamDeckSlots)
       ) {
         emitSettings();
@@ -1978,6 +2080,10 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       } else if (encoding() && programChanged && !switchingSource) {
         void switchProgramLive();
         if (gainsChanged) void applyLiveGains(settings);
+      } else if (encoding() && sceneChanged && !switchingSource) {
+        void restyleProgramLive();
+        if (gainsChanged) void applyLiveGains(settings);
+        if (previewChanged) void syncBrowserPreview();
       } else if (encoding() && switchingSource) {
         // Loopt er al een wissel: die kijkt aan het eind of de bron intussen weer veranderde.
         if (gainsChanged) void applyLiveGains(settings);

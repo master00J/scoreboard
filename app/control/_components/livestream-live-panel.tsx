@@ -5,13 +5,13 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { isElectron } from "@/lib/electron";
 import {
-  applyVideoInputSelection,
   audioDeviceLabel,
   DEFAULT_LIVESTREAM_HEALTH,
   DEFAULT_LIVESTREAM_SETTINGS,
   DEFAULT_LIVESTREAM_STATUS,
   mergeLivestreamSettings,
   sourceAudioDevices,
+  takeScene,
   type LivestreamAudioDevice,
   type LivestreamSettings,
   type LivestreamStatus,
@@ -20,7 +20,8 @@ import {
 import { streamFallingBehind } from "@/lib/livestream-bitrate";
 import { enumerateAudioCaptureOptions, mergeAudioDeviceLists } from "@/lib/enumerate-audio-capture-options";
 import { useWallClockMs } from "@/lib/use-wall-clock-tick";
-import { videoInputReady, videoKindLabel } from "@/app/control/_components/livestream-studio";
+import { sceneLabel, videoInputReady } from "@/app/control/_components/livestream-studio";
+import { sceneInputId, type StreamScene } from "@/lib/stream-scenes";
 import { LivestreamAudioMixer } from "@/app/control/_components/livestream-audio-mixer";
 import { StreamOverlaySwitch } from "@/app/control/_components/stream-overlay-switch";
 
@@ -132,19 +133,14 @@ export function LivestreamLivePanel({
   const fpsLow = status.running && health.fps != null && health.targetFps > 0 && health.fps < health.targetFps * 0.85;
   const startedMs = status.startedAt ? Date.parse(status.startedAt) : NaN;
 
-  const take = (input: LivestreamVideoInput) => {
-    if (busy || input.id === settings.activeVideoInputId) return;
-    if (!videoInputReady(input)) {
+  const take = (scene: StreamScene, input: LivestreamVideoInput | undefined) => {
+    if (busy || scene.id === settings.activeSceneId) return;
+    if (!input || !videoInputReady(input)) {
       onOpenStudio();
       return;
     }
-    // Zoals in de studio: de vorige bron wordt de volgende in de wachtrij (preview).
-    const nextPreview =
-      settings.videoInputs.find((item) => item.id !== input.id && videoInputReady(item))?.id ?? input.id;
-    void window.electronAPI?.saveLivestreamSettings?.({
-      ...applyVideoInputSelection(settings, input.id),
-      previewVideoInputId: nextPreview,
-    });
+    // Zoals in de studio: een andere bruikbare scène komt klaar te staan (preview).
+    void window.electronAPI?.saveLivestreamSettings?.(takeScene(settings, scene.id, videoInputReady));
   };
 
   const start = async () => {
@@ -236,18 +232,19 @@ export function LivestreamLivePanel({
       </div>
 
       <div className="flex flex-wrap gap-1" role="group" aria-label={t("livestream.livePanelSources")}>
-        {settings.videoInputs.map((input, index) => {
-          const on = input.id === settings.activeVideoInputId;
-          const ready = videoInputReady(input);
-          const label = input.name.trim() || videoKindLabel(input.kind, t, true, input.cameraDevice);
+        {settings.scenes.map((scene, index) => {
+          const input = settings.videoInputs.find((item) => item.id === sceneInputId(scene));
+          const on = scene.id === settings.activeSceneId;
+          const ready = Boolean(input && videoInputReady(input));
+          const label = sceneLabel(scene, input, t);
           return (
             <button
-              key={input.id}
+              key={scene.id}
               type="button"
               aria-pressed={on}
               disabled={busy}
               title={ready ? t("livestream.livePanelTake", { name: label }) : t("livestream.switcherNeedsSetup")}
-              onClick={() => take(input)}
+              onClick={() => take(scene, input)}
               className={`h-9 min-w-[3rem] max-w-[9rem] truncate rounded-md px-2.5 text-[11px] font-bold ${
                 on
                   ? status.running
