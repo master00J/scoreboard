@@ -7,6 +7,17 @@ import { signFileWithAzure } from "./azure-trusted-sign.mjs";
  * (signAndEditExecutable blijft false i.v.m. symlink-rechten op Windows).
  * Azure Artifact Signing gebeurt hierna, als credentials aanwezig zijn.
  */
+/** Alleen het cijferdeel, aangevuld tot a.b.c.d zoals de Windows-versiebron verwacht. */
+function numericFileVersion(version) {
+  const parts = String(version)
+    .split("-")[0]
+    .split(".")
+    .map((part) => Number.parseInt(part, 10))
+    .filter((part) => Number.isFinite(part));
+  while (parts.length < 4) parts.push(0);
+  return parts.slice(0, 4).join(".");
+}
+
 export default async function afterPack(context) {
   if (context.electronPlatformName !== "win32") return;
 
@@ -17,7 +28,9 @@ export default async function afterPack(context) {
 
   await rcedit(exePath, {
     icon: iconPath,
-    "file-version": version,
+    // Windows wil hier alleen cijfers. Een staging-build heet 0.1.54-staging.7, en dat zou
+    // rcedit laten struikelen; het volledige nummer blijft in product-version staan.
+    "file-version": numericFileVersion(version),
     "product-version": version,
     "version-string": {
       CompanyName: "ArenaCue",
