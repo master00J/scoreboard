@@ -1699,11 +1699,16 @@
     "layerBrightness": "Luminosità",
     "layerContrast": "Contrasto",
     "layerSaturation": "Saturazione",
-    "layerColorUnsupported": "Per ora colore e opacità funzionano solo con telecamere e sorgenti di rete.",
+    "layerColorUnsupported": "Colore e opacità funzionano con telecamere e sorgenti di rete, e con i file multimediali come livello in una scena con più sorgenti.",
     "layerReset": "Ripristina",
     "layers": "Livelli",
     "layerUp": "Porta avanti",
-    "layerDown": "Porta indietro"
+    "layerDown": "Porta indietro",
+    "layerAdd": "+ Aggiungi livello…",
+    "layerRemove": "Rimuovi livello",
+    "layerAddBlocked": "Un sito web o lo schermo LED non può ancora essere un livello accanto ad altre sorgenti.",
+    "layerAddFull": "Questa scena ha il numero massimo di livelli.",
+    "sceneLayerCount": "{{count}} livelli"
   },
   "update": {
     "available": "Nuova versione disponibile",

@@ -219,16 +219,76 @@ export function resolveSceneSelection(
   const byId = (id: unknown) => (typeof id === "string" ? scenes.find((scene) => scene.id === id) : undefined);
   const requestedActive = byId(opts.activeSceneId);
   const active =
-    (requestedActive && sceneInputId(requestedActive) === opts.activeInputId ? requestedActive : undefined) ??
+    (requestedActive && sceneHasInput(requestedActive, opts.activeInputId) ? requestedActive : undefined) ??
     scenes.find((scene) => sceneInputId(scene) === opts.activeInputId) ??
     scenes[0];
   const requestedPreview = byId(opts.previewSceneId);
   const preview =
-    (requestedPreview && sceneInputId(requestedPreview) === opts.previewInputId ? requestedPreview : undefined) ??
+    (requestedPreview && sceneHasInput(requestedPreview, opts.previewInputId) ? requestedPreview : undefined) ??
     scenes.find((scene) => scene.id !== active?.id && sceneInputId(scene) === opts.previewInputId) ??
     scenes.find((scene) => sceneInputId(scene) === opts.previewInputId) ??
     scenes.find((scene) => scene.id !== active?.id);
   return { activeSceneId: active?.id ?? "", previewSceneId: preview?.id ?? "" };
+}
+
+/** Komt deze bron ergens in de scène voor (ook als beeld-in-beeld)? */
+export function sceneHasInput(scene: StreamScene, inputId: string): boolean {
+  return Boolean(inputId) && scene.layers.some((layer) => layer.inputId === inputId);
+}
+
+/**
+ * Een scène met meer dan één laag tekent de streampagina helemaal zelf (beeld-in-beeld). Een scène
+ * met één laag blijft zoals in fase 1: de bron opent zoals altijd, met hooguit een kader.
+ */
+export function sceneIsComposite(scene: StreamScene | null | undefined): boolean {
+  return Boolean(scene && scene.layers.length > 1);
+}
+
+/**
+ * Bronnen die de streampagina zelf kan tekenen. Een website en het LED-scherm hebben een eigen
+ * venster en kunnen (nog) geen laag naast een andere bron zijn.
+ */
+export const LAYER_KINDS_IN_PAGE = ["camera", "media", "network"] as const;
+
+export function layerKindInPage(kind: string): boolean {
+  return (LAYER_KINDS_IN_PAGE as readonly string[]).includes(kind);
+}
+
+/** Waar een nieuwe laag komt: rechtsonder, een derde van het beeld, zoals beeld-in-beeld in OBS. */
+export const PIP_RECT: StreamLayerRect = { x: 66, y: 62, w: 30, h: 30 };
+
+/**
+ * Kan deze bron als extra laag in de scène? Alleen soorten die de pagina tekent, en één netwerkbron
+ * per scène (er draait één ontvanger).
+ */
+export function canAddSceneLayer(
+  scene: StreamScene,
+  input: { id: string; kind: string },
+  kindOf: (inputId: string) => string | undefined,
+): boolean {
+  if (scene.layers.length >= STREAM_SCENE_LAYER_LIMIT) return false;
+  if (!layerKindInPage(input.kind)) return false;
+  if (!scene.layers.every((layer) => layerKindInPage(kindOf(layer.inputId) ?? ""))) return false;
+  if (input.kind === "network") {
+    const networks = new Set(
+      scene.layers.filter((layer) => kindOf(layer.inputId) === "network").map((layer) => layer.inputId),
+    );
+    if (networks.size > 0 && !networks.has(input.id)) return false;
+  }
+  return true;
+}
+
+/** Nieuwe laag bovenop, als beeld-in-beeld. */
+export function addSceneLayer(scene: StreamScene, inputId: string): { scene: StreamScene; layerId: string } {
+  const layer = createSceneLayer({ inputId, rect: PIP_RECT });
+  return { scene: { ...scene, layers: [...scene.layers, layer] }, layerId: layer.id };
+}
+
+/** Laag weg; de laatste laag van een scène blijft. */
+export function removeSceneLayer(scene: StreamScene, layerId: string): StreamScene {
+  if (scene.layers.length <= 1) return scene;
+  const layers = scene.layers.filter((layer) => layer.id !== layerId);
+  return layers.length === scene.layers.length ? scene : { ...scene, layers };
 }
 
 /** Zelfde als `moveElementLayer` in de scorebord-editor: +1 = een laag naar voren (hoger). */
@@ -296,7 +356,9 @@ export function layerIsIdentity(layer: StreamSceneLayer | null | undefined): boo
  * Kleurfilters en dekking kan alleen de streampagina (op de GPU): camera en netwerkbron. In de
  * beeldpomp kost het 11–16 ms per 1080p-beeld op de hoofddraad, te veel voor een vloeiende stream.
  */
-export function layerColorSupported(kind: string): boolean {
+export function layerColorSupported(kind: string, composite = false): boolean {
+  // In een beeld-in-beeld-scène tekent de pagina ook mediabestanden, dus ook daar met de GPU.
+  if (composite) return layerKindInPage(kind);
   return kind === "camera" || kind === "network";
 }
 

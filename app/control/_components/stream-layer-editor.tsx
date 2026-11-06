@@ -33,11 +33,16 @@ export function StreamLayerEditor({
   layer,
   live,
   onChange,
+  others = [],
+  onSelect,
 }: {
   layer: StreamSceneLayer;
   /** Deze monitor is wat er nu de stream in gaat. */
   live: boolean;
   onChange: (patch: StreamLayerPatch, commit: boolean) => void;
+  /** De andere lagen van de scène: een stippellijn, aanklikken om die te bewerken. */
+  others?: StreamSceneLayer[];
+  onSelect?: (layerId: string) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -113,6 +118,24 @@ export function StreamLayerEditor({
       data-stream-layer-editor
       onDoubleClick={(event) => event.stopPropagation()}
     >
+      {others.map((other) => (
+        <div
+          key={other.id}
+          className="pointer-events-auto absolute cursor-pointer border border-dashed border-white/60 hover:border-white"
+          style={{
+            left: `${other.rect.x}%`,
+            top: `${other.rect.y}%`,
+            width: `${other.rect.w}%`,
+            height: `${other.rect.h}%`,
+          }}
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+            onSelect?.(other.id);
+          }}
+        />
+      ))}
       <div
         role="application"
         tabIndex={0}
@@ -191,6 +214,10 @@ export function StreamLayerPanel({
   onMoveLayer,
   onReset,
   onClose,
+  addableSources,
+  addHint,
+  onAddLayer,
+  onRemoveLayer,
 }: {
   scene: StreamScene;
   layer: StreamSceneLayer;
@@ -205,6 +232,12 @@ export function StreamLayerPanel({
   onMoveLayer: (layerId: string, delta: 1 | -1) => void;
   onReset: () => void;
   onClose: () => void;
+  /** Bronnen die als beeld-in-beeld bovenop kunnen. */
+  addableSources: { id: string; label: string }[];
+  /** Waarom er (nu) niets bij kan, of leeg. */
+  addHint?: string;
+  onAddLayer: (inputId: string) => void;
+  onRemoveLayer: (layerId: string) => void;
 }) {
   const cropSides = ["top", "right", "bottom", "left"] as const;
   return (
@@ -337,9 +370,30 @@ export function StreamLayerPanel({
           ) : null}
         </div>
       </div>
-      {scene.layers.length > 1 ? (
-        <div className="flex flex-col gap-0.5 border-t border-border pt-1.5 text-[10px] text-muted-foreground">
-          {t("livestream.layers")}
+      <div className="flex flex-col gap-0.5 border-t border-border pt-1.5 text-[10px] text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2">
+          <span>{t("livestream.layers")}</span>
+          {addableSources.length > 0 ? (
+            <select
+              aria-label={t("livestream.layerAdd")}
+              className="h-6 rounded border border-border bg-background px-1 text-[11px] text-foreground"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) onAddLayer(e.target.value);
+              }}
+            >
+              <option value="">{t("livestream.layerAdd")}</option>
+              {addableSources.map((source) => (
+                <option key={source.id} value={source.id}>
+                  {source.label}
+                </option>
+              ))}
+            </select>
+          ) : null}
+          {addHint ? <span className="min-w-0 flex-1 truncate">{addHint}</span> : null}
+        </div>
+        {scene.layers.length > 1 ? (
+          <>
           {/* Bovenste laag eerst, zoals in de scorebord-editor; opgeslagen staat de onderste eerst. */}
           {[...scene.layers].reverse().map((item, index, list) => (
             <div
@@ -371,10 +425,20 @@ export function StreamLayerPanel({
               >
                 ↓
               </button>
+              <button
+                type="button"
+                aria-label={t("livestream.layerRemove")}
+                title={t("livestream.layerRemove")}
+                onClick={() => onRemoveLayer(item.id)}
+                className="h-5 w-5 rounded bg-zinc-800 hover:bg-red-700 hover:text-white"
+              >
+                ×
+              </button>
             </div>
           ))}
-        </div>
-      ) : null}
+          </>
+        ) : null}
+      </div>
     </div>
   );
 }

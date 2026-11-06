@@ -33,7 +33,9 @@ import {
   mergeStreamScenes,
   migrateScenes,
   resolveSceneSelection,
+  sceneHasInput,
   sceneInputId,
+  sceneIsComposite,
   sceneMainLayer,
   type StreamScene,
   type StreamSceneLayer,
@@ -707,8 +709,13 @@ export function videoInputPreviewKey(input: LivestreamVideoInput | null | undefi
  * alleen het voorbeeld, dan blijft de stream ongemoeid.
  */
 export function programSourceKey(
-  settings: Pick<LivestreamSettings, "source" | "cameraDevice" | "videoInputs" | "activeVideoInputId">,
+  settings: Pick<LivestreamSettings, "source" | "cameraDevice" | "videoInputs" | "activeVideoInputId"> &
+    Partial<Pick<LivestreamSettings, "scenes" | "activeSceneId">>,
 ): string {
+  // Beeld-in-beeld: de streampagina tekent alle lagen. Opnieuw openen alleen als er een andere bron
+  // bij komt of af gaat; lagen verschuiven of een andere scène met dezelfde bronnen is een kader.
+  const scene = settings.scenes ? programScene(settings as Parameters<typeof programScene>[0]) : null;
+  if (scene && sceneIsComposite(scene)) return `scene|${compositeSourceSignature(scene, settings.videoInputs)}`;
   const input = settings.videoInputs.find((item) => item.id === settings.activeVideoInputId) ?? settings.videoInputs[0];
   const camera = settings.source === "camera" ? settings.cameraDevice : "";
   const browser = settings.source === "browser" ? (input?.browserUrl ?? "") : "";
@@ -790,7 +797,10 @@ export function pumpProgramLayer(
   settings: Pick<LivestreamSettings, "source" | "scenes" | "activeSceneId" | "activeVideoInputId">,
 ): StreamSceneLayer | null {
   if (settings.source === "camera" || settings.source === "network") return null;
-  const layer = sceneMainLayer(programScene(settings));
+  const scene = programScene(settings);
+  // Beeld-in-beeld tekent de streampagina; de pomp neemt dat beeld zoals het is.
+  if (sceneIsComposite(scene)) return null;
+  const layer = sceneMainLayer(scene);
   return layer && !layerFramingIsIdentity(layer) ? layer : null;
 }
 
@@ -802,8 +812,32 @@ export function programScene(
   settings: Pick<LivestreamSettings, "scenes" | "activeSceneId" | "activeVideoInputId">,
 ): StreamScene | null {
   const active = settings.scenes.find((scene) => scene.id === settings.activeSceneId);
-  if (active && sceneInputId(active) === settings.activeVideoInputId) return active;
+  if (active && sceneHasInput(active, settings.activeVideoInputId)) return active;
   return settings.scenes.find((scene) => sceneInputId(scene) === settings.activeVideoInputId) ?? null;
+}
+
+/** Welke bronnen een beeld-in-beeld-scène opent; de volgorde van de lagen telt niet. */
+export function compositeSourceSignature(scene: StreamScene, inputs: LivestreamVideoInput[]): string {
+  const keys = new Set<string>();
+  for (const layer of scene.layers) {
+    const input = inputs.find((item) => item.id === layer.inputId);
+    if (!input) continue;
+    if (input.kind === "camera") keys.add(`camera:${input.cameraDevice}`);
+    else if (input.kind === "network") keys.add(`network:${input.networkUrl}`);
+    else if (input.kind === "media") keys.add(`media:${input.mediaPath}:${input.mediaLoop ? 1 : 0}`);
+    else keys.add(`${input.kind}:${input.id}`);
+  }
+  return [...keys].sort().join(",");
+}
+
+/** Het adres van de netwerkbron in een beeld-in-beeld-scène (er draait één ontvanger), of "". */
+export function compositeNetworkUrl(scene: StreamScene | null, inputs: LivestreamVideoInput[]): string {
+  if (!scene) return "";
+  for (const layer of scene.layers) {
+    const input = inputs.find((item) => item.id === layer.inputId);
+    if (input?.kind === "network" && input.networkUrl.trim()) return input.networkUrl.trim();
+  }
+  return "";
 }
 
 /** De laag die de streampagina toont: van de live scène, of `null` als de bron gewoon het beeld vult. */
