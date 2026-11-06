@@ -2,6 +2,7 @@ import { spawn, type ChildProcessByStdio } from "node:child_process";
 import type { Readable } from "node:stream";
 import { guardChildPipes } from "../lib/child-pipe";
 import {
+  NETWORK_SOURCE_SILENCE_MS,
   NETWORK_SOURCE_STALL_MS,
   maskNetworkUrl,
   networkSourceErrorIsFatal,
@@ -70,6 +71,7 @@ export function createNetworkSource(deps: NetworkSourceDeps): NetworkSourceContr
   let receiving = false;
   let retryTimer: NodeJS.Timeout | null = null;
   let stallTimer: NodeJS.Timeout | null = null;
+  let silenceTimer: NodeJS.Timeout | null = null;
   let stderrTail = "";
   /** Tegen een lus wanneer de pagina blijft vragen terwijl het probleem elders zit. */
   let initRestarts = 0;
@@ -97,6 +99,10 @@ export function createNetworkSource(deps: NetworkSourceDeps): NetworkSourceContr
       clearTimeout(stallTimer);
       stallTimer = null;
     }
+    if (silenceTimer) {
+      clearTimeout(silenceTimer);
+      silenceTimer = null;
+    }
   };
 
   const killChild = () => {
@@ -110,8 +116,20 @@ export function createNetworkSource(deps: NetworkSourceDeps): NetworkSourceContr
     }
   };
 
-  /** Komt er niets meer door, dan hangt de verbinding: afbreken en opnieuw proberen. */
+  /**
+   * Twee klokken op dezelfde stilte. De korte vertelt de bediening dat er geen beeld is; de lange
+   * besluit dat de verbinding hangt en begint opnieuw. Bij UDP valt de zender weg zonder dat ffmpeg
+   * stopt, dus zonder deze klokken zou de studio "beeld" blijven melden bij een zwart scherm.
+   */
   const armStall = () => {
+    if (silenceTimer) clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => {
+      if (!wanted || !receiving) return;
+      receiving = false;
+      error = "Geen beeld van de bron…";
+      deps.log("[netwerkbron] stilte op de lijn — nog geen herstart");
+      emitStatus();
+    }, NETWORK_SOURCE_SILENCE_MS);
     if (stallTimer) clearTimeout(stallTimer);
     stallTimer = setTimeout(() => {
       if (!wanted) return;

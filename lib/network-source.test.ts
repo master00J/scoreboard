@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   NETWORK_SOURCE_H264_CODEC,
+  NETWORK_SOURCE_SILENCE_MS,
+  NETWORK_SOURCE_STALL_MS,
   isSafeNetworkUrl,
   listensForIncoming,
   maskNetworkUrl,
@@ -129,6 +131,12 @@ describe("herstel", () => {
     expect(networkSourceErrorIsFatal("401 Unauthorized")).toBe(true);
     expect(networkSourceErrorIsFatal("Protocol not found")).toBe(true);
     expect(networkSourceErrorIsFatal("Connection timed out")).toBe(false);
+  });
+
+  it("meldt stilte eerder dan het herstarten, want UDP valt weg zonder dat ffmpeg stopt", () => {
+    // Bij een multicast die even hapert stopt ffmpeg niet: er komt alleen niets meer. De
+    // bediening moet dat zien, terwijl een gezonde ffmpeg nog de kans krijgt zelf door te gaan.
+    expect(NETWORK_SOURCE_SILENCE_MS).toBeLessThan(NETWORK_SOURCE_STALL_MS);
   });
 
   it("wacht langer na elke mislukte poging, tot 15 seconden", () => {

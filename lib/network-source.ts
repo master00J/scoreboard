@@ -221,8 +221,17 @@ export function networkSourceErrorIsFatal(text: string): boolean {
 /**
  * Komt er zo lang niets door de pijp, dan hangt de verbinding: afbreken en opnieuw. Dekt het geval
  * waarvoor een ffmpeg-tijdslimiet bedoeld is, zonder af te hangen van hoe die optie in deze build heet.
+ *
+ * Ruim genomen, want bij UDP stopt ffmpeg niet als de zender wegvalt: er komt gewoon niets meer.
+ * Een multicast die twee seconden hapert mag geen herstart kosten.
  */
 export const NETWORK_SOURCE_STALL_MS = 10_000;
+
+/**
+ * Zo snel zegt de bediening dat er geen beeld is. Korter dan de herstart hierboven: de operator
+ * hoort de waarheid te zien terwijl een gezonde ffmpeg nog de kans krijgt om zelf door te gaan.
+ */
+export const NETWORK_SOURCE_SILENCE_MS = 2000;
 
 /** Wachttijd voor de volgende poging: 1, 2, 4, 8, dan 15 seconden. */
 export function networkSourceRetryDelayMs(attempt: number): number {
