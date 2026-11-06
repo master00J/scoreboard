@@ -28,6 +28,16 @@ import {
   parseStreamTransition,
   type StreamTransitionKind,
 } from "./stream-transition";
+import {
+  layerFramingIsIdentity,
+  mergeStreamScenes,
+  migrateScenes,
+  resolveSceneSelection,
+  sceneInputId,
+  sceneMainLayer,
+  type StreamScene,
+  type StreamSceneLayer,
+} from "./stream-scenes";
 
 export type { StreamScoreWidgetDesign, StreamScoreWidgetSettings };
 export { mergeStreamScoreWidget, sixteenByNineScaleFilter } from "./stream-score-widget";
@@ -226,6 +236,14 @@ export type LivestreamSettings = {
   videoInputs: LivestreamVideoInput[];
   activeVideoInputId: string;
   previewVideoInputId: string;
+  /**
+   * Scènes zoals in OBS: wat live gaat is een scène, niet meer één bron. Opstellingen van daarvoor
+   * krijgen één scène per bron met een laag over het hele beeld, dus hetzelfde beeld.
+   * `activeVideoInputId` en `previewVideoInputId` blijven de bron van de hoofdlaag van die scènes.
+   */
+  scenes: StreamScene[];
+  activeSceneId: string;
+  previewSceneId: string;
   overlay: boolean;
   layoutMode: LivestreamLayoutMode;
   manualPhaseSplit: boolean;
@@ -407,6 +425,9 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
   ],
   activeVideoInputId: "v1",
   previewVideoInputId: "v-led",
+  scenes: migrateScenes([{ id: "v1" }, { id: "v-led" }]),
+  activeSceneId: "s-v1",
+  previewSceneId: "s-v-led",
   overlay: true,
   layoutMode: "auto",
   manualPhaseSplit: false,
@@ -711,6 +732,98 @@ export function applyVideoInputSelection(
   };
 }
 
+export function resolveActiveScene(
+  settings: Pick<LivestreamSettings, "scenes" | "activeSceneId">,
+): StreamScene | null {
+  return settings.scenes.find((scene) => scene.id === settings.activeSceneId) ?? settings.scenes[0] ?? null;
+}
+
+export function resolvePreviewScene(
+  settings: Pick<LivestreamSettings, "scenes" | "previewSceneId">,
+): StreamScene | null {
+  return settings.scenes.find((scene) => scene.id === settings.previewSceneId) ?? null;
+}
+
+/** Een scène live zetten: de scène én de bron van zijn hoofdlaag (die bepaalt wat er opent). */
+export function applySceneSelection(settings: LivestreamSettings, sceneId: string): Partial<LivestreamSettings> {
+  const scene = settings.scenes.find((item) => item.id === sceneId);
+  const inputId = sceneInputId(scene);
+  if (!scene || !inputId) return {};
+  return { ...applyVideoInputSelection(settings, inputId), activeSceneId: scene.id };
+}
+
+/** Een scène klaarzetten op VOLGENDE. */
+export function applyScenePreview(settings: LivestreamSettings, sceneId: string): Partial<LivestreamSettings> {
+  const scene = settings.scenes.find((item) => item.id === sceneId);
+  const inputId = sceneInputId(scene);
+  if (!scene || !inputId) return {};
+  return { previewSceneId: scene.id, previewVideoInputId: inputId };
+}
+
+/**
+ * Scène live zetten en de volgende klaarzetten, zoals de overgangsknop: VOLGENDE wordt de eerste
+ * andere scène waarvan de bron gebruikt kan worden.
+ */
+export function takeScene(
+  settings: LivestreamSettings,
+  sceneId: string,
+  ready: (input: LivestreamVideoInput) => boolean = () => true,
+): Partial<LivestreamSettings> {
+  const selection = applySceneSelection(settings, sceneId);
+  if (!selection.activeSceneId) return {};
+  const usable = (scene: StreamScene) => {
+    const input = settings.videoInputs.find((item) => item.id === sceneInputId(scene));
+    return Boolean(input && ready(input));
+  };
+  const nextPreview =
+    settings.scenes.find((scene) => scene.id !== sceneId && usable(scene)) ??
+    settings.scenes.find((scene) => scene.id === sceneId)!;
+  return { ...selection, ...applyScenePreview(settings, nextPreview.id) };
+}
+
+/**
+ * De laag die de beeldpomp zelf moet plaatsen: alleen bij een bron met een eigen venster (website,
+ * mediabestand, LED). Camera en netwerkbron plaatst de streampagina, onder de score en sponsors.
+ * `null` = beeld zoals altijd.
+ */
+export function pumpProgramLayer(
+  settings: Pick<LivestreamSettings, "source" | "scenes" | "activeSceneId" | "activeVideoInputId">,
+): StreamSceneLayer | null {
+  if (settings.source === "camera" || settings.source === "network") return null;
+  const layer = sceneMainLayer(programScene(settings));
+  return layer && !layerFramingIsIdentity(layer) ? layer : null;
+}
+
+/**
+ * De scène die nu live is, passend bij de bron die live is. Een aanroeper die alleen een bron koos
+ * (`applyVideoInputSelection`) krijgt de eerste scène met die bron, nooit het kader van een andere.
+ */
+export function programScene(
+  settings: Pick<LivestreamSettings, "scenes" | "activeSceneId" | "activeVideoInputId">,
+): StreamScene | null {
+  const active = settings.scenes.find((scene) => scene.id === settings.activeSceneId);
+  if (active && sceneInputId(active) === settings.activeVideoInputId) return active;
+  return settings.scenes.find((scene) => sceneInputId(scene) === settings.activeVideoInputId) ?? null;
+}
+
+/** De laag die de streampagina toont: van de live scène, of `null` als de bron gewoon het beeld vult. */
+export function programLayer(
+  settings: Pick<LivestreamSettings, "scenes" | "activeSceneId" | "activeVideoInputId">,
+): StreamSceneLayer | null {
+  return sceneMainLayer(programScene(settings));
+}
+
+/**
+ * Wat er live in beeld gaat, op scèneniveau: de bron (zie `programSourceKey`) plus welke scène. Een
+ * andere scène met dezelfde bron (bv. ingezoomd) wisselt zonder de bron opnieuw te openen.
+ */
+export function programSceneChanged(
+  prev: Pick<LivestreamSettings, "activeSceneId">,
+  next: Pick<LivestreamSettings, "activeSceneId">,
+): boolean {
+  return prev.activeSceneId !== next.activeSceneId;
+}
+
 export function mergeLivestreamSettings(raw: Partial<LivestreamSettings> | null | undefined): LivestreamSettings {
   const d = DEFAULT_LIVESTREAM_SETTINGS;
   const r = raw ?? {};
@@ -767,6 +880,19 @@ export function mergeLivestreamSettings(raw: Partial<LivestreamSettings> | null 
       ? streamFormatPlan(quality, uploadMbps, dualEnabled ? [platform, platform2] : [platform], audioBitrateKbps)
       : null;
 
+  const previewVideoInputId =
+    videoInputs.find((input) => input.id === (typeof r.previewVideoInputId === "string" ? r.previewVideoInputId : ""))
+      ?.id ??
+    videoInputs.find((input) => input.id !== activeVideoInput.id)?.id ??
+    "";
+  const scenes = mergeStreamScenes(r.scenes, synced.videoInputs);
+  const sceneSelection = resolveSceneSelection(scenes, {
+    activeSceneId: r.activeSceneId,
+    activeInputId: activeVideoInput.id,
+    previewSceneId: r.previewSceneId,
+    previewInputId: previewVideoInputId,
+  });
+
   return {
     platform,
     source: activeVideoInput.kind,
@@ -774,11 +900,10 @@ export function mergeLivestreamSettings(raw: Partial<LivestreamSettings> | null 
       activeVideoInput.kind === "camera" ? activeVideoInput.cameraDevice : legacyCamera,
     videoInputs: synced.videoInputs,
     activeVideoInputId: activeVideoInput.id,
-    previewVideoInputId:
-      videoInputs.find((input) => input.id === (typeof r.previewVideoInputId === "string" ? r.previewVideoInputId : ""))
-        ?.id ??
-      videoInputs.find((input) => input.id !== activeVideoInput.id)?.id ??
-      "",
+    previewVideoInputId,
+    scenes,
+    activeSceneId: sceneSelection.activeSceneId,
+    previewSceneId: sceneSelection.previewSceneId,
     overlay: flat.score,
     layoutMode: parseLayoutMode(r.layoutMode ?? d.layoutMode),
     manualPhaseSplit,

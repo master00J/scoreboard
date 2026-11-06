@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * Bouwstenen voor de livestream-studio.
@@ -118,7 +118,50 @@ export function StudioMonitor({
         <span className="uppercase tracking-wide">{label}</span>
         <span className="truncate font-medium opacity-90">{name}</span>
       </div>
-      <div className="relative min-h-0 w-full flex-1 bg-black">{children}</div>
+      <div className="relative min-h-0 w-full flex-1 bg-black">
+        <MonitorCanvas>{children}</MonitorCanvas>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Precies 16:9 binnen het monitorvlak (dat door de balk erboven iets breder is). Het kader van een
+ * scènelaag staat in procenten van het programmabeeld; alleen op een 16:9-vlak ziet de monitor er
+ * dan uit zoals de stream, en valt het rode bewerkkader precies over het beeld.
+ */
+function MonitorCanvas({ children }: { children: ReactNode }) {
+  const outerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (!outer) return;
+    const measure = () => {
+      const width = outer.clientWidth;
+      const height = outer.clientHeight;
+      if (width <= 0 || height <= 0) return;
+      let w = width;
+      let h = (w * 9) / 16;
+      if (h > height) {
+        h = height;
+        w = (h * 16) / 9;
+      }
+      setSize((prev) => (prev && Math.abs(prev.w - w) < 0.5 && Math.abs(prev.h - h) < 0.5 ? prev : { w, h }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(outer);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={outerRef} className="absolute inset-0 grid place-items-center overflow-hidden">
+      <div
+        className="relative overflow-hidden"
+        style={size ? { width: size.w, height: size.h } : { width: "100%", height: "100%" }}
+        data-monitor-canvas
+      >
+        {children}
+      </div>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Gauge, Keyboard, Layers, Radio, Video, Volume2, type LucideIcon } from "lucide-react";
+import { Copy, Crop, Gauge, Keyboard, Layers, Radio, Video, Volume2, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
@@ -29,8 +29,12 @@ import {
   DEFAULT_LIVESTREAM_SETTINGS,
   DEFAULT_LIVESTREAM_STATUS,
   guessDshowAudioForCameraLabel,
+  applyScenePreview,
+  applySceneSelection,
   applyVideoInputSelection,
   createVideoInput,
+  programScene,
+  takeScene,
   mergeLivestreamSettings,
   resolveActiveVideoInput,
   sanitizeBrowserUrl,
@@ -97,6 +101,24 @@ import { syncLegacyFromManualLayout } from "@/lib/stream-layer-layout";
 import { STREAM_TRANSITIONS, transitionDurationOptions } from "@/lib/stream-transition";
 import { sendCommand } from "@/lib/use-socket";
 import {
+  duplicateScene,
+  layerColorSupported,
+  moveSceneLayer,
+  resetSceneLayer,
+  sceneInputId,
+  sceneMainLayer,
+  STREAM_SCENE_LIMIT,
+  updateSceneLayer,
+  type StreamScene,
+  type StreamSceneLayer,
+} from "@/lib/stream-scenes";
+import { StreamLayerFrame } from "@/components/stream-layer-frame";
+import {
+  StreamLayerEditor,
+  StreamLayerPanel,
+  type StreamLayerPatch,
+} from "@/app/control/_components/stream-layer-editor";
+import {
   STREAM_DECK_HTTP_PORT,
   STREAM_DECK_KINDS,
   STREAM_DECK_MAX_SLOTS,
@@ -141,6 +163,18 @@ export function videoKindLabel(
     return short ? t("livestream.sourceScreenShort") : t("livestream.sourceScreen");
   }
   return short ? t("livestream.sourceCameraShort") : t("livestream.sourceCamera");
+}
+
+/** Naam van een scène: zijn eigen naam, anders die van de bron van de hoofdlaag. */
+export function sceneLabel(
+  scene: StreamScene,
+  input: LivestreamVideoInput | undefined,
+  t: (key: string, opts?: Record<string, string | number>) => string,
+) {
+  const own = scene.name.trim();
+  if (own) return own;
+  if (!input) return "—";
+  return input.name.trim() || videoKindLabel(input.kind, t, true, input.cameraDevice);
 }
 
 /**
@@ -355,8 +389,13 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [holdPreview, setHoldPreview] = useState(false);
   const [livePreview, setLivePreview] = useState<string | null>(null);
   const [livePreviewInputId, setLivePreviewInputId] = useState<string | null>(null);
-  /** Bron die klaarstaat om in beeld te komen (oranje), los van wat nu program is. */
-  const [previewInputId, setPreviewInputId] = useState<string | null>(null);
+  /** Scène die klaarstaat om in beeld te komen (oranje), los van wat nu program is. */
+  const [previewSceneId, setPreviewSceneId] = useState<string | null>(null);
+  /** Welke monitor het rode kader toont, en welke laag van die scène. */
+  const [editing, setEditing] = useState<{ role: "program" | "preview"; layerId: string | null } | null>(null);
+  /** Tijdens slepen: wat binnenkomt van het hoofdproces is ouder dan wat de operator ziet. */
+  const draggingRef = useRef(false);
+  const liveSaveRef = useRef<{ timer: number | null; scenes: StreamScene[] | null }>({ timer: null, scenes: null });
   const [sourceThumbs, setSourceThumbs] = useState<Record<string, string>>({});
   const [deckInfo, setDeckInfo] = useState<StreamDeckInfo | null>(null);
   const [addPick, setAddPick] = useState<
@@ -450,7 +489,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       if (info) setDeckInfo(info);
     });
     const offStatus = window.electronAPI?.onLivestreamStatus?.((next) => setStatus(next));
-    const offSettings = window.electronAPI?.onLivestreamSettings?.((next) => setSettings(next));
+    const offSettings = window.electronAPI?.onLivestreamSettings?.((next) => {
+      if (!draggingRef.current) setSettings(next);
+    });
     const offPreview = window.electronAPI?.onLivestreamPreview?.((frame) => {
       if (typeof frame === "string") {
         setLivePreview(`data:image/jpeg;base64,${frame}`);
@@ -477,26 +518,29 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   }, [previewWanted]);
 
   useEffect(() => {
-    if (settings.previewVideoInputId && settings.previewVideoInputId !== previewInputId) {
-      setPreviewInputId(settings.previewVideoInputId);
+    if (settings.previewSceneId && settings.previewSceneId !== previewSceneId) {
+      setPreviewSceneId(settings.previewSceneId);
     }
-  }, [settings.previewVideoInputId, previewInputId]);
+  }, [settings.previewSceneId, previewSceneId]);
+
+  const inputOf = (scene: StreamScene | null | undefined) =>
+    scene ? settings.videoInputs.find((input) => input.id === sceneInputId(scene)) : undefined;
+  const sceneReady = (scene: StreamScene) => {
+    const input = inputOf(scene);
+    return Boolean(input && videoInputReady(input));
+  };
 
   useEffect(() => {
-    const ids = new Set(settings.videoInputs.map((input) => input.id));
-    if (previewInputId && ids.has(previewInputId) && previewInputId !== settings.activeVideoInputId) return;
-    if (previewInputId && ids.has(previewInputId) && previewInputId === settings.activeVideoInputId) {
-      const other = settings.videoInputs.find(
-        (input) => input.id !== settings.activeVideoInputId && videoInputReady(input),
-      )?.id;
-      setPreviewInputId(other ?? null);
-      return;
-    }
-    const next = settings.videoInputs.find(
-      (input) => input.id !== settings.activeVideoInputId && videoInputReady(input),
-    )?.id;
-    setPreviewInputId(next ?? null);
-  }, [settings.videoInputs, settings.activeVideoInputId, previewInputId]);
+    const ids = new Set(settings.scenes.map((scene) => scene.id));
+    if (previewSceneId && ids.has(previewSceneId) && previewSceneId !== settings.activeSceneId) return;
+    const next = settings.scenes.find((scene) => scene.id !== settings.activeSceneId && sceneReady(scene))?.id;
+    setPreviewSceneId(next ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.scenes, settings.videoInputs, settings.activeSceneId, previewSceneId]);
+
+  /** Altijd de nieuwste instellingen, voor sleepacties die langer duren dan één render. */
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   const persist = async (partial: Partial<LivestreamSettings>) => {
     const next = mergeLivestreamSettings({ ...settings, ...partial });
@@ -614,7 +658,8 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       ...extra,
     });
     void saveVideoInputs([...settings.videoInputs, input]);
-    setPreviewInputId(input.id);
+    // Het hoofdproces maakt er meteen een scène bij (`s-<bron>`); die komt klaar te staan.
+    setPreviewSceneId(`s-${input.id}`);
     void persist({ previewVideoInputId: input.id });
   };
 
@@ -682,10 +727,10 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     const nextActive =
       settings.activeVideoInputId === id ? videoInputs[0]?.id : settings.activeVideoInputId;
     const nextPreview =
-      settings.previewVideoInputId === id || previewInputId === id
+      settings.previewVideoInputId === id || sceneInputId(previewScene) === id
         ? videoInputs.find((item) => item.id !== nextActive && item.id !== id)?.id ?? ""
         : settings.previewVideoInputId;
-    setPreviewInputId(nextPreview || null);
+    setPreviewSceneId(null);
     if (livePreviewInputId === id) {
       setLivePreview(null);
       setLivePreviewInputId(null);
@@ -781,32 +826,169 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       health.packetLossHints > 0 ||
       (health.fps != null && health.targetFps > 0 && health.fps < health.targetFps * 0.85));
 
-  const previewVideo =
-    (previewInputId &&
-    previewInputId !== settings.activeVideoInputId
-      ? settings.videoInputs.find((input) => input.id === previewInputId)
+  const activeScene = programScene(settings) ?? settings.scenes[0] ?? null;
+  const previewScene =
+    (previewSceneId && previewSceneId !== activeScene?.id
+      ? settings.scenes.find((scene) => scene.id === previewSceneId)
       : undefined) ??
-    settings.videoInputs.find((input) => input.id !== settings.activeVideoInputId && videoInputReady(input)) ??
+    settings.scenes.find((scene) => scene.id !== activeScene?.id && sceneReady(scene)) ??
     null;
+  const previewVideo = inputOf(previewScene) ?? null;
 
   const inputLabel = (input: LivestreamVideoInput) =>
     input.name.trim() || videoKindLabel(input.kind, t, true, input.cameraDevice);
+  const labelOfScene = (scene: StreamScene | null | undefined) => (scene ? sceneLabel(scene, inputOf(scene), t) : "—");
 
-  const takeInput = (input: LivestreamVideoInput) => {
-    if (!videoInputReady(input)) {
+  /** Scène live zetten (overgangsknop, dubbelklik, Stream Deck); de volgende komt klaar te staan. */
+  const takeSceneNow = (scene: StreamScene | null | undefined) => {
+    if (!scene) return;
+    if (!sceneReady(scene)) {
       openSetup("sources");
       return;
     }
-    if (input.id === settings.activeVideoInputId) return;
-    const next = settings.videoInputs.find((item) => item.id !== input.id && videoInputReady(item));
-    setPreviewInputId(next?.id ?? input.id);
+    if (scene.id === settings.activeSceneId) return;
+    const partial = takeScene(settings, scene.id, videoInputReady);
+    setPreviewSceneId(partial.previewSceneId ?? null);
+    // Het kader hoort bij een monitor; na de wissel staat daar een andere scène.
+    setEditing(null);
+    void persist(partial);
+  };
+
+  const cueScene = (scene: StreamScene) => {
+    if (busy || !sceneReady(scene)) return;
+    setPreviewSceneId(scene.id);
+    if (editing?.role === "preview") setEditing(null);
+    void persist(applyScenePreview(settings, scene.id));
+  };
+
+  const duplicateSceneNow = (scene: StreamScene) => {
+    if (busy || settings.scenes.length >= STREAM_SCENE_LIMIT) return;
+    const copy = duplicateScene(scene, t("livestream.sceneCopyName", { name: labelOfScene(scene) }));
+    const index = settings.scenes.findIndex((item) => item.id === scene.id);
+    const scenes = [...settings.scenes.slice(0, index + 1), copy, ...settings.scenes.slice(index + 1)];
+    setPreviewSceneId(copy.id);
+    void persist({ scenes, ...applyScenePreview({ ...settings, scenes }, copy.id) });
+  };
+
+  /**
+   * Scène weg. Gebruikt geen andere scène die bron nog, dan gaat de bron mee (zoals vroeger het
+   * kruisje op een bron deed).
+   */
+  const removeScene = (scene: StreamScene) => {
+    if (busy || settings.scenes.length <= 1) return;
+    const scenes = settings.scenes.filter((item) => item.id !== scene.id);
+    const inputId = sceneInputId(scene);
+    const stillUsed = scenes.some((item) => item.layers.some((layer) => layer.inputId === inputId));
+    if (editing) setEditing(null);
+    if (!stillUsed && settings.videoInputs.length > 1) {
+      removeVideoSource(inputId);
+      return;
+    }
+    const base = { ...settings, scenes };
+    const wasActive = scene.id === settings.activeSceneId;
+    const nextActive = wasActive ? scenes[0]! : scenes.find((item) => item.id === settings.activeSceneId) ?? scenes[0]!;
+    const nextPreview =
+      scenes.find((item) => item.id === previewScene?.id && item.id !== nextActive.id) ??
+      scenes.find((item) => item.id !== nextActive.id) ??
+      null;
+    setPreviewSceneId(nextPreview?.id ?? null);
     void persist({
-      ...applyVideoInputSelection(settings, input.id),
-      previewVideoInputId: next?.id ?? input.id,
+      scenes,
+      ...(wasActive ? applySceneSelection(base, nextActive.id) : { activeSceneId: nextActive.id }),
+      ...(nextPreview ? applyScenePreview(base, nextPreview.id) : { previewSceneId: "" }),
     });
   };
 
-  const renderPicture = (input: LivestreamVideoInput, role: "program" | "preview") => {
+  /**
+   * Kader of kleur van een laag aanpassen. Tijdens slepen alleen hier; staat de scène live, dan gaat
+   * de stream mee (hooguit ±7 keer per seconde). Bij loslaten wordt het opgeslagen.
+   */
+  const changeLayer = (sceneId: string, layerId: string, patch: StreamLayerPatch, commit: boolean) => {
+    const scenes = updateSceneLayer(settingsRef.current.scenes, sceneId, layerId, patch);
+    settingsRef.current = { ...settingsRef.current, scenes };
+    setSettings((current) => ({ ...current, scenes }));
+    const live = liveSaveRef.current;
+    if (commit) {
+      draggingRef.current = false;
+      if (live.timer != null) window.clearTimeout(live.timer);
+      live.timer = null;
+      live.scenes = null;
+      void persist({ scenes });
+      return;
+    }
+    draggingRef.current = true;
+    if (sceneId !== settings.activeSceneId || !status.running) return;
+    live.scenes = scenes;
+    if (live.timer != null) return;
+    live.timer = window.setTimeout(() => {
+      live.timer = null;
+      const pending = live.scenes;
+      live.scenes = null;
+      if (pending && draggingRef.current) void window.electronAPI?.saveLivestreamSettings?.({ scenes: pending });
+    }, 140);
+  };
+
+  const editedScene = editing ? (editing.role === "program" ? activeScene : previewScene) : null;
+  const editedLayer: StreamSceneLayer | null = editedScene
+    ? editedScene.layers.find((layer) => layer.id === editing?.layerId) ?? sceneMainLayer(editedScene)
+    : null;
+  const editedInput = editedLayer ? settings.videoInputs.find((input) => input.id === editedLayer.inputId) : undefined;
+
+  useEffect(() => {
+    // De bewerkte scène verdween (verwijderd, of de monitor toont nu niets): kader dicht.
+    if (editing && !editedScene) setEditing(null);
+  }, [editing, editedScene]);
+
+  /** Het rode kader over een monitor, als die monitor bewerkt wordt. */
+  const renderEditor = (scene: StreamScene | null, role: "program" | "preview") => {
+    if (!editing || editing.role !== role || !scene || !editedLayer || editedScene?.id !== scene.id) return null;
+    return (
+      <StreamLayerEditor
+        layer={editedLayer}
+        live={role === "program" && status.running}
+        onChange={(patch, commit) => changeLayer(scene.id, editedLayer.id, patch, commit)}
+      />
+    );
+  };
+
+  /** Knop op een monitor om het kader van die scène te bewerken. */
+  const renderEditToggle = (scene: StreamScene | null, role: "program" | "preview") => {
+    if (!scene || !settings.studioPreview || !active) return null;
+    if (role === "preview" && scene.id === settings.activeSceneId) return null;
+    const on = editing?.role === role;
+    return (
+      <button
+        type="button"
+        aria-pressed={on}
+        title={on ? t("livestream.sceneEditDone") : t("livestream.sceneEdit")}
+        onClick={(event) => {
+          event.stopPropagation();
+          setEditing(on ? null : { role, layerId: null });
+        }}
+        onDoubleClick={(event) => event.stopPropagation()}
+        className={`absolute bottom-1 right-1 z-50 flex h-6 items-center gap-1 rounded px-1.5 text-[10px] font-semibold ${
+          on ? "bg-primary text-primary-foreground" : "bg-black/70 text-white/80 hover:bg-black/90 hover:text-white"
+        }`}
+      >
+        <Crop className="h-3 w-3" aria-hidden />
+        {on ? t("livestream.sceneEditDone") : t("livestream.sceneEdit")}
+      </button>
+    );
+  };
+
+  /** Rauw bronbeeld (JPEG of LED-beeld) in het kader van de scène, zoals de pomp het in de stream zet. */
+  const framedImage = (src: string, scene: StreamScene, input: LivestreamVideoInput) => (
+    <StreamLayerFrame layer={sceneMainLayer(scene)} colorSupported={layerColorSupported(input.kind)}>
+      {(className) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={src} alt="" className={className} />
+      )}
+    </StreamLayerFrame>
+  );
+
+  const renderPicture = (scene: StreamScene, role: "program" | "preview") => {
+    const input = inputOf(scene);
+    if (!input) return <StudioMonitorEmpty>{t("livestream.switcherNeedsSetup")}</StudioMonitorEmpty>;
     if (!settings.studioPreview) {
       return <StudioMonitorEmpty>{t("livestream.studioPreviewDisabled")}</StudioMonitorEmpty>;
     }
@@ -816,7 +998,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     if (!videoInputReady(input)) {
       return <StudioMonitorEmpty>{t("livestream.switcherNeedsSetup")}</StudioMonitorEmpty>;
     }
-    if (role === "preview" && input.id === settings.activeVideoInputId) {
+    if (role === "preview" && scene.id === settings.activeSceneId) {
       return <StudioMonitorEmpty>{t("livestream.monitorSame")}</StudioMonitorEmpty>;
     }
     const isProgram = input.id === settings.activeVideoInputId;
@@ -829,18 +1011,16 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         input.kind === "media" ||
         (input.kind === "camera" && status.running));
     if (showJpeg) {
+      // Website en media: rauw bronbeeld, dus hier in het kader zetten. Een live camera komt als beeld
+      // van de streampagina, met kader, score en sponsors er al in.
+      if (input.kind === "browser" || input.kind === "media") return framedImage(livePreview ?? "", scene, input);
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={livePreview ?? undefined} alt="" className="absolute inset-0 h-full w-full object-contain" />
       );
     }
     if (input.kind === "display") {
-      if (ledPreviewFrame) {
-        return (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={ledPreviewFrame} alt="" className="absolute inset-0 h-full w-full object-contain" />
-        );
-      }
+      if (ledPreviewFrame) return framedImage(ledPreviewFrame, scene, input);
       return <StudioMonitorEmpty>{t("shell.previewLoading")}</StudioMonitorEmpty>;
     }
     if (input.kind === "camera" && !status.running && !holdPreview) {
@@ -850,7 +1030,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           cameraOverride={input.cameraDevice}
           settingsOverride={{
             ...settings,
-            ...applyVideoInputSelection(settings, input.id),
+            ...applySceneSelection(settings, scene.id),
           }}
           onScoreWidgetChange={
             role === "program"
@@ -911,7 +1091,8 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     return () => window.clearInterval(timer);
   }, [settings.studioPreview, active, previewVideo?.id, activeVideo.id]);
 
-  const renderTilePicture = (input: LivestreamVideoInput) => {
+  /** Klein beeld op een scèneknop: het bronbeeld in het kader van die scène. */
+  const renderTilePicture = (scene: StreamScene, input: LivestreamVideoInput) => {
     if (!videoInputReady(input)) {
       return (
         <div className="absolute inset-0 grid place-items-center px-1 text-center text-[9px] text-white/40">
@@ -921,12 +1102,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     }
     if (input.kind === "display") {
       const thumb = sourceThumbs[input.id];
-      if (thumb) {
-        return (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={thumb} alt="" className="absolute inset-0 h-full w-full object-contain" />
-        );
-      }
+      if (thumb) return framedImage(thumb, scene, input);
       return (
         <div className="absolute inset-0 grid place-items-center px-1 text-center text-[9px] text-white/40">
           {t("livestream.videoInputsAddDisplay")}
@@ -938,18 +1114,11 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       (livePreviewInputId ? livePreviewInputId === input.id : input.id === settings.activeVideoInputId) &&
       (input.kind === "browser" || input.kind === "media")
     ) {
-      return (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={livePreview} alt="" className="absolute inset-0 h-full w-full object-contain" />
-      );
+      return framedImage(livePreview, scene, input);
     }
+    // Miniaturen komen van het rauwe camerabeeld op de monitors, dus ook hier het kader erop.
     const thumb = sourceThumbs[input.id];
-    if (thumb) {
-      return (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={thumb} alt="" className="absolute inset-0 h-full w-full object-contain" />
-      );
-    }
+    if (thumb) return framedImage(thumb, scene, input);
     const isProgram = input.id === settings.activeVideoInputId;
     if (isProgram && livePreview && livePreviewInputId === input.id) {
       return (
@@ -966,7 +1135,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             cameraOverride={input.cameraDevice}
             settingsOverride={{
               ...settings,
-              ...applyVideoInputSelection(settings, input.id),
+              ...applySceneSelection(settings, scene.id),
             }}
           />
         </div>
@@ -1014,20 +1183,18 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       if (nested) runDeckAction(nested.action);
       return;
     }
+    // Knop N = scène N (na de overstap dezelfde volgorde als de bronnen).
     if (action.id === "input") {
-      const input = settings.videoInputs[action.index - 1];
-      if (input) takeInput(input);
+      takeSceneNow(settings.scenes[action.index - 1]);
       return;
     }
     if (action.id === "preview") {
-      const input = settings.videoInputs[action.index - 1];
-      if (!input || !videoInputReady(input)) return;
-      setPreviewInputId(input.id);
-      void persist({ previewVideoInputId: input.id });
+      const scene = settings.scenes[action.index - 1];
+      if (scene) cueScene(scene);
       return;
     }
     if (action.id === "cut") {
-      if (previewVideo) takeInput(previewVideo);
+      takeSceneNow(previewScene);
       return;
     }
     if (action.id === "stream") {
@@ -1270,40 +1437,41 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             <div
               ref={previewBoxRef}
               className={`aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-6rem)/2)] ${
-                previewVideo && previewVideo.id !== settings.activeVideoInputId ? "cursor-pointer" : ""
+                previewScene && editing?.role !== "preview" ? "cursor-pointer" : ""
               }`}
               title={
-                previewVideo && previewVideo.id !== settings.activeVideoInputId
+                previewScene && editing?.role !== "preview"
                   ? t("livestream.monitorNextDoubleClick", { transition: t(`livestream.transition_${settings.transition}`) })
                   : undefined
               }
-              // Dubbelklik op VOLGENDE zet die bron live, net als de overgangsknop. Niet als je in het
-              // beeld de score-widget versleept of vergroot: dat is instellen, geen wissel.
+              // Dubbelklik op VOLGENDE zet die scène live, net als de overgangsknop. Niet als je in het
+              // beeld de score-widget of een kader versleept: dat is instellen, geen wissel.
               onDoubleClick={(event) => {
-                if ((event.target as HTMLElement).closest("[data-stream-overlay-transform]")) return;
-                if (busy || !previewVideo || previewVideo.id === settings.activeVideoInputId) return;
-                takeInput(previewVideo);
+                const target = event.target as HTMLElement;
+                if (target.closest("[data-stream-overlay-transform], [data-stream-layer-editor]")) return;
+                if (busy || editing?.role === "preview" || !previewScene) return;
+                takeSceneNow(previewScene);
               }}
             >
               <StudioMonitor
                 label={t("livestream.monitorNext")}
-                name={previewVideo ? inputLabel(previewVideo) : "—"}
+                name={labelOfScene(previewScene)}
                 tone="preview"
               >
-                {previewVideo ? (
-                  renderPicture(previewVideo, "preview")
+                {previewScene ? (
+                  renderPicture(previewScene, "preview")
                 ) : (
                   <StudioMonitorEmpty>{t("livestream.monitorSame")}</StudioMonitorEmpty>
                 )}
+                {renderEditor(previewScene, "preview")}
+                {renderEditToggle(previewScene, "preview")}
               </StudioMonitor>
             </div>
             <div className="flex w-[5.5rem] shrink-0 flex-col items-stretch gap-1" data-transition-controls>
               <button
                 type="button"
-                disabled={busy || !previewVideo || previewVideo.id === settings.activeVideoInputId}
-                onClick={() => {
-                  if (previewVideo) takeInput(previewVideo);
-                }}
+                disabled={busy || !previewScene}
+                onClick={() => takeSceneNow(previewScene)}
                 title={t("livestream.transitionTakeHint")}
                 className="h-10 rounded-md bg-zinc-200 text-xs font-black uppercase tracking-wide text-zinc-900 hover:bg-white disabled:opacity-40"
               >
@@ -1348,50 +1516,84 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             >
               <StudioMonitor
                 label={t("livestream.monitorNow")}
-                name={inputLabel(activeVideo)}
+                name={activeScene ? labelOfScene(activeScene) : inputLabel(activeVideo)}
                 tone={status.running ? "live" : "program"}
               >
-                {renderPicture(activeVideo, "program")}
+                {activeScene ? (
+                  renderPicture(activeScene, "program")
+                ) : (
+                  <StudioMonitorEmpty>{t("livestream.switcherNeedsSetup")}</StudioMonitorEmpty>
+                )}
+                {renderEditor(activeScene, "program")}
+                {renderEditToggle(activeScene, "program")}
               </StudioMonitor>
             </div>
           </div>
 
+          {editing && editedScene && editedLayer ? (
+            <StreamLayerPanel
+              scene={editedScene}
+              layer={editedLayer}
+              sceneLabel={labelOfScene(editedScene)}
+              sourceLabel={(layer) => {
+                const input = settings.videoInputs.find((item) => item.id === layer.inputId);
+                return input ? inputLabel(input) : "—";
+              }}
+              colorSupported={layerColorSupported(editedInput?.kind ?? "")}
+              live={editing.role === "program" && status.running}
+              t={t}
+              onLayerChange={(patch, commit) => changeLayer(editedScene.id, editedLayer.id, patch, commit)}
+              onSceneName={(name) =>
+                void persist({
+                  scenes: settings.scenes.map((scene) =>
+                    scene.id === editedScene.id ? { ...scene, name: name.trim().slice(0, 40) } : scene,
+                  ),
+                })
+              }
+              onSelectLayer={(layerId) => setEditing({ role: editing.role, layerId })}
+              onMoveLayer={(layerId, delta) =>
+                void persist({
+                  scenes: settings.scenes.map((scene) =>
+                    scene.id === editedScene.id ? { ...scene, layers: moveSceneLayer(scene.layers, layerId, delta) } : scene,
+                  ),
+                })
+              }
+              onReset={() => changeLayer(editedScene.id, editedLayer.id, resetSceneLayer(editedLayer), true)}
+              onClose={() => setEditing(null)}
+            />
+          ) : null}
+
           <div className="grid shrink-0 grid-cols-1 items-start gap-1.5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
             <div className="overflow-x-auto rounded-md border border-border bg-zinc-950/50 p-1">
               <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-1">
-                {settings.videoInputs.map((input, index) => {
-                  const on = input.id === settings.activeVideoInputId;
-                  const next = input.id === previewVideo?.id;
+                {settings.scenes.map((scene, index) => {
+                  const input = inputOf(scene);
+                  if (!input) return null;
+                  const on = scene.id === activeScene?.id;
+                  const next = scene.id === previewScene?.id;
                   const ready = videoInputReady(input);
                   return (
                     <div
-                      key={input.id}
+                      key={scene.id}
                       className="relative overflow-hidden rounded bg-zinc-900 text-left ring-1 ring-white/10 hover:ring-white/25"
                     >
                       <div
                         role="button"
                         tabIndex={busy ? -1 : 0}
-                        onClick={() => {
-                          if (busy) return;
-                          if (!ready) return;
-                          setPreviewInputId(input.id);
-                          void persist({ previewVideoInputId: input.id });
-                        }}
+                        onClick={() => cueScene(scene)}
                         onDoubleClick={() => {
-                          if (!busy) takeInput(input);
+                          if (!busy) takeSceneNow(scene);
                         }}
                         onKeyDown={(event) => {
                           if (event.key !== "Enter" && event.key !== " ") return;
                           event.preventDefault();
-                          if (busy || !ready) return;
-                          setPreviewInputId(input.id);
-                          void persist({ previewVideoInputId: input.id });
+                          cueScene(scene);
                         }}
                         className="relative aspect-video bg-black"
                       >
                         <div className={`absolute inset-x-0 top-0 z-10 h-1 ${on ? "bg-emerald-500" : next ? "bg-amber-500" : "bg-zinc-700"}`} />
                         {ready ? (
-                          renderTilePicture(input)
+                          renderTilePicture(scene, input)
                         ) : input.kind === "camera" ? (
                           <div
                             className="absolute inset-0 z-20 flex items-center p-1"
@@ -1472,14 +1674,30 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                             </Button>
                           </div>
                         ) : (
-                          renderTilePicture(input)
+                          renderTilePicture(scene, input)
                         )}
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 truncate bg-black/70 px-1 py-0.5 text-[10px] font-medium text-white">
                           <span className="mr-0.5 text-white/40">{index + 1}</span>
-                          {inputLabel(input)}
+                          {labelOfScene(scene)}
                         </div>
                       </div>
-                      {settings.videoInputs.length > 1 ? (
+                      {ready && settings.scenes.length < STREAM_SCENE_LIMIT ? (
+                        <button
+                          type="button"
+                          aria-label={t("livestream.sceneDuplicate")}
+                          title={t("livestream.sceneDuplicate")}
+                          disabled={sourceLocked}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            duplicateSceneNow(scene);
+                          }}
+                          onDoubleClick={(event) => event.stopPropagation()}
+                          className="absolute right-6 top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded bg-black/70 text-white/80 hover:bg-zinc-700 hover:text-white disabled:opacity-40"
+                        >
+                          <Copy className="h-3 w-3" aria-hidden />
+                        </button>
+                      ) : null}
+                      {settings.scenes.length > 1 ? (
                         <button
                           type="button"
                           aria-label={t("livestream.videoInputRemove")}
@@ -1487,8 +1705,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                           disabled={sourceLocked}
                           onClick={(event) => {
                             event.stopPropagation();
-                            removeVideoSource(input.id);
+                            removeScene(scene);
                           }}
+                          onDoubleClick={(event) => event.stopPropagation()}
                           className="absolute right-0.5 top-1.5 z-30 flex h-5 w-5 items-center justify-center rounded bg-black/70 text-[11px] leading-none text-white/80 hover:bg-red-700 hover:text-white disabled:opacity-40"
                         >
                           ×
@@ -1732,13 +1951,13 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                 const action = slot.action;
                 const source =
                   action.id === "input" || action.id === "preview"
-                    ? settings.videoInputs[action.index - 1]
+                    ? settings.scenes[action.index - 1]
                     : undefined;
-                const on = source && action.id === "input" && source.id === settings.activeVideoInputId;
+                const on = source && action.id === "input" && source.id === activeScene?.id;
                 const next =
                   source &&
                   (action.id === "preview" || action.id === "input") &&
-                  source.id === previewVideo?.id &&
+                  source.id === previewScene?.id &&
                   !on;
                 const live = action.id === "stream" && status.running;
                 const rec = action.id === "record" && status.recording;

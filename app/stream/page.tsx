@@ -21,7 +21,8 @@ import {
   streamWidgetClearancePx,
   widgetScoreEdge,
 } from "@/lib/stream-score-widget";
-import { DEFAULT_LIVESTREAM_SETTINGS, type LivestreamSettings } from "@/lib/livestream";
+import { DEFAULT_LIVESTREAM_SETTINGS, programLayer, type LivestreamSettings } from "@/lib/livestream";
+import { StreamLayerFrame } from "@/components/stream-layer-frame";
 import {
   matchPlayersById,
   resolveCardColor,
@@ -216,6 +217,8 @@ export default function StreamProgramPage({
   const customSurface = streamCustomSurface(streamSettings, layout.phase);
   const scoreVisible =
     !customSurface && layout.showScore && Boolean(match) && state?.mode !== "SUBSTITUTION";
+  /** Kader van de live scène voor de camera of netwerkbron; de score en sponsors blijven staan. */
+  const sourceLayer = useMemo(() => programLayer(streamSettings), [streamSettings]);
 
   return (
     <div
@@ -228,18 +231,22 @@ export default function StreamProgramPage({
         data-stream-canvas
       >
       {camera ? (
-        <ExternalCaptureVideo
-          ref={captureRef}
-          sourceId={camera}
-          className="absolute inset-0 h-full w-full"
-          onActive={notifyProgramReady}
-        />
+        <StreamLayerFrame layer={sourceLayer}>
+          {(className) => (
+            <ExternalCaptureVideo
+              ref={captureRef}
+              sourceId={camera}
+              className={className}
+              onActive={notifyProgramReady}
+            />
+          )}
+        </StreamLayerFrame>
       ) : network ? (
-        <NetworkCaptureVideo
-          ref={captureRef}
-          className="absolute inset-0 h-full w-full"
-          onActive={notifyProgramReady}
-        />
+        <StreamLayerFrame layer={sourceLayer}>
+          {(className) => (
+            <NetworkCaptureVideo ref={captureRef} className={className} onActive={notifyProgramReady} />
+          )}
+        </StreamLayerFrame>
       ) : layoutCanvas ? (
         // Rustige achtergrond: de lagen moeten opvallen, niet het vlak eronder.
         <div
