@@ -354,6 +354,7 @@ export default function ControlPage() {
               "match-info": <MatchInfoCard match={isFullMatch(match) ? match : null} />,
               livestream: (
                 <LivestreamLivePanel
+                  active={activeTab === "match"}
                   onOpenStudio={() => {
                     if (interfaceProfile.tabs.includes("livestream")) setActiveTab("livestream");
                   }}

@@ -1,21 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { isElectron } from "@/lib/electron";
 import {
   applyVideoInputSelection,
+  audioDeviceLabel,
   DEFAULT_LIVESTREAM_HEALTH,
   DEFAULT_LIVESTREAM_SETTINGS,
   DEFAULT_LIVESTREAM_STATUS,
+  mergeLivestreamSettings,
+  sourceAudioDevices,
+  type LivestreamAudioDevice,
   type LivestreamSettings,
   type LivestreamStatus,
   type LivestreamVideoInput,
 } from "@/lib/livestream";
 import { streamFallingBehind } from "@/lib/livestream-bitrate";
+import { enumerateAudioCaptureOptions, mergeAudioDeviceLists } from "@/lib/enumerate-audio-capture-options";
 import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 import { videoInputReady, videoKindLabel } from "@/app/control/_components/livestream-studio";
+import { LivestreamAudioMixer } from "@/app/control/_components/livestream-audio-mixer";
 
 /** Hoe lang de stopknop na de eerste klik op "Echt stoppen?" blijft staan. */
 const STOP_CONFIRM_MS = 3000;
@@ -38,15 +44,51 @@ function formatDuration(ms: number): string {
  * je één keer instelt, blijft in de studio. Dit paneel gebruikt dezelfde instellingen en dezelfde
  * aansturing als de studio, dus wat je hier doet staat daar meteen ook zo.
  */
-export function LivestreamLivePanel({ onOpenStudio }: { onOpenStudio: () => void }) {
+export function LivestreamLivePanel({
+  onOpenStudio,
+  active,
+}: {
+  onOpenStudio: () => void;
+  /**
+   * Staat het Live-tabblad open? Het blok blijft gemount op andere tabbladen; de mixer dan niet,
+   * anders meet hij dezelfde apparaten dubbel naast de mixer van de studio.
+   */
+  active: boolean;
+}) {
   const { t } = useTranslation();
   const [settings, setSettings] = useState<LivestreamSettings>(DEFAULT_LIVESTREAM_SETTINGS);
   const [status, setStatus] = useState<LivestreamStatus>(DEFAULT_LIVESTREAM_STATUS);
   const [preview, setPreview] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
+  const [audioDevices, setAudioDevices] = useState<LivestreamAudioDevice[]>([]);
+  const [audioOutputs, setAudioOutputs] = useState<LivestreamAudioDevice[]>([]);
+  const devicesLoaded = useRef(false);
   const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const now = useWallClockMs(1000);
+
+  /** Zoals `persist` in de studio: meteen tonen, dan opslaan en de opgeslagen versie overnemen. */
+  const persist = useCallback(
+    async (partial: Partial<LivestreamSettings>) => {
+      setSettings((current) => mergeLivestreamSettings({ ...current, ...partial }));
+      const saved = await window.electronAPI?.saveLivestreamSettings?.(partial);
+      if (saved) setSettings(saved);
+    },
+    [],
+  );
+
+  // Apparatenlijst pas laden als het Live-tabblad open is: dat vraagt Windows om alle geluidskaarten.
+  useEffect(() => {
+    if (!active || devicesLoaded.current || !window.electronAPI) return;
+    devicesLoaded.current = true;
+    void (async () => {
+      const fromChrome = await enumerateAudioCaptureOptions().catch(() => []);
+      const fromHost = await window.electronAPI?.listLivestreamAudioDevices?.().catch(() => []);
+      setAudioDevices(mergeAudioDeviceLists(fromHost ?? [], fromChrome));
+      const outputs = await window.electronAPI?.listLivestreamAudioOutputs?.().catch(() => []);
+      setAudioOutputs(outputs ?? []);
+    })();
+  }, [active]);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -181,7 +223,7 @@ export function LivestreamLivePanel({ onOpenStudio }: { onOpenStudio: () => void
         </div>
       </div>
 
-      <div className="relative aspect-video w-full overflow-hidden rounded-md bg-black ring-1 ring-white/10">
+      <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-md bg-black ring-1 ring-white/10">
         {preview ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={preview} alt="" className="absolute inset-0 h-full w-full object-contain" />
@@ -229,6 +271,42 @@ export function LivestreamLivePanel({ onOpenStudio }: { onOpenStudio: () => void
               ms: settings.transitionMs,
             })}
       </p>
+
+      <div className="flex flex-col gap-1.5 border-t border-border pt-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("livestream.audioSection")}
+        </span>
+        {!active ? null : settings.audioEnabled ? (
+          <div className="overflow-x-auto rounded-md border border-border bg-zinc-950/50 p-1.5">
+            <LivestreamAudioMixer
+              channels={settings.audioChannels}
+              masterVolume={settings.audioMasterVolume}
+              devices={mergeAudioDeviceLists(audioDevices, sourceAudioDevices(settings.videoInputs))}
+              deviceLabel={(name) => audioDeviceLabel(name, settings.videoInputs, t("livestream.sourceBrowser"))}
+              outputs={audioOutputs}
+              monitorDevice={settings.audioMonitorDevice}
+              monitorCueIds={settings.audioMonitorCueIds}
+              locked={status.running}
+              live={status.running}
+              t={t}
+              onMaster={(audioMasterVolume) => void persist({ audioMasterVolume })}
+              onChannels={(audioChannels) => void persist({ audioChannels })}
+              onMonitorDevice={(audioMonitorDevice) => void persist({ audioMonitorDevice })}
+              onMonitorCueIds={(audioMonitorCueIds) => void persist({ audioMonitorCueIds })}
+            />
+          </div>
+        ) : (
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={false}
+              disabled={status.running}
+              onChange={(e) => void persist({ audioEnabled: e.target.checked })}
+            />
+            {t("livestream.audioEnabled")}
+          </label>
+        )}
+      </div>
 
       {!destinationReady && !status.running ? (
         <p className="text-[11px] text-amber-600/90">{t("livestream.needsStreamKey")}</p>
