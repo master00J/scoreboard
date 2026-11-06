@@ -1592,7 +1592,7 @@
     "setupCat_audio": "Audio",
     "setupCat_overlay": "Overlay",
     "setupCat_hotkeys": "Hotkeys",
-    "setupOverlayUnavailable": "The LED screen already shows score and sponsors itself. Overlays appear once a camera, browser, media or network source is live.",
+    "setupOverlayUnavailable": "The LED screen is live now, and it already shows score and sponsors itself. This overlay goes into the stream once a camera, browser, media or network source is live. You can set it up here already.",
     "autoSetupTitle": "Auto setup",
     "autoSetupPlatforms": "Platform: {{platforms}}",
     "autoSetupResult": "Recommended: {{resolution}} · {{fps}} fps · {{bitrate}} kbps",

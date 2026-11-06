@@ -1592,7 +1592,7 @@
     "setupCat_audio": "Audio",
     "setupCat_overlay": "Overlay",
     "setupCat_hotkeys": "Sneltoetsen",
-    "setupOverlayUnavailable": "Het LED-scherm toont score en sponsors al zelf. Overlays komen in beeld zodra een camera-, browser-, media- of netwerkbron live staat.",
+    "setupOverlayUnavailable": "Nu staat het LED-scherm live, en dat toont score en sponsors al zelf. Deze overlay komt in de stream zodra een camera-, browser-, media- of netwerkbron live staat. Je kunt hem hier al klaarzetten.",
     "autoSetupTitle": "Automatisch instellen",
     "autoSetupPlatforms": "Platform: {{platforms}}",
     "autoSetupResult": "Aanbevolen: {{resolution}} · {{fps}} fps · {{bitrate}} kbps",

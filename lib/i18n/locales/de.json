@@ -1592,7 +1592,7 @@
     "setupCat_audio": "Audio",
     "setupCat_overlay": "Overlay",
     "setupCat_hotkeys": "Tastenkürzel",
-    "setupOverlayUnavailable": "Der LED-Bildschirm zeigt Spielstand und Sponsoren bereits selbst. Overlays erscheinen, sobald eine Kamera-, Browser-, Medien- oder Netzwerkquelle live ist.",
+    "setupOverlayUnavailable": "Gerade ist der LED-Bildschirm live, und er zeigt Spielstand und Sponsoren bereits selbst. Dieses Overlay kommt in den Stream, sobald eine Kamera-, Browser-, Medien- oder Netzwerkquelle live ist. Du kannst es hier schon vorbereiten.",
     "autoSetupTitle": "Automatisch einrichten",
     "autoSetupPlatforms": "Plattform: {{platforms}}",
     "autoSetupResult": "Empfohlen: {{resolution}} · {{fps}} fps · {{bitrate}} kbps",

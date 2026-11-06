@@ -2132,7 +2132,13 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         ) : null}
 
         {setupCategory === "overlay" ? (
-          sourceShowsStreamLayers(settings.source) ? (
+          <>
+          {/* Het LED-scherm toont score en sponsors al; de overlay kan wel al klaargezet worden. */}
+          {!sourceShowsStreamLayers(settings.source) ? (
+            <p className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-[11px] leading-snug text-sky-200/90">
+              {t("livestream.setupOverlayUnavailable")}
+            </p>
+          ) : null}
           <StudioSection
             title={t("livestream.layersSection")}
             summary={
@@ -2258,11 +2264,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               />
             </StudioDisclosure>
           </StudioSection>
-          ) : (
-            <p className="rounded-xl border border-border bg-card p-3 text-[11px] leading-snug text-muted-foreground">
-              {t("livestream.setupOverlayUnavailable")}
-            </p>
-          )
+          </>
         ) : null}
 
         {setupCategory === "stream" ? (

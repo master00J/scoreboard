@@ -1592,7 +1592,7 @@
     "setupCat_audio": "Audio",
     "setupCat_overlay": "Habillage",
     "setupCat_hotkeys": "Raccourcis",
-    "setupOverlayUnavailable": "L'écran LED affiche déjà lui-même le score et les sponsors. L'habillage apparaît dès qu'une source caméra, navigateur, média ou réseau est à l'antenne.",
+    "setupOverlayUnavailable": "L'écran LED est à l'antenne et affiche déjà lui-même le score et les sponsors. Cet habillage apparaît dans le stream dès qu'une source caméra, navigateur, média ou réseau est à l'antenne. Vous pouvez déjà le préparer ici.",
     "autoSetupTitle": "Configuration automatique",
     "autoSetupPlatforms": "Plateforme : {{platforms}}",
     "autoSetupResult": "Recommandé : {{resolution}} · {{fps}} fps · {{bitrate}} kbps",

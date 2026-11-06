@@ -1592,7 +1592,7 @@
     "setupCat_audio": "Audio",
     "setupCat_overlay": "Overlay",
     "setupCat_hotkeys": "Scorciatoie",
-    "setupOverlayUnavailable": "Lo schermo LED mostra già da sé punteggio e sponsor. Gli overlay compaiono quando è in onda una sorgente camera, browser, media o rete.",
+    "setupOverlayUnavailable": "Ora è in onda lo schermo LED, che mostra già da sé punteggio e sponsor. Questo overlay entra nello stream quando è in onda una sorgente camera, browser, media o rete. Puoi già prepararlo qui.",
     "autoSetupTitle": "Configurazione automatica",
     "autoSetupPlatforms": "Piattaforma: {{platforms}}",
     "autoSetupResult": "Consigliato: {{resolution}} · {{fps}} fps · {{bitrate}} kbps",
