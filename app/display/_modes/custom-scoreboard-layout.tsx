@@ -21,6 +21,8 @@ export function CustomScoreboardLayout({
   addedTime = 0,
   shotClock = 0,
   theme: themeProp,
+  elements: elementsProp,
+  transparent = false,
   children,
 }: {
   match: Match;
@@ -30,18 +32,29 @@ export function CustomScoreboardLayout({
   addedTime?: number;
   shotClock?: number;
   theme?: ResolvedScoreboardTheme;
+  /**
+   * Andere elementen dan het sponsorvlak, bv. de livestream-overlay. Zonder deze prop blijft het
+   * stadionscherm exact zijn eigen `theme.elements.sponsor` tekenen.
+   */
+  elements?: LayoutElement[];
+  /** Geen achtergrondkleur of -beeld: voor de overlay boven het camerabeeld van de stream. */
+  transparent?: boolean;
   children?: ReactNode;
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
+  const elements = elementsProp ?? theme.elements.sponsor;
   const accent = running ? theme.timerRunningColor : theme.timerPausedColor;
   const profile = getSportProfile(match.sport);
   const showShot = profile.shotClockPresets.length > 0 && !useShotClockOff();
   const showClockBlock =
     theme.showClock || theme.fullShowPeriod || profile.hasSets || profile.shotClockPresets.length > 0;
-  const frameSrc = mediaUrl(scoreboardSurfaceBackgroundPath(theme, "sponsor"));
+  const frameSrc = transparent ? "" : mediaUrl(scoreboardSurfaceBackgroundPath(theme, "sponsor"));
 
   return (
-    <div className="absolute inset-0" style={{ fontFamily: theme.fontFamily, background: theme.contentAreaBg }}>
+    <div
+      className="absolute inset-0"
+      style={{ fontFamily: theme.fontFamily, background: transparent ? "transparent" : theme.contentAreaBg }}
+    >
       {frameSrc ? (
         <img
           src={frameSrc}
@@ -49,7 +62,7 @@ export function CustomScoreboardLayout({
           className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover"
         />
       ) : null}
-      {theme.elements.sponsor.map((element, index) => {
+      {elements.map((element, index) => {
         if (element.hidden) return null;
         const box = elementBoxStyle(element, index);
         const inner = elementInnerStyle(element);

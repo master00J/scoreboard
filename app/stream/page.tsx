@@ -29,7 +29,15 @@ import {
   streamShowsEventGraphic,
 } from "@/lib/stream-match-overlay";
 import { resolveStreamOverlayClip, streamOverlayClipAllowed } from "@/lib/stream-program-clip";
-import { resolveStreamProgramLayout, type StreamProgramPhase } from "@/lib/stream-program-layout";
+import {
+  resolveStreamProgramLayout,
+  streamCustomSurface,
+  type StreamProgramPhase,
+} from "@/lib/stream-program-layout";
+import { mergeScoreboardTheme } from "@/lib/scoreboard-theme";
+import { useLiveShotClockSeconds } from "@/lib/use-timer";
+import { CustomScoreboardLayout } from "@/app/display/_modes/custom-scoreboard-layout";
+import { StreamSponsorMedia } from "@/app/stream/stream-sponsor-layer";
 import type { Match, MediaItem } from "@/lib/types";
 
 function cameraFromQuery(): string {
@@ -129,6 +137,24 @@ export default function StreamProgramPage({
     void reloadMatch();
   }, [state?.updatedAt, reloadMatch]);
 
+  // De eigen overlay staat in het scorebordthema (Scherm indelen → Livestream). Zoals het
+  // stadionscherm opnieuw lezen bij elke statuswijziging, zodat opslaan in de editor meteen telt.
+  const [themeJson, setThemeJson] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((s: { scoreboardThemeJson?: string | null } | null) => {
+        if (!cancelled && s) setThemeJson(s.scoreboardThemeJson ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [state?.updatedAt]);
+  const scoreboardTheme = useMemo(() => mergeScoreboardTheme(themeJson), [themeJson]);
+  const shotClockSeconds = useLiveShotClockSeconds();
+
   const sponsorSlot = useStreamSponsorSlot(match ?? null);
   const [displayMedia, setDisplayMedia] = useState<MediaItem | null>(null);
   useEffect(() => {
@@ -186,7 +212,10 @@ export default function StreamProgramPage({
     : elapsedRaw;
   const scoreEdge = widgetScoreEdge(streamSettings.scoreWidget);
   const widgetClearance = streamWidgetClearancePx(streamSettings.scoreWidget);
-  const scoreVisible = layout.showScore && Boolean(match) && state?.mode !== "SUBSTITUTION";
+  /** Eigen indeling uit Scherm indelen in plaats van de vaste lagen, als de club dat koos. */
+  const customSurface = streamCustomSurface(streamSettings, layout.phase);
+  const scoreVisible =
+    !customSurface && layout.showScore && Boolean(match) && state?.mode !== "SUBSTITUTION";
 
   return (
     <div
@@ -257,10 +286,27 @@ export default function StreamProgramPage({
           }
         />
       ) : null}
-      {layout.showSponsorBreak && !showOverlayClip && !eventGraphic ? (
+      {customSurface && match && !showOverlayClip && !eventGraphic ? (
+        <div className="pointer-events-none absolute inset-0 z-20">
+          <CustomScoreboardLayout
+            match={match}
+            elapsed={scoreboardClock}
+            running={Boolean(state?.timerRunning)}
+            period={period}
+            addedTime={state?.addedTimeMinutes ?? 0}
+            shotClock={shotClockSeconds}
+            theme={scoreboardTheme}
+            elements={scoreboardTheme.elements[customSurface]}
+            transparent
+          >
+            <StreamSponsorMedia slot={sponsorSlot} match={match} placeholder={layoutCanvas} />
+          </CustomScoreboardLayout>
+        </div>
+      ) : null}
+      {!customSurface && layout.showSponsorBreak && !showOverlayClip && !eventGraphic ? (
         <StreamBreakSponsorOverlay slot={sponsorSlot} match={match ?? null} placeholder={layoutCanvas} />
       ) : null}
-      {layout.showSponsorStrip && !showOverlayClip && !eventGraphic ? (
+      {!customSurface && layout.showSponsorStrip && !showOverlayClip && !eventGraphic ? (
         <StreamSponsorLayer
           slot={sponsorSlot}
           match={match ?? null}

@@ -1,4 +1,10 @@
-import { layoutRulesFromThemeJson, pickLayoutRule, pickLayoutRuleForPhase, type LayoutRule } from "./scoreboard-elements";
+import {
+  layoutRulesFromThemeJson,
+  pickLayoutRule,
+  pickLayoutRuleForPhase,
+  STREAM_SURFACES,
+  type LayoutRule,
+} from "./scoreboard-elements";
 import {
   DEFAULT_SCOREBOARD_THEME,
   SLOT_PRESETS,
@@ -72,6 +78,13 @@ export function extractVisualTheme(raw: string | null | undefined): ScoreboardTh
   for (const key of VISUAL_THEME_KEYS) {
     if (patch[key] !== undefined) out[key] = patch[key];
   }
+  // Een bibliotheekindeling is het stadionscherm. De livestream-overlay hoort er niet in: anders
+  // telt een aanpassing aan de stream als een gewijzigde stadionindeling.
+  if (out.elements && typeof out.elements === "object" && !Array.isArray(out.elements)) {
+    const elements = { ...(out.elements as Record<string, unknown>) };
+    for (const surface of STREAM_SURFACES) delete elements[surface];
+    out.elements = elements;
+  }
   return out as ScoreboardTheme;
 }
 
@@ -126,6 +139,15 @@ export function applyTemplateToThemeJson(
     const fromTemplate = typeof next[key] === "string" ? next[key].trim() : "";
     const fromCurrent = typeof current[key] === "string" ? current[key].trim() : "";
     if (!fromTemplate && fromCurrent) next[key] = fromCurrent;
+  }
+  // De livestream-overlay hoort bij de club, niet bij een stadionscherm-indeling: een indeling
+  // uit de bibliotheek kiezen mag de overlay van de stream niet terugzetten.
+  const currentElements = current.elements as Record<string, unknown> | undefined;
+  for (const surface of STREAM_SURFACES) {
+    const keep = currentElements?.[surface];
+    if (keep === undefined) continue;
+    const elements = (next.elements && typeof next.elements === "object" ? next.elements : {}) as Record<string, unknown>;
+    next.elements = { ...elements, [surface]: keep };
   }
   return JSON.stringify(next);
 }

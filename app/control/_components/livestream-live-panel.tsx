@@ -22,6 +22,7 @@ import { enumerateAudioCaptureOptions, mergeAudioDeviceLists } from "@/lib/enume
 import { useWallClockMs } from "@/lib/use-wall-clock-tick";
 import { videoInputReady, videoKindLabel } from "@/app/control/_components/livestream-studio";
 import { LivestreamAudioMixer } from "@/app/control/_components/livestream-audio-mixer";
+import { StreamOverlaySwitch } from "@/app/control/_components/stream-overlay-switch";
 
 /** Hoe lang de stopknop na de eerste klik op "Echt stoppen?" blijft staan. */
 const STOP_CONFIRM_MS = 3000;
@@ -271,6 +272,13 @@ export function LivestreamLivePanel({
               ms: settings.transitionMs,
             })}
       </p>
+
+      <div className="flex flex-col gap-1.5 border-t border-border pt-2">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("livestream.setupCat_overlay")}
+        </span>
+        <StreamOverlaySwitch settings={settings} onChange={(partial) => void persist(partial)} t={t} />
+      </div>
 
       <div className="flex flex-col gap-1.5 border-t border-border pt-2">
         <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">

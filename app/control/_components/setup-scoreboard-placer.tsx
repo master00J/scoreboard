@@ -33,10 +33,12 @@ import {
   createElement,
   duplicateElement,
   isClassicElementId,
+  isStreamSurface,
   moveElementLayer,
   normalizeBox,
   sixteenByNineHeightPct,
   type AddableElementType,
+  type StreamSurface,
   type ElementAlign,
   type ElementSide,
   type LayoutElement,
@@ -60,7 +62,8 @@ import {
 import { SPORT_TYPES, getSportProfile, normalizeSport, sportClockSeconds, type SportType } from "@/lib/sports";
 import type { Match, Team } from "@/lib/types";
 
-export type EditorSurface = LayoutPreviewSurface;
+/** Het stadionscherm (sponsorvlak, volledig) of de livestream-overlay (spel, pauze). */
+export type EditorSurface = LayoutPreviewSurface | StreamSurface;
 
 /**
  * `live` = tussenstand tijdens slepen (de eigenaar maakt er bij `onGestureEnd` één stap van).
@@ -574,7 +577,11 @@ export function SetupScoreboardPlacer({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <p className="max-w-2xl text-sm text-muted-foreground">
-          {surface === "full" ? t("setup.themePlacerHelpFull") : t("setup.themePlacerHelp")}
+          {surface === "full"
+            ? t("setup.themePlacerHelpFull")
+            : isStreamSurface(surface)
+              ? t("setup.themePlacerHelpStream")
+              : t("setup.themePlacerHelp")}
         </p>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
           <label className="flex items-center gap-2">
@@ -615,6 +622,10 @@ export function SetupScoreboardPlacer({
               aspectRatio: `${canvasWidth} / ${canvasHeight}`,
               width: `min(100%, calc(70vh * ${canvasWidth / canvasHeight}))`,
               touchAction: "none",
+              // De livestream-overlay is doorzichtig: een dambord laat zien waar straks het camerabeeld komt.
+              ...(isStreamSurface(surface)
+                ? { background: "repeating-conic-gradient(#1c222b 0% 25%, #161b22 0% 50%) 50% / 32px 32px" }
+                : {}),
             }}
             onPointerMove={onMove}
             onPointerUp={endDrag}

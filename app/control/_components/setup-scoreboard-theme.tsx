@@ -37,6 +37,7 @@ import {
   elementsFromSlots,
   layoutRulesFromThemeJson,
   overviewSportForEditor,
+  isStreamSurface,
   type LayoutPhase,
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
@@ -456,7 +457,11 @@ export function SetupScoreboardThemeSection({
   }
 
   /** Wat het stadionscherm bij "Probeer op scherm" toont: dit concept, op het vlak en de sport van het canvas. */
-  const tryPayloadJson = JSON.stringify(withLayoutPreviewMeta(themePayload(), { surface, sport: canvasSport }));
+  // De livestream-vlakken komen nooit op het stadionscherm: een proef toont daar het sponsorvlak.
+  const streamSurface = isStreamSurface(surface);
+  const tryPayloadJson = JSON.stringify(
+    withLayoutPreviewMeta(themePayload(), { surface: streamSurface ? "sponsor" : surface, sport: canvasSport }),
+  );
   const sentTryJsonRef = useRef<string | null>(null);
 
   async function sendTryPreview(json: string, seconds: number): Promise<number> {
@@ -749,7 +754,13 @@ export function SetupScoreboardThemeSection({
               {t("layoutEditor.trying")}
             </Button>
           ) : (
-            <Button variant="outline" size="sm" onClick={() => void tryOnScreen()}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={streamSurface}
+              title={streamSurface ? t("setup.themeTryLedOnly") : undefined}
+              onClick={() => void tryOnScreen()}
+            >
               {t("layoutEditor.tryOnScreen")}
             </Button>
           )}
@@ -825,6 +836,8 @@ export function SetupScoreboardThemeSection({
             [
               ["sponsor", "themeSurfaceSponsor"],
               ["full", "themeSurfaceFull"],
+              ["stream", "themeSurfaceStream"],
+              ["streamBreak", "themeSurfaceStreamBreak"],
             ] as const
           ).map(([id, labelKey]) => (
             <button
@@ -841,7 +854,9 @@ export function SetupScoreboardThemeSection({
             </button>
           ))}
         </div>
-        <p className="max-w-3xl text-xs text-muted-foreground">{t("setup.themeSurfaceHint")}</p>
+        <p className="max-w-3xl text-xs text-muted-foreground">
+          {streamSurface ? t("setup.themeSurfaceStreamHint") : t("setup.themeSurfaceHint")}
+        </p>
         <SetupScoreboardPlacer
           theme={draft}
           onChange={setDraft}
@@ -860,9 +875,10 @@ export function SetupScoreboardThemeSection({
           initialSport={previewSport}
           onPreviewSportChange={setCanvasSport}
           surface={surface}
-          canvasWidth={canvasWidth}
-          canvasHeight={canvasHeight}
-          safeZonePx={Math.max(0, Number(settings?.displaySafeZoneMarginPx ?? 40))}
+          // De stream is altijd 1920×1080, wat het stadionscherm ook is.
+          canvasWidth={streamSurface ? 1920 : canvasWidth}
+          canvasHeight={streamSurface ? 1080 : canvasHeight}
+          safeZonePx={streamSurface ? 0 : Math.max(0, Number(settings?.displaySafeZoneMarginPx ?? 40))}
         />
       </div>
 

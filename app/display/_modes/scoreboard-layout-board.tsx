@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import type { Match } from "@/lib/types";
 import { scoreboardEditorShowsLeftFrame, type ResolvedScoreboardTheme } from "@/lib/scoreboard-theme";
 import type { LayoutPreviewSurface } from "@/lib/scoreboard-preview-match";
+import type { StreamSurface } from "@/lib/scoreboard-elements";
 import { CustomScoreboardLayout } from "./custom-scoreboard-layout";
 import { LeftScoreboardLayout } from "./left-scoreboard-layout";
 import { MatchScoreboardFull } from "./match-scoreboard-full";
@@ -35,7 +36,7 @@ export function ScoreboardSurfaceBoard({
   addedTime = 0,
   shotClock = 0,
 }: {
-  surface: LayoutPreviewSurface;
+  surface: LayoutPreviewSurface | StreamSurface;
   theme: ResolvedScoreboardTheme;
   match: Match;
   elapsed: number;
@@ -45,6 +46,14 @@ export function ScoreboardSurfaceBoard({
   shotClock?: number;
 }) {
   const props = { match, elapsed, running, period, addedTime, shotClock, theme };
+  if (surface === "stream" || surface === "streamBreak") {
+    // Doorzichtig zoals op de stream: de editor legt er zelf een dambord onder.
+    return (
+      <CustomScoreboardLayout {...props} elements={theme.elements[surface]} transparent>
+        <SponsorVideoPlate />
+      </CustomScoreboardLayout>
+    );
+  }
   if (surface === "full") return <MatchScoreboardFull {...props} />;
   const video = <SponsorVideoPlate />;
   if (scoreboardEditorShowsLeftFrame(theme)) return <LeftScoreboardLayout {...props}>{video}</LeftScoreboardLayout>;

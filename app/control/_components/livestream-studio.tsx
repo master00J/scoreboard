@@ -92,6 +92,7 @@ import { StreamScoreWidgetEditor } from "@/app/control/_components/stream-score-
 import { StreamLayoutDesigner } from "@/app/control/_components/stream-layout-designer";
 import { autoPhaseLayout, type StreamProgramPhase } from "@/lib/stream-program-layout";
 import { LivestreamAudioMixer } from "@/app/control/_components/livestream-audio-mixer";
+import { StreamOverlaySwitch } from "@/app/control/_components/stream-overlay-switch";
 import { syncLegacyFromManualLayout } from "@/lib/stream-layer-layout";
 import { STREAM_TRANSITIONS, transitionDurationOptions } from "@/lib/stream-transition";
 import { sendCommand } from "@/lib/use-socket";
@@ -2147,6 +2148,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
 
         {setupCategory === "overlay" ? (
           <>
+          <StudioSection title={t("livestream.overlayModeTitle")}>
+            <StreamOverlaySwitch settings={settings} onChange={(partial) => void persist(partial)} t={t} />
+          </StudioSection>
           {/* Het LED-scherm toont score en sponsors al; de overlay kan wel al klaargezet worden. */}
           {!sourceShowsStreamLayers(settings.source) ? (
             <p className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-[11px] leading-snug text-sky-200/90">
