@@ -87,6 +87,7 @@ export function StreamOverlayTransform({
   return (
     <div
       ref={boxRef}
+      data-stream-overlay-transform
       className={`absolute z-40 ${interactive ? "cursor-move" : "pointer-events-none"}`}
       style={{
         left: `${xPct}%`,

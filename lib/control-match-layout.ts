@@ -10,7 +10,8 @@ export type MatchTabPanelId =
   | "preview"
   | "match-live"
   | "event-log"
-  | "match-info";
+  | "match-info"
+  | "livestream";
 
 export type MatchTabColumn = "left" | "center" | "right";
 
@@ -70,7 +71,7 @@ export const DEFAULT_MATCH_TAB_LAYOUT: MatchTabLayoutState = {
     "sponsor-timeline",
     "external",
   ],
-  orderRight: ["preview", "display", "match-info"],
+  orderRight: ["preview", "livestream", "display", "match-info"],
   collapsed: {},
   columnWeights: { ...DEFAULT_COLUMN_WEIGHTS },
   panelHeights: {},
@@ -89,6 +90,7 @@ const ALL_PANEL_IDS: MatchTabPanelId[] = [
   "match-live",
   "event-log",
   "match-info",
+  "livestream",
 ];
 
 export function isMatchTabPanelId(x: unknown): x is MatchTabPanelId {
@@ -386,4 +388,5 @@ export const MATCH_TAB_PANEL_LABELS: Record<MatchTabPanelId, string> = {
   "match-live": "Wedstrijd live",
   "event-log": "Logboek",
   "match-info": "Wedstrijd",
+  livestream: "Livestream",
 };

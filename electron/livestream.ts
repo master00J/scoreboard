@@ -45,7 +45,6 @@ import {
   looksLikeEncoderFail,
   looksLikeDestinationFail,
   looksLikeNonEncoderFail,
-  STREAM_AUDIO_BITRATE_K,
   STREAM_AUDIO_RESAMPLE,
   STREAM_AUDIO_SAMPLE_RATE,
   type LivestreamAudioDevice,
@@ -56,6 +55,12 @@ import {
   type LivestreamSettings,
   type LivestreamStatus,
 } from "../lib/livestream";
+import {
+  effectiveBitrateKbps,
+  keyframeIntervalFrames,
+  uploadBudgetKbps,
+  type LivestreamEncoderPreset,
+} from "../lib/livestream-bitrate";
 import { guardChildPipes, writeWithBackpressure } from "../lib/child-pipe";
 import { FrameClock } from "../lib/frame-clock";
 import {
@@ -434,14 +439,30 @@ function ensureWasapiLoopbackExe(deps: Deps): Promise<string | null> {
   });
 }
 
-function encoderArgs(encoder: LivestreamEncoder, bitrateKbps: number, fps: number): string[] {
+/** `balanced` is wat ArenaCue altijd gebruikte; de andere twee schuiven één kant op. */
+const NVENC_PRESET: Record<LivestreamEncoderPreset, string> = { quality: "p6", balanced: "p5", performance: "p3" };
+const X264_PRESET: Record<LivestreamEncoderPreset, string> = {
+  quality: "medium",
+  balanced: "fast",
+  performance: "veryfast",
+};
+
+function encoderArgs(
+  encoder: LivestreamEncoder,
+  bitrateKbps: number,
+  fps: number,
+  preset: LivestreamEncoderPreset,
+  keyframeSec: number,
+): string[] {
   const maxrate = Math.round(bitrateKbps * 1.1);
-  const bufsize = bitrateKbps * 2;
+  // Eén seconde buffer, zoals OBS bij CBR: een grotere buffer laat pieken toe die een krappe
+  // upload niet wegkrijgt, en dan blijft de stream bij de kijker hangen.
+  const bufsize = bitrateKbps;
   const common = [
     "-pix_fmt",
     "yuv420p",
     "-g",
-    String(Math.max(30, fps * 2)),
+    String(keyframeIntervalFrames(fps, keyframeSec)),
     "-r",
     String(fps),
     "-fps_mode",
@@ -458,7 +479,7 @@ function encoderArgs(encoder: LivestreamEncoder, bitrateKbps: number, fps: numbe
       "-c:v",
       "h264_nvenc",
       "-preset",
-      "p5",
+      NVENC_PRESET[preset],
       "-tune",
       "hq",
       "-rc",
@@ -483,7 +504,7 @@ function encoderArgs(encoder: LivestreamEncoder, bitrateKbps: number, fps: numbe
     "-c:v",
     "libx264",
     "-preset",
-    "fast",
+    X264_PRESET[preset],
     "-tune",
     "film",
     "-profile:v",
@@ -1545,7 +1566,19 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     plan: CapturePlan,
     audioPlan: AudioPlan,
   ) => {
-    const bitrate = clampBitrateKbps(settings.bitrateKbps);
+    const chosenBitrate = clampBitrateKbps(settings.bitrateKbps);
+    // Elke RTMP-bestemming krijgt een eigen kopie; een opnamebestand gaat niet over de lijn.
+    const uploadBudget = uploadBudgetKbps(
+      settings.uploadMbps,
+      dests.filter((url) => isRtmpDestination(url)).length,
+      settings.audioBitrateKbps,
+    );
+    const bitrate = effectiveBitrateKbps(chosenBitrate, uploadBudget);
+    if (bitrate < chosenBitrate) {
+      deps.log(
+        `[livestream] bitrate ${chosenBitrate} → ${bitrate} kbps: past in upload ${settings.uploadMbps} Mbps`,
+      );
+    }
     const args = [
       "-hide_banner",
       "-loglevel",
@@ -1561,11 +1594,11 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       "-map",
       audioPlan.audioMap,
       ...plan.videoFilter,
-      ...encoderArgs(useEncoder, bitrate, settings.fps),
+      ...encoderArgs(useEncoder, bitrate, settings.fps, settings.encoderPreset, settings.keyframeSec),
       "-c:a",
       "aac",
       "-b:a",
-      `${STREAM_AUDIO_BITRATE_K}k`,
+      `${settings.audioBitrateKbps}k`,
       "-ar",
       String(STREAM_AUDIO_SAMPLE_RATE),
       "-ac",

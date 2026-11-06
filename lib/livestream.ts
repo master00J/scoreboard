@@ -8,6 +8,20 @@ import {
 import { defaultStreamDeckSlots, mergeStreamDeckSlots, type StreamDeckSlot } from "./stream-deck";
 import { sanitizeNetworkUrl } from "./network-source";
 import {
+  clampAudioBitrateKbps,
+  clampKeyframeSec,
+  clampUploadMbps,
+  DEFAULT_AUDIO_BITRATE_KBPS,
+  DEFAULT_KEYFRAME_SEC,
+  parseEncoderMode,
+  parseEncoderPreset,
+  parseQuality,
+  streamFormatPlan,
+  type LivestreamEncoderMode,
+  type LivestreamEncoderPreset,
+  type LivestreamQuality,
+} from "./livestream-bitrate";
+import {
   DEFAULT_TRANSITION,
   DEFAULT_TRANSITION_MS,
   clampTransitionMs,
@@ -252,6 +266,17 @@ export type LivestreamSettings = {
   streamDeckSlots: StreamDeckSlot[];
   /** Map voor opnames. Leeg = Videos/ArenaCue. */
   recordDir: string;
+  /** Gemeten uploadsnelheid van deze pc in Mbps (0 = onbekend). De stream blijft daaronder. */
+  uploadMbps: number;
+  /**
+   * Eenvoudig: ArenaCue vult resolutie, fps en bitrate in uit `quality`. Geavanceerd: de operator
+   * zet ze zelf. Instellingen van vóór deze keuze openen als geavanceerd, zodat er niets verandert.
+   */
+  encoderMode: LivestreamEncoderMode;
+  quality: LivestreamQuality;
+  encoderPreset: LivestreamEncoderPreset;
+  keyframeSec: number;
+  audioBitrateKbps: number;
 };
 
 export type LivestreamHealth = {
@@ -390,9 +415,10 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
   platform2: "youtube",
   customUrl2: "",
   streamKey2: "",
-  bitrateKbps: 6000,
+  // Wat de eenvoudige stand op `auto` zonder gemeten upload kiest (720p30).
+  bitrateKbps: 4500,
   encoder: "auto",
-  resolution: "1920x1080",
+  resolution: "1280x720",
   fps: 30,
   audioEnabled: true,
   audioDevice: "",
@@ -407,6 +433,12 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
   transitionMs: DEFAULT_TRANSITION_MS,
   streamDeckSlots: defaultStreamDeckSlots(),
   recordDir: "",
+  uploadMbps: 0,
+  encoderMode: "simple",
+  quality: "auto",
+  encoderPreset: "balanced",
+  keyframeSec: DEFAULT_KEYFRAME_SEC,
+  audioBitrateKbps: DEFAULT_AUDIO_BITRATE_KBPS,
 };
 
 export function clampFps(value: number): number {
@@ -710,8 +742,22 @@ export function mergeLivestreamSettings(raw: Partial<LivestreamSettings> | null 
     videoInputs[0]!;
   const synced = syncBrowserAudioChannels(videoInputs, audioChannels, activeVideoInput.id);
 
+  // Wie al een bitrate had opgeslagen, stelde zelf in: die opent als geavanceerd.
+  const encoderMode =
+    parseEncoderMode(r.encoderMode) ?? (r.bitrateKbps != null ? "advanced" : d.encoderMode);
+  const quality = parseQuality(r.quality ?? d.quality);
+  const uploadMbps = clampUploadMbps(r.uploadMbps ?? d.uploadMbps);
+  const audioBitrateKbps = clampAudioBitrateKbps(r.audioBitrateKbps ?? d.audioBitrateKbps);
+  const platform = parsePlatform(r.platform ?? d.platform);
+  const dualEnabled = typeof r.dualEnabled === "boolean" ? r.dualEnabled : d.dualEnabled;
+  const platform2 = parsePlatform(r.platform2 ?? d.platform2);
+  const simplePlan =
+    encoderMode === "simple"
+      ? streamFormatPlan(quality, uploadMbps, dualEnabled ? [platform, platform2] : [platform], audioBitrateKbps)
+      : null;
+
   return {
-    platform: parsePlatform(r.platform ?? d.platform),
+    platform,
     source: activeVideoInput.kind,
     cameraDevice:
       activeVideoInput.kind === "camera" ? activeVideoInput.cameraDevice : legacyCamera,
@@ -735,14 +781,15 @@ export function mergeLivestreamSettings(raw: Partial<LivestreamSettings> | null 
     sponsorPosition: flat.sponsorPosition,
     customUrl: typeof r.customUrl === "string" ? r.customUrl : d.customUrl,
     streamKey: typeof r.streamKey === "string" ? sanitizeStreamKey(r.streamKey) : d.streamKey,
-    dualEnabled: typeof r.dualEnabled === "boolean" ? r.dualEnabled : d.dualEnabled,
-    platform2: parsePlatform(r.platform2 ?? d.platform2),
+    dualEnabled,
+    platform2,
     customUrl2: typeof r.customUrl2 === "string" ? r.customUrl2 : d.customUrl2,
     streamKey2: typeof r.streamKey2 === "string" ? sanitizeStreamKey(r.streamKey2) : d.streamKey2,
-    bitrateKbps: clampBitrateKbps(Number(r.bitrateKbps) || d.bitrateKbps),
+    bitrateKbps: clampBitrateKbps(simplePlan?.bitrateKbps ?? (Number(r.bitrateKbps) || d.bitrateKbps)),
     encoder: parseEncoderPref(r.encoder ?? d.encoder),
-    resolution: parseResolution(typeof r.resolution === "string" ? r.resolution : d.resolution),
-    fps: clampFps(Number(r.fps) || d.fps),
+    resolution:
+      simplePlan?.resolution ?? parseResolution(typeof r.resolution === "string" ? r.resolution : d.resolution),
+    fps: simplePlan?.fps ?? clampFps(Number(r.fps) || d.fps),
     audioEnabled: typeof r.audioEnabled === "boolean" ? r.audioEnabled : d.audioEnabled,
     audioDevice: synced.audioChannels[0]?.device ?? "",
     audioMasterVolume: clampAudioVolume(r.audioMasterVolume ?? d.audioMasterVolume),
@@ -759,6 +806,12 @@ export function mergeLivestreamSettings(raw: Partial<LivestreamSettings> | null 
     transitionMs: clampTransitionMs(r.transitionMs ?? d.transitionMs),
     streamDeckSlots: Array.isArray(r.streamDeckSlots) ? mergeStreamDeckSlots(r.streamDeckSlots) : d.streamDeckSlots,
     recordDir: sanitizeRecordDir(r.recordDir ?? d.recordDir),
+    uploadMbps,
+    encoderMode,
+    quality,
+    encoderPreset: parseEncoderPreset(r.encoderPreset ?? d.encoderPreset),
+    keyframeSec: clampKeyframeSec(r.keyframeSec ?? d.keyframeSec),
+    audioBitrateKbps,
   };
 }
 

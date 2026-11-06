@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Gauge, Keyboard, Layers, Radio, Video, Volume2, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
@@ -41,6 +42,7 @@ import {
   audioDeviceLabel,
   mergeStreamScoreWidget,
   parseWasapiHelperError,
+  clampBitrateKbps,
   type LivestreamAudioChannel,
   type LivestreamAudioFollowAction,
   type LivestreamVideoInput,
@@ -58,6 +60,18 @@ import {
   bitrateAdvice,
   bitrateOptionsKbps,
   bitrateVerdict,
+  AUDIO_BITRATES_KBPS,
+  clampUploadMbps,
+  effectiveBitrateKbps,
+  ENCODER_PRESETS,
+  KEYFRAME_SECONDS,
+  LIVESTREAM_QUALITIES,
+  streamFallingBehind,
+  streamFormatPlan,
+  totalUploadKbps,
+  uploadBudgetKbps,
+  type LivestreamEncoderPreset,
+  type LivestreamQuality,
 } from "@/lib/livestream-bitrate";
 import {
   armedFollowChannels,
@@ -98,7 +112,18 @@ import {
 
 const idleStatus: LivestreamStatus = { ...DEFAULT_LIVESTREAM_STATUS };
 
-function videoKindLabel(
+/** Categorieën van het Instellen-tabblad, in de volgorde van het OBS-instellingenvenster. */
+type SetupCategory = "stream" | "output" | "sources" | "audio" | "overlay" | "hotkeys";
+const SETUP_CATEGORIES: readonly { id: SetupCategory; icon: LucideIcon }[] = [
+  { id: "stream", icon: Radio },
+  { id: "output", icon: Gauge },
+  { id: "sources", icon: Video },
+  { id: "audio", icon: Volume2 },
+  { id: "overlay", icon: Layers },
+  { id: "hotkeys", icon: Keyboard },
+];
+
+export function videoKindLabel(
   kind: LivestreamSource,
   t: (key: string, opts?: Record<string, string | number>) => string,
   short = false,
@@ -156,7 +181,7 @@ function NetworkSourceState({
   );
 }
 
-function videoInputReady(input: LivestreamVideoInput): boolean {
+export function videoInputReady(input: LivestreamVideoInput): boolean {
   if (input.kind === "camera") return Boolean(input.cameraDevice.trim());
   if (input.kind === "browser") return Boolean(input.browserUrl.trim());
   if (input.kind === "media") return Boolean(input.mediaPath.trim());
@@ -310,9 +335,19 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [busy, setBusy] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [showKey2, setShowKey2] = useState(false);
+  /** Wat de operator typt in het uploadveld (met komma of punt); null = toon de opgeslagen waarde. */
+  const [uploadDraft, setUploadDraft] = useState<string | null>(null);
+  /** Idem voor het vrije bitrateveld in de geavanceerde stand. */
+  const [bitrateDraft, setBitrateDraft] = useState<string | null>(null);
   const [editPhase, setEditPhase] = useState(programPhase);
   /** Live = wat je tijdens de wedstrijd bedient; Setup = wat je één keer instelt. */
   const [studioTab, setStudioTab] = useState<"live" | "setup">("live");
+  /** Welke categorie het Instellen-tabblad toont, zoals de lijst links in het OBS-instellingenvenster. */
+  const [setupCategory, setSetupCategory] = useState<SetupCategory>("stream");
+  const openSetup = (category: SetupCategory) => {
+    setSetupCategory(category);
+    setStudioTab("setup");
+  };
   const [networkStatus, setNetworkStatus] = useState<NetworkSourceBridgeStatus | null>(null);
   /** Welke fase de indeling-editor toont; losgekoppeld van de lopende wedstrijd. */
   const [designerPhase, setDesignerPhase] = useState<StreamProgramPhase>("play");
@@ -354,7 +389,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     setStatus(nextStatus);
     if (!booted.current) {
       booted.current = true;
-      if (!nextSettings.streamKey.trim() && !nextSettings.customUrl.trim()) setStudioTab("setup");
+      if (!nextSettings.streamKey.trim() && !nextSettings.customUrl.trim()) openSetup("stream");
     }
   }, []);
 
@@ -712,11 +747,34 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     settings.fps,
     outputPlatforms,
   );
+  const destinationCount = outputPlatforms.length;
+  const uploadBudget = uploadBudgetKbps(settings.uploadMbps, destinationCount, settings.audioBitrateKbps);
+  const sentBitrate = effectiveBitrateKbps(settings.bitrateKbps, uploadBudget);
+  const totalUploadMbps = (totalUploadKbps(sentBitrate, destinationCount, settings.audioBitrateKbps) / 1000).toFixed(1);
+  /** Wat de wizard aanraadt voor deze platformen en deze upload. */
+  const recommendation = streamFormatPlan("auto", settings.uploadMbps, outputPlatforms, settings.audioBitrateKbps);
+  const followsRecommendation =
+    settings.encoderMode === "simple"
+      ? settings.quality === "auto"
+      : settings.resolution === recommendation.resolution &&
+        settings.fps === recommendation.fps &&
+        settings.bitrateKbps === clampBitrateKbps(recommendation.bitrateKbps);
+  const applyRecommendation = () =>
+    settings.encoderMode === "simple"
+      ? persist({ quality: "auto" })
+      : persist({
+          resolution: recommendation.resolution,
+          fps: recommendation.fps,
+          bitrateKbps: recommendation.bitrateKbps,
+        });
+  const resolutionLabel = settings.resolution === "1920x1080" ? "1080p" : "720p";
   const sourceLocked = busy;
   const health = status.health ?? DEFAULT_LIVESTREAM_HEALTH;
+  const fallingBehind = status.running && streamFallingBehind(health);
   const healthWarn =
     status.running &&
     (health.stale ||
+      fallingBehind ||
       health.dropFrames > 0 ||
       health.paintDrops > 2 ||
       health.packetLossHints > 0 ||
@@ -735,7 +793,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
 
   const takeInput = (input: LivestreamVideoInput) => {
     if (!videoInputReady(input)) {
-      setStudioTab("setup");
+      openSetup("sources");
       return;
     }
     if (input.id === settings.activeVideoInputId) return;
@@ -977,7 +1035,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         return;
       }
       if (!destinationReady) {
-        setStudioTab("setup");
+        openSetup("stream");
         return;
       }
       void start();
@@ -1043,7 +1101,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           className="min-w-[7rem] bg-red-600 text-white hover:bg-red-700"
           onClick={() => {
             if (!destinationReady) {
-              setStudioTab("setup");
+              openSetup("stream");
               return;
             }
             void start();
@@ -1112,6 +1170,11 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             tone={healthWarn ? "warn" : "normal"}
           />
         </div>
+      ) : null}
+      {fallingBehind ? (
+        <p className="text-[11px] leading-snug text-amber-600/90">
+          {t("livestream.uploadBehind", { speed: (health.speed ?? 0).toFixed(2) })}
+        </p>
       ) : null}
       {settings.source === "network" ? <NetworkSourceState status={networkStatus} t={t} /> : null}
       {!destinationReady && !status.running ? (
@@ -1205,7 +1268,21 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center gap-2">
             <div
               ref={previewBoxRef}
-              className="aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-6rem)/2)]"
+              className={`aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-6rem)/2)] ${
+                previewVideo && previewVideo.id !== settings.activeVideoInputId ? "cursor-pointer" : ""
+              }`}
+              title={
+                previewVideo && previewVideo.id !== settings.activeVideoInputId
+                  ? t("livestream.monitorNextDoubleClick", { transition: t(`livestream.transition_${settings.transition}`) })
+                  : undefined
+              }
+              // Dubbelklik op VOLGENDE zet die bron live, net als de overgangsknop. Niet als je in het
+              // beeld de score-widget versleept of vergroot: dat is instellen, geen wissel.
+              onDoubleClick={(event) => {
+                if ((event.target as HTMLElement).closest("[data-stream-overlay-transform]")) return;
+                if (busy || !previewVideo || previewVideo.id === settings.activeVideoInputId) return;
+                takeInput(previewVideo);
+              }}
             >
               <StudioMonitor
                 label={t("livestream.monitorNext")}
@@ -1645,7 +1722,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               <button
                 type="button"
                 className="h-9 rounded-md px-2 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
-                onClick={() => setStudioTab("setup")}
+                onClick={() => openSetup("hotkeys")}
               >
                 {t("livestream.deckEmpty")}
               </button>
@@ -1691,7 +1768,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             <button
               type="button"
               className="ml-auto h-9 rounded-md px-2 text-[10px] text-muted-foreground hover:bg-zinc-800 hover:text-foreground"
-              onClick={() => setStudioTab("setup")}
+              onClick={() => openSetup("hotkeys")}
             >
               {t("livestream.deckEdit")}
             </button>
@@ -1700,7 +1777,31 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           {streamBar}
         </div>
       {studioTab !== "live" ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row">
+        {/* Categorieën links, instellingen rechts: zoals het OBS-instellingenvenster. */}
+        <nav
+          aria-label={t("livestream.tabSetup")}
+          className="flex shrink-0 gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-1.5 sm:w-44 sm:flex-col sm:overflow-visible"
+        >
+          {SETUP_CATEGORIES.map(({ id, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              aria-current={setupCategory === id ? "page" : undefined}
+              className={`flex shrink-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs ${
+                setupCategory === id
+                  ? "bg-primary text-primary-foreground font-semibold"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              }`}
+              onClick={() => setSetupCategory(id)}
+            >
+              <Icon className="h-4 w-4 shrink-0" aria-hidden />
+              {t(`livestream.setupCat_${id}`)}
+            </button>
+          ))}
+        </nav>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto">
+        {setupCategory === "sources" ? (
         <StudioSection
           title={t("livestream.sourceSection")}
           summary={t("livestream.sourceCount", { n: settings.videoInputs.length })}
@@ -2011,7 +2112,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             ) : null}
           </div>
         </StudioSection>
+        ) : null}
 
+        {setupCategory === "audio" ? (
         <StudioSection
           title={t("livestream.audioSection")}
           summary={
@@ -2040,8 +2143,16 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             </>
           )}
         </StudioSection>
+        ) : null}
 
-        {sourceShowsStreamLayers(settings.source) && (
+        {setupCategory === "overlay" ? (
+          <>
+          {/* Het LED-scherm toont score en sponsors al; de overlay kan wel al klaargezet worden. */}
+          {!sourceShowsStreamLayers(settings.source) ? (
+            <p className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-[11px] leading-snug text-sky-200/90">
+              {t("livestream.setupOverlayUnavailable")}
+            </p>
+          ) : null}
           <StudioSection
             title={t("livestream.layersSection")}
             summary={
@@ -2167,8 +2278,10 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               />
             </StudioDisclosure>
           </StudioSection>
-        )}
+          </>
+        ) : null}
 
+        {setupCategory === "stream" ? (
         <StudioSection
           title={t("livestream.outputSection")}
           summary={
@@ -2221,18 +2334,117 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               />
             </>
           )}
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">{t("livestream.recordFolder")}</span>
-            <span className="max-w-[22rem] truncate font-mono text-[11px]">
-              {settings.recordDir.trim() || t("livestream.recordFolderDefault")}
-            </span>
-            <Button size="sm" variant="outline" disabled={status.recording} onClick={() => void pickRecordDir()}>
-              {t("livestream.recordFolderPick")}
-            </Button>
-          </div>
         </StudioSection>
+        ) : null}
 
-        <StudioDisclosure title={t("livestream.encoderSection")} summary={encoderSummary(settings)}>
+        {setupCategory === "output" ? (
+        <StudioSection title={t("livestream.encoderSection")} summary={encoderSummary(settings)}>
+          {/* Automatisch instellen, zoals de OBS-wizard: platformen + upload → aanbeveling. */}
+          <div className="flex flex-col gap-2 rounded-md border border-border bg-card/60 p-2">
+            <div className="text-[11px] font-medium">{t("livestream.autoSetupTitle")}</div>
+            <div className="flex flex-wrap items-end gap-3">
+              <StudioField label={t("livestream.uploadSpeed")} htmlFor="ls-upload">
+                <Input
+                  id="ls-upload"
+                  className="h-8 w-28"
+                  inputMode="decimal"
+                  placeholder="—"
+                  value={uploadDraft ?? (settings.uploadMbps > 0 ? String(settings.uploadMbps) : "")}
+                  disabled={locked}
+                  onChange={(e) => setUploadDraft(e.target.value)}
+                  onBlur={() => {
+                    if (uploadDraft == null) return;
+                    const uploadMbps = clampUploadMbps(uploadDraft);
+                    setUploadDraft(null);
+                    if (uploadMbps !== settings.uploadMbps) void persist({ uploadMbps });
+                  }}
+                />
+              </StudioField>
+              <div className="flex min-w-0 flex-col gap-1 pb-1.5 text-[11px]">
+                <span className="text-muted-foreground">
+                  {t("livestream.autoSetupPlatforms", {
+                    platforms: outputPlatforms.map((p) => t(`livestream.${p}`)).join(" + "),
+                  })}
+                </span>
+                <span>
+                  {t("livestream.autoSetupResult", {
+                    resolution: recommendation.resolution.replace("x", "×"),
+                    fps: recommendation.fps,
+                    bitrate: recommendation.bitrateKbps,
+                  })}
+                </span>
+              </div>
+              {!followsRecommendation ? (
+                <Button size="sm" className="mb-0.5" disabled={locked} onClick={() => void applyRecommendation()}>
+                  {t("livestream.autoSetupApply")}
+                </Button>
+              ) : null}
+            </div>
+            {settings.uploadMbps <= 0 ? (
+              <p className="text-[11px] leading-snug text-muted-foreground">{t("livestream.uploadSpeedHelp")}</p>
+            ) : null}
+          </div>
+
+          <div className="inline-flex w-fit rounded-md border border-border p-0.5" role="radiogroup">
+            {(["simple", "advanced"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={settings.encoderMode === mode}
+                disabled={locked}
+                className={`h-7 rounded px-3 text-[11px] disabled:opacity-50 ${
+                  settings.encoderMode === mode
+                    ? "bg-secondary font-medium text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+                onClick={() => void persist({ encoderMode: mode })}
+              >
+                {t(mode === "simple" ? "livestream.encoderModeSimple" : "livestream.encoderModeAdvanced")}
+              </button>
+            ))}
+          </div>
+
+          {settings.encoderMode === "simple" ? (
+            <div className="grid grid-cols-2 gap-2">
+              <StudioField label={t("livestream.quality")} htmlFor="ls-quality">
+                <Select
+                  id="ls-quality"
+                  className="h-8"
+                  value={settings.quality}
+                  disabled={locked}
+                  onChange={(e) => void persist({ quality: e.target.value as LivestreamQuality })}
+                >
+                  {LIVESTREAM_QUALITIES.map((q) => (
+                    <option key={q} value={q}>
+                      {q === "auto" ? t("livestream.qualityAuto") : q}
+                    </option>
+                  ))}
+                </Select>
+              </StudioField>
+              <StudioField label={t("livestream.encoder")} htmlFor="ls-encoder-simple">
+                <Select
+                  id="ls-encoder-simple"
+                  className="h-8"
+                  value={settings.encoder}
+                  disabled={locked}
+                  onChange={(e) => void persist({ encoder: e.target.value as LivestreamEncoderPref })}
+                >
+                  <option value="auto">{t("livestream.encoderAuto")}</option>
+                  <option value="h264_nvenc">{t("livestream.encoderNvenc")}</option>
+                  <option value="libx264">{t("livestream.encoderX264")}</option>
+                </Select>
+              </StudioField>
+              <p className="col-span-2 text-[11px] leading-snug text-muted-foreground">
+                {t("livestream.qualityResult", {
+                  resolution: settings.resolution.replace("x", "×"),
+                  fps: settings.fps,
+                  bitrate: sentBitrate,
+                })}
+              </p>
+            </div>
+          ) : (
+          <>
           <div className="grid grid-cols-2 gap-2">
             <StudioField label={t("livestream.encoder")} htmlFor="ls-encoder">
               <Select
@@ -2272,17 +2484,73 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                 <option value="60">60</option>
               </Select>
             </StudioField>
-            <StudioField label={t("livestream.bitrate")} htmlFor="ls-br">
-              <Select
+            <StudioField label={`${t("livestream.bitrate")} (kbps)`} htmlFor="ls-br">
+              <Input
                 id="ls-br"
                 className="h-8"
-                value={String(settings.bitrateKbps)}
+                inputMode="numeric"
+                list="ls-br-options"
+                value={bitrateDraft ?? String(settings.bitrateKbps)}
                 disabled={locked}
-                onChange={(e) => void persist({ bitrateKbps: Number(e.target.value) })}
-              >
+                onChange={(e) => setBitrateDraft(e.target.value)}
+                onBlur={() => {
+                  if (bitrateDraft == null) return;
+                  const typed = Number(bitrateDraft.replace(/[^\d]/g, ""));
+                  setBitrateDraft(null);
+                  if (typed > 0 && clampBitrateKbps(typed) !== settings.bitrateKbps) {
+                    void persist({ bitrateKbps: clampBitrateKbps(typed) });
+                  }
+                }}
+              />
+              <datalist id="ls-br-options">
                 {bitrateOptions.map((kbps) => (
                   <option key={kbps} value={kbps}>
-                    {kbps} kbps{kbps === advice.recommendedKbps ? ` — ${t("livestream.bitrateRecommended")}` : ""}
+                    {kbps === advice.recommendedKbps ? t("livestream.bitrateRecommended") : undefined}
+                  </option>
+                ))}
+              </datalist>
+            </StudioField>
+            <StudioField label={t("livestream.encoderPreset")} htmlFor="ls-preset">
+              <Select
+                id="ls-preset"
+                className="h-8"
+                value={settings.encoderPreset}
+                disabled={locked}
+                onChange={(e) => void persist({ encoderPreset: e.target.value as LivestreamEncoderPreset })}
+              >
+                {ENCODER_PRESETS.map((preset) => (
+                  <option key={preset} value={preset}>
+                    {t(`livestream.encoderPreset_${preset}`)}
+                  </option>
+                ))}
+              </Select>
+            </StudioField>
+            <StudioField label={t("livestream.keyframeSec")} htmlFor="ls-keyframe">
+              <Select
+                id="ls-keyframe"
+                className="h-8"
+                value={String(settings.keyframeSec)}
+                disabled={locked}
+                onChange={(e) => void persist({ keyframeSec: Number(e.target.value) })}
+              >
+                {KEYFRAME_SECONDS.map((sec) => (
+                  <option key={sec} value={sec}>
+                    {sec} s
+                  </option>
+                ))}
+              </Select>
+            </StudioField>
+            <StudioField label={t("livestream.audioBitrate")} htmlFor="ls-audio-br">
+              <Select
+                id="ls-audio-br"
+                className="h-8"
+                value={String(settings.audioBitrateKbps)}
+                disabled={locked}
+                onChange={(e) => void persist({ audioBitrateKbps: Number(e.target.value) })}
+              >
+                {AUDIO_BITRATES_KBPS.map((kbps) => (
+                  <option key={kbps} value={kbps}>
+                    {kbps} kbps
                   </option>
                 ))}
               </Select>
@@ -2302,8 +2570,34 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               {t("livestream.bitrateTooHigh", { maximum: advice.maximumKbps })}
             </p>
           )}
-        </StudioDisclosure>
+          </>
+          )}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            {t("livestream.uploadTotal", { total: totalUploadMbps, n: destinationCount, per: sentBitrate })}
+          </p>
+          {uploadBudget != null && sentBitrate < settings.bitrateKbps && (
+            <p className="text-[11px] leading-snug text-amber-600/90">
+              {t("livestream.uploadCapped", { upload: settings.uploadMbps, per: sentBitrate, n: destinationCount })}
+            </p>
+          )}
+          {uploadBudget != null && sentBitrate < advice.minimumKbps && (
+            <p className="text-[11px] leading-snug text-amber-600/90">
+              {t("livestream.uploadTooSlow", { per: sentBitrate, resolution: resolutionLabel, fps: settings.fps })}
+            </p>
+          )}
+          <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <span className="text-[11px] text-muted-foreground">{t("livestream.recordFolder")}</span>
+            <span className="max-w-[22rem] truncate font-mono text-[11px]">
+              {settings.recordDir.trim() || t("livestream.recordFolderDefault")}
+            </span>
+            <Button size="sm" variant="outline" disabled={status.recording} onClick={() => void pickRecordDir()}>
+              {t("livestream.recordFolderPick")}
+            </Button>
+          </div>
+        </StudioSection>
+        ) : null}
 
+        {setupCategory === "hotkeys" ? (
         <StudioSection
           title={t("livestream.deckSection")}
           summary={t("livestream.deckSlotCount", { n: settings.streamDeckSlots.length })}
@@ -2467,6 +2761,8 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             </div>
           )}
         </StudioSection>
+        ) : null}
+        </div>
         </div>
       ) : null}
       </>
