@@ -945,8 +945,11 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         name === "from" ? transition!.from : name === "card" ? card : (sourceBuf ?? transition!.from);
       if (mix.t <= 0) return layer(mix.a);
       if (mix.t >= 1) return layer(mix.b);
-      // Nieuw mengbeeld per beeldje: ffmpeg kan het vorige nog aan het lezen zijn.
-      const out = Buffer.alloc(width * height * 4);
+      // Nieuw mengbeeld per beeldje: ffmpeg kan het vorige nog aan het lezen zijn, dus
+      // hergebruiken mag niet. Wel ongevuld: blendBgra schrijft alle vier de kanalen van
+      // elke pixel, dus de nulvulling van Buffer.alloc (8,3 MB bij 1080p) is weggegooid werk
+      // op de draad die ook het beeldje moet afleveren.
+      const out = Buffer.allocUnsafe(width * height * 4);
       blendBgra(out, layer(mix.a), layer(mix.b), mix.t);
       return out;
     };
@@ -1013,7 +1016,6 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     const pushFrame = (image: Electron.NativeImage) => {
       if (!live() || image.isEmpty()) return;
       lastPaintAt = performance.now();
-      emitPreview(image);
       paints += 1;
       if (!latestSent) overwritten += 1;
       latest = image;
@@ -1085,6 +1087,10 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       // Ook zonder nieuw beeld (stilstaand scorebord, of een bron die nog opstart) blijft het ritme
       // lopen: het vorige beeld gaat mee.
       void pumpFrames();
+      // De voorbeeldweergave kost een JPEG-encode plus base64. Dat hoort niet in `pushFrame`:
+      // daar ligt het tussen het binnenkomen van een beeld en het afleveren ervan. Hier staat
+      // het ernaast, met dezelfde snelheidsbegrenzing van 66 ms in `emitPreview`.
+      if (latest) emitPreview(latest);
       const current = win;
       if (!current || current.isDestroyed()) return;
       if (lastPaintAt > 0 && performance.now() - lastPaintAt < staleMs) {
