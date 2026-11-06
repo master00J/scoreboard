@@ -1239,6 +1239,11 @@ export function installWebDemoBridge() {
     onLivestreamAudioMeters: () => () => undefined,
     onLivestreamReadyRequest: () => () => undefined,
     reportStreamProgramReady: () => undefined,
+    onNetworkSourceChunk: () => () => undefined,
+    onNetworkSourceReset: () => () => undefined,
+    onNetworkSourceStatus: () => () => undefined,
+    reportNetworkSourceCodecUnsupported: () => undefined,
+    requestNetworkSourceInit: () => undefined,
   };
 
   window.electronAPI = bridge;

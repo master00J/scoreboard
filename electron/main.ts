@@ -50,11 +50,13 @@ import { getAppResourceMetrics, getMemoryBreakdownForBootLog } from "./resource-
 import { menuLabel, normalizeMenuLocale } from "./menu-i18n";
 import {
   createLivestreamController,
+  findFfmpegPath,
   type BrowserSourceRequest,
   type LivestreamController,
   type MediaSourceRequest,
   type StreamWindowRequest,
 } from "./livestream";
+import { createNetworkSource, type NetworkSourceController } from "./network-source";
 import { sanitizeBrowserUrl, type LivestreamSettings } from "../lib/livestream";
 
 /**
@@ -337,6 +339,26 @@ let desktopContext: ElectronBridge["context"] | null = null;
 let mobileBridge: MobileBridgeHandle | null = null;
 let cloudAgent: CloudAgentHandle | null = null;
 let livestream: LivestreamController | null = null;
+let networkSource: NetworkSourceController | null = null;
+
+/**
+ * De netwerkbron (RTSP/UDP/SRT/RTMP). Stuurt de stukken fragmented MP4 naar het streamvenster;
+ * bestaat dat niet, dan geeft `send` false terug en stopt de bron zichzelf.
+ */
+function ensureNetworkSource(): NetworkSourceController {
+  if (networkSource) return networkSource;
+  networkSource = createNetworkSource({
+    ffmpegPath: () => findFfmpegPath({ resourcesPath: () => process.resourcesPath, appRoot }),
+    log: bootLog,
+    send: (channel, payload) => {
+      const win = streamWindow;
+      if (!win || win.isDestroyed()) return false;
+      win.webContents.send(channel, payload);
+      return true;
+    },
+  });
+  return networkSource;
+}
 let streamDeck: StreamDeckHandle | null = null;
 let officialClock: OfficialClockHandle | null = null;
 let splashWindow: BrowserWindow | null = null;
@@ -653,7 +675,8 @@ async function destroyStreamWindow() {
 
 async function ensureStreamWindow(req: StreamWindowRequest): Promise<{ win: BrowserWindow; reloaded: boolean }> {
   const cam = req.camera.trim();
-  const extra = { camera: cam, overlay: req.overlay ? "1" : "0" };
+  const net = req.network ? "1" : "0";
+  const extra = { camera: cam, network: net, overlay: req.overlay ? "1" : "0" };
   const applyFrameRate = (win: BrowserWindow) => {
     try {
       win.webContents.setFrameRate(req.fps);
@@ -675,7 +698,7 @@ async function ensureStreamWindow(req: StreamWindowRequest): Promise<{ win: Brow
     const current = (() => {
       try {
         const url = new URL(streamWindow.webContents.getURL());
-        return `${url.searchParams.get("camera") ?? ""}|${url.searchParams.get("overlay") ?? ""}`;
+        return `${url.searchParams.get("camera") ?? ""}|${url.searchParams.get("network") ?? "0"}|${url.searchParams.get("overlay") ?? ""}`;
       } catch {
         return "";
       }
@@ -684,7 +707,7 @@ async function ensureStreamWindow(req: StreamWindowRequest): Promise<{ win: Brow
       streamWindow.getContentSize()[0] !== req.width || streamWindow.getContentSize()[1] !== req.height;
     if (sizeChanged) streamWindow.setContentSize(req.width, req.height);
     applyFrameRate(streamWindow);
-    if (current === `${cam}|${extra.overlay}`) {
+    if (current === `${cam}|${net}|${extra.overlay}`) {
       return { win: streamWindow, reloaded: false };
     }
     await loadView(streamWindow, "stream", extra);
@@ -2015,6 +2038,8 @@ function registerIpc() {
       ensureMediaWindow: ensureMediaSourceWindow,
       closeMediaWindow: destroyMediaSourceWindow,
       getMediaWindow: () => mediaSourceWindow,
+      startNetworkSource: (url, fps) => ensureNetworkSource().start(url, fps),
+      stopNetworkSource: () => networkSource?.stop(),
       userDataDir: () => app.getPath("userData"),
       recordDir: () => path.join(app.getPath("videos"), "ArenaCue"),
       appRoot,
@@ -2023,6 +2048,15 @@ function registerIpc() {
       log: bootLog,
     });
   }
+  // De speler in de streampagina kan deze codec niet (een H.265-camera): hercoderen naar H.264.
+  ipcMain.on("network-source:codecUnsupported", () => {
+    networkSource?.useH264();
+  });
+  // De streampagina is (opnieuw) geladen en heeft een nieuw init-segment nodig.
+  ipcMain.on("network-source:requestInit", () => {
+    networkSource?.restartForInit();
+  });
+
   ipcMain.handle("livestream:getSettings", () => livestream!.getSettings());
   ipcMain.handle("livestream:saveSettings", (_e, partial: Partial<LivestreamSettings>) =>
     livestream!.saveSettings(partial ?? {}),

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   NETWORK_SOURCE_H264_CODEC,
   isSafeNetworkUrl,
+  listensForIncoming,
   maskNetworkUrl,
   networkSourceErrorIsFatal,
   networkSourceErrorIsTemporary,
@@ -73,6 +74,17 @@ describe("ffmpeg-opdracht", () => {
       "-overrun_nonfatal",
       "1",
     ]);
+  });
+
+  it("laat ffmpeg wachten op een zender als het adres 0.0.0.0 is", () => {
+    // Een zendwagen die naar ons toe pusht. Zonder deze vlag probeert ffmpeg zélf te verbinden
+    // met 0.0.0.0, en dat lukt nooit.
+    expect(listensForIncoming("rtmp://0.0.0.0:1935/live")).toBe(true);
+    expect(listensForIncoming("rtmp://10.0.0.5/live/stream")).toBe(false);
+    expect(networkSourceTransportArgs("rtmp://0.0.0.0:1935/live")).toEqual(["-rtmp_listen", "1"]);
+    expect(networkSourceTransportArgs("rtmp://10.0.0.5/live/stream")).toEqual([]);
+    // SRT regelt dit in het adres zelf, dus daar hoeven wij niets toe te voegen.
+    expect(networkSourceTransportArgs("srt://0.0.0.0:9999?mode=listener")).toEqual([]);
   });
 
   it("gebruikt geen ffmpeg-tijdslimiet, want die optie heet per versie anders", () => {

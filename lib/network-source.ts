@@ -84,6 +84,18 @@ export function networkSourceProtocol(url: string): NetworkSourceProtocol | null
 }
 
 /**
+ * Wacht deze bron op een zender in plaats van zelf te verbinden? Zo kan een zendwagen naar ons toe
+ * pushen. SRT regelt dat in het adres zelf (`?mode=listener`); bij RTMP zegt host 0.0.0.0 het.
+ */
+export function listensForIncoming(url: string): boolean {
+  try {
+    return new URL(url).hostname === "0.0.0.0";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Verbergt het wachtwoord in een adres. Een RTSP-URL draagt `gebruiker:wachtwoord@` mee, en clubs
  * mailen logbestanden door.
  */
@@ -107,6 +119,11 @@ export function networkSourceTransportArgs(url: string): string[] {
   }
   if (protocol === "udp:" || protocol === "rtp:") {
     return ["-fifo_size", "5000000", "-overrun_nonfatal", "1"];
+  }
+  if ((protocol === "rtmp:" || protocol === "rtmps:") && listensForIncoming(url)) {
+    // Host 0.0.0.0 betekent: wij wachten, de zender komt naar ons toe. Zonder deze vlag probeert
+    // ffmpeg zelf te verbinden met 0.0.0.0, en dat lukt nooit.
+    return ["-rtmp_listen", "1"];
   }
   return [];
 }

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalCaptureVideo, type ExternalCaptureVideoHandle } from "@/components/external-capture-video";
+import { ExternalCaptureVideo } from "@/components/external-capture-video";
+import { NetworkCaptureVideo } from "@/components/network-capture-video";
 import { CardMode } from "@/app/display/_modes/card";
 import { SubstitutionMode } from "@/app/display/_modes/substitution";
 import { StreamScoreWidget } from "@/app/stream/stream-score-widget";
@@ -36,6 +37,12 @@ function cameraFromQuery(): string {
   return new URLSearchParams(window.location.search).get("camera") ?? "";
 }
 
+/** Beeld komt van de netwerkbron (RTSP/UDP/SRT/RTMP) in plaats van een capture-apparaat. */
+function networkFromQuery(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("network") === "1";
+}
+
 export default function StreamProgramPage({
   cameraOverride,
   embedded = false,
@@ -52,6 +59,7 @@ export default function StreamProgramPage({
   const state = useDisplayStore((s) => s.state);
   const elapsedRaw = useLiveTimerSeconds();
   const [camera, setCamera] = useState(() => cameraOverride ?? cameraFromQuery());
+  const [network, setNetwork] = useState(() => (cameraOverride ? false : networkFromQuery()));
   const [streamSettings, setStreamSettings] = useState<LivestreamSettings>(
     settingsOverride ?? DEFAULT_LIVESTREAM_SETTINGS,
   );
@@ -67,6 +75,7 @@ export default function StreamProgramPage({
 
   useEffect(() => {
     setCamera(cameraOverride ?? cameraFromQuery());
+    setNetwork(cameraOverride ? false : networkFromQuery());
   }, [cameraOverride]);
 
   useEffect(() => {
@@ -87,7 +96,10 @@ export default function StreamProgramPage({
     };
   }, [settingsOverride]);
 
-  const captureRef = useRef<ExternalCaptureVideoHandle>(null);
+  // Beide spelers melden op dezelfde manier of ze beeld geven.
+  const captureRef = useRef<{ isPlaying: () => boolean }>(null);
+  /** Er is een bron die eerst beeld moet leveren voor de opname mag starten. */
+  const hasLiveSource = Boolean(camera) || network;
 
   const notifyProgramReady = () => {
     if (embedded) return;
@@ -95,14 +107,14 @@ export default function StreamProgramPage({
   };
 
   useEffect(() => {
-    if (!camera) notifyProgramReady();
-  }, [camera]);
+    if (!hasLiveSource) notifyProgramReady();
+  }, [hasLiveSource]);
 
   useEffect(() => {
     return window.electronAPI?.onLivestreamReadyRequest?.(() => {
-      if (!camera || captureRef.current?.isPlaying()) notifyProgramReady();
+      if (!hasLiveSource || captureRef.current?.isPlaying()) notifyProgramReady();
     });
-  }, [camera]);
+  }, [hasLiveSource]);
 
   useEffect(() => {
     void reloadMatch();
@@ -181,6 +193,12 @@ export default function StreamProgramPage({
         <ExternalCaptureVideo
           ref={captureRef}
           sourceId={camera}
+          className="absolute inset-0 h-full w-full"
+          onActive={notifyProgramReady}
+        />
+      ) : network ? (
+        <NetworkCaptureVideo
+          ref={captureRef}
           className="absolute inset-0 h-full w-full"
           onActive={notifyProgramReady}
         />

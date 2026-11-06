@@ -51,6 +51,7 @@ import {
   type LivestreamStatus,
   type StreamLayerLayout,
 } from "@/lib/livestream";
+import { sanitizeNetworkUrl } from "@/lib/network-source";
 import {
   bitrateAdvice,
   bitrateOptionsKbps,
@@ -102,6 +103,7 @@ function videoKindLabel(
   if (kind === "display") return short ? t("livestream.sourceDisplayShort") : t("livestream.sourceDisplay");
   if (kind === "browser") return short ? t("livestream.sourceBrowserShort") : t("livestream.sourceBrowser");
   if (kind === "media") return short ? t("livestream.sourceMediaShort") : t("livestream.sourceMedia");
+  if (kind === "network") return short ? t("livestream.sourceNetworkShort") : t("livestream.sourceNetwork");
   if (isWindowCaptureSourceId(cameraDevice)) {
     return short ? t("livestream.sourceWindowShort") : t("livestream.sourceWindow");
   }
@@ -115,6 +117,7 @@ function videoInputReady(input: LivestreamVideoInput): boolean {
   if (input.kind === "camera") return Boolean(input.cameraDevice.trim());
   if (input.kind === "browser") return Boolean(input.browserUrl.trim());
   if (input.kind === "media") return Boolean(input.mediaPath.trim());
+  if (input.kind === "network") return Boolean(input.networkUrl.trim());
   return true;
 }
 
@@ -274,8 +277,12 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [previewInputId, setPreviewInputId] = useState<string | null>(null);
   const [sourceThumbs, setSourceThumbs] = useState<Record<string, string>>({});
   const [deckInfo, setDeckInfo] = useState<StreamDeckInfo | null>(null);
-  const [addPick, setAddPick] = useState<null | "camera" | "browser" | "media" | "window" | "screen">(null);
+  const [addPick, setAddPick] = useState<
+    null | "camera" | "browser" | "media" | "window" | "screen" | "network"
+  >(null);
   const [addBrowserUrl, setAddBrowserUrl] = useState("");
+  const [addNetworkUrl, setAddNetworkUrl] = useState("");
+  const [networkUrlDrafts, setNetworkUrlDrafts] = useState<Record<string, string>>({});
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const programBoxRef = useRef<HTMLDivElement>(null);
   const hasDisplayInput = settings.videoInputs.some((item) => item.kind === "display");
@@ -527,11 +534,22 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     setAddPick(null);
   };
 
-  const startAddPick = (kind: "camera" | "browser" | "media" | "window" | "screen") => {
+  const startAddPick = (
+    kind: "camera" | "browser" | "media" | "window" | "screen" | "network",
+  ) => {
     setAddPick(kind);
     setAddBrowserUrl("");
+    setAddNetworkUrl("");
     if (kind === "camera") void loadCameras();
     if (kind === "window" || kind === "screen") void loadDesktopSources();
+  };
+
+  const addNetworkSource = () => {
+    const networkUrl = sanitizeNetworkUrl(addNetworkUrl);
+    if (!networkUrl) return;
+    addVideoSource("network", { networkUrl });
+    setAddNetworkUrl("");
+    setAddPick(null);
   };
 
   const addMediaSource = () => {
@@ -1336,7 +1354,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                                 ? t("livestream.screenPick")
                                 : addPick === "browser"
                                   ? t("livestream.browserUrl")
-                                  : t("livestream.mediaPick")}
+                                  : addPick === "network"
+                                    ? t("livestream.networkUrl")
+                                    : t("livestream.mediaPick")}
                         </div>
                         {addPick === "camera" || addPick === "window" || addPick === "screen" ? (
                           <div className="max-h-28 overflow-y-auto">
@@ -1378,6 +1398,29 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                                 {item.name}
                               </button>
                             ))}
+                          </div>
+                        ) : addPick === "network" ? (
+                          <div className="flex flex-col gap-0.5">
+                            <Input
+                              aria-label={t("livestream.networkUrl")}
+                              className="h-7 px-1 text-[10px]"
+                              inputMode="url"
+                              placeholder={t("livestream.networkUrlPlaceholder")}
+                              value={addNetworkUrl}
+                              disabled={sourceLocked}
+                              onChange={(e) => setAddNetworkUrl(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") addNetworkSource();
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={sourceLocked || !sanitizeNetworkUrl(addNetworkUrl)}
+                              onClick={addNetworkSource}
+                              className="h-6 rounded text-[10px] font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                            >
+                              {t("common.add")}
+                            </button>
                           </div>
                         ) : addPick === "browser" ? (
                           <div className="flex flex-col gap-0.5">
@@ -1440,6 +1483,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                           onClick={() => {
                             setAddPick(null);
                             setAddBrowserUrl("");
+                            setAddNetworkUrl("");
                           }}
                           className="h-5 text-[10px] text-muted-foreground hover:text-foreground"
                         >
@@ -1471,6 +1515,14 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                           className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
                         >
                           {t("livestream.videoInputsAddScreen")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={sourceLocked}
+                          onClick={() => startAddPick("network")}
+                          className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+                        >
+                          {t("livestream.videoInputsAddNetwork")}
                         </button>
                         <button
                           type="button"
@@ -1919,6 +1971,32 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                       {t("livestream.mediaLoop")}
                     </label>
                   </div>
+                ) : input.kind === "network" ? (
+                  <StudioField label={t("livestream.networkUrl")} htmlFor={`ls-vin-net-${input.id}`}>
+                    <Input
+                      id={`ls-vin-net-${input.id}`}
+                      className="h-8"
+                      inputMode="url"
+                      placeholder={t("livestream.networkUrlPlaceholder")}
+                      value={networkUrlDrafts[input.id] ?? input.networkUrl}
+                      disabled={sourceLocked}
+                      onChange={(e) =>
+                        setNetworkUrlDrafts((drafts) => ({ ...drafts, [input.id]: e.target.value }))
+                      }
+                      onBlur={(e) => {
+                        const networkUrl = sanitizeNetworkUrl(e.target.value);
+                        setNetworkUrlDrafts((drafts) => {
+                          const next = { ...drafts };
+                          delete next[input.id];
+                          return next;
+                        });
+                        if (networkUrl !== input.networkUrl) void patchVideoInput(input.id, { networkUrl });
+                      }}
+                    />
+                    <p className="text-[10px] leading-snug text-muted-foreground">
+                      {t("livestream.networkUrlHint")}
+                    </p>
+                  </StudioField>
                 ) : input.kind === "browser" ? (
                   <StudioField label={t("livestream.browserUrl")} htmlFor={`ls-vin-url-${input.id}`}>
                     <Input
