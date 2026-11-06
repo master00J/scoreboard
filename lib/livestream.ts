@@ -6,6 +6,7 @@ import {
   type StreamScoreWidgetSettings,
 } from "./stream-score-widget";
 import { defaultStreamDeckSlots, mergeStreamDeckSlots, type StreamDeckSlot } from "./stream-deck";
+import { sanitizeNetworkUrl } from "./network-source";
 import {
   DEFAULT_TRANSITION,
   DEFAULT_TRANSITION_MS,
@@ -19,7 +20,7 @@ export { mergeStreamScoreWidget, sixteenByNineScaleFilter } from "./stream-score
 
 export type LivestreamPlatform = "youtube" | "twitch" | "facebook" | "custom";
 
-export type LivestreamSource = "camera" | "display" | "browser" | "media";
+export type LivestreamSource = "camera" | "display" | "browser" | "media" | "network";
 
 export type LivestreamEncoder = "h264_nvenc" | "libx264";
 
@@ -147,6 +148,8 @@ export type LivestreamVideoInput = {
   /** Alleen `kind === "media"`: lokaal pad of `/uploads/…`. */
   mediaPath: string;
   mediaLoop: boolean;
+  /** Alleen `kind === "network"`: rtsp/udp/rtp/srt/rtmp-adres van een camera of feed. */
+  networkUrl: string;
   audioFollow: Record<string, LivestreamAudioFollowAction>;
 };
 
@@ -353,6 +356,7 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
       browserUrl: "",
       mediaPath: "",
       mediaLoop: true,
+      networkUrl: "",
       audioFollow: {},
     },
     {
@@ -363,6 +367,7 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
       browserUrl: "",
       mediaPath: "",
       mediaLoop: true,
+      networkUrl: "",
       audioFollow: {},
     },
   ],
@@ -471,7 +476,15 @@ export function parseAudioFollowAction(value: unknown): LivestreamAudioFollowAct
 }
 
 export function parseLivestreamSource(value: unknown): LivestreamSource {
-  if (value === "display" || value === "browser" || value === "media" || value === "camera") return value;
+  if (
+    value === "display" ||
+    value === "browser" ||
+    value === "media" ||
+    value === "camera" ||
+    value === "network"
+  ) {
+    return value;
+  }
   return "camera";
 }
 
@@ -538,6 +551,7 @@ export function createVideoInput(partial?: Partial<LivestreamVideoInput>): Lives
     browserUrl: sanitizeBrowserUrl(partial?.browserUrl),
     mediaPath: sanitizeMediaPath(partial?.mediaPath),
     mediaLoop: partial?.mediaLoop !== false,
+    networkUrl: sanitizeNetworkUrl(partial?.networkUrl),
     audioFollow,
   };
 }
@@ -607,7 +621,7 @@ export function resolvePreviewVideoInput(
 
 export function videoInputPreviewKey(input: LivestreamVideoInput | null | undefined): string {
   if (!input) return "";
-  return `${input.id}:${input.kind}:${input.browserUrl}:${input.mediaPath}:${input.mediaLoop ? 1 : 0}`;
+  return `${input.id}:${input.kind}:${input.browserUrl}:${input.mediaPath}:${input.mediaLoop ? 1 : 0}:${input.networkUrl}`;
 }
 
 /**
@@ -621,7 +635,8 @@ export function programSourceKey(
   const camera = settings.source === "camera" ? settings.cameraDevice : "";
   const browser = settings.source === "browser" ? (input?.browserUrl ?? "") : "";
   const media = settings.source === "media" ? `${input?.mediaPath ?? ""}:${input?.mediaLoop ? 1 : 0}` : "";
-  return `${settings.source}|${camera}|${browser}|${media}`;
+  const network = settings.source === "network" ? (input?.networkUrl ?? "") : "";
+  return `${settings.source}|${camera}|${browser}|${media}|${network}`;
 }
 
 export function applyVideoInputSelection(
