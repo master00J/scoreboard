@@ -212,7 +212,8 @@
     "preview": "Aperçu en direct",
     "match-live": "Match en direct",
     "event-log": "Journal",
-    "match-info": "Match"
+    "match-info": "Match",
+    "livestream": "Diffusion en direct"
   },
   "music": {
     "add": "Ajouter de la musique",
@@ -1596,6 +1597,17 @@
     "designerSponsorHere": "Le sponsor apparaît ici",
     "designerSponsorName": "Nom du sponsor",
     "designerSponsorBreakHere": "Écran sponsor pendant la pause",
+    "livePanelLive": "En direct",
+    "livePanelOff": "Hors antenne",
+    "livePanelReconnecting": "Reconnexion",
+    "livePanelStopConfirm": "Vraiment arrêter ?",
+    "livePanelNoPicture": "En direct, mais pas encore d'image du stream",
+    "livePanelNotLive": "Le stream n'est pas en direct",
+    "livePanelSources": "Sources du stream",
+    "livePanelTake": "Mettre {{name}} à l'antenne",
+    "livePanelTransition": "Transition : {{kind}} · {{ms}} ms",
+    "livePanelTransitionCut": "Transition : Cut",
+    "livePanelOpenStudio": "Ouvrir le studio de diffusion",
     "autoSetupTitle": "Configuration automatique",
     "autoSetupPlatforms": "Plateforme : {{platforms}}",
     "autoSetupResult": "Recommandé : {{resolution}} · {{fps}} fps · {{bitrate}} kbps",

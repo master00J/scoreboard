@@ -18,6 +18,7 @@ import { SponsorLiveOverview } from "./_components/sponsor-live-overview";
 import { SponsorTimelinePreview } from "./_components/sponsor-timeline-preview";
 import { ExternalCapturePanel } from "./_components/external-capture-panel";
 import { LivestreamStudio } from "./_components/livestream-studio";
+import { LivestreamLivePanel } from "./_components/livestream-live-panel";
 import { PlayerIntroLauncher } from "./_components/player-intro-launcher";
 import { CrashRecoveryBanner } from "./_components/crash-recovery";
 import { SponsorPhaseHud } from "./_components/sponsor-phase-hud";
@@ -351,6 +352,13 @@ export default function ControlPage() {
               "match-live": <MatchLivePanel />,
               "event-log": <EventLog match={isFullMatch(match) ? match : null} />,
               "match-info": <MatchInfoCard match={isFullMatch(match) ? match : null} />,
+              livestream: (
+                <LivestreamLivePanel
+                  onOpenStudio={() => {
+                    if (interfaceProfile.tabs.includes("livestream")) setActiveTab("livestream");
+                  }}
+                />
+              ),
               }).filter(([id]) => interfaceProfile.panels.includes(id as (typeof interfaceProfile.panels)[number])),
             )}
           />

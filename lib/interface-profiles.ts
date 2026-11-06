@@ -16,6 +16,7 @@ export const INTERFACE_PANELS: MatchTabPanelId[] = [
   "external",
   "event-log",
   "match-info",
+  "livestream",
 ];
 
 export const FULL_PROFILE_ID = "full";

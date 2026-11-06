@@ -212,7 +212,8 @@
     "preview": "Live preview",
     "match-live": "Wedstrijd live",
     "event-log": "Logboek",
-    "match-info": "Wedstrijd"
+    "match-info": "Wedstrijd",
+    "livestream": "Livestream"
   },
   "music": {
     "add": "Muziek toevoegen",
@@ -1596,6 +1597,17 @@
     "designerSponsorHere": "Sponsor verschijnt hier",
     "designerSponsorName": "Naam van de sponsor",
     "designerSponsorBreakHere": "Sponsorscherm in de pauze",
+    "livePanelLive": "Live",
+    "livePanelOff": "Niet live",
+    "livePanelReconnecting": "Opnieuw verbinden",
+    "livePanelStopConfirm": "Echt stoppen?",
+    "livePanelNoPicture": "Live, maar nog geen beeld van de stream",
+    "livePanelNotLive": "De stream staat niet live",
+    "livePanelSources": "Bronnen voor de stream",
+    "livePanelTake": "{{name}} live zetten op de stream",
+    "livePanelTransition": "Overgang: {{kind}} · {{ms}} ms",
+    "livePanelTransitionCut": "Overgang: Cut",
+    "livePanelOpenStudio": "Livestream-studio openen",
     "autoSetupTitle": "Automatisch instellen",
     "autoSetupPlatforms": "Platform: {{platforms}}",
     "autoSetupResult": "Aanbevolen: {{resolution}} · {{fps}} fps · {{bitrate}} kbps",

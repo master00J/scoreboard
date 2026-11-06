@@ -123,7 +123,7 @@ const SETUP_CATEGORIES: readonly { id: SetupCategory; icon: LucideIcon }[] = [
   { id: "hotkeys", icon: Keyboard },
 ];
 
-function videoKindLabel(
+export function videoKindLabel(
   kind: LivestreamSource,
   t: (key: string, opts?: Record<string, string | number>) => string,
   short = false,
@@ -181,7 +181,7 @@ function NetworkSourceState({
   );
 }
 
-function videoInputReady(input: LivestreamVideoInput): boolean {
+export function videoInputReady(input: LivestreamVideoInput): boolean {
   if (input.kind === "camera") return Boolean(input.cameraDevice.trim());
   if (input.kind === "browser") return Boolean(input.browserUrl.trim());
   if (input.kind === "media") return Boolean(input.mediaPath.trim());

@@ -212,7 +212,8 @@
     "preview": "Anteprima live",
     "match-live": "Partita live",
     "event-log": "Registro eventi",
-    "match-info": "Partita"
+    "match-info": "Partita",
+    "livestream": "Livestream"
   },
   "music": {
     "add": "Aggiungi musica",
@@ -1596,6 +1597,17 @@
     "designerSponsorHere": "Lo sponsor appare qui",
     "designerSponsorName": "Nome dello sponsor",
     "designerSponsorBreakHere": "Schermata sponsor durante la pausa",
+    "livePanelLive": "In diretta",
+    "livePanelOff": "Non in diretta",
+    "livePanelReconnecting": "Riconnessione",
+    "livePanelStopConfirm": "Fermare davvero?",
+    "livePanelNoPicture": "In diretta, ma ancora nessuna immagine dello stream",
+    "livePanelNotLive": "Lo stream non è in diretta",
+    "livePanelSources": "Sorgenti dello stream",
+    "livePanelTake": "Metti {{name}} in onda sullo stream",
+    "livePanelTransition": "Transizione: {{kind}} · {{ms}} ms",
+    "livePanelTransitionCut": "Transizione: Cut",
+    "livePanelOpenStudio": "Apri lo studio livestream",
     "autoSetupTitle": "Configurazione automatica",
     "autoSetupPlatforms": "Piattaforma: {{platforms}}",
     "autoSetupResult": "Consigliato: {{resolution}} · {{fps}} fps · {{bitrate}} kbps",
