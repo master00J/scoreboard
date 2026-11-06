@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Gauge, Keyboard, Layers, Radio, Video, Volume2, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label, Select } from "@/components/ui/form";
@@ -110,6 +111,17 @@ import {
 } from "@/lib/stream-deck";
 
 const idleStatus: LivestreamStatus = { ...DEFAULT_LIVESTREAM_STATUS };
+
+/** Categorieën van het Instellen-tabblad, in de volgorde van het OBS-instellingenvenster. */
+type SetupCategory = "stream" | "output" | "sources" | "audio" | "overlay" | "hotkeys";
+const SETUP_CATEGORIES: readonly { id: SetupCategory; icon: LucideIcon }[] = [
+  { id: "stream", icon: Radio },
+  { id: "output", icon: Gauge },
+  { id: "sources", icon: Video },
+  { id: "audio", icon: Volume2 },
+  { id: "overlay", icon: Layers },
+  { id: "hotkeys", icon: Keyboard },
+];
 
 function videoKindLabel(
   kind: LivestreamSource,
@@ -330,6 +342,12 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [editPhase, setEditPhase] = useState(programPhase);
   /** Live = wat je tijdens de wedstrijd bedient; Setup = wat je één keer instelt. */
   const [studioTab, setStudioTab] = useState<"live" | "setup">("live");
+  /** Welke categorie het Instellen-tabblad toont, zoals de lijst links in het OBS-instellingenvenster. */
+  const [setupCategory, setSetupCategory] = useState<SetupCategory>("stream");
+  const openSetup = (category: SetupCategory) => {
+    setSetupCategory(category);
+    setStudioTab("setup");
+  };
   const [networkStatus, setNetworkStatus] = useState<NetworkSourceBridgeStatus | null>(null);
   /** Welke fase de indeling-editor toont; losgekoppeld van de lopende wedstrijd. */
   const [designerPhase, setDesignerPhase] = useState<StreamProgramPhase>("play");
@@ -371,7 +389,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     setStatus(nextStatus);
     if (!booted.current) {
       booted.current = true;
-      if (!nextSettings.streamKey.trim() && !nextSettings.customUrl.trim()) setStudioTab("setup");
+      if (!nextSettings.streamKey.trim() && !nextSettings.customUrl.trim()) openSetup("stream");
     }
   }, []);
 
@@ -775,7 +793,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
 
   const takeInput = (input: LivestreamVideoInput) => {
     if (!videoInputReady(input)) {
-      setStudioTab("setup");
+      openSetup("sources");
       return;
     }
     if (input.id === settings.activeVideoInputId) return;
@@ -1017,7 +1035,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         return;
       }
       if (!destinationReady) {
-        setStudioTab("setup");
+        openSetup("stream");
         return;
       }
       void start();
@@ -1083,7 +1101,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           className="min-w-[7rem] bg-red-600 text-white hover:bg-red-700"
           onClick={() => {
             if (!destinationReady) {
-              setStudioTab("setup");
+              openSetup("stream");
               return;
             }
             void start();
@@ -1690,7 +1708,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               <button
                 type="button"
                 className="h-9 rounded-md px-2 text-[11px] text-muted-foreground underline-offset-2 hover:underline"
-                onClick={() => setStudioTab("setup")}
+                onClick={() => openSetup("hotkeys")}
               >
                 {t("livestream.deckEmpty")}
               </button>
@@ -1736,7 +1754,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             <button
               type="button"
               className="ml-auto h-9 rounded-md px-2 text-[10px] text-muted-foreground hover:bg-zinc-800 hover:text-foreground"
-              onClick={() => setStudioTab("setup")}
+              onClick={() => openSetup("hotkeys")}
             >
               {t("livestream.deckEdit")}
             </button>
@@ -1745,7 +1763,31 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           {streamBar}
         </div>
       {studioTab !== "live" ? (
-        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 sm:flex-row">
+        {/* Categorieën links, instellingen rechts: zoals het OBS-instellingenvenster. */}
+        <nav
+          aria-label={t("livestream.tabSetup")}
+          className="flex shrink-0 gap-0.5 overflow-x-auto rounded-xl border border-border bg-card p-1.5 sm:w-44 sm:flex-col sm:overflow-visible"
+        >
+          {SETUP_CATEGORIES.map(({ id, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              aria-current={setupCategory === id ? "page" : undefined}
+              className={`flex shrink-0 items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs ${
+                setupCategory === id
+                  ? "bg-primary text-primary-foreground font-semibold"
+                  : "text-muted-foreground hover:bg-secondary hover:text-foreground"
+              }`}
+              onClick={() => setSetupCategory(id)}
+            >
+              <Icon className="h-4 w-4 shrink-0" aria-hidden />
+              {t(`livestream.setupCat_${id}`)}
+            </button>
+          ))}
+        </nav>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto">
+        {setupCategory === "sources" ? (
         <StudioSection
           title={t("livestream.sourceSection")}
           summary={t("livestream.sourceCount", { n: settings.videoInputs.length })}
@@ -2056,7 +2098,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             ) : null}
           </div>
         </StudioSection>
+        ) : null}
 
+        {setupCategory === "audio" ? (
         <StudioSection
           title={t("livestream.audioSection")}
           summary={
@@ -2085,8 +2129,10 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             </>
           )}
         </StudioSection>
+        ) : null}
 
-        {sourceShowsStreamLayers(settings.source) && (
+        {setupCategory === "overlay" ? (
+          sourceShowsStreamLayers(settings.source) ? (
           <StudioSection
             title={t("livestream.layersSection")}
             summary={
@@ -2212,8 +2258,14 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               />
             </StudioDisclosure>
           </StudioSection>
-        )}
+          ) : (
+            <p className="rounded-xl border border-border bg-card p-3 text-[11px] leading-snug text-muted-foreground">
+              {t("livestream.setupOverlayUnavailable")}
+            </p>
+          )
+        ) : null}
 
+        {setupCategory === "stream" ? (
         <StudioSection
           title={t("livestream.outputSection")}
           summary={
@@ -2266,18 +2318,11 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               />
             </>
           )}
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <span className="text-[11px] text-muted-foreground">{t("livestream.recordFolder")}</span>
-            <span className="max-w-[22rem] truncate font-mono text-[11px]">
-              {settings.recordDir.trim() || t("livestream.recordFolderDefault")}
-            </span>
-            <Button size="sm" variant="outline" disabled={status.recording} onClick={() => void pickRecordDir()}>
-              {t("livestream.recordFolderPick")}
-            </Button>
-          </div>
         </StudioSection>
+        ) : null}
 
-        <StudioDisclosure title={t("livestream.encoderSection")} summary={encoderSummary(settings)}>
+        {setupCategory === "output" ? (
+        <StudioSection title={t("livestream.encoderSection")} summary={encoderSummary(settings)}>
           {/* Automatisch instellen, zoals de OBS-wizard: platformen + upload → aanbeveling. */}
           <div className="flex flex-col gap-2 rounded-md border border-border bg-card/60 p-2">
             <div className="text-[11px] font-medium">{t("livestream.autoSetupTitle")}</div>
@@ -2524,8 +2569,19 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               {t("livestream.uploadTooSlow", { per: sentBitrate, resolution: resolutionLabel, fps: settings.fps })}
             </p>
           )}
-        </StudioDisclosure>
+          <div className="mt-1 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <span className="text-[11px] text-muted-foreground">{t("livestream.recordFolder")}</span>
+            <span className="max-w-[22rem] truncate font-mono text-[11px]">
+              {settings.recordDir.trim() || t("livestream.recordFolderDefault")}
+            </span>
+            <Button size="sm" variant="outline" disabled={status.recording} onClick={() => void pickRecordDir()}>
+              {t("livestream.recordFolderPick")}
+            </Button>
+          </div>
+        </StudioSection>
+        ) : null}
 
+        {setupCategory === "hotkeys" ? (
         <StudioSection
           title={t("livestream.deckSection")}
           summary={t("livestream.deckSlotCount", { n: settings.streamDeckSlots.length })}
@@ -2689,6 +2745,8 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             </div>
           )}
         </StudioSection>
+        ) : null}
+        </div>
         </div>
       ) : null}
       </>
