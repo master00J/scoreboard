@@ -245,10 +245,10 @@ export function sceneIsComposite(scene: StreamScene | null | undefined): boolean
 }
 
 /**
- * Bronnen die de streampagina zelf kan tekenen. Een website en het LED-scherm hebben een eigen
- * venster en kunnen (nog) geen laag naast een andere bron zijn.
+ * Bronnen die de streampagina zelf kan tekenen, zoals lagen in OBS. Het LED-scherm is een kopie van
+ * het stadionscherm. Een website heeft een eigen venster en kan nog geen laag naast andere bronnen zijn.
  */
-export const LAYER_KINDS_IN_PAGE = ["camera", "media", "network"] as const;
+export const LAYER_KINDS_IN_PAGE = ["camera", "media", "network", "display"] as const;
 
 export function layerKindInPage(kind: string): boolean {
   return (LAYER_KINDS_IN_PAGE as readonly string[]).includes(kind);
@@ -258,8 +258,8 @@ export function layerKindInPage(kind: string): boolean {
 export const PIP_RECT: StreamLayerRect = { x: 66, y: 62, w: 30, h: 30 };
 
 /**
- * Kan deze bron als extra laag in de scène? Alleen soorten die de pagina tekent, en één netwerkbron
- * per scène (er draait één ontvanger).
+ * Kan deze bron als extra laag in de scène? Alleen soorten die de pagina tekent (camera, media,
+ * netwerk, LED), en één netwerkbron per scène (er draait één ontvanger).
  */
 export function canAddSceneLayer(
   scene: StreamScene,

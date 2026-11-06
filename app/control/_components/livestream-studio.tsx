@@ -1069,6 +1069,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           embedded
           sceneMode
           liveCameras={!status.running && !holdPreview}
+          liveDisplay={!status.running && !holdPreview}
           settingsOverride={{
             ...settings,
             ...applySceneSelection(settings, scene.id),

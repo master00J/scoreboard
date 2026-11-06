@@ -73,6 +73,7 @@ export default function StreamProgramPage({
   layoutCanvas = false,
   sceneMode,
   liveCameras = true,
+  liveDisplay = true,
 }: {
   cameraOverride?: string;
   embedded?: boolean;
@@ -92,6 +93,8 @@ export default function StreamProgramPage({
   sceneMode?: boolean;
   /** Uit = camera's in de scène als vlak met hun naam (de stream heeft ze al open). */
   liveCameras?: boolean;
+  /** Uit = LED in de scène als vlak met de naam (de stream heeft het stadionscherm al open). */
+  liveDisplay?: boolean;
 } = {}) {
   const { t } = useTranslation();
   useSocketSync();
@@ -148,7 +151,7 @@ export default function StreamProgramPage({
   const sceneHasLiveSource = Boolean(
     scene?.layers.some((layer) => {
       const kind = streamSettings.videoInputs.find((input) => input.id === layer.inputId)?.kind;
-      return kind === "camera" || kind === "network";
+      return kind === "camera" || kind === "network" || kind === "display";
     }),
   );
   /** Er is een bron die eerst beeld moet leveren voor de opname mag starten. */
@@ -277,6 +280,7 @@ export default function StreamProgramPage({
             inputs={streamSettings.videoInputs}
             liveCameras={liveCameras}
             liveNetwork={!embedded}
+            liveDisplay={liveDisplay}
             registerHandle={registerLayerHandle}
             onActive={notifyProgramReady}
           />

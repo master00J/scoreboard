@@ -806,7 +806,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
   > => {
     const scene = programScene(settings);
     if (sceneIsComposite(scene)) {
-      // Beeld-in-beeld: het streamvenster tekent alle lagen (camera's, media, één netwerkbron).
+      // Beeld-in-beeld: het streamvenster tekent alle lagen (camera's, media, LED, één netwerkbron).
       await deps.closeBrowserWindow();
       await deps.closeMediaWindow();
       const networkUrl = compositeNetworkUrl(scene, settings.videoInputs);

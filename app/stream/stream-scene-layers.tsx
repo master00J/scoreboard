@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { DisplayCaptureVideo } from "@/components/display-capture-video";
 import { ExternalCaptureVideo } from "@/components/external-capture-video";
 import { NetworkCaptureVideo } from "@/components/network-capture-video";
 import { StreamLayerFrame } from "@/components/stream-layer-frame";
@@ -11,8 +12,8 @@ import { layerColorSupported, type StreamScene } from "@/lib/stream-scenes";
 export type SceneLayerHandle = { isPlaying: () => boolean } | null;
 
 /**
- * Alle lagen van een beeld-in-beeld-scène in de streampagina: camera's, mediabestanden en één
- * netwerkbron, elk in zijn eigen kader.
+ * Alle lagen van een beeld-in-beeld-scène in de streampagina: camera's, mediabestanden, het
+ * LED-scherm en één netwerkbron, elk in zijn eigen kader.
  *
  * De volgorde in de DOM blijft altijd dezelfde (op laag-id); wat boven ligt bepaalt `z-index`. Een
  * `<video>` die React in de DOM verplaatst, pauzeert: dan zou een camera even stilstaan zodra je een
@@ -23,6 +24,7 @@ export function StreamSceneLayers({
   inputs,
   liveCameras = true,
   liveNetwork = true,
+  liveDisplay = true,
   registerHandle,
   onActive,
 }: {
@@ -32,6 +34,8 @@ export function StreamSceneLayers({
   liveCameras?: boolean;
   /** De netwerkbron speelt alleen in het streamvenster, waar het hoofdproces de stukken heen stuurt. */
   liveNetwork?: boolean;
+  /** Uit in de studio terwijl de stream loopt: dan heeft het streamvenster het LED-venster al open. */
+  liveDisplay?: boolean;
   registerHandle?: (layerId: string, handle: SceneLayerHandle) => void;
   onActive?: () => void;
 }) {
@@ -62,6 +66,14 @@ export function StreamSceneLayers({
             <ExternalCaptureVideo
               ref={(handle) => registerHandle?.(layer.id, handle)}
               sourceId={input.cameraDevice}
+              className={className}
+              onActive={onActive}
+            />
+          );
+        } else if (input.kind === "display" && liveDisplay) {
+          content = (className) => (
+            <DisplayCaptureVideo
+              ref={(handle) => registerHandle?.(layer.id, handle)}
               className={className}
               onActive={onActive}
             />

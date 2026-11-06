@@ -353,13 +353,25 @@ describe("picture-in-picture scenes", () => {
   it("only adds sources the stream page can draw, and one network source", () => {
     const input = (id: string) => settings.videoInputs.find((item) => item.id === id)!;
     expect(canAddSceneLayer(cam1, input("v2"), kindOf)).toBe(true);
+    expect(canAddSceneLayer(cam1, input("v-led"), kindOf)).toBe(true);
     expect(canAddSceneLayer(cam1, input("v5"), kindOf)).toBe(false);
-    expect(canAddSceneLayer(cam1, input("v-led"), kindOf)).toBe(false);
+    const led = settings.scenes.find((scene) => scene.id === "s-v-led")!;
+    expect(canAddSceneLayer(led, input("v1"), kindOf)).toBe(true);
     const withIp = addSceneLayer(cam1, "v3").scene;
     expect(canAddSceneLayer(withIp, input("v3"), kindOf)).toBe(true);
     expect(canAddSceneLayer(withIp, input("v4"), kindOf)).toBe(false);
     const site = settings.scenes.find((scene) => scene.id === "s-v5")!;
     expect(canAddSceneLayer(site, input("v1"), kindOf)).toBe(false);
+  });
+
+  it("keeps LED in the live scene key like any other source", () => {
+    const pip = addSceneLayer(cam1, "v-led");
+    const live = mergeLivestreamSettings({
+      ...settings,
+      scenes: settings.scenes.map((scene) => (scene.id === cam1.id ? pip.scene : scene)),
+    });
+    expect(programSourceKey(live)).toBe("scene|camera:cam-a,display:v-led");
+    expect(pumpProgramLayer(live)).toBeNull();
   });
 
   it("keeps at least one layer", () => {

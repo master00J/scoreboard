@@ -2309,7 +2309,9 @@ function registerIpc() {
   });
 
   ipcMain.handle("display:getPreviewCaptureIds", (event) => {
-    if (!controlWindow || event.sender !== controlWindow.webContents) return null;
+    const fromControl = Boolean(controlWindow && event.sender === controlWindow.webContents);
+    const fromStream = Boolean(streamWindow && event.sender === streamWindow.webContents);
+    if (!fromControl && !fromStream) return null;
     if (!displayWindowAlive() || !displayWindow) return null;
     let tabId: string | null = null;
     let windowId: string | null = null;
