@@ -75,6 +75,8 @@ import { createBrowserAudioTap, type BrowserAudioTap } from "./browser-source-au
 
 export type StreamWindowRequest = {
   camera: string;
+  /** Beeld komt van de netwerkbron in plaats van een capture-apparaat. */
+  network?: boolean;
   overlay: boolean;
   width: number;
   height: number;
@@ -128,6 +130,9 @@ type Deps = {
   resourcesPath: () => string;
   /** Logo van de eigen club voor de overgangskaart; null = effen kaart. */
   clubLogoPath?: () => Promise<string | null>;
+  /** Houdt een RTSP/UDP/SRT/RTMP-bron in de lucht en levert de beelden aan de streampagina. */
+  startNetworkSource?: (url: string, fps: number) => void;
+  stopNetworkSource?: () => void;
   log: (line: string) => void;
 };
 
@@ -152,7 +157,25 @@ function writeSettings(file: string, settings: LivestreamSettings) {
 
 let cachedFfmpegPath: string | null | undefined;
 
+/**
+ * Zoekt de meegeleverde ffmpeg. Ook de netwerkbron gebruikt deze, zodat beide processen zeker
+ * dezelfde binary nemen en de cache gedeeld blijft.
+ */
+export function findFfmpegPath(
+  paths: { resourcesPath: () => string; appRoot: () => string },
+  force = false,
+): string | null {
+  return resolveFfmpegPathIn(paths, force);
+}
+
 function resolveFfmpegPath(deps: Deps, force = false): string | null {
+  return resolveFfmpegPathIn(deps, force);
+}
+
+function resolveFfmpegPathIn(
+  deps: { resourcesPath: () => string; appRoot: () => string },
+  force = false,
+): string | null {
   if (!force && cachedFfmpegPath !== undefined) return cachedFfmpegPath;
   const exe = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
   const candidates = [
@@ -748,6 +771,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     { ok: true; programWindow: BrowserWindow; plans: CapturePlan[] } | { ok: false; error: string }
   > => {
     if (settings.source === "camera") {
+      deps.stopNetworkSource?.();
       await deps.closeBrowserWindow();
       await deps.closeMediaWindow();
       const device = settings.cameraDevice.trim();
@@ -769,9 +793,36 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         plans: [programCapturePlan(outSize.width, outSize.height, settings.fps)],
       };
     }
+    if (settings.source === "network") {
+      await deps.closeBrowserWindow();
+      await deps.closeMediaWindow();
+      const url = resolveActiveVideoInput(settings).networkUrl.trim();
+      if (!url) return { ok: false, error: "Vul het adres van de netwerkbron in" };
+      // Het venster eerst: anders stuurt ffmpeg zijn init-segment naar een pagina die er nog
+      // niet is, en kan de speler niets met de fragmenten die daarna komen.
+      const ensured = await deps.ensureStreamWindow({
+        camera: "",
+        network: true,
+        overlay: settings.overlay,
+        width: outSize.width,
+        height: outSize.height,
+        fps: settings.fps,
+      });
+      deps.startNetworkSource?.(url, settings.fps);
+      programIsReady = false;
+      emitSettings();
+      requestProgramReady();
+      await waitForProgramReady(PROGRAM_READY_TIMEOUT_MS);
+      return {
+        ok: true,
+        programWindow: ensured.win,
+        plans: [programCapturePlan(outSize.width, outSize.height, settings.fps)],
+      };
+    }
     if (settings.source === "browser") {
       await deps.closeStreamWindow();
       await deps.closeMediaWindow();
+      deps.stopNetworkSource?.();
       const url = resolveActiveVideoInput(settings).browserUrl.trim();
       if (!url) return { ok: false, error: "Vul een website-URL in" };
       const ensured = await deps.ensureBrowserWindow({
@@ -790,6 +841,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     if (settings.source === "media") {
       await deps.closeStreamWindow();
       await deps.closeBrowserWindow();
+      deps.stopNetworkSource?.();
       const filePath = resolveActiveVideoInput(settings).mediaPath.trim();
       if (!filePath) return { ok: false, error: "Kies een mediabestand" };
       const ensured = await deps.ensureMediaWindow({
@@ -806,6 +858,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         plans: [programCapturePlan(outSize.width, outSize.height, settings.fps)],
       };
     }
+    deps.stopNetworkSource?.();
     await deps.closeStreamWindow();
     await deps.closeBrowserWindow();
     await deps.closeMediaWindow();
@@ -945,8 +998,11 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         name === "from" ? transition!.from : name === "card" ? card : (sourceBuf ?? transition!.from);
       if (mix.t <= 0) return layer(mix.a);
       if (mix.t >= 1) return layer(mix.b);
-      // Nieuw mengbeeld per beeldje: ffmpeg kan het vorige nog aan het lezen zijn.
-      const out = Buffer.alloc(width * height * 4);
+      // Nieuw mengbeeld per beeldje: ffmpeg kan het vorige nog aan het lezen zijn, dus
+      // hergebruiken mag niet. Wel ongevuld: blendBgra schrijft alle vier de kanalen van
+      // elke pixel, dus de nulvulling van Buffer.alloc (8,3 MB bij 1080p) is weggegooid werk
+      // op de draad die ook het beeldje moet afleveren.
+      const out = Buffer.allocUnsafe(width * height * 4);
       blendBgra(out, layer(mix.a), layer(mix.b), mix.t);
       return out;
     };
@@ -1013,7 +1069,6 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     const pushFrame = (image: Electron.NativeImage) => {
       if (!live() || image.isEmpty()) return;
       lastPaintAt = performance.now();
-      emitPreview(image);
       paints += 1;
       if (!latestSent) overwritten += 1;
       latest = image;
@@ -1085,6 +1140,10 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       // Ook zonder nieuw beeld (stilstaand scorebord, of een bron die nog opstart) blijft het ritme
       // lopen: het vorige beeld gaat mee.
       void pumpFrames();
+      // De voorbeeldweergave kost een JPEG-encode plus base64. Dat hoort niet in `pushFrame`:
+      // daar ligt het tussen het binnenkomen van een beeld en het afleveren ervan. Hier staat
+      // het ernaast, met dezelfde snelheidsbegrenzing van 66 ms in `emitPreview`.
+      if (latest) emitPreview(latest);
       const current = win;
       if (!current || current.isDestroyed()) return;
       if (lastPaintAt > 0 && performance.now() - lastPaintAt < staleMs) {
@@ -2107,6 +2166,8 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       clearReconnect();
       stopPump();
       programIsReady = false;
+      // Geen reden om nog een camerastream van het netwerk te trekken als er niets mee gebeurt.
+      deps.stopNetworkSource?.();
       await killChild();
       deps.log("[livestream] gestopt");
       void syncBrowserPreview();

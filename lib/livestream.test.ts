@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  sourceShowsStreamLayers,
   DEFAULT_LIVESTREAM_SETTINGS,
   type LivestreamVideoInput,
   buildRtmpDestination,
@@ -564,11 +565,25 @@ describe("audio mixer", () => {
   });
 });
 
+describe("score en sponsors over de bron", () => {
+  it("legt het scorebord over elke bron behalve het stadionscherm zelf", () => {
+    // Een IP-camera is net zo goed een camera: zonder dit waren de instellingen voor score en
+    // sponsors onbereikbaar zodra de bron geen capture-kaart was.
+    expect(sourceShowsStreamLayers("camera")).toBe(true);
+    expect(sourceShowsStreamLayers("network")).toBe(true);
+    expect(sourceShowsStreamLayers("browser")).toBe(true);
+    expect(sourceShowsStreamLayers("media")).toBe(true);
+    // Het stadionscherm bevat het scorebord al; eroverheen zou het dubbel zijn.
+    expect(sourceShowsStreamLayers("display")).toBe(false);
+  });
+});
+
 describe("live wisselen van bron", () => {
   const inputs = [
-    { id: "cam", name: "Camera", kind: "camera" as const, cameraDevice: "BRIO", browserUrl: "", mediaPath: "", mediaLoop: false, audioFollow: {} },
-    { id: "led", name: "LED", kind: "display" as const, cameraDevice: "", browserUrl: "", mediaPath: "", mediaLoop: false, audioFollow: {} },
-    { id: "clip", name: "Clip", kind: "media" as const, cameraDevice: "", browserUrl: "", mediaPath: "/uploads/a.mp4", mediaLoop: true, audioFollow: {} },
+    { id: "cam", name: "Camera", kind: "camera" as const, cameraDevice: "BRIO", browserUrl: "", mediaPath: "", mediaLoop: false, networkUrl: "", audioFollow: {} },
+    { id: "led", name: "LED", kind: "display" as const, cameraDevice: "", browserUrl: "", mediaPath: "", mediaLoop: false, networkUrl: "", audioFollow: {} },
+    { id: "clip", name: "Clip", kind: "media" as const, cameraDevice: "", browserUrl: "", mediaPath: "/uploads/a.mp4", mediaLoop: true, networkUrl: "", audioFollow: {} },
+    { id: "ipcam", name: "IP-camera", kind: "network" as const, cameraDevice: "", browserUrl: "", mediaPath: "", mediaLoop: false, networkUrl: "rtsp://admin:pw@192.168.1.64:554/Streaming/Channels/101", audioFollow: {} },
   ];
   const base = { ...DEFAULT_LIVESTREAM_SETTINGS, videoInputs: inputs, activeVideoInputId: "cam", source: "camera" as const, cameraDevice: "BRIO" };
 
@@ -581,6 +596,19 @@ describe("live wisselen van bron", () => {
         activeVideoInputId: "clip",
         source: "media",
         videoInputs: inputs.map((input) => (input.id === "clip" ? { ...input, mediaPath: "/uploads/b.mp4" } : input)),
+      }),
+    );
+  });
+
+  it("ziet een ander netwerkadres als een wissel", () => {
+    const net = { ...base, activeVideoInputId: "ipcam", source: "network" as const };
+    expect(programSourceKey(net)).not.toBe(programSourceKey(base));
+    expect(programSourceKey(net)).not.toBe(
+      programSourceKey({
+        ...net,
+        videoInputs: inputs.map((input) =>
+          input.id === "ipcam" ? { ...input, networkUrl: "rtsp://admin:pw@192.168.1.65:554/Streaming/Channels/101" } : input,
+        ),
       }),
     );
   });

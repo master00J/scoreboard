@@ -1,4 +1,4 @@
-import type { LivestreamSettings } from "./livestream";
+import type { LivestreamSettings, StreamLayerLayout } from "./livestream";
 import { activeManualPhaseLayout } from "./stream-layer-layout";
 import type {
   LivestreamScorePosition,
@@ -48,7 +48,13 @@ function layoutFromPhaseConfig(
   };
 }
 
-/** Bepaalt welke lagen op de stream zichtbaar zijn. */
+/**
+ * Bepaalt welke lagen op de stream zichtbaar zijn.
+ *
+ * `phaseOverride` dwingt een fase af in plaats van die uit de wedstrijdstatus te lezen. Nodig voor
+ * de indeling-editor: anders kun je de pauze-indeling niet zien zolang er gespeeld wordt, en de
+ * speel-indeling niet in de rust.
+ */
 export function resolveStreamProgramLayout(
   settings: Pick<
     LivestreamSettings,
@@ -60,32 +66,45 @@ export function resolveStreamProgramLayout(
     | "manualBreakLayout"
   >,
   matchStatus: string | undefined,
+  phaseOverride?: StreamProgramPhase,
 ): ResolvedStreamProgramLayout {
-  const phase = streamProgramPhase(matchStatus);
+  const phase = phaseOverride ?? streamProgramPhase(matchStatus);
 
   if (settings.layoutMode === "manual") {
     return layoutFromPhaseConfig(phase, activeManualPhaseLayout(settings, phase));
   }
 
+  return layoutFromPhaseConfig(phase, autoPhaseLayout(settings, phase));
+}
+
+/**
+ * Wat "automatisch" voor deze fase doet, als gewone indeling.
+ *
+ * Zo kan de indeling-editor bij de overstap naar zelf instellen hiermee beginnen: wie één vinkje
+ * omzet, hoort de rest niet te zien veranderen.
+ */
+export function autoPhaseLayout(
+  settings: Pick<LivestreamSettings, "sponsors">,
+  phase: StreamProgramPhase,
+): StreamLayerLayout {
   if (phase === "play") {
-    return layoutFromPhaseConfig(phase, {
+    return {
       score: true,
       scorePosition: "bottom",
       sponsors: false,
       sponsorStyle: "logos",
       sponsorScope: "phase",
       sponsorPosition: "auto",
-    });
+    };
   }
-
-  return layoutFromPhaseConfig(phase, {
+  return {
     score: false,
     scorePosition: "bottom",
     sponsors: settings.sponsors,
     sponsorStyle: "break",
     sponsorScope: "phase",
     sponsorPosition: "auto",
-  });
+  };
 }
 
 export function streamProgramPhaseLabelKey(

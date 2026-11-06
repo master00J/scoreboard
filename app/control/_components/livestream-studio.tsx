@@ -19,7 +19,8 @@ import {
   isScreenCaptureSourceId,
   isWindowCaptureSourceId,
 } from "@/lib/get-desktop-capture-stream";
-import type { DesktopCaptureSourceInfo } from "@/lib/desktop-bridge";
+import type {
+  NetworkSourceBridgeStatus, DesktopCaptureSourceInfo } from "@/lib/desktop-bridge";
 import { enumerateAudioCaptureOptions, mergeAudioDeviceLists } from "@/lib/enumerate-audio-capture-options";
 import { selectFilesViaDialog, selectFolderViaDialog } from "@/lib/electron";
 import {
@@ -32,6 +33,7 @@ import {
   mergeLivestreamSettings,
   resolveActiveVideoInput,
   sanitizeBrowserUrl,
+  sourceShowsStreamLayers,
   sanitizeMediaPath,
   mediaPathFileName,
   MEDIA_FILE_EXTENSIONS,
@@ -51,6 +53,7 @@ import {
   type LivestreamStatus,
   type StreamLayerLayout,
 } from "@/lib/livestream";
+import { sanitizeNetworkUrl } from "@/lib/network-source";
 import {
   bitrateAdvice,
   bitrateOptionsKbps,
@@ -72,6 +75,8 @@ import {
 } from "@/app/control/_components/livestream-ui";
 import { LivestreamLayoutEditor } from "@/app/control/_components/livestream-layout-editor";
 import { StreamScoreWidgetEditor } from "@/app/control/_components/stream-score-widget-editor";
+import { StreamLayoutDesigner } from "@/app/control/_components/stream-layout-designer";
+import { autoPhaseLayout, type StreamProgramPhase } from "@/lib/stream-program-layout";
 import { LivestreamAudioMixer } from "@/app/control/_components/livestream-audio-mixer";
 import { syncLegacyFromManualLayout } from "@/lib/stream-layer-layout";
 import { STREAM_TRANSITIONS, transitionDurationOptions } from "@/lib/stream-transition";
@@ -102,6 +107,7 @@ function videoKindLabel(
   if (kind === "display") return short ? t("livestream.sourceDisplayShort") : t("livestream.sourceDisplay");
   if (kind === "browser") return short ? t("livestream.sourceBrowserShort") : t("livestream.sourceBrowser");
   if (kind === "media") return short ? t("livestream.sourceMediaShort") : t("livestream.sourceMedia");
+  if (kind === "network") return short ? t("livestream.sourceNetworkShort") : t("livestream.sourceNetwork");
   if (isWindowCaptureSourceId(cameraDevice)) {
     return short ? t("livestream.sourceWindowShort") : t("livestream.sourceWindow");
   }
@@ -111,10 +117,50 @@ function videoKindLabel(
   return short ? t("livestream.sourceCameraShort") : t("livestream.sourceCamera");
 }
 
+/**
+ * Wat de netwerkbron op dit moment doet.
+ *
+ * Een IP-camera kan wegvallen zonder dat de stream stopt: de pomp herhaalt het laatste beeld en
+ * ffmpeg blijft doorlopen. Zonder deze regel zou de operator een stilstaand beeld moeten raden.
+ */
+function NetworkSourceState({
+  status,
+  t,
+}: {
+  status: NetworkSourceBridgeStatus | null;
+  t: (key: string, opts?: Record<string, string | number>) => string;
+}) {
+  if (!status?.url) return null;
+  const retrying = status.running && !status.receiving && status.attempt > 0;
+  const text = status.receiving
+    ? t("livestream.networkStateReceiving")
+    : retrying
+      ? t("livestream.networkStateRetrying", { n: status.attempt })
+      : status.running
+        ? t("livestream.networkStateWaiting")
+        : t("livestream.networkStateOff");
+  const tone = status.receiving
+    ? "bg-emerald-500"
+    : status.running
+      ? "bg-amber-500"
+      : "bg-muted-foreground/50";
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone}`} aria-hidden />
+      <span className={status.receiving ? "" : "text-amber-600/90"}>{text}</span>
+      {status.mode === "h264" ? (
+        <span className="text-muted-foreground">{t("livestream.networkStateTranscoding")}</span>
+      ) : null}
+      <span className="min-w-0 truncate font-mono text-[10px] text-muted-foreground">{status.url}</span>
+    </div>
+  );
+}
+
 function videoInputReady(input: LivestreamVideoInput): boolean {
   if (input.kind === "camera") return Boolean(input.cameraDevice.trim());
   if (input.kind === "browser") return Boolean(input.browserUrl.trim());
   if (input.kind === "media") return Boolean(input.mediaPath.trim());
+  if (input.kind === "network") return Boolean(input.networkUrl.trim());
   return true;
 }
 
@@ -267,6 +313,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [editPhase, setEditPhase] = useState(programPhase);
   /** Live = wat je tijdens de wedstrijd bedient; Setup = wat je één keer instelt. */
   const [studioTab, setStudioTab] = useState<"live" | "setup">("live");
+  const [networkStatus, setNetworkStatus] = useState<NetworkSourceBridgeStatus | null>(null);
+  /** Welke fase de indeling-editor toont; losgekoppeld van de lopende wedstrijd. */
+  const [designerPhase, setDesignerPhase] = useState<StreamProgramPhase>("play");
   const [holdPreview, setHoldPreview] = useState(false);
   const [livePreview, setLivePreview] = useState<string | null>(null);
   const [livePreviewInputId, setLivePreviewInputId] = useState<string | null>(null);
@@ -274,8 +323,12 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [previewInputId, setPreviewInputId] = useState<string | null>(null);
   const [sourceThumbs, setSourceThumbs] = useState<Record<string, string>>({});
   const [deckInfo, setDeckInfo] = useState<StreamDeckInfo | null>(null);
-  const [addPick, setAddPick] = useState<null | "camera" | "browser" | "media" | "window" | "screen">(null);
+  const [addPick, setAddPick] = useState<
+    null | "camera" | "browser" | "media" | "window" | "screen" | "network"
+  >(null);
   const [addBrowserUrl, setAddBrowserUrl] = useState("");
+  const [addNetworkUrl, setAddNetworkUrl] = useState("");
+  const [networkUrlDrafts, setNetworkUrlDrafts] = useState<Record<string, string>>({});
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const programBoxRef = useRef<HTMLDivElement>(null);
   const hasDisplayInput = settings.videoInputs.some((item) => item.kind === "display");
@@ -371,10 +424,12 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       setLivePreview(`data:image/jpeg;base64,${frame.jpeg}`);
       setLivePreviewInputId(frame.inputId ?? null);
     });
+    const offNetwork = window.electronAPI?.onNetworkSourceStatus?.((next) => setNetworkStatus(next));
     return () => {
       offStatus?.();
       offSettings?.();
       offPreview?.();
+      offNetwork?.();
     };
   }, [refresh, loadCameras, loadDesktopSources, loadAudioDevices]);
 
@@ -412,6 +467,34 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     setSettings(next);
     if (!window.electronAPI?.saveLivestreamSettings) return;
     setSettings(await window.electronAPI.saveLivestreamSettings(partial));
+  };
+
+  /**
+   * Een wijziging uit de indeling-editor wegschrijven.
+   *
+   * Staat de indeling nog op automatisch, dan gebeurt het overschakelen én de wijziging in één
+   * schrijfactie. Twee keer achter elkaar `persist` aanroepen kan niet: beide rekenen vanaf
+   * dezelfde `settings` uit de closure, dus de tweede wist de eerste.
+   *
+   * De handmatige indeling begint met precies wat automatisch nu zou tonen, zodat één vinkje
+   * omzetten de rest van het beeld niet verandert.
+   */
+  const applyDesignerLayout = async (
+    phase: StreamProgramPhase,
+    partial: Partial<StreamLayerLayout>,
+  ) => {
+    if (settings.layoutMode === "manual") {
+      await persistLayout(settings.manualPhaseSplit ? phase : "unified", partial);
+      return;
+    }
+    const play = autoPhaseLayout(settings, "play");
+    const brk = autoPhaseLayout(settings, "break");
+    await persist({
+      layoutMode: "manual",
+      manualPhaseSplit: true,
+      manualPlayLayout: phase === "play" ? { ...play, ...partial } : play,
+      manualBreakLayout: phase === "break" ? { ...brk, ...partial } : brk,
+    });
   };
 
   const persistLayout = async (
@@ -479,15 +562,16 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     if (busy || settings.videoInputs.length >= 8) return;
     if (kind === "display" && settings.videoInputs.some((item) => item.kind === "display")) return;
     const n = settings.videoInputs.filter((item) => item.kind === kind).length + 1;
-    const name =
-      extra?.name?.trim() ||
-      (kind === "camera"
-        ? t("livestream.videoInputCameraName", { n })
-        : kind === "browser"
-          ? t("livestream.videoInputBrowserName", { n })
-          : kind === "media"
-            ? t("livestream.videoInputMediaName", { n })
-            : t("livestream.sourceDisplayShort"));
+    // Per soort een eigen naam. Een ketting met een laatste "anders" gaf elk nieuw brontype
+    // stilzwijgend de naam van het stadionscherm: een verse netwerkbron heette "LED".
+    const defaultNames: Record<LivestreamSource, string> = {
+      camera: t("livestream.videoInputCameraName", { n }),
+      browser: t("livestream.videoInputBrowserName", { n }),
+      media: t("livestream.videoInputMediaName", { n }),
+      network: t("livestream.videoInputNetworkName", { n }),
+      display: t("livestream.sourceDisplayShort"),
+    };
+    const name = extra?.name?.trim() || defaultNames[kind];
     const input = createVideoInput({
       name,
       kind,
@@ -527,11 +611,22 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     setAddPick(null);
   };
 
-  const startAddPick = (kind: "camera" | "browser" | "media" | "window" | "screen") => {
+  const startAddPick = (
+    kind: "camera" | "browser" | "media" | "window" | "screen" | "network",
+  ) => {
     setAddPick(kind);
     setAddBrowserUrl("");
+    setAddNetworkUrl("");
     if (kind === "camera") void loadCameras();
     if (kind === "window" || kind === "screen") void loadDesktopSources();
+  };
+
+  const addNetworkSource = () => {
+    const networkUrl = sanitizeNetworkUrl(addNetworkUrl);
+    if (!networkUrl) return;
+    addVideoSource("network", { networkUrl });
+    setAddNetworkUrl("");
+    setAddPick(null);
   };
 
   const addMediaSource = () => {
@@ -1018,6 +1113,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           />
         </div>
       ) : null}
+      {settings.source === "network" ? <NetworkSourceState status={networkStatus} t={t} /> : null}
       {!destinationReady && !status.running ? (
         <p className="text-[11px] text-amber-600/90">{t("livestream.needsStreamKey")}</p>
       ) : null}
@@ -1336,7 +1432,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                                 ? t("livestream.screenPick")
                                 : addPick === "browser"
                                   ? t("livestream.browserUrl")
-                                  : t("livestream.mediaPick")}
+                                  : addPick === "network"
+                                    ? t("livestream.networkUrl")
+                                    : t("livestream.mediaPick")}
                         </div>
                         {addPick === "camera" || addPick === "window" || addPick === "screen" ? (
                           <div className="max-h-28 overflow-y-auto">
@@ -1378,6 +1476,29 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                                 {item.name}
                               </button>
                             ))}
+                          </div>
+                        ) : addPick === "network" ? (
+                          <div className="flex flex-col gap-0.5">
+                            <Input
+                              aria-label={t("livestream.networkUrl")}
+                              className="h-7 px-1 text-[10px]"
+                              inputMode="url"
+                              placeholder={t("livestream.networkUrlPlaceholder")}
+                              value={addNetworkUrl}
+                              disabled={sourceLocked}
+                              onChange={(e) => setAddNetworkUrl(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") addNetworkSource();
+                              }}
+                            />
+                            <button
+                              type="button"
+                              disabled={sourceLocked || !sanitizeNetworkUrl(addNetworkUrl)}
+                              onClick={addNetworkSource}
+                              className="h-6 rounded text-[10px] font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                            >
+                              {t("common.add")}
+                            </button>
                           </div>
                         ) : addPick === "browser" ? (
                           <div className="flex flex-col gap-0.5">
@@ -1440,6 +1561,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                           onClick={() => {
                             setAddPick(null);
                             setAddBrowserUrl("");
+                            setAddNetworkUrl("");
                           }}
                           className="h-5 text-[10px] text-muted-foreground hover:text-foreground"
                         >
@@ -1471,6 +1593,14 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                           className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
                         >
                           {t("livestream.videoInputsAddScreen")}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={sourceLocked}
+                          onClick={() => startAddPick("network")}
+                          className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
+                        >
+                          {t("livestream.videoInputsAddNetwork")}
                         </button>
                         <button
                           type="button"
@@ -1571,7 +1701,474 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         </div>
       {studioTab !== "live" ? (
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-                {studioTab === "setup" ? (
+        <StudioSection
+          title={t("livestream.sourceSection")}
+          summary={t("livestream.sourceCount", { n: settings.videoInputs.length })}
+        >
+          {settings.videoInputs.map((input, index) => {
+            const followChannels = armedFollowChannels(settings.audioChannels);
+            const follow = summarizeAudioFollow(input, followChannels, (n) =>
+              t("livestream.audioChannel", { n }),
+            );
+            const followSummary = follow.empty
+              ? t("livestream.audioFollowNone")
+              : [
+                  follow.unmute.length ? `${follow.unmute.join(", ")} ${t("livestream.audioFollowOnShort")}` : "",
+                  follow.mute.length ? `${follow.mute.join(", ")} ${t("livestream.audioFollowOffShort")}` : "",
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
+            return (
+              <div key={input.id} className="rounded-lg border border-border p-2.5 flex flex-col gap-2">
+                <div className="flex items-end gap-2">
+                  <StudioField
+                    label={t("livestream.videoInputName")}
+                    htmlFor={`ls-vin-name-${input.id}`}
+                    className="flex-1"
+                  >
+                    <Input
+                      id={`ls-vin-name-${input.id}`}
+                      className="h-8"
+                      value={input.name}
+                      disabled={sourceLocked}
+                      placeholder={
+                        input.kind === "display"
+                          ? t("livestream.sourceDisplay")
+                          : input.kind === "browser"
+                            ? t("livestream.sourceBrowser")
+                            : input.kind === "media"
+                              ? t("livestream.videoInputMediaName", { n: index + 1 })
+                              : t("livestream.videoInputCameraName", { n: index + 1 })
+                      }
+                      onChange={(e) => void patchVideoInput(input.id, { name: e.target.value })}
+                    />
+                  </StudioField>
+                  <div className="mb-0.5 flex h-8 w-[6.5rem] shrink-0 items-center rounded-md bg-secondary/60 px-2 text-[11px] text-muted-foreground">
+                    {videoKindLabel(input.kind, t, true, input.cameraDevice)}
+                  </div>
+                  {settings.videoInputs.length > 1 ? (
+                    <button
+                      type="button"
+                      aria-label={t("livestream.videoInputRemove")}
+                      title={t("livestream.videoInputRemove")}
+                      className="mb-0.5 h-8 shrink-0 rounded-md px-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                      disabled={sourceLocked}
+                      onClick={() => removeVideoSource(input.id)}
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+
+                {input.kind === "media" ? (
+                  <div className="flex flex-col gap-1">
+                    <StudioField label={t("livestream.mediaFile")} htmlFor={`ls-vin-media-${input.id}`}>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          size="sm"
+                          variant={input.mediaPath ? "outline" : "default"}
+                          disabled={sourceLocked}
+                          onClick={() => {
+                            void (async () => {
+                              const mediaPath = await pickLocalMedia();
+                              if (!mediaPath) return;
+                              const name = mediaPathFileName(mediaPath);
+                              void patchVideoInput(input.id, { mediaPath, name });
+                            })();
+                          }}
+                        >
+                          {input.mediaPath ? mediaPathFileName(input.mediaPath) : t("livestream.mediaPick")}
+                        </Button>
+                        {libraryMedia && libraryMedia.length > 0 ? (
+                          <Select
+                            id={`ls-vin-media-${input.id}`}
+                            className="h-8 min-w-[10rem] flex-1"
+                            value={libraryMedia.some((item) => item.path === input.mediaPath) ? input.mediaPath : ""}
+                            disabled={sourceLocked}
+                            onChange={(e) => {
+                              const mediaPath = sanitizeMediaPath(e.target.value);
+                              if (!mediaPath) return;
+                              const item = libraryMedia.find((entry) => entry.path === mediaPath);
+                              void patchVideoInput(input.id, {
+                                mediaPath,
+                                name: input.name.trim() || (item?.title ?? mediaPathFileName(mediaPath)).slice(0, 40),
+                              });
+                            }}
+                          >
+                            <option value="">{t("livestream.mediaFromLibrary")}</option>
+                            {libraryMedia
+                              .filter((item) => item.active !== false && !item.hideFromLibrary)
+                              .map((item) => (
+                                <option key={item.id} value={item.path}>
+                                  {item.title || mediaPathFileName(item.path)}
+                                </option>
+                              ))}
+                          </Select>
+                        ) : null}
+                      </div>
+                    </StudioField>
+                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={input.mediaLoop}
+                        disabled={sourceLocked}
+                        onChange={(e) => void patchVideoInput(input.id, { mediaLoop: e.target.checked })}
+                      />
+                      {t("livestream.mediaLoop")}
+                    </label>
+                  </div>
+                ) : input.kind === "network" ? (
+                  <StudioField label={t("livestream.networkUrl")} htmlFor={`ls-vin-net-${input.id}`}>
+                    <Input
+                      id={`ls-vin-net-${input.id}`}
+                      className="h-8"
+                      inputMode="url"
+                      placeholder={t("livestream.networkUrlPlaceholder")}
+                      value={networkUrlDrafts[input.id] ?? input.networkUrl}
+                      disabled={sourceLocked}
+                      onChange={(e) =>
+                        setNetworkUrlDrafts((drafts) => ({ ...drafts, [input.id]: e.target.value }))
+                      }
+                      onBlur={(e) => {
+                        const networkUrl = sanitizeNetworkUrl(e.target.value);
+                        setNetworkUrlDrafts((drafts) => {
+                          const next = { ...drafts };
+                          delete next[input.id];
+                          return next;
+                        });
+                        if (networkUrl !== input.networkUrl) void patchVideoInput(input.id, { networkUrl });
+                      }}
+                    />
+                    {input.id === settings.activeVideoInputId ? (
+                      <NetworkSourceState status={networkStatus} t={t} />
+                    ) : null}
+                    <p className="text-[10px] leading-snug text-muted-foreground">
+                      {t("livestream.networkUrlHint")}
+                    </p>
+                  </StudioField>
+                ) : input.kind === "browser" ? (
+                  <StudioField label={t("livestream.browserUrl")} htmlFor={`ls-vin-url-${input.id}`}>
+                    <Input
+                      id={`ls-vin-url-${input.id}`}
+                      className="h-8"
+                      type="url"
+                      inputMode="url"
+                      placeholder={t("livestream.browserUrlPlaceholder")}
+                      value={browserUrlDrafts[input.id] ?? input.browserUrl}
+                      disabled={sourceLocked}
+                      onChange={(e) =>
+                        setBrowserUrlDrafts((drafts) => ({ ...drafts, [input.id]: e.target.value }))
+                      }
+                      onBlur={(e) => {
+                        const browserUrl = sanitizeBrowserUrl(e.target.value);
+                        setBrowserUrlDrafts((drafts) => {
+                          const next = { ...drafts };
+                          delete next[input.id];
+                          return next;
+                        });
+                        if (browserUrl !== input.browserUrl) void patchVideoInput(input.id, { browserUrl });
+                      }}
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={sourceLocked || !sanitizeBrowserUrl(browserUrlDrafts[input.id] ?? input.browserUrl)}
+                        onClick={() => {
+                          const browserUrl = sanitizeBrowserUrl(browserUrlDrafts[input.id] ?? input.browserUrl);
+                          if (browserUrl !== input.browserUrl) void patchVideoInput(input.id, { browserUrl });
+                          void window.electronAPI?.openLivestreamBrowserInteract?.(browserUrl);
+                        }}
+                      >
+                        {t("livestream.browserInteract")}
+                      </Button>
+                    </div>
+                  </StudioField>
+                ) : input.kind === "camera" ? (
+                  <StudioField label={t("livestream.camera")} htmlFor={`ls-vin-cam-${input.id}`}>
+                    <Select
+                      id={`ls-vin-cam-${input.id}`}
+                      className="h-8"
+                      value={input.cameraDevice}
+                      disabled={sourceLocked}
+                      onChange={(e) => assignCameraDevice(input.id, e.target.value)}
+                    >
+                      <option value="">{t("livestream.cameraPick")}</option>
+                      <CaptureDeviceOptions
+                        cameras={cameras}
+                        windows={windowSources}
+                        screens={screenSources}
+                        usedIds={usedCameraIds}
+                        currentId={input.cameraDevice}
+                        t={t}
+                      />
+                    </Select>
+                  </StudioField>
+                ) : null}
+
+                {settings.audioEnabled && followChannels.length > 1 && settings.videoInputs.length > 1 ? (
+                  <StudioDisclosure title={t("livestream.audioFollowTitle")} summary={followSummary}>
+                    {followChannels.map((channel, channelIndex) => (
+                      <div key={channel.id} className="grid grid-cols-[1fr_auto] items-center gap-2">
+                        <span className="truncate text-[11px]">
+                          {channelLabel(channel, channelIndex, (n) => t("livestream.audioChannel", { n }))}
+                        </span>
+                        <Select
+                          aria-label={t("livestream.audioFollowTitle")}
+                          className="h-8 w-[8.5rem]"
+                          value={input.audioFollow[channel.id] ?? "leave"}
+                          disabled={sourceLocked}
+                          onChange={(e) =>
+                            void patchVideoInput(input.id, {
+                              audioFollow: {
+                                ...input.audioFollow,
+                                [channel.id]: e.target.value as LivestreamAudioFollowAction,
+                              },
+                            })
+                          }
+                        >
+                          <option value="leave">{t("livestream.audioFollowLeave")}</option>
+                          <option value="unmute">{t("livestream.audioFollowUnmute")}</option>
+                          <option value="mute">{t("livestream.audioFollowMute")}</option>
+                        </Select>
+                      </div>
+                    ))}
+                  </StudioDisclosure>
+                ) : null}
+              </div>
+            );
+          })}
+
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={sourceLocked || settings.videoInputs.length >= 8}
+              onClick={() => addVideoSource("camera")}
+            >
+              {t("livestream.videoInputsAdd")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={sourceLocked || settings.videoInputs.length >= 8}
+              onClick={() => {
+                setStudioTab("live");
+                startAddPick("window");
+              }}
+            >
+              {t("livestream.videoInputsAddWindow")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={sourceLocked || settings.videoInputs.length >= 8}
+              onClick={() => {
+                setStudioTab("live");
+                startAddPick("screen");
+              }}
+            >
+              {t("livestream.videoInputsAddScreen")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={sourceLocked || settings.videoInputs.length >= 8}
+              onClick={() => addVideoSource("network")}
+            >
+              {t("livestream.videoInputsAddNetwork")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={sourceLocked || settings.videoInputs.length >= 8}
+              onClick={() => addVideoSource("browser")}
+            >
+              {t("livestream.videoInputsAddBrowser")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={sourceLocked || settings.videoInputs.length >= 8}
+              onClick={addMediaSource}
+            >
+              {t("livestream.videoInputsAddMedia")}
+            </Button>
+            {settings.videoInputs.some((item) => item.kind === "display") ? null : (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={sourceLocked || settings.videoInputs.length >= 8}
+                onClick={() => addVideoSource("display")}
+              >
+                {t("livestream.videoInputsAddDisplay")}
+              </Button>
+            )}
+            {cameras.length === 0 ? (
+              <Button size="sm" variant="outline" onClick={() => void loadCameras()} disabled={sourceLocked}>
+                {t("livestream.refreshCameras")}
+              </Button>
+            ) : null}
+          </div>
+        </StudioSection>
+
+        <StudioSection
+          title={t("livestream.audioSection")}
+          summary={
+            settings.audioEnabled
+              ? t("livestream.audioCount", { n: armedFollowChannels(settings.audioChannels).length })
+              : t("common.off")
+          }
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={settings.audioEnabled}
+              disabled={locked}
+              onChange={(e) => void persist({ audioEnabled: e.target.checked })}
+            />
+            {t("livestream.audioEnabled")}
+          </label>
+          {settings.audioEnabled && (
+            <>
+              {mixer}
+              {audioDevices.length === 0 ? (
+                <Button size="sm" variant="outline" onClick={() => void loadAudioDevices()} disabled={locked}>
+                  {t("livestream.refreshAudio")}
+                </Button>
+              ) : null}
+            </>
+          )}
+        </StudioSection>
+
+        {sourceShowsStreamLayers(settings.source) && (
+          <StudioSection
+            title={t("livestream.layersSection")}
+            summary={
+              settings.layoutMode === "auto" ? t("livestream.layoutAuto") : t("livestream.layoutManual")
+            }
+          >
+            <StreamLayoutDesigner
+              settings={settings}
+              phase={designerPhase}
+              onPhaseChange={setDesignerPhase}
+              onLayoutChange={(partial) => void applyDesignerLayout(designerPhase, partial)}
+              onScoreWidgetChange={(partial, commit) => {
+                const scoreWidget = mergeStreamScoreWidget({ ...settings.scoreWidget, ...partial });
+                setSettings((s) => ({ ...s, scoreWidget }));
+                if (commit) void persist({ scoreWidget });
+              }}
+              t={t}
+            />
+            <StudioDisclosure title={t("livestream.designerMore")}>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                    settings.layoutMode === "auto" ? "border-primary bg-primary/10 font-semibold" : "border-border"
+                  }`}
+                  onClick={() => void persist({ layoutMode: "auto" })}
+                >
+                  {t("livestream.layoutAuto")}
+                  <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                    {t("livestream.layoutAutoShort")}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                    settings.layoutMode === "manual" ? "border-primary bg-primary/10 font-semibold" : "border-border"
+                  }`}
+                  onClick={() => void persist({ layoutMode: "manual" })}
+                >
+                  {t("livestream.layoutManual")}
+                  <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                    {t("livestream.layoutManualShort")}
+                  </span>
+                </button>
+              </div>
+              {settings.layoutMode === "auto" ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={settings.sponsors}
+                    onChange={(e) => void persist({ sponsors: e.target.checked })}
+                  />
+                  {t("livestream.sponsorsDuringBreakAuto")}
+                </label>
+              ) : (
+                <>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={settings.manualPhaseSplit}
+                      onChange={(e) => void persist({ manualPhaseSplit: e.target.checked })}
+                    />
+                    {t("livestream.manualPhaseSplit")}
+                  </label>
+                  {!settings.manualPhaseSplit ? (
+                    <LivestreamLayoutEditor
+                      idPrefix="ls-unified"
+                      layout={settings.manualLayout}
+                      onChange={(partial) => void persistLayout("unified", partial)}
+                      t={t}
+                    />
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-1 rounded-lg bg-secondary/40 p-1">
+                        <button
+                          type="button"
+                          className={`rounded-md px-2 py-1.5 text-xs ${
+                            editPhase === "play" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"
+                          }`}
+                          onClick={() => setEditPhase("play")}
+                        >
+                          {t("livestream.phasePlay")}
+                          {programPhase === "play" ? ` · ${t("livestream.previewLayoutActive")}` : ""}
+                        </button>
+                        <button
+                          type="button"
+                          className={`rounded-md px-2 py-1.5 text-xs ${
+                            editPhase === "break" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"
+                          }`}
+                          onClick={() => setEditPhase("break")}
+                        >
+                          {t("livestream.phaseBreak")}
+                          {programPhase === "break" ? ` · ${t("livestream.previewLayoutActive")}` : ""}
+                        </button>
+                      </div>
+                      {editPhase === "play" ? (
+                        <LivestreamLayoutEditor
+                          idPrefix="ls-play"
+                          layout={settings.manualPlayLayout}
+                          onChange={(partial) => void persistLayout("play", partial)}
+                          t={t}
+                        />
+                      ) : (
+                        <LivestreamLayoutEditor
+                          idPrefix="ls-break"
+                          layout={settings.manualBreakLayout}
+                          onChange={(partial) => void persistLayout("break", partial)}
+                          t={t}
+                        />
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+              <StreamScoreWidgetEditor
+                widget={settings.scoreWidget}
+                designs={settings.scoreWidgetDesigns}
+                onChange={(partial) =>
+                  void persist({ scoreWidget: { ...settings.scoreWidget, ...partial } })
+                }
+                onDesignsChange={(scoreWidgetDesigns) => void persist({ scoreWidgetDesigns })}
+                t={t}
+              />
+            </StudioDisclosure>
+          </StudioSection>
+        )}
+
         <StudioSection
           title={t("livestream.outputSection")}
           summary={
@@ -1634,9 +2231,79 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             </Button>
           </div>
         </StudioSection>
-        ) : null}
 
-        {studioTab === "setup" ? (
+        <StudioDisclosure title={t("livestream.encoderSection")} summary={encoderSummary(settings)}>
+          <div className="grid grid-cols-2 gap-2">
+            <StudioField label={t("livestream.encoder")} htmlFor="ls-encoder">
+              <Select
+                id="ls-encoder"
+                className="h-8"
+                value={settings.encoder}
+                disabled={locked}
+                onChange={(e) => void persist({ encoder: e.target.value as LivestreamEncoderPref })}
+              >
+                <option value="auto">{t("livestream.encoderAuto")}</option>
+                <option value="h264_nvenc">{t("livestream.encoderNvenc")}</option>
+                <option value="libx264">{t("livestream.encoderX264")}</option>
+              </Select>
+            </StudioField>
+            <StudioField label={t("livestream.resolution")} htmlFor="ls-res">
+              <Select
+                id="ls-res"
+                className="h-8"
+                value={settings.resolution}
+                disabled={locked}
+                onChange={(e) => void persist({ resolution: e.target.value as LivestreamResolution })}
+              >
+                <option value="1920x1080">1920×1080</option>
+                <option value="1280x720">1280×720</option>
+              </Select>
+            </StudioField>
+            <StudioField label={t("livestream.fps")} htmlFor="ls-fps">
+              <Select
+                id="ls-fps"
+                className="h-8"
+                value={String(settings.fps)}
+                disabled={locked}
+                onChange={(e) => void persist({ fps: Number(e.target.value) })}
+              >
+                <option value="15">15</option>
+                <option value="30">30</option>
+                <option value="60">60</option>
+              </Select>
+            </StudioField>
+            <StudioField label={t("livestream.bitrate")} htmlFor="ls-br">
+              <Select
+                id="ls-br"
+                className="h-8"
+                value={String(settings.bitrateKbps)}
+                disabled={locked}
+                onChange={(e) => void persist({ bitrateKbps: Number(e.target.value) })}
+              >
+                {bitrateOptions.map((kbps) => (
+                  <option key={kbps} value={kbps}>
+                    {kbps} kbps{kbps === advice.recommendedKbps ? ` — ${t("livestream.bitrateRecommended")}` : ""}
+                  </option>
+                ))}
+              </Select>
+            </StudioField>
+          </div>
+          {verdict === "low" && (
+            <p className="text-[11px] leading-snug text-amber-600/90">
+              {t("livestream.bitrateTooLow", {
+                recommended: advice.recommendedKbps,
+                resolution: settings.resolution === "1920x1080" ? "1080p" : "720p",
+                fps: settings.fps,
+              })}
+            </p>
+          )}
+          {verdict === "high" && (
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              {t("livestream.bitrateTooHigh", { maximum: advice.maximumKbps })}
+            </p>
+          )}
+        </StudioDisclosure>
+
         <StudioSection
           title={t("livestream.deckSection")}
           summary={t("livestream.deckSlotCount", { n: settings.streamDeckSlots.length })}
@@ -1800,500 +2467,6 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
             </div>
           )}
         </StudioSection>
-        ) : null}
-
-        {studioTab === "setup" ? (
-        <StudioSection
-          title={t("livestream.sourceSection")}
-          summary={t("livestream.sourceCount", { n: settings.videoInputs.length })}
-        >
-          {settings.videoInputs.map((input, index) => {
-            const followChannels = armedFollowChannels(settings.audioChannels);
-            const follow = summarizeAudioFollow(input, followChannels, (n) =>
-              t("livestream.audioChannel", { n }),
-            );
-            const followSummary = follow.empty
-              ? t("livestream.audioFollowNone")
-              : [
-                  follow.unmute.length ? `${follow.unmute.join(", ")} ${t("livestream.audioFollowOnShort")}` : "",
-                  follow.mute.length ? `${follow.mute.join(", ")} ${t("livestream.audioFollowOffShort")}` : "",
-                ]
-                  .filter(Boolean)
-                  .join(" · ");
-            return (
-              <div key={input.id} className="rounded-lg border border-border p-2.5 flex flex-col gap-2">
-                <div className="flex items-end gap-2">
-                  <StudioField
-                    label={t("livestream.videoInputName")}
-                    htmlFor={`ls-vin-name-${input.id}`}
-                    className="flex-1"
-                  >
-                    <Input
-                      id={`ls-vin-name-${input.id}`}
-                      className="h-8"
-                      value={input.name}
-                      disabled={sourceLocked}
-                      placeholder={
-                        input.kind === "display"
-                          ? t("livestream.sourceDisplay")
-                          : input.kind === "browser"
-                            ? t("livestream.sourceBrowser")
-                            : input.kind === "media"
-                              ? t("livestream.videoInputMediaName", { n: index + 1 })
-                              : t("livestream.videoInputCameraName", { n: index + 1 })
-                      }
-                      onChange={(e) => void patchVideoInput(input.id, { name: e.target.value })}
-                    />
-                  </StudioField>
-                  <div className="mb-0.5 flex h-8 w-[6.5rem] shrink-0 items-center rounded-md bg-secondary/60 px-2 text-[11px] text-muted-foreground">
-                    {videoKindLabel(input.kind, t, true, input.cameraDevice)}
-                  </div>
-                  {settings.videoInputs.length > 1 ? (
-                    <button
-                      type="button"
-                      aria-label={t("livestream.videoInputRemove")}
-                      title={t("livestream.videoInputRemove")}
-                      className="mb-0.5 h-8 shrink-0 rounded-md px-2 text-muted-foreground hover:bg-secondary hover:text-foreground"
-                      disabled={sourceLocked}
-                      onClick={() => removeVideoSource(input.id)}
-                    >
-                      ×
-                    </button>
-                  ) : null}
-                </div>
-
-                {input.kind === "media" ? (
-                  <div className="flex flex-col gap-1">
-                    <StudioField label={t("livestream.mediaFile")} htmlFor={`ls-vin-media-${input.id}`}>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant={input.mediaPath ? "outline" : "default"}
-                          disabled={sourceLocked}
-                          onClick={() => {
-                            void (async () => {
-                              const mediaPath = await pickLocalMedia();
-                              if (!mediaPath) return;
-                              const name = mediaPathFileName(mediaPath);
-                              void patchVideoInput(input.id, { mediaPath, name });
-                            })();
-                          }}
-                        >
-                          {input.mediaPath ? mediaPathFileName(input.mediaPath) : t("livestream.mediaPick")}
-                        </Button>
-                        {libraryMedia && libraryMedia.length > 0 ? (
-                          <Select
-                            id={`ls-vin-media-${input.id}`}
-                            className="h-8 min-w-[10rem] flex-1"
-                            value={libraryMedia.some((item) => item.path === input.mediaPath) ? input.mediaPath : ""}
-                            disabled={sourceLocked}
-                            onChange={(e) => {
-                              const mediaPath = sanitizeMediaPath(e.target.value);
-                              if (!mediaPath) return;
-                              const item = libraryMedia.find((entry) => entry.path === mediaPath);
-                              void patchVideoInput(input.id, {
-                                mediaPath,
-                                name: input.name.trim() || (item?.title ?? mediaPathFileName(mediaPath)).slice(0, 40),
-                              });
-                            }}
-                          >
-                            <option value="">{t("livestream.mediaFromLibrary")}</option>
-                            {libraryMedia
-                              .filter((item) => item.active !== false && !item.hideFromLibrary)
-                              .map((item) => (
-                                <option key={item.id} value={item.path}>
-                                  {item.title || mediaPathFileName(item.path)}
-                                </option>
-                              ))}
-                          </Select>
-                        ) : null}
-                      </div>
-                    </StudioField>
-                    <label className="flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <input
-                        type="checkbox"
-                        checked={input.mediaLoop}
-                        disabled={sourceLocked}
-                        onChange={(e) => void patchVideoInput(input.id, { mediaLoop: e.target.checked })}
-                      />
-                      {t("livestream.mediaLoop")}
-                    </label>
-                  </div>
-                ) : input.kind === "browser" ? (
-                  <StudioField label={t("livestream.browserUrl")} htmlFor={`ls-vin-url-${input.id}`}>
-                    <Input
-                      id={`ls-vin-url-${input.id}`}
-                      className="h-8"
-                      type="url"
-                      inputMode="url"
-                      placeholder={t("livestream.browserUrlPlaceholder")}
-                      value={browserUrlDrafts[input.id] ?? input.browserUrl}
-                      disabled={sourceLocked}
-                      onChange={(e) =>
-                        setBrowserUrlDrafts((drafts) => ({ ...drafts, [input.id]: e.target.value }))
-                      }
-                      onBlur={(e) => {
-                        const browserUrl = sanitizeBrowserUrl(e.target.value);
-                        setBrowserUrlDrafts((drafts) => {
-                          const next = { ...drafts };
-                          delete next[input.id];
-                          return next;
-                        });
-                        if (browserUrl !== input.browserUrl) void patchVideoInput(input.id, { browserUrl });
-                      }}
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={sourceLocked || !sanitizeBrowserUrl(browserUrlDrafts[input.id] ?? input.browserUrl)}
-                        onClick={() => {
-                          const browserUrl = sanitizeBrowserUrl(browserUrlDrafts[input.id] ?? input.browserUrl);
-                          if (browserUrl !== input.browserUrl) void patchVideoInput(input.id, { browserUrl });
-                          void window.electronAPI?.openLivestreamBrowserInteract?.(browserUrl);
-                        }}
-                      >
-                        {t("livestream.browserInteract")}
-                      </Button>
-                    </div>
-                  </StudioField>
-                ) : input.kind === "camera" ? (
-                  <StudioField label={t("livestream.camera")} htmlFor={`ls-vin-cam-${input.id}`}>
-                    <Select
-                      id={`ls-vin-cam-${input.id}`}
-                      className="h-8"
-                      value={input.cameraDevice}
-                      disabled={sourceLocked}
-                      onChange={(e) => assignCameraDevice(input.id, e.target.value)}
-                    >
-                      <option value="">{t("livestream.cameraPick")}</option>
-                      <CaptureDeviceOptions
-                        cameras={cameras}
-                        windows={windowSources}
-                        screens={screenSources}
-                        usedIds={usedCameraIds}
-                        currentId={input.cameraDevice}
-                        t={t}
-                      />
-                    </Select>
-                  </StudioField>
-                ) : null}
-
-                {settings.audioEnabled && followChannels.length > 1 && settings.videoInputs.length > 1 ? (
-                  <StudioDisclosure title={t("livestream.audioFollowTitle")} summary={followSummary}>
-                    {followChannels.map((channel, channelIndex) => (
-                      <div key={channel.id} className="grid grid-cols-[1fr_auto] items-center gap-2">
-                        <span className="truncate text-[11px]">
-                          {channelLabel(channel, channelIndex, (n) => t("livestream.audioChannel", { n }))}
-                        </span>
-                        <Select
-                          aria-label={t("livestream.audioFollowTitle")}
-                          className="h-8 w-[8.5rem]"
-                          value={input.audioFollow[channel.id] ?? "leave"}
-                          disabled={sourceLocked}
-                          onChange={(e) =>
-                            void patchVideoInput(input.id, {
-                              audioFollow: {
-                                ...input.audioFollow,
-                                [channel.id]: e.target.value as LivestreamAudioFollowAction,
-                              },
-                            })
-                          }
-                        >
-                          <option value="leave">{t("livestream.audioFollowLeave")}</option>
-                          <option value="unmute">{t("livestream.audioFollowUnmute")}</option>
-                          <option value="mute">{t("livestream.audioFollowMute")}</option>
-                        </Select>
-                      </div>
-                    ))}
-                  </StudioDisclosure>
-                ) : null}
-              </div>
-            );
-          })}
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={sourceLocked || settings.videoInputs.length >= 8}
-              onClick={() => addVideoSource("camera")}
-            >
-              {t("livestream.videoInputsAdd")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={sourceLocked || settings.videoInputs.length >= 8}
-              onClick={() => {
-                setStudioTab("live");
-                startAddPick("window");
-              }}
-            >
-              {t("livestream.videoInputsAddWindow")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={sourceLocked || settings.videoInputs.length >= 8}
-              onClick={() => {
-                setStudioTab("live");
-                startAddPick("screen");
-              }}
-            >
-              {t("livestream.videoInputsAddScreen")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={sourceLocked || settings.videoInputs.length >= 8}
-              onClick={() => addVideoSource("browser")}
-            >
-              {t("livestream.videoInputsAddBrowser")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={sourceLocked || settings.videoInputs.length >= 8}
-              onClick={addMediaSource}
-            >
-              {t("livestream.videoInputsAddMedia")}
-            </Button>
-            {settings.videoInputs.some((item) => item.kind === "display") ? null : (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={sourceLocked || settings.videoInputs.length >= 8}
-                onClick={() => addVideoSource("display")}
-              >
-                {t("livestream.videoInputsAddDisplay")}
-              </Button>
-            )}
-            {cameras.length === 0 ? (
-              <Button size="sm" variant="outline" onClick={() => void loadCameras()} disabled={sourceLocked}>
-                {t("livestream.refreshCameras")}
-              </Button>
-            ) : null}
-          </div>
-        </StudioSection>
-        ) : null}
-
-        <StudioSection
-          title={t("livestream.audioSection")}
-          summary={
-            settings.audioEnabled
-              ? t("livestream.audioCount", { n: armedFollowChannels(settings.audioChannels).length })
-              : t("common.off")
-          }
-        >
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={settings.audioEnabled}
-              disabled={locked}
-              onChange={(e) => void persist({ audioEnabled: e.target.checked })}
-            />
-            {t("livestream.audioEnabled")}
-          </label>
-          {settings.audioEnabled && (
-            <>
-              {mixer}
-              {audioDevices.length === 0 ? (
-                <Button size="sm" variant="outline" onClick={() => void loadAudioDevices()} disabled={locked}>
-                  {t("livestream.refreshAudio")}
-                </Button>
-              ) : null}
-            </>
-          )}
-        </StudioSection>
-
-        {studioTab === "setup" && settings.source === "camera" && (
-          <StudioSection
-            title={t("livestream.layersSection")}
-            summary={
-              settings.layoutMode === "auto" ? t("livestream.layoutAuto") : t("livestream.layoutManual")
-            }
-          >
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className={`rounded-lg border px-3 py-2 text-left text-sm ${
-                  settings.layoutMode === "auto" ? "border-primary bg-primary/10 font-semibold" : "border-border"
-                }`}
-                onClick={() => void persist({ layoutMode: "auto" })}
-              >
-                {t("livestream.layoutAuto")}
-                <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
-                  {t("livestream.layoutAutoShort")}
-                </span>
-              </button>
-              <button
-                type="button"
-                className={`rounded-lg border px-3 py-2 text-left text-sm ${
-                  settings.layoutMode === "manual" ? "border-primary bg-primary/10 font-semibold" : "border-border"
-                }`}
-                onClick={() => void persist({ layoutMode: "manual" })}
-              >
-                {t("livestream.layoutManual")}
-                <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
-                  {t("livestream.layoutManualShort")}
-                </span>
-              </button>
-            </div>
-            {settings.layoutMode === "auto" ? (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={settings.sponsors}
-                  onChange={(e) => void persist({ sponsors: e.target.checked })}
-                />
-                {t("livestream.sponsorsDuringBreakAuto")}
-              </label>
-            ) : (
-              <>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={settings.manualPhaseSplit}
-                    onChange={(e) => void persist({ manualPhaseSplit: e.target.checked })}
-                  />
-                  {t("livestream.manualPhaseSplit")}
-                </label>
-                {!settings.manualPhaseSplit ? (
-                  <LivestreamLayoutEditor
-                    idPrefix="ls-unified"
-                    layout={settings.manualLayout}
-                    onChange={(partial) => void persistLayout("unified", partial)}
-                    t={t}
-                  />
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-1 rounded-lg bg-secondary/40 p-1">
-                      <button
-                        type="button"
-                        className={`rounded-md px-2 py-1.5 text-xs ${
-                          editPhase === "play" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"
-                        }`}
-                        onClick={() => setEditPhase("play")}
-                      >
-                        {t("livestream.phasePlay")}
-                        {programPhase === "play" ? ` · ${t("livestream.previewLayoutActive")}` : ""}
-                      </button>
-                      <button
-                        type="button"
-                        className={`rounded-md px-2 py-1.5 text-xs ${
-                          editPhase === "break" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"
-                        }`}
-                        onClick={() => setEditPhase("break")}
-                      >
-                        {t("livestream.phaseBreak")}
-                        {programPhase === "break" ? ` · ${t("livestream.previewLayoutActive")}` : ""}
-                      </button>
-                    </div>
-                    {editPhase === "play" ? (
-                      <LivestreamLayoutEditor
-                        idPrefix="ls-play"
-                        layout={settings.manualPlayLayout}
-                        onChange={(partial) => void persistLayout("play", partial)}
-                        t={t}
-                      />
-                    ) : (
-                      <LivestreamLayoutEditor
-                        idPrefix="ls-break"
-                        layout={settings.manualBreakLayout}
-                        onChange={(partial) => void persistLayout("break", partial)}
-                        t={t}
-                      />
-                    )}
-                  </>
-                )}
-              </>
-            )}
-            <StreamScoreWidgetEditor
-              widget={settings.scoreWidget}
-              designs={settings.scoreWidgetDesigns}
-              onChange={(partial) =>
-                void persist({ scoreWidget: { ...settings.scoreWidget, ...partial } })
-              }
-              onDesignsChange={(scoreWidgetDesigns) => void persist({ scoreWidgetDesigns })}
-              t={t}
-            />
-          </StudioSection>
-        )}
-
-        {studioTab === "setup" ? (
-        <StudioDisclosure title={t("livestream.encoderSection")} summary={encoderSummary(settings)}>
-          <div className="grid grid-cols-2 gap-2">
-            <StudioField label={t("livestream.encoder")} htmlFor="ls-encoder">
-              <Select
-                id="ls-encoder"
-                className="h-8"
-                value={settings.encoder}
-                disabled={locked}
-                onChange={(e) => void persist({ encoder: e.target.value as LivestreamEncoderPref })}
-              >
-                <option value="auto">{t("livestream.encoderAuto")}</option>
-                <option value="h264_nvenc">{t("livestream.encoderNvenc")}</option>
-                <option value="libx264">{t("livestream.encoderX264")}</option>
-              </Select>
-            </StudioField>
-            <StudioField label={t("livestream.resolution")} htmlFor="ls-res">
-              <Select
-                id="ls-res"
-                className="h-8"
-                value={settings.resolution}
-                disabled={locked}
-                onChange={(e) => void persist({ resolution: e.target.value as LivestreamResolution })}
-              >
-                <option value="1920x1080">1920×1080</option>
-                <option value="1280x720">1280×720</option>
-              </Select>
-            </StudioField>
-            <StudioField label={t("livestream.fps")} htmlFor="ls-fps">
-              <Select
-                id="ls-fps"
-                className="h-8"
-                value={String(settings.fps)}
-                disabled={locked}
-                onChange={(e) => void persist({ fps: Number(e.target.value) })}
-              >
-                <option value="15">15</option>
-                <option value="30">30</option>
-                <option value="60">60</option>
-              </Select>
-            </StudioField>
-            <StudioField label={t("livestream.bitrate")} htmlFor="ls-br">
-              <Select
-                id="ls-br"
-                className="h-8"
-                value={String(settings.bitrateKbps)}
-                disabled={locked}
-                onChange={(e) => void persist({ bitrateKbps: Number(e.target.value) })}
-              >
-                {bitrateOptions.map((kbps) => (
-                  <option key={kbps} value={kbps}>
-                    {kbps} kbps{kbps === advice.recommendedKbps ? ` — ${t("livestream.bitrateRecommended")}` : ""}
-                  </option>
-                ))}
-              </Select>
-            </StudioField>
-          </div>
-          {verdict === "low" && (
-            <p className="text-[11px] leading-snug text-amber-600/90">
-              {t("livestream.bitrateTooLow", {
-                recommended: advice.recommendedKbps,
-                resolution: settings.resolution === "1920x1080" ? "1080p" : "720p",
-                fps: settings.fps,
-              })}
-            </p>
-          )}
-          {verdict === "high" && (
-            <p className="text-[11px] leading-snug text-muted-foreground">
-              {t("livestream.bitrateTooHigh", { maximum: advice.maximumKbps })}
-            </p>
-          )}
-        </StudioDisclosure>
-        ) : null}
         </div>
       ) : null}
       </>

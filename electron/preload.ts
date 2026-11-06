@@ -106,6 +106,15 @@ const bridge: ElectronBridge = {
   reportStreamProgramReady: () => {
     ipcRenderer.send("livestream:programReady");
   },
+  onNetworkSourceChunk: (listener) => subscribe("network-source:chunk", listener),
+  onNetworkSourceReset: (listener) => subscribe("network-source:reset", listener),
+  onNetworkSourceStatus: (listener) => subscribe("network-source:status", listener),
+  reportNetworkSourceCodecUnsupported: () => {
+    ipcRenderer.send("network-source:codecUnsupported");
+  },
+  requestNetworkSourceInit: () => {
+    ipcRenderer.send("network-source:requestInit");
+  },
 };
 
 try {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ExternalCaptureVideo, type ExternalCaptureVideoHandle } from "@/components/external-capture-video";
+import { ExternalCaptureVideo } from "@/components/external-capture-video";
+import { NetworkCaptureVideo } from "@/components/network-capture-video";
 import { CardMode } from "@/app/display/_modes/card";
 import { SubstitutionMode } from "@/app/display/_modes/substitution";
 import { StreamScoreWidget } from "@/app/stream/stream-score-widget";
@@ -28,7 +29,7 @@ import {
   streamShowsEventGraphic,
 } from "@/lib/stream-match-overlay";
 import { resolveStreamOverlayClip, streamOverlayClipAllowed } from "@/lib/stream-program-clip";
-import { resolveStreamProgramLayout } from "@/lib/stream-program-layout";
+import { resolveStreamProgramLayout, type StreamProgramPhase } from "@/lib/stream-program-layout";
 import type { Match, MediaItem } from "@/lib/types";
 
 function cameraFromQuery(): string {
@@ -36,22 +37,38 @@ function cameraFromQuery(): string {
   return new URLSearchParams(window.location.search).get("camera") ?? "";
 }
 
+/** Beeld komt van de netwerkbron (RTSP/UDP/SRT/RTMP) in plaats van een capture-apparaat. */
+function networkFromQuery(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("network") === "1";
+}
+
 export default function StreamProgramPage({
   cameraOverride,
   embedded = false,
   settingsOverride,
   onScoreWidgetChange,
+  phaseOverride,
+  layoutCanvas = false,
 }: {
   cameraOverride?: string;
   embedded?: boolean;
   settingsOverride?: LivestreamSettings;
   onScoreWidgetChange?: (partial: Partial<LivestreamSettings["scoreWidget"]>, commit: boolean) => void;
+  /** Toon deze fase in plaats van die van de lopende wedstrijd (voor de indeling-editor). */
+  phaseOverride?: StreamProgramPhase;
+  /**
+   * Gebruikt als tekenvlak om de indeling in te stellen: geen camerabeeld en geen "Geen camera",
+   * maar een rustige achtergrond waarop de lagen te zien en te verslepen zijn.
+   */
+  layoutCanvas?: boolean;
 } = {}) {
   const { t } = useTranslation();
   useSocketSync();
   const state = useDisplayStore((s) => s.state);
   const elapsedRaw = useLiveTimerSeconds();
   const [camera, setCamera] = useState(() => cameraOverride ?? cameraFromQuery());
+  const [network, setNetwork] = useState(() => (cameraOverride ? false : networkFromQuery()));
   const [streamSettings, setStreamSettings] = useState<LivestreamSettings>(
     settingsOverride ?? DEFAULT_LIVESTREAM_SETTINGS,
   );
@@ -67,6 +84,7 @@ export default function StreamProgramPage({
 
   useEffect(() => {
     setCamera(cameraOverride ?? cameraFromQuery());
+    setNetwork(cameraOverride ? false : networkFromQuery());
   }, [cameraOverride]);
 
   useEffect(() => {
@@ -87,7 +105,10 @@ export default function StreamProgramPage({
     };
   }, [settingsOverride]);
 
-  const captureRef = useRef<ExternalCaptureVideoHandle>(null);
+  // Beide spelers melden op dezelfde manier of ze beeld geven.
+  const captureRef = useRef<{ isPlaying: () => boolean }>(null);
+  /** Er is een bron die eerst beeld moet leveren voor de opname mag starten. */
+  const hasLiveSource = Boolean(camera) || network;
 
   const notifyProgramReady = () => {
     if (embedded) return;
@@ -95,14 +116,14 @@ export default function StreamProgramPage({
   };
 
   useEffect(() => {
-    if (!camera) notifyProgramReady();
-  }, [camera]);
+    if (!hasLiveSource) notifyProgramReady();
+  }, [hasLiveSource]);
 
   useEffect(() => {
     return window.electronAPI?.onLivestreamReadyRequest?.(() => {
-      if (!camera || captureRef.current?.isPlaying()) notifyProgramReady();
+      if (!hasLiveSource || captureRef.current?.isPlaying()) notifyProgramReady();
     });
-  }, [camera]);
+  }, [hasLiveSource]);
 
   useEffect(() => {
     void reloadMatch();
@@ -147,8 +168,8 @@ export default function StreamProgramPage({
     [sponsorSlot.activeScheduledCue?.media, state?.mode, displayMedia],
   );
   const layout = useMemo(
-    () => resolveStreamProgramLayout(streamSettings, match?.status),
-    [streamSettings, match?.status],
+    () => resolveStreamProgramLayout(streamSettings, match?.status, phaseOverride),
+    [streamSettings, match?.status, phaseOverride],
   );
   const showOverlayClip =
     overlayClip != null &&
@@ -183,6 +204,21 @@ export default function StreamProgramPage({
           sourceId={camera}
           className="absolute inset-0 h-full w-full"
           onActive={notifyProgramReady}
+        />
+      ) : network ? (
+        <NetworkCaptureVideo
+          ref={captureRef}
+          className="absolute inset-0 h-full w-full"
+          onActive={notifyProgramReady}
+        />
+      ) : layoutCanvas ? (
+        // Rustige achtergrond: de lagen moeten opvallen, niet het vlak eronder.
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "repeating-conic-gradient(#1c222b 0% 25%, #161b22 0% 50%) 50% / 48px 48px",
+          }}
         />
       ) : (
         <div className="absolute inset-0 grid place-items-center text-white/40 text-2xl">

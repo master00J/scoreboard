@@ -202,6 +202,17 @@ export type RestoreNotice =
   | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
   | { kind: "failed"; error: string };
 
+export type NetworkSourceResetInfo = { mode: "copy" | "h264" };
+
+export type NetworkSourceBridgeStatus = {
+  url: string;
+  running: boolean;
+  receiving: boolean;
+  mode: "copy" | "h264";
+  error: string | null;
+  attempt: number;
+};
+
 export type ElectronBridge = {
   context: DesktopContext;
   /** Desktop-only; the browser demo intentionally has no local music storage. */
@@ -323,4 +334,17 @@ export type ElectronBridge = {
   onLivestreamAudioMeters: (listener: (meters: LivestreamAudioMeterMap) => void) => () => void;
   onLivestreamReadyRequest: (listener: () => void) => () => void;
   reportStreamProgramReady: () => void;
+  /** Stukken fragmented MP4 van de netwerkbron, in de volgorde waarin ffmpeg ze levert. */
+  onNetworkSourceChunk: (listener: (chunk: Uint8Array) => void) => () => void;
+  /** Nieuwe ffmpeg, dus een nieuw init-segment: de speler moet opnieuw beginnen. */
+  onNetworkSourceReset: (listener: (info: NetworkSourceResetInfo) => void) => () => void;
+  onNetworkSourceStatus: (listener: (status: NetworkSourceBridgeStatus) => void) => () => void;
+  /** De speler kan deze codec niet (een H.265-camera): vraag om hercodering naar H.264. */
+  reportNetworkSourceCodecUnsupported: () => void;
+  /**
+   * Vraag ffmpeg opnieuw te starten, zodat er een nieuw init-segment komt. Nodig wanneer de
+   * streampagina is herladen terwijl de bron al liep: dan is het eerste segment al voorbij en kan
+   * de speler niets met de fragmenten die daarna komen.
+   */
+  requestNetworkSourceInit: () => void;
 };
