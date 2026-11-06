@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  sourceShowsStreamLayers,
   DEFAULT_LIVESTREAM_SETTINGS,
   type LivestreamVideoInput,
   buildRtmpDestination,
@@ -561,6 +562,19 @@ describe("audio mixer", () => {
         { id: "a3", device: "Mic", volume: 80, muted: false },
       ]).map((c) => c.id),
     ).toEqual(["a2"]);
+  });
+});
+
+describe("score en sponsors over de bron", () => {
+  it("legt het scorebord over elke bron behalve het stadionscherm zelf", () => {
+    // Een IP-camera is net zo goed een camera: zonder dit waren de instellingen voor score en
+    // sponsors onbereikbaar zodra de bron geen capture-kaart was.
+    expect(sourceShowsStreamLayers("camera")).toBe(true);
+    expect(sourceShowsStreamLayers("network")).toBe(true);
+    expect(sourceShowsStreamLayers("browser")).toBe(true);
+    expect(sourceShowsStreamLayers("media")).toBe(true);
+    // Het stadionscherm bevat het scorebord al; eroverheen zou het dubbel zijn.
+    expect(sourceShowsStreamLayers("display")).toBe(false);
   });
 });
 

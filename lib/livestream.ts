@@ -475,6 +475,20 @@ export function parseAudioFollowAction(value: unknown): LivestreamAudioFollowAct
   return "leave";
 }
 
+/**
+ * Hoort het scorebord over deze bron heen te komen?
+ *
+ * Over alles wat van buiten komt, ja: een camera op een capture-kaart, een IP-camera, een website
+ * of een clip. Alleen niet over het stadionscherm zelf, want daar staat het scorebord al in — dan
+ * zou het dubbel in beeld komen.
+ *
+ * Stond eerder als `source === "camera"` in de studio, waardoor de instellingen voor score en
+ * sponsors onbereikbaar waren zodra je een andere bron koos.
+ */
+export function sourceShowsStreamLayers(source: LivestreamSource): boolean {
+  return source !== "display";
+}
+
 export function parseLivestreamSource(value: unknown): LivestreamSource {
   if (
     value === "display" ||
