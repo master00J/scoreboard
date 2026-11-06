@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { useStreamSponsorPlaylist } from "@/lib/use-stream-sponsor-playlist";
 import type { StreamSponsorSlotView } from "@/lib/use-stream-sponsor-slot";
 import type { Match } from "@/lib/types";
@@ -8,12 +9,23 @@ import { StreamHdMedia } from "@/app/stream/stream-hd-media";
 export function StreamBreakSponsorOverlay({
   slot,
   match,
+  placeholder = false,
 }: {
   slot: StreamSponsorSlotView;
   match: Match | null;
+  /** In de indeling-editor: zonder ingeplande sponsor een gestippeld vlak dat het pauzescherm toont. */
+  placeholder?: boolean;
 }) {
+  const { t } = useTranslation();
   const { slide, next, onVideoEnded } = useStreamSponsorPlaylist(slot, match);
-  if (!slide) return null;
+  if (!slide) {
+    if (!placeholder) return null;
+    return (
+      <div className="pointer-events-none absolute inset-3 z-30 grid place-items-center rounded-md border-2 border-dashed border-amber-300/70 bg-amber-300/10 px-4 text-center text-sm font-semibold text-amber-100">
+        {t("livestream.designerSponsorBreakHere")}
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0 z-30 overflow-hidden bg-black">

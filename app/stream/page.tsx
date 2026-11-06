@@ -258,7 +258,7 @@ export default function StreamProgramPage({
         />
       ) : null}
       {layout.showSponsorBreak && !showOverlayClip && !eventGraphic ? (
-        <StreamBreakSponsorOverlay slot={sponsorSlot} match={match ?? null} />
+        <StreamBreakSponsorOverlay slot={sponsorSlot} match={match ?? null} placeholder={layoutCanvas} />
       ) : null}
       {layout.showSponsorStrip && !showOverlayClip && !eventGraphic ? (
         <StreamSponsorLayer
@@ -269,6 +269,7 @@ export default function StreamProgramPage({
           scorePosition={scoreEdge}
           scoreVisible={scoreVisible}
           stripHeightPx={widgetClearance}
+          placeholder={layoutCanvas}
         />
       ) : null}
       {scoreVisible && match ? (
