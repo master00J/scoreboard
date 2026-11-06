@@ -1699,11 +1699,16 @@
     "layerBrightness": "Luminosité",
     "layerContrast": "Contraste",
     "layerSaturation": "Saturation",
-    "layerColorUnsupported": "Pour l'instant, couleur et opacité ne fonctionnent qu'avec les caméras et les sources réseau.",
+    "layerColorUnsupported": "Couleur et opacité fonctionnent avec les caméras et les sources réseau, et avec les fichiers média comme calque dans une scène à plusieurs sources.",
     "layerReset": "Réinitialiser",
     "layers": "Calques",
     "layerUp": "Avancer",
-    "layerDown": "Reculer"
+    "layerDown": "Reculer",
+    "layerAdd": "+ Ajouter un calque…",
+    "layerRemove": "Supprimer le calque",
+    "layerAddBlocked": "Un site web ou l'écran LED ne peut pas encore être un calque à côté d'autres sources.",
+    "layerAddFull": "Cette scène a le nombre maximal de calques.",
+    "sceneLayerCount": "{{count}} calques"
   },
   "update": {
     "available": "Nouvelle version disponible",

@@ -1699,11 +1699,16 @@
     "layerBrightness": "Helligkeit",
     "layerContrast": "Kontrast",
     "layerSaturation": "Sättigung",
-    "layerColorUnsupported": "Farbe und Deckkraft gehen vorerst nur bei Kameras und Netzwerkquellen.",
+    "layerColorUnsupported": "Farbe und Deckkraft gehen bei Kameras und Netzwerkquellen, und bei Mediendateien als Ebene in einer Szene mit mehreren Quellen.",
     "layerReset": "Zurücksetzen",
     "layers": "Ebenen",
     "layerUp": "Nach vorne",
-    "layerDown": "Nach hinten"
+    "layerDown": "Nach hinten",
+    "layerAdd": "+ Ebene hinzufügen…",
+    "layerRemove": "Ebene entfernen",
+    "layerAddBlocked": "Eine Website oder der LED-Bildschirm kann noch keine Ebene neben anderen Quellen sein.",
+    "layerAddFull": "Diese Szene hat die maximale Anzahl Ebenen.",
+    "sceneLayerCount": "{{count}} Ebenen"
   },
   "update": {
     "available": "Neue Version verfügbar",

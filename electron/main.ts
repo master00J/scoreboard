@@ -676,7 +676,8 @@ async function destroyStreamWindow() {
 async function ensureStreamWindow(req: StreamWindowRequest): Promise<{ win: BrowserWindow; reloaded: boolean }> {
   const cam = req.camera.trim();
   const net = req.network ? "1" : "0";
-  const extra = { camera: cam, network: net, overlay: req.overlay ? "1" : "0" };
+  const scene = req.scene ? "1" : "0";
+  const extra = { camera: cam, network: net, overlay: req.overlay ? "1" : "0", scene };
   const applyFrameRate = (win: BrowserWindow) => {
     try {
       win.webContents.setFrameRate(req.fps);
@@ -698,7 +699,7 @@ async function ensureStreamWindow(req: StreamWindowRequest): Promise<{ win: Brow
     const current = (() => {
       try {
         const url = new URL(streamWindow.webContents.getURL());
-        return `${url.searchParams.get("camera") ?? ""}|${url.searchParams.get("network") ?? "0"}|${url.searchParams.get("overlay") ?? ""}`;
+        return `${url.searchParams.get("camera") ?? ""}|${url.searchParams.get("network") ?? "0"}|${url.searchParams.get("overlay") ?? ""}|${url.searchParams.get("scene") ?? "0"}`;
       } catch {
         return "";
       }
@@ -707,7 +708,7 @@ async function ensureStreamWindow(req: StreamWindowRequest): Promise<{ win: Brow
       streamWindow.getContentSize()[0] !== req.width || streamWindow.getContentSize()[1] !== req.height;
     if (sizeChanged) streamWindow.setContentSize(req.width, req.height);
     applyFrameRate(streamWindow);
-    if (current === `${cam}|${net}|${extra.overlay}`) {
+    if (current === `${cam}|${net}|${extra.overlay}|${scene}`) {
       return { win: streamWindow, reloaded: false };
     }
     await loadView(streamWindow, "stream", extra);

@@ -1699,11 +1699,16 @@
     "layerBrightness": "Brightness",
     "layerContrast": "Contrast",
     "layerSaturation": "Saturation",
-    "layerColorUnsupported": "Colour and opacity only work for cameras and network sources for now.",
+    "layerColorUnsupported": "Colour and opacity work for cameras and network sources, and for media files as a layer in a scene with more sources.",
     "layerReset": "Reset",
     "layers": "Layers",
     "layerUp": "Bring forward",
-    "layerDown": "Send backward"
+    "layerDown": "Send backward",
+    "layerAdd": "+ Add layer…",
+    "layerRemove": "Remove layer",
+    "layerAddBlocked": "A website or the LED screen cannot be a layer next to other sources yet.",
+    "layerAddFull": "This scene has the maximum number of layers.",
+    "sceneLayerCount": "{{count}} layers"
   },
   "update": {
     "available": "New version available",

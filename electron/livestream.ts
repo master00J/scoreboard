@@ -17,6 +17,8 @@ import {
   programSourceKey,
   programSceneChanged,
   pumpProgramLayer,
+  programScene,
+  compositeNetworkUrl,
   videoInputPreviewKey,
   parseDshowAudioDevices,
   parseDshowVideoDevices,
@@ -76,7 +78,7 @@ import {
   transitionMix,
   type StreamTransitionKind,
 } from "../lib/stream-transition";
-import { layerPlacement, type StreamSceneLayer } from "../lib/stream-scenes";
+import { layerPlacement, sceneIsComposite, type StreamSceneLayer } from "../lib/stream-scenes";
 import { naudioHelperCandidates } from "../lib/naudio-helper";
 import { sendZmqReq } from "./zmq-req";
 import { createBrowserAudioTap, type BrowserAudioTap } from "./browser-source-audio";
@@ -85,6 +87,8 @@ export type StreamWindowRequest = {
   camera: string;
   /** Beeld komt van de netwerkbron in plaats van een capture-apparaat. */
   network?: boolean;
+  /** Beeld-in-beeld: de pagina tekent alle lagen van de live scène (`?scene=1`). */
+  scene?: boolean;
   overlay: boolean;
   width: number;
   height: number;
@@ -734,7 +738,11 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     const gen = ++browserPreviewGen;
     const active = resolveActiveVideoInput(settings);
     const preview = resolvePreviewVideoInput(settings);
-    const programOwnsWindow = encoding() && (settings.source === "browser" || settings.source === "media");
+    // Bij beeld-in-beeld is het streamvenster het programma, ook als de onderste laag media is.
+    const programOwnsWindow =
+      encoding() &&
+      !sceneIsComposite(programScene(settings)) &&
+      (settings.source === "browser" || settings.source === "media");
     const target = programOwnsWindow
       ? null
       : encoding()
@@ -796,6 +804,33 @@ export function createLivestreamController(deps: Deps): LivestreamController {
   ): Promise<
     { ok: true; programWindow: BrowserWindow; plans: CapturePlan[] } | { ok: false; error: string }
   > => {
+    const scene = programScene(settings);
+    if (sceneIsComposite(scene)) {
+      // Beeld-in-beeld: het streamvenster tekent alle lagen (camera's, media, één netwerkbron).
+      await deps.closeBrowserWindow();
+      await deps.closeMediaWindow();
+      const networkUrl = compositeNetworkUrl(scene, settings.videoInputs);
+      const ensured = await deps.ensureStreamWindow({
+        camera: "",
+        network: Boolean(networkUrl),
+        scene: true,
+        overlay: settings.overlay,
+        width: outSize.width,
+        height: outSize.height,
+        fps: settings.fps,
+      });
+      if (networkUrl) deps.startNetworkSource?.(networkUrl, settings.fps);
+      else deps.stopNetworkSource?.();
+      programIsReady = false;
+      emitSettings();
+      requestProgramReady();
+      await waitForProgramReady(PROGRAM_READY_TIMEOUT_MS);
+      return {
+        ok: true,
+        programWindow: ensured.win,
+        plans: [programCapturePlan(outSize.width, outSize.height, settings.fps)],
+      };
+    }
     if (settings.source === "camera") {
       deps.stopNetworkSource?.();
       await deps.closeBrowserWindow();

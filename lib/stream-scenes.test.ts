@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  addSceneLayer,
+  canAddSceneLayer,
   createSceneLayer,
+  PIP_RECT,
+  removeSceneLayer,
+  sceneHasInput,
+  sceneIsComposite,
   duplicateScene,
   layerCssFilter,
   layerCssPlacement,
@@ -21,6 +27,7 @@ import {
 } from "./stream-scenes";
 import {
   applySceneSelection,
+  compositeNetworkUrl,
   mergeLivestreamSettings,
   programSourceKey,
   pumpProgramLayer,
@@ -316,5 +323,81 @@ describe("layer values", () => {
     expect(copy.id).not.toBe(scene.id);
     expect(copy.layers[0]!.id).not.toBe(scene.layers[0]!.id);
     expect(copy.layers[0]!.inputId).toBe("v1");
+  });
+});
+
+describe("picture-in-picture scenes", () => {
+  const settings = mergeLivestreamSettings({
+    videoInputs: [
+      { id: "v1", name: "Camera 1", kind: "camera", cameraDevice: "cam-a" },
+      { id: "v2", name: "Camera 2", kind: "camera", cameraDevice: "cam-b" },
+      { id: "v3", name: "IP", kind: "network", networkUrl: "rtsp://10.0.0.5/a" },
+      { id: "v4", name: "IP 2", kind: "network", networkUrl: "rtsp://10.0.0.6/a" },
+      { id: "v5", name: "Site", kind: "browser", browserUrl: "https://example.com" },
+      { id: "v-led", name: "LED", kind: "display" },
+    ],
+    activeVideoInputId: "v1",
+  } as unknown as Partial<LivestreamSettings>);
+  const kindOf = (id: string) => settings.videoInputs.find((input) => input.id === id)?.kind;
+  const cam1 = settings.scenes.find((scene) => scene.id === "s-v1")!;
+
+  it("adds a layer on top as a picture-in-picture box", () => {
+    const { scene, layerId } = addSceneLayer(cam1, "v2");
+    expect(scene.layers.map((layer) => layer.inputId)).toEqual(["v1", "v2"]);
+    expect(scene.layers[1]!.id).toBe(layerId);
+    expect(scene.layers[1]!.rect).toEqual(PIP_RECT);
+    expect(sceneIsComposite(scene)).toBe(true);
+    expect(sceneIsComposite(cam1)).toBe(false);
+  });
+
+  it("only adds sources the stream page can draw, and one network source", () => {
+    const input = (id: string) => settings.videoInputs.find((item) => item.id === id)!;
+    expect(canAddSceneLayer(cam1, input("v2"), kindOf)).toBe(true);
+    expect(canAddSceneLayer(cam1, input("v5"), kindOf)).toBe(false);
+    expect(canAddSceneLayer(cam1, input("v-led"), kindOf)).toBe(false);
+    const withIp = addSceneLayer(cam1, "v3").scene;
+    expect(canAddSceneLayer(withIp, input("v3"), kindOf)).toBe(true);
+    expect(canAddSceneLayer(withIp, input("v4"), kindOf)).toBe(false);
+    const site = settings.scenes.find((scene) => scene.id === "s-v5")!;
+    expect(canAddSceneLayer(site, input("v1"), kindOf)).toBe(false);
+  });
+
+  it("keeps at least one layer", () => {
+    const { scene, layerId } = addSceneLayer(cam1, "v2");
+    expect(removeSceneLayer(scene, layerId).layers.map((layer) => layer.inputId)).toEqual(["v1"]);
+    expect(removeSceneLayer(cam1, cam1.layers[0]!.id)).toBe(cam1);
+  });
+
+  it("reopens the stream only when a source joins or leaves the live scene", () => {
+    const pip = addSceneLayer(cam1, "v2");
+    const live = mergeLivestreamSettings({
+      ...settings,
+      scenes: settings.scenes.map((scene) => (scene.id === cam1.id ? pip.scene : scene)),
+    });
+    expect(live.activeSceneId).toBe(cam1.id);
+    const key = programSourceKey(live);
+    expect(key).toBe("scene|camera:cam-a,camera:cam-b");
+    const moved = mergeLivestreamSettings({
+      ...live,
+      scenes: updateSceneLayer(live.scenes, cam1.id, pip.layerId, { rect: { x: 5, y: 5, w: 20, h: 20 } }),
+    });
+    expect(programSourceKey(moved)).toBe(key);
+    const reordered = mergeLivestreamSettings({
+      ...live,
+      scenes: live.scenes.map((scene) =>
+        scene.id === cam1.id ? { ...scene, layers: moveSceneLayer(scene.layers, scene.layers[0]!.id, 1) } : scene,
+      ),
+    });
+    // De onderste laag is nu camera 2, maar de scène blijft live en hetzelfde geopend.
+    expect(reordered.activeSceneId).toBe(cam1.id);
+    expect(programSourceKey(reordered)).toBe(key);
+    expect(pumpProgramLayer(reordered)).toBeNull();
+  });
+
+  it("finds the network address of a composite scene", () => {
+    const scene = addSceneLayer(cam1, "v3").scene;
+    expect(compositeNetworkUrl(scene, settings.videoInputs)).toBe("rtsp://10.0.0.5/a");
+    expect(compositeNetworkUrl(cam1, settings.videoInputs)).toBe("");
+    expect(sceneHasInput(scene, "v3")).toBe(true);
   });
 });

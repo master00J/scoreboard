@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ExternalCaptureVideo } from "@/components/external-capture-video";
 import { NetworkCaptureVideo } from "@/components/network-capture-video";
 import { CardMode } from "@/app/display/_modes/card";
@@ -21,7 +21,13 @@ import {
   streamWidgetClearancePx,
   widgetScoreEdge,
 } from "@/lib/stream-score-widget";
-import { DEFAULT_LIVESTREAM_SETTINGS, programLayer, type LivestreamSettings } from "@/lib/livestream";
+import {
+  DEFAULT_LIVESTREAM_SETTINGS,
+  programLayer,
+  programScene,
+  type LivestreamSettings,
+} from "@/lib/livestream";
+import { StreamSceneLayers, type SceneLayerHandle } from "@/app/stream/stream-scene-layers";
 import { StreamLayerFrame } from "@/components/stream-layer-frame";
 import {
   matchPlayersById,
@@ -46,6 +52,12 @@ function cameraFromQuery(): string {
   return new URLSearchParams(window.location.search).get("camera") ?? "";
 }
 
+/** Het streamvenster tekent een beeld-in-beeld-scène (alle lagen) in plaats van één bron. */
+function sceneFromQuery(): boolean {
+  if (typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("scene") === "1";
+}
+
 /** Beeld komt van de netwerkbron (RTSP/UDP/SRT/RTMP) in plaats van een capture-apparaat. */
 function networkFromQuery(): boolean {
   if (typeof window === "undefined") return false;
@@ -59,6 +71,8 @@ export default function StreamProgramPage({
   onScoreWidgetChange,
   phaseOverride,
   layoutCanvas = false,
+  sceneMode,
+  liveCameras = true,
 }: {
   cameraOverride?: string;
   embedded?: boolean;
@@ -71,6 +85,13 @@ export default function StreamProgramPage({
    * maar een rustige achtergrond waarop de lagen te zien en te verslepen zijn.
    */
   layoutCanvas?: boolean;
+  /**
+   * Teken alle lagen van de live scène (beeld-in-beeld) in plaats van één camera. In het
+   * streamvenster komt dit uit `?scene=1`.
+   */
+  sceneMode?: boolean;
+  /** Uit = camera's in de scène als vlak met hun naam (de stream heeft ze al open). */
+  liveCameras?: boolean;
 } = {}) {
   const { t } = useTranslation();
   useSocketSync();
@@ -116,8 +137,26 @@ export default function StreamProgramPage({
 
   // Beide spelers melden op dezelfde manier of ze beeld geven.
   const captureRef = useRef<{ isPlaying: () => boolean }>(null);
+  const composite = sceneMode ?? sceneFromQuery();
+  const scene = useMemo(() => (composite ? programScene(streamSettings) : null), [composite, streamSettings]);
+  /** Bij beeld-in-beeld: één speler per camera- of netwerklaag. */
+  const layerHandles = useRef(new Map<string, { isPlaying: () => boolean }>());
+  const registerLayerHandle = useCallback((layerId: string, handle: SceneLayerHandle) => {
+    if (handle) layerHandles.current.set(layerId, handle);
+    else layerHandles.current.delete(layerId);
+  }, []);
+  const sceneHasLiveSource = Boolean(
+    scene?.layers.some((layer) => {
+      const kind = streamSettings.videoInputs.find((input) => input.id === layer.inputId)?.kind;
+      return kind === "camera" || kind === "network";
+    }),
+  );
   /** Er is een bron die eerst beeld moet leveren voor de opname mag starten. */
-  const hasLiveSource = Boolean(camera) || network;
+  const hasLiveSource = composite ? sceneHasLiveSource : Boolean(camera) || network;
+  const sourcePlaying = () =>
+    composite
+      ? [...layerHandles.current.values()].some((handle) => handle.isPlaying())
+      : Boolean(captureRef.current?.isPlaying());
 
   const notifyProgramReady = () => {
     if (embedded) return;
@@ -130,9 +169,10 @@ export default function StreamProgramPage({
 
   useEffect(() => {
     return window.electronAPI?.onLivestreamReadyRequest?.(() => {
-      if (!hasLiveSource || captureRef.current?.isPlaying()) notifyProgramReady();
+      if (!hasLiveSource || sourcePlaying()) notifyProgramReady();
     });
-  }, [hasLiveSource]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasLiveSource, composite]);
 
   useEffect(() => {
     void reloadMatch();
@@ -230,7 +270,18 @@ export default function StreamProgramPage({
         className="relative aspect-video h-full max-h-full w-full max-w-[177.78vh] overflow-hidden bg-black"
         data-stream-canvas
       >
-      {camera ? (
+      {composite ? (
+        scene ? (
+          <StreamSceneLayers
+            scene={scene}
+            inputs={streamSettings.videoInputs}
+            liveCameras={liveCameras}
+            liveNetwork={!embedded}
+            registerHandle={registerLayerHandle}
+            onActive={notifyProgramReady}
+          />
+        ) : null
+      ) : camera ? (
         <StreamLayerFrame layer={sourceLayer}>
           {(className) => (
             <ExternalCaptureVideo

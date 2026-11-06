@@ -1699,11 +1699,16 @@
     "layerBrightness": "Helderheid",
     "layerContrast": "Contrast",
     "layerSaturation": "Verzadiging",
-    "layerColorUnsupported": "Kleur en dekking werken voorlopig alleen bij camera's en netwerkbronnen.",
+    "layerColorUnsupported": "Kleur en dekking werken bij camera's en netwerkbronnen, en bij mediabestanden als laag in een scène met meer bronnen.",
     "layerReset": "Reset",
     "layers": "Lagen",
     "layerUp": "Naar voren",
-    "layerDown": "Naar achteren"
+    "layerDown": "Naar achteren",
+    "layerAdd": "+ Laag toevoegen…",
+    "layerRemove": "Laag verwijderen",
+    "layerAddBlocked": "Een website of het LED-scherm kan nog geen laag naast andere bronnen zijn.",
+    "layerAddFull": "Deze scène heeft het maximum aan lagen.",
+    "sceneLayerCount": "{{count}} lagen"
   },
   "update": {
     "available": "Nieuwe versie beschikbaar",

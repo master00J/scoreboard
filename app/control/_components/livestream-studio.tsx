@@ -101,12 +101,19 @@ import { syncLegacyFromManualLayout } from "@/lib/stream-layer-layout";
 import { STREAM_TRANSITIONS, transitionDurationOptions } from "@/lib/stream-transition";
 import { sendCommand } from "@/lib/use-socket";
 import {
+  addSceneLayer,
+  canAddSceneLayer,
   duplicateScene,
   layerColorSupported,
+  layerKindInPage,
   moveSceneLayer,
+  removeSceneLayer,
   resetSceneLayer,
+  sceneHasInput,
   sceneInputId,
+  sceneIsComposite,
   sceneMainLayer,
+  STREAM_SCENE_LAYER_LIMIT,
   STREAM_SCENE_LIMIT,
   updateSceneLayer,
   type StreamScene,
@@ -947,8 +954,54 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         layer={editedLayer}
         live={role === "program" && status.running}
         onChange={(patch, commit) => changeLayer(scene.id, editedLayer.id, patch, commit)}
+        others={scene.layers.filter((layer) => layer.id !== editedLayer.id && layer.visible)}
+        onSelect={(layerId) => setEditing({ role, layerId })}
       />
     );
+  };
+
+  /** Bron als beeld-in-beeld bovenop een scène; daarna bewerk je meteen die nieuwe laag. */
+  const addLayer = (scene: StreamScene, inputId: string, role: "program" | "preview") => {
+    const added = addSceneLayer(scene, inputId);
+    void persist({ scenes: settings.scenes.map((item) => (item.id === scene.id ? added.scene : item)) });
+    setEditing({ role, layerId: added.layerId });
+  };
+
+  /**
+   * Laag weg. Was het de bron die de scène live hield (de hoofdbron), dan gaat de scène met een
+   * andere hoofdbron verder: anders zou de stream naar een andere scène springen.
+   */
+  const removeLayer = (scene: StreamScene, layerId: string, role: "program" | "preview") => {
+    const next = removeSceneLayer(scene, layerId);
+    if (next === scene) return;
+    const scenes = settings.scenes.map((item) => (item.id === scene.id ? next : item));
+    const base = { ...settings, scenes };
+    const partial: Partial<LivestreamSettings> = { scenes };
+    if (scene.id === settings.activeSceneId && !sceneHasInput(next, settings.activeVideoInputId)) {
+      Object.assign(partial, applySceneSelection(base, scene.id));
+    }
+    if (scene.id === settings.previewSceneId && !sceneHasInput(next, settings.previewVideoInputId)) {
+      Object.assign(partial, applyScenePreview(base, scene.id));
+    }
+    void persist(partial);
+    if (editing?.layerId === layerId) setEditing({ role, layerId: null });
+  };
+
+  /** Welke bronnen er nog bij kunnen in deze scène, en anders waarom niet. */
+  const layerOptions = (scene: StreamScene) => {
+    const kindOf = (id: string) => settings.videoInputs.find((input) => input.id === id)?.kind;
+    const sources = settings.videoInputs
+      .filter((input) => videoInputReady(input) && canAddSceneLayer(scene, input, kindOf))
+      .map((input) => ({ id: input.id, label: inputLabel(input) }));
+    const blocked = !scene.layers.every((layer) => layerKindInPage(kindOf(layer.inputId) ?? ""));
+    return {
+      sources,
+      hint: blocked
+        ? t("livestream.layerAddBlocked")
+        : scene.layers.length >= STREAM_SCENE_LAYER_LIMIT
+          ? t("livestream.layerAddFull")
+          : "",
+    };
   };
 
   /** Knop op een monitor om het kader van die scène te bewerken. */
@@ -1000,6 +1053,37 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     }
     if (role === "preview" && scene.id === settings.activeSceneId) {
       return <StudioMonitorEmpty>{t("livestream.monitorSame")}</StudioMonitorEmpty>;
+    }
+    if (sceneIsComposite(scene)) {
+      // Beeld-in-beeld live: het beeld van het streamvenster, met alle lagen, score en sponsors.
+      if (role === "program" && status.running && livePreview) {
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={livePreview} alt="" className="absolute inset-0 h-full w-full object-contain" />
+        );
+      }
+      // Anders tekent de studio de scène zelf. Terwijl de stream loopt heeft die de camera's open:
+      // dan staan ze hier als vlak met hun naam.
+      return (
+        <StreamProgramPage
+          embedded
+          sceneMode
+          liveCameras={!status.running && !holdPreview}
+          settingsOverride={{
+            ...settings,
+            ...applySceneSelection(settings, scene.id),
+          }}
+          onScoreWidgetChange={
+            role === "program"
+              ? (partial, commit) => {
+                  const scoreWidget = mergeStreamScoreWidget({ ...settings.scoreWidget, ...partial });
+                  setSettings((s) => ({ ...s, scoreWidget }));
+                  if (commit) void persist({ scoreWidget });
+                }
+              : undefined
+          }
+        />
+      );
     }
     const isProgram = input.id === settings.activeVideoInputId;
     const jpegForInput =
@@ -1064,6 +1148,8 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     return <StudioMonitorEmpty>{t("livestream.previewEmpty")}</StudioMonitorEmpty>;
   };
 
+  const previewComposite = sceneIsComposite(previewScene);
+  const activeComposite = sceneIsComposite(activeScene);
   useEffect(() => {
     if (!settings.studioPreview || !active) return;
     const canvas = document.createElement("canvas");
@@ -1083,13 +1169,14 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       const jpeg = canvas.toDataURL("image/jpeg", 0.62);
       setSourceThumbs((prev) => (prev[id] === jpeg ? prev : { ...prev, [id]: jpeg }));
     };
+    // Bij beeld-in-beeld staan er meer video's op de monitor: welke van wie is dan niet zeker.
     const tick = () => {
-      if (previewVideo) grab(previewVideo.id, previewBoxRef.current);
-      grab(activeVideo.id, programBoxRef.current);
+      if (previewVideo && !previewComposite) grab(previewVideo.id, previewBoxRef.current);
+      if (!activeComposite) grab(activeVideo.id, programBoxRef.current);
     };
     const timer = window.setInterval(tick, 140);
     return () => window.clearInterval(timer);
-  }, [settings.studioPreview, active, previewVideo?.id, activeVideo.id]);
+  }, [settings.studioPreview, active, previewVideo?.id, activeVideo.id, previewComposite, activeComposite]);
 
   /** Klein beeld op een scèneknop: het bronbeeld in het kader van die scène. */
   const renderTilePicture = (scene: StreamScene, input: LivestreamVideoInput) => {
@@ -1539,7 +1626,11 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                 const input = settings.videoInputs.find((item) => item.id === layer.inputId);
                 return input ? inputLabel(input) : "—";
               }}
-              colorSupported={layerColorSupported(editedInput?.kind ?? "")}
+              colorSupported={layerColorSupported(editedInput?.kind ?? "", sceneIsComposite(editedScene))}
+              addableSources={layerOptions(editedScene).sources}
+              addHint={layerOptions(editedScene).hint}
+              onAddLayer={(inputId) => addLayer(editedScene, inputId, editing.role)}
+              onRemoveLayer={(layerId) => removeLayer(editedScene, layerId, editing.role)}
               live={editing.role === "program" && status.running}
               t={t}
               onLayerChange={(patch, commit) => changeLayer(editedScene.id, editedLayer.id, patch, commit)}
@@ -1679,6 +1770,11 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 truncate bg-black/70 px-1 py-0.5 text-[10px] font-medium text-white">
                           <span className="mr-0.5 text-white/40">{index + 1}</span>
                           {labelOfScene(scene)}
+                          {sceneIsComposite(scene) ? (
+                            <span className="ml-1 rounded bg-white/15 px-1 text-[9px] text-white/80">
+                              {t("livestream.sceneLayerCount", { count: scene.layers.length })}
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                       {ready && settings.scenes.length < STREAM_SCENE_LIMIT ? (
