@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_STREAM_BREAK_LAYOUT, DEFAULT_STREAM_MANUAL_LAYOUT, DEFAULT_STREAM_PLAY_LAYOUT } from "./livestream";
-import { resolveStreamProgramLayout, streamProgramPhase, summarizeStreamLayout } from "./stream-program-layout";
+import {
+  autoPhaseLayout,
+  resolveStreamProgramLayout,
+  streamProgramPhase,
+  summarizeStreamLayout,
+} from "./stream-program-layout";
 
 const auto = {
   layoutMode: "auto" as const,
@@ -100,5 +105,35 @@ describe("summarizeStreamLayout", () => {
       score: true,
       sponsors: "off",
     });
+  });
+});
+
+describe("fase afdwingen voor de indeling-editor", () => {
+  it("toont de pauze-indeling terwijl er gespeeld wordt, en omgekeerd", () => {
+    // Zonder dit kun je de rustindeling pas instellen als het rust is.
+    const playing = resolveStreamProgramLayout(manualUnified, "FIRST_HALF");
+    const breakWhilePlaying = resolveStreamProgramLayout(manualUnified, "FIRST_HALF", "break");
+    expect(playing.phase).toBe("play");
+    expect(breakWhilePlaying.phase).toBe("break");
+    expect(resolveStreamProgramLayout(manualUnified, "HALFTIME", "play").phase).toBe("play");
+  });
+});
+
+describe("automatisch als startpunt voor zelf instellen", () => {
+  it("geeft per fase precies wat automatisch zou tonen", () => {
+    // De indeling-editor begint hiermee bij de overstap naar handmatig: wie één vinkje omzet,
+    // hoort de rest niet te zien veranderen.
+    for (const phase of ["play", "break"] as const) {
+      const manualFromAuto = {
+        ...auto,
+        layoutMode: "manual" as const,
+        manualPhaseSplit: true,
+        manualPlayLayout: autoPhaseLayout(auto, "play"),
+        manualBreakLayout: autoPhaseLayout(auto, "break"),
+      };
+      expect(resolveStreamProgramLayout(manualFromAuto, undefined, phase)).toEqual(
+        resolveStreamProgramLayout(auto, undefined, phase),
+      );
+    }
   });
 });

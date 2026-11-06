@@ -29,7 +29,7 @@ import {
   streamShowsEventGraphic,
 } from "@/lib/stream-match-overlay";
 import { resolveStreamOverlayClip, streamOverlayClipAllowed } from "@/lib/stream-program-clip";
-import { resolveStreamProgramLayout } from "@/lib/stream-program-layout";
+import { resolveStreamProgramLayout, type StreamProgramPhase } from "@/lib/stream-program-layout";
 import type { Match, MediaItem } from "@/lib/types";
 
 function cameraFromQuery(): string {
@@ -48,11 +48,20 @@ export default function StreamProgramPage({
   embedded = false,
   settingsOverride,
   onScoreWidgetChange,
+  phaseOverride,
+  layoutCanvas = false,
 }: {
   cameraOverride?: string;
   embedded?: boolean;
   settingsOverride?: LivestreamSettings;
   onScoreWidgetChange?: (partial: Partial<LivestreamSettings["scoreWidget"]>, commit: boolean) => void;
+  /** Toon deze fase in plaats van die van de lopende wedstrijd (voor de indeling-editor). */
+  phaseOverride?: StreamProgramPhase;
+  /**
+   * Gebruikt als tekenvlak om de indeling in te stellen: geen camerabeeld en geen "Geen camera",
+   * maar een rustige achtergrond waarop de lagen te zien en te verslepen zijn.
+   */
+  layoutCanvas?: boolean;
 } = {}) {
   const { t } = useTranslation();
   useSocketSync();
@@ -159,8 +168,8 @@ export default function StreamProgramPage({
     [sponsorSlot.activeScheduledCue?.media, state?.mode, displayMedia],
   );
   const layout = useMemo(
-    () => resolveStreamProgramLayout(streamSettings, match?.status),
-    [streamSettings, match?.status],
+    () => resolveStreamProgramLayout(streamSettings, match?.status, phaseOverride),
+    [streamSettings, match?.status, phaseOverride],
   );
   const showOverlayClip =
     overlayClip != null &&
@@ -201,6 +210,15 @@ export default function StreamProgramPage({
           ref={captureRef}
           className="absolute inset-0 h-full w-full"
           onActive={notifyProgramReady}
+        />
+      ) : layoutCanvas ? (
+        // Rustige achtergrond: de lagen moeten opvallen, niet het vlak eronder.
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "repeating-conic-gradient(#1c222b 0% 25%, #161b22 0% 50%) 50% / 48px 48px",
+          }}
         />
       ) : (
         <div className="absolute inset-0 grid place-items-center text-white/40 text-2xl">

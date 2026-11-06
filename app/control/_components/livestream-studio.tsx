@@ -75,6 +75,8 @@ import {
 } from "@/app/control/_components/livestream-ui";
 import { LivestreamLayoutEditor } from "@/app/control/_components/livestream-layout-editor";
 import { StreamScoreWidgetEditor } from "@/app/control/_components/stream-score-widget-editor";
+import { StreamLayoutDesigner } from "@/app/control/_components/stream-layout-designer";
+import { autoPhaseLayout, type StreamProgramPhase } from "@/lib/stream-program-layout";
 import { LivestreamAudioMixer } from "@/app/control/_components/livestream-audio-mixer";
 import { syncLegacyFromManualLayout } from "@/lib/stream-layer-layout";
 import { STREAM_TRANSITIONS, transitionDurationOptions } from "@/lib/stream-transition";
@@ -312,6 +314,8 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   /** Live = wat je tijdens de wedstrijd bedient; Setup = wat je één keer instelt. */
   const [studioTab, setStudioTab] = useState<"live" | "setup">("live");
   const [networkStatus, setNetworkStatus] = useState<NetworkSourceBridgeStatus | null>(null);
+  /** Welke fase de indeling-editor toont; losgekoppeld van de lopende wedstrijd. */
+  const [designerPhase, setDesignerPhase] = useState<StreamProgramPhase>("play");
   const [holdPreview, setHoldPreview] = useState(false);
   const [livePreview, setLivePreview] = useState<string | null>(null);
   const [livePreviewInputId, setLivePreviewInputId] = useState<string | null>(null);
@@ -463,6 +467,34 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     setSettings(next);
     if (!window.electronAPI?.saveLivestreamSettings) return;
     setSettings(await window.electronAPI.saveLivestreamSettings(partial));
+  };
+
+  /**
+   * Een wijziging uit de indeling-editor wegschrijven.
+   *
+   * Staat de indeling nog op automatisch, dan gebeurt het overschakelen én de wijziging in één
+   * schrijfactie. Twee keer achter elkaar `persist` aanroepen kan niet: beide rekenen vanaf
+   * dezelfde `settings` uit de closure, dus de tweede wist de eerste.
+   *
+   * De handmatige indeling begint met precies wat automatisch nu zou tonen, zodat één vinkje
+   * omzetten de rest van het beeld niet verandert.
+   */
+  const applyDesignerLayout = async (
+    phase: StreamProgramPhase,
+    partial: Partial<StreamLayerLayout>,
+  ) => {
+    if (settings.layoutMode === "manual") {
+      await persistLayout(settings.manualPhaseSplit ? phase : "unified", partial);
+      return;
+    }
+    const play = autoPhaseLayout(settings, "play");
+    const brk = autoPhaseLayout(settings, "break");
+    await persist({
+      layoutMode: "manual",
+      manualPhaseSplit: true,
+      manualPlayLayout: phase === "play" ? { ...play, ...partial } : play,
+      manualBreakLayout: phase === "break" ? { ...brk, ...partial } : brk,
+    });
   };
 
   const persistLayout = async (
@@ -2016,110 +2048,124 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               settings.layoutMode === "auto" ? t("livestream.layoutAuto") : t("livestream.layoutManual")
             }
           >
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className={`rounded-lg border px-3 py-2 text-left text-sm ${
-                  settings.layoutMode === "auto" ? "border-primary bg-primary/10 font-semibold" : "border-border"
-                }`}
-                onClick={() => void persist({ layoutMode: "auto" })}
-              >
-                {t("livestream.layoutAuto")}
-                <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
-                  {t("livestream.layoutAutoShort")}
-                </span>
-              </button>
-              <button
-                type="button"
-                className={`rounded-lg border px-3 py-2 text-left text-sm ${
-                  settings.layoutMode === "manual" ? "border-primary bg-primary/10 font-semibold" : "border-border"
-                }`}
-                onClick={() => void persist({ layoutMode: "manual" })}
-              >
-                {t("livestream.layoutManual")}
-                <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
-                  {t("livestream.layoutManualShort")}
-                </span>
-              </button>
-            </div>
-            {settings.layoutMode === "auto" ? (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={settings.sponsors}
-                  onChange={(e) => void persist({ sponsors: e.target.checked })}
-                />
-                {t("livestream.sponsorsDuringBreakAuto")}
-              </label>
-            ) : (
-              <>
+            <StreamLayoutDesigner
+              settings={settings}
+              phase={designerPhase}
+              onPhaseChange={setDesignerPhase}
+              onLayoutChange={(partial) => void applyDesignerLayout(designerPhase, partial)}
+              onScoreWidgetChange={(partial, commit) => {
+                const scoreWidget = mergeStreamScoreWidget({ ...settings.scoreWidget, ...partial });
+                setSettings((s) => ({ ...s, scoreWidget }));
+                if (commit) void persist({ scoreWidget });
+              }}
+              t={t}
+            />
+            <StudioDisclosure title={t("livestream.designerMore")}>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                    settings.layoutMode === "auto" ? "border-primary bg-primary/10 font-semibold" : "border-border"
+                  }`}
+                  onClick={() => void persist({ layoutMode: "auto" })}
+                >
+                  {t("livestream.layoutAuto")}
+                  <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                    {t("livestream.layoutAutoShort")}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`rounded-lg border px-3 py-2 text-left text-sm ${
+                    settings.layoutMode === "manual" ? "border-primary bg-primary/10 font-semibold" : "border-border"
+                  }`}
+                  onClick={() => void persist({ layoutMode: "manual" })}
+                >
+                  {t("livestream.layoutManual")}
+                  <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                    {t("livestream.layoutManualShort")}
+                  </span>
+                </button>
+              </div>
+              {settings.layoutMode === "auto" ? (
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    checked={settings.manualPhaseSplit}
-                    onChange={(e) => void persist({ manualPhaseSplit: e.target.checked })}
+                    checked={settings.sponsors}
+                    onChange={(e) => void persist({ sponsors: e.target.checked })}
                   />
-                  {t("livestream.manualPhaseSplit")}
+                  {t("livestream.sponsorsDuringBreakAuto")}
                 </label>
-                {!settings.manualPhaseSplit ? (
-                  <LivestreamLayoutEditor
-                    idPrefix="ls-unified"
-                    layout={settings.manualLayout}
-                    onChange={(partial) => void persistLayout("unified", partial)}
-                    t={t}
-                  />
-                ) : (
-                  <>
-                    <div className="grid grid-cols-2 gap-1 rounded-lg bg-secondary/40 p-1">
-                      <button
-                        type="button"
-                        className={`rounded-md px-2 py-1.5 text-xs ${
-                          editPhase === "play" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"
-                        }`}
-                        onClick={() => setEditPhase("play")}
-                      >
-                        {t("livestream.phasePlay")}
-                        {programPhase === "play" ? ` · ${t("livestream.previewLayoutActive")}` : ""}
-                      </button>
-                      <button
-                        type="button"
-                        className={`rounded-md px-2 py-1.5 text-xs ${
-                          editPhase === "break" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"
-                        }`}
-                        onClick={() => setEditPhase("break")}
-                      >
-                        {t("livestream.phaseBreak")}
-                        {programPhase === "break" ? ` · ${t("livestream.previewLayoutActive")}` : ""}
-                      </button>
-                    </div>
-                    {editPhase === "play" ? (
-                      <LivestreamLayoutEditor
-                        idPrefix="ls-play"
-                        layout={settings.manualPlayLayout}
-                        onChange={(partial) => void persistLayout("play", partial)}
-                        t={t}
-                      />
-                    ) : (
-                      <LivestreamLayoutEditor
-                        idPrefix="ls-break"
-                        layout={settings.manualBreakLayout}
-                        onChange={(partial) => void persistLayout("break", partial)}
-                        t={t}
-                      />
-                    )}
-                  </>
-                )}
-              </>
-            )}
-            <StreamScoreWidgetEditor
-              widget={settings.scoreWidget}
-              designs={settings.scoreWidgetDesigns}
-              onChange={(partial) =>
-                void persist({ scoreWidget: { ...settings.scoreWidget, ...partial } })
-              }
-              onDesignsChange={(scoreWidgetDesigns) => void persist({ scoreWidgetDesigns })}
-              t={t}
-            />
+              ) : (
+                <>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={settings.manualPhaseSplit}
+                      onChange={(e) => void persist({ manualPhaseSplit: e.target.checked })}
+                    />
+                    {t("livestream.manualPhaseSplit")}
+                  </label>
+                  {!settings.manualPhaseSplit ? (
+                    <LivestreamLayoutEditor
+                      idPrefix="ls-unified"
+                      layout={settings.manualLayout}
+                      onChange={(partial) => void persistLayout("unified", partial)}
+                      t={t}
+                    />
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-2 gap-1 rounded-lg bg-secondary/40 p-1">
+                        <button
+                          type="button"
+                          className={`rounded-md px-2 py-1.5 text-xs ${
+                            editPhase === "play" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"
+                          }`}
+                          onClick={() => setEditPhase("play")}
+                        >
+                          {t("livestream.phasePlay")}
+                          {programPhase === "play" ? ` · ${t("livestream.previewLayoutActive")}` : ""}
+                        </button>
+                        <button
+                          type="button"
+                          className={`rounded-md px-2 py-1.5 text-xs ${
+                            editPhase === "break" ? "bg-background font-semibold shadow-sm" : "text-muted-foreground"
+                          }`}
+                          onClick={() => setEditPhase("break")}
+                        >
+                          {t("livestream.phaseBreak")}
+                          {programPhase === "break" ? ` · ${t("livestream.previewLayoutActive")}` : ""}
+                        </button>
+                      </div>
+                      {editPhase === "play" ? (
+                        <LivestreamLayoutEditor
+                          idPrefix="ls-play"
+                          layout={settings.manualPlayLayout}
+                          onChange={(partial) => void persistLayout("play", partial)}
+                          t={t}
+                        />
+                      ) : (
+                        <LivestreamLayoutEditor
+                          idPrefix="ls-break"
+                          layout={settings.manualBreakLayout}
+                          onChange={(partial) => void persistLayout("break", partial)}
+                          t={t}
+                        />
+                      )}
+                    </>
+                  )}
+                </>
+              )}
+              <StreamScoreWidgetEditor
+                widget={settings.scoreWidget}
+                designs={settings.scoreWidgetDesigns}
+                onChange={(partial) =>
+                  void persist({ scoreWidget: { ...settings.scoreWidget, ...partial } })
+                }
+                onDesignsChange={(scoreWidgetDesigns) => void persist({ scoreWidgetDesigns })}
+                t={t}
+              />
+            </StudioDisclosure>
           </StudioSection>
         )}
 
