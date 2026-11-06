@@ -1268,7 +1268,21 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center gap-2">
             <div
               ref={previewBoxRef}
-              className="aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-6rem)/2)]"
+              className={`aspect-video h-full min-h-0 w-auto min-w-0 max-w-[calc((100%-6rem)/2)] ${
+                previewVideo && previewVideo.id !== settings.activeVideoInputId ? "cursor-pointer" : ""
+              }`}
+              title={
+                previewVideo && previewVideo.id !== settings.activeVideoInputId
+                  ? t("livestream.monitorNextDoubleClick", { transition: t(`livestream.transition_${settings.transition}`) })
+                  : undefined
+              }
+              // Dubbelklik op VOLGENDE zet die bron live, net als de overgangsknop. Niet als je in het
+              // beeld de score-widget versleept of vergroot: dat is instellen, geen wissel.
+              onDoubleClick={(event) => {
+                if ((event.target as HTMLElement).closest("[data-stream-overlay-transform]")) return;
+                if (busy || !previewVideo || previewVideo.id === settings.activeVideoInputId) return;
+                takeInput(previewVideo);
+              }}
             >
               <StudioMonitor
                 label={t("livestream.monitorNext")}

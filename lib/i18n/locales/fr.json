@@ -1608,6 +1608,7 @@
     "livePanelTransition": "Transition : {{kind}} · {{ms}} ms",
     "livePanelTransitionCut": "Transition : Cut",
     "livePanelOpenStudio": "Ouvrir le studio de diffusion",
+    "monitorNextDoubleClick": "Double-cliquez pour mettre cette source à l'antenne ({{transition}})",
     "autoSetupTitle": "Configuration automatique",
     "autoSetupPlatforms": "Plateforme : {{platforms}}",
     "autoSetupResult": "Recommandé : {{resolution}} · {{fps}} fps · {{bitrate}} kbps",

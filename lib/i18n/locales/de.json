@@ -1608,6 +1608,7 @@
     "livePanelTransition": "Übergang: {{kind}} · {{ms}} ms",
     "livePanelTransitionCut": "Übergang: Cut",
     "livePanelOpenStudio": "Livestream-Studio öffnen",
+    "monitorNextDoubleClick": "Doppelklicken, um diese Quelle live zu schalten ({{transition}})",
     "autoSetupTitle": "Automatisch einrichten",
     "autoSetupPlatforms": "Plattform: {{platforms}}",
     "autoSetupResult": "Empfohlen: {{resolution}} · {{fps}} fps · {{bitrate}} kbps",
