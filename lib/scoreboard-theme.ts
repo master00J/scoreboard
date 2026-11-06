@@ -7,6 +7,8 @@ import {
   normalizeBox,
   normalizeElements,
   slotsFromElements,
+  type ElementSurface,
+  type LayoutElement,
   type LayoutElements,
   type LayoutRule,
 } from "./scoreboard-elements";
@@ -92,6 +94,44 @@ export const DEFAULT_FULL_SLOTS: FullScoreboardSlots = {
   away: { x: 69, y: 14, w: 26, h: 44 },
   awayScore: { x: 69, y: 60, w: 26, h: 16 },
 };
+
+/**
+ * Livestream tijdens het spel: een scorebalk linksboven zoals op tv, de sponsorplaat rechtsboven.
+ * Het canvas is altijd 1920×1080, dus een vak met w = h is 16:9.
+ */
+export const DEFAULT_STREAM_SLOTS: ScoreboardSlots = {
+  home: { x: 2, y: 4, w: 4.5, h: 8 },
+  homeScore: { x: 6.8, y: 4, w: 5, h: 8 },
+  clock: { x: 12, y: 4, w: 9, h: 8 },
+  awayScore: { x: 21.2, y: 4, w: 5, h: 8 },
+  away: { x: 26.5, y: 4, w: 4.5, h: 8 },
+  shotClock: { x: 31.3, y: 4, w: 5, h: 8 },
+  sponsor: { x: 78, y: 4, w: 20, h: 20 },
+};
+
+/** Livestream in de pauze: stand groot in beeld, sponsorplaat eronder. */
+export const DEFAULT_STREAM_BREAK_SLOTS: ScoreboardSlots = {
+  home: { x: 12, y: 18, w: 18, h: 32 },
+  homeScore: { x: 12, y: 52, w: 18, h: 16 },
+  clock: { x: 38, y: 26, w: 24, h: 18 },
+  shotClock: { x: 42, y: 46, w: 16, h: 8 },
+  away: { x: 70, y: 18, w: 18, h: 32 },
+  awayScore: { x: 70, y: 52, w: 18, h: 16 },
+  sponsor: { x: 36, y: 58, w: 28, h: 28 },
+};
+
+/** Donkere vlakken achter score en klok: op camerabeeld is witte tekst anders niet te lezen. */
+const STREAM_PLATE = "rgba(8,12,20,0.72)";
+
+function defaultStreamElements(slots: ScoreboardSlots): LayoutElement[] {
+  return elementsFromSlots(slots).map((element) =>
+    element.type === "media" ? element : { ...element, style: { background: STREAM_PLATE } },
+  );
+}
+
+export function defaultStreamSurfaceElements(surface: "stream" | "streamBreak"): LayoutElement[] {
+  return defaultStreamElements(surface === "stream" ? DEFAULT_STREAM_SLOTS : DEFAULT_STREAM_BREAK_SLOTS);
+}
 
 export const SLOT_PRESETS: { id: string; slots: ScoreboardSlots }[] = [
   { id: "overlay", slots: DEFAULT_SLOTS },
@@ -334,6 +374,8 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
   elements: {
     sponsor: elementsFromSlots(normalizeSlots(DEFAULT_SLOTS)),
     full: elementsFromFullSlots(DEFAULT_FULL_SLOTS),
+    stream: defaultStreamElements(DEFAULT_STREAM_SLOTS),
+    streamBreak: defaultStreamElements(DEFAULT_STREAM_BREAK_SLOTS),
   },
   stripHeightPx: 180,
   stripLogoPx: 120,
@@ -634,9 +676,13 @@ export function themeForFreeformEdit(theme: ResolvedScoreboardTheme): ResolvedSc
  */
 export function withSurfaceElements(
   theme: ResolvedScoreboardTheme,
-  surface: "sponsor" | "full",
+  surface: ElementSurface,
   list: LayoutElements["sponsor"],
 ): ResolvedScoreboardTheme {
+  // De livestream-overlay raakt het stadionscherm niet: geen vakken, geen indelingsmodus.
+  if (surface === "stream" || surface === "streamBreak") {
+    return { ...theme, elements: { ...theme.elements, [surface]: list } };
+  }
   if (surface === "full") {
     return {
       ...theme,
@@ -714,6 +760,13 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
   const elements: LayoutElements = {
     sponsor: normalizeElements(patch.elements?.sponsor, "sponsor", slots),
     full: normalizeElements(patch.elements?.full, "full", fullSlots),
+    // Nog niet ingedeeld: de standaard livestream-overlay, met leesbare vlakken achter de score.
+    stream: Array.isArray(patch.elements?.stream)
+      ? normalizeElements(patch.elements?.stream, "stream", DEFAULT_STREAM_SLOTS)
+      : defaultStreamElements(DEFAULT_STREAM_SLOTS),
+    streamBreak: Array.isArray(patch.elements?.streamBreak)
+      ? normalizeElements(patch.elements?.streamBreak, "streamBreak", DEFAULT_STREAM_BREAK_SLOTS)
+      : defaultStreamElements(DEFAULT_STREAM_BREAK_SLOTS),
   };
   const bar = clamp(Math.round(patch.leftBarWidthPx ?? DEFAULT_SCOREBOARD_THEME.leftBarWidthPx), 180, 520);
   const bottom = patch.bottomBarHeightPx != null

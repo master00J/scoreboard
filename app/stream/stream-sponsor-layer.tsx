@@ -8,6 +8,36 @@ import type { StreamSponsorSlotView } from "@/lib/use-stream-sponsor-slot";
 import type { Match } from "@/lib/types";
 import { StreamHdMedia } from "@/app/stream/stream-hd-media";
 
+/**
+ * Alleen de huidige sponsor, zonder eigen plek: voor het sponsorvak van een eigen overlay-indeling.
+ * Geen sponsor ingepland: niets (doorzichtig), of in de indeling-editor een gestippeld vak.
+ */
+export function StreamSponsorMedia({
+  slot,
+  match,
+  placeholder = false,
+}: {
+  slot: StreamSponsorSlotView;
+  match: Match | null;
+  placeholder?: boolean;
+}) {
+  const { t } = useTranslation();
+  const { slide, onVideoEnded } = useStreamSponsorPlaylist(slot, match);
+  if (!slot.current || !slide) {
+    if (!placeholder) return null;
+    return (
+      <div className="grid h-full w-full place-items-center rounded-md border-2 border-dashed border-amber-300/70 bg-amber-300/10 text-[11px] font-semibold text-amber-100">
+        {t("livestream.designerSponsorHere")}
+      </div>
+    );
+  }
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-black">
+      <StreamHdMedia src={slide.src} type={slide.type} title={slide.title} onEnded={onVideoEnded} />
+    </div>
+  );
+}
+
 export function StreamSponsorLayer({
   slot,
   match,

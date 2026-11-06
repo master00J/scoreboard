@@ -8,7 +8,19 @@
 import type { FullScoreboardSlots, FullSlotId, LayoutSlot, LayoutSlotId, ScoreboardSlots } from "./scoreboard-theme";
 import { SPORT_TYPES, normalizeSport, type SportType } from "./sports";
 
-export type ElementSurface = "sponsor" | "full";
+/**
+ * Vlakken die een club indeelt. `sponsor` en `full` zijn het stadionscherm; `stream` en
+ * `streamBreak` zijn de doorzichtige overlay boven het camerabeeld van de livestream (tijdens het
+ * spel en in de pauze). Die laatste twee tekent het stadionscherm nooit.
+ */
+export type ElementSurface = "sponsor" | "full" | "stream" | "streamBreak";
+
+export const STREAM_SURFACES = ["stream", "streamBreak"] as const;
+export type StreamSurface = (typeof STREAM_SURFACES)[number];
+
+export function isStreamSurface(surface: string): surface is StreamSurface {
+  return surface === "stream" || surface === "streamBreak";
+}
 export type ElementSide = "home" | "away";
 
 export type LayoutElementType =
@@ -90,6 +102,7 @@ export function isClassicElementId(id: string): id is LayoutSlotId {
 }
 
 export function classicIdsFor(surface: ElementSurface): LayoutSlotId[] {
+  // De stream-vlakken hebben dezelfde vakken als het sponsorvlak; het mediavak is daar de sponsorplaat.
   return surface === "full" ? [...FULL_ORDER] : [...SPONSOR_ORDER];
 }
 

@@ -131,3 +131,15 @@ export function summarizeStreamLayout(
     sponsors: layout.showSponsorBreak ? "fullscreen" : layout.showSponsorStrip ? "pip" : "off",
   };
 }
+
+/**
+ * Tekent de stream nu een eigen indeling uit Scherm indelen, en zo ja welk vlak? `null` = de vaste
+ * lagen (score-widget, sponsorstrook of het sponsorscherm in de pauze), zoals voorheen.
+ */
+export function streamCustomSurface(
+  settings: Pick<LivestreamSettings, "overlayPlay" | "overlayBreak">,
+  phase: StreamProgramPhase,
+): "stream" | "streamBreak" | null {
+  if (phase === "break") return settings.overlayBreak === "custom" ? "streamBreak" : null;
+  return settings.overlayPlay === "custom" ? "stream" : null;
+}

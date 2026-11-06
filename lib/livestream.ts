@@ -277,7 +277,16 @@ export type LivestreamSettings = {
   encoderPreset: LivestreamEncoderPreset;
   keyframeSec: number;
   audioBitrateKbps: number;
+  /**
+   * Overlay tijdens het spel: de vaste score-widget, of de eigen indeling uit Scherm indelen
+   * (vlak "Livestream"). In de pauze: het sponsorscherm, of de eigen pauze-indeling.
+   */
+  overlayPlay: StreamOverlayPlay;
+  overlayBreak: StreamOverlayBreak;
 };
+
+export type StreamOverlayPlay = "widget" | "custom";
+export type StreamOverlayBreak = "sponsors" | "custom";
 
 export type LivestreamHealth = {
   fps: number | null;
@@ -439,6 +448,8 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
   encoderPreset: "balanced",
   keyframeSec: DEFAULT_KEYFRAME_SEC,
   audioBitrateKbps: DEFAULT_AUDIO_BITRATE_KBPS,
+  overlayPlay: "widget",
+  overlayBreak: "sponsors",
 };
 
 export function clampFps(value: number): number {
@@ -812,6 +823,8 @@ export function mergeLivestreamSettings(raw: Partial<LivestreamSettings> | null 
     encoderPreset: parseEncoderPreset(r.encoderPreset ?? d.encoderPreset),
     keyframeSec: clampKeyframeSec(r.keyframeSec ?? d.keyframeSec),
     audioBitrateKbps,
+    overlayPlay: r.overlayPlay === "custom" ? "custom" : "widget",
+    overlayBreak: r.overlayBreak === "custom" ? "custom" : "sponsors",
   };
 }
 
