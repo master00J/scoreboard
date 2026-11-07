@@ -896,6 +896,28 @@ export function scoreboardUsesCustom(theme: LayoutModeTheme): boolean {
 }
 
 /** Zelfde keuze als "Probeer op scherm" voor het vlak naast de sponsorclip. */
+/**
+ * Welke indeling de club koos, los van de vraag of het frame nu getoond mag worden.
+ *
+ * Die twee liepen door elkaar. Het stadionscherm koos zijn component uit `useCustomLayout`
+ * en vrienden, en die dragen `allowScoreFrame` in zich. Viel die weg — bij IDLE, rust, een
+ * intro of een wissel — dan werden alle drie false en viel de ternary terug op de L-balk.
+ * Twee plekken tekenen het frame toch (een sponsorclip naast het bord), en die kregen zo de
+ * L-balk met `leftBarWidthPx` in plaats van de vrije indeling van de club: de clip ging over
+ * de score heen staan in plaats van in zijn eigen vak.
+ *
+ * Welke indeling het is, hangt alleen van het thema af. Of hij getoond wordt, is een andere vraag.
+ */
+export function scoreboardFrameKind(
+  theme: LayoutModeTheme,
+  autoLeft: boolean,
+): "custom" | "strip" | "left" {
+  if (scoreboardUsesCustom(theme)) return "custom";
+  if (scoreboardUsesStrip(theme)) return "strip";
+  void autoLeft;
+  return "left";
+}
+
 export function scoreboardLiveBesideKind(
   theme: LayoutModeTheme,
 ): "custom" | "strip" | "left" {

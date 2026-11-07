@@ -29,6 +29,7 @@ import type {
 } from "@/lib/types";
 import {
   mergeScoreboardTheme,
+  scoreboardFrameKind,
   scoreboardUsesCustom,
   scoreboardUsesLeftFrame,
   scoreboardUsesStrip,
@@ -1280,11 +1281,17 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     !useStripLayout &&
     !!match &&
     scoreboardUsesLeftFrame(scoreboardTheme, autoLeftLayout);
-  const ScoreFrame = useCustomLayout
-    ? CustomScoreboardLayout
-    : useStripLayout
-      ? StripScoreboardLayout
-      : LeftScoreboardLayout;
+  // Welke indeling de club koos — bewust los van `allowScoreFrame`. Die vlag bepaalt of er een
+  // frame komt, niet welk. Stond hij hier wél in, dan viel de keuze bij IDLE, rust, een intro of
+  // een wissel terug op de L-balk, en tekenden de twee sponsor-naast-blokken hieronder een clip
+  // met `leftBarWidthPx` over het scorebord heen in plaats van in het vak van de club.
+  const frameKind = scoreboardFrameKind(scoreboardTheme, autoLeftLayout);
+  const ScoreFrame =
+    frameKind === "custom"
+      ? CustomScoreboardLayout
+      : frameKind === "strip"
+        ? StripScoreboardLayout
+        : LeftScoreboardLayout;
   const showScoreFrame = useLeftLayout || useStripLayout || useCustomLayout;
   const sponsorBudgetSponsorFilter =
     previewForcesSponsorBeside && previewFollowClip
