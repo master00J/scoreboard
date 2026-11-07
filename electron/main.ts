@@ -213,6 +213,21 @@ if (process.platform === "win32") {
 }
 
 /**
+ * Windows besluit zelf of een venster bedekt is en laat Chromium dan stoppen met tekenen
+ * (`CalculateNativeWinOcclusion`). Op een tweede scherm gaat die inschatting geregeld mis: het
+ * stadionscherm bevriest op zijn laatste beeld en werkt pas weer bij als het venster opnieuw
+ * wordt aangemaakt. Een club zag daardoor dagenlang zijn gewijzigde indeling niet verschijnen —
+ * opslaan kwam wel aan, het venster tekende alleen niets nieuws meer.
+ *
+ * Wij hebben er niets aan: het stadionscherm hoort altijd te tekenen, ook als er een ander
+ * venster overheen ligt. Uitzetten kost hooguit wat stroom op een scherm dat echt verborgen is.
+ */
+if (process.platform === "win32" && process.env.STADIUM_ENABLE_WIN_OCCLUSION !== "1") {
+  app.commandLine.appendSwitch("disable-features", "CalculateNativeWinOcclusion");
+  console.log("[electron] CalculateNativeWinOcclusion uit (tweede scherm blijft tekenen)");
+}
+
+/**
  * Alleen op verzoek of na GPU-crash-vlag: software-decode (zwaarder op CPU).
  */
 if (videoDecodeFallbackEnabled()) {
