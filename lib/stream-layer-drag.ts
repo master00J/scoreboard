@@ -13,6 +13,40 @@ export function r2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/** % van het programmabeeld → pixels van de stream (1920×1080 of 1280×720). */
+export function pctToPx(pct: number, size: number): number {
+  return Math.round((pct / 100) * size);
+}
+
+export function pxToPct(px: number, size: number): number {
+  return r2((px / Math.max(1, size)) * 100);
+}
+
+export function rectToPixels(
+  rect: StreamLayerRect,
+  canvasW: number,
+  canvasH: number,
+): { x: number; y: number; w: number; h: number; left: number; top: number; right: number; bottom: number } {
+  const x = pctToPx(rect.x, canvasW);
+  const y = pctToPx(rect.y, canvasH);
+  const w = pctToPx(rect.w, canvasW);
+  const h = pctToPx(rect.h, canvasH);
+  return { x, y, w, h, left: x, top: y, right: canvasW - x - w, bottom: canvasH - y - h };
+}
+
+export function pixelsToRect(
+  px: { x: number; y: number; w: number; h: number },
+  canvasW: number,
+  canvasH: number,
+): StreamLayerRect {
+  return {
+    x: pxToPct(px.x, canvasW),
+    y: pxToPct(px.y, canvasH),
+    w: pxToPct(px.w, canvasW),
+    h: pxToPct(px.h, canvasH),
+  };
+}
+
 export function snapEdge(value: number, size: number, enabled: boolean): number {
   if (!enabled) return value;
   for (const target of [0, 50 - size / 2, 100 - size]) {

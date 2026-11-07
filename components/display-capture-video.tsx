@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
-import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
+import { captureMediaStyle } from "@/lib/display-cover-media-style";
 import type { ExternalCaptureVideoHandle } from "@/components/external-capture-video";
 import { useDisplayPreviewPlayback } from "@/lib/use-display-preview-playback";
 
@@ -59,11 +59,11 @@ export const DisplayCaptureVideo = forwardRef<
         playsInline
         autoPlay
         className={className}
-        style={DISPLAY_COVER_MEDIA_STYLE}
+        style={captureMediaStyle(className)}
       />
       {!stream && jpeg ? (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={jpeg} alt="" className={className} style={DISPLAY_COVER_MEDIA_STYLE} />
+        <img src={jpeg} alt="" className={className} style={captureMediaStyle(className)} />
       ) : null}
     </DisplayMediaStage>
   );

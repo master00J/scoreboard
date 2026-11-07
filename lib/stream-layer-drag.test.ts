@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cropFromHandle, resizeRect, snapEdge } from "./stream-layer-drag";
+import { cropFromHandle, pctToPx, pixelsToRect, rectToPixels, resizeRect, snapEdge } from "./stream-layer-drag";
 import { layerPlacement, createSceneLayer } from "./stream-scenes";
 
 const full = { x: 0, y: 0, w: 100, h: 100 };
@@ -55,6 +55,16 @@ describe("cropFromHandle", () => {
     const { crop } = cropFromHandle(full, noCrop, "se", -10, -20);
     expect(crop.right).toBe(10);
     expect(crop.bottom).toBe(20);
+  });
+});
+
+describe("rect pixels", () => {
+  it("round-trips a 1920×1080 box", () => {
+    const rect = { x: 10, y: 20, w: 30, h: 40 };
+    const px = rectToPixels(rect, 1920, 1080);
+    expect(px).toEqual({ x: 192, y: 216, w: 576, h: 432, left: 192, top: 216, right: 1152, bottom: 432 });
+    expect(rectToPixels(pixelsToRect(px, 1920, 1080), 1920, 1080)).toEqual(px);
+    expect(pctToPx(100, 1920)).toBe(1920);
   });
 });
 

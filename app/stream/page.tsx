@@ -74,6 +74,7 @@ export default function StreamProgramPage({
   sceneMode,
   liveCameras = true,
   liveDisplay = true,
+  hideOverlay = false,
 }: {
   cameraOverride?: string;
   embedded?: boolean;
@@ -95,6 +96,8 @@ export default function StreamProgramPage({
   liveCameras?: boolean;
   /** Uit = LED in de scène als vlak met de naam (de stream heeft het stadionscherm al open). */
   liveDisplay?: boolean;
+  /** De overlay-editor op de monitor tekent score en logo's zelf. */
+  hideOverlay?: boolean;
 } = {}) {
   const { t } = useTranslation();
   useSocketSync();
@@ -281,6 +284,7 @@ export default function StreamProgramPage({
             liveCameras={liveCameras}
             liveNetwork={!embedded}
             liveDisplay={liveDisplay}
+            muteMedia={embedded}
             registerHandle={registerLayerHandle}
             onActive={notifyProgramReady}
           />
@@ -348,7 +352,7 @@ export default function StreamProgramPage({
           }
         />
       ) : null}
-      {customSurface && match && !showOverlayClip && !eventGraphic ? (
+      {!hideOverlay && customSurface && match && !showOverlayClip && !eventGraphic ? (
         <div className="pointer-events-none absolute inset-0 z-20">
           <CustomScoreboardLayout
             match={match}
@@ -365,10 +369,10 @@ export default function StreamProgramPage({
           </CustomScoreboardLayout>
         </div>
       ) : null}
-      {!customSurface && layout.showSponsorBreak && !showOverlayClip && !eventGraphic ? (
+      {!hideOverlay && !customSurface && layout.showSponsorBreak && !showOverlayClip && !eventGraphic ? (
         <StreamBreakSponsorOverlay slot={sponsorSlot} match={match ?? null} placeholder={layoutCanvas} />
       ) : null}
-      {!customSurface && layout.showSponsorStrip && !showOverlayClip && !eventGraphic ? (
+      {!hideOverlay && !customSurface && layout.showSponsorStrip && !showOverlayClip && !eventGraphic ? (
         <StreamSponsorLayer
           slot={sponsorSlot}
           match={match ?? null}
@@ -380,7 +384,7 @@ export default function StreamProgramPage({
           placeholder={layoutCanvas}
         />
       ) : null}
-      {scoreVisible && match ? (
+      {!hideOverlay && scoreVisible && match ? (
         <StreamScoreWidget
           match={match}
           elapsed={scoreboardClock}

@@ -8,6 +8,7 @@ import { StreamLayerFrame } from "@/components/stream-layer-frame";
 import { isVideoMediaPath, type LivestreamVideoInput } from "@/lib/livestream";
 import { mediaUrl } from "@/lib/media-url";
 import { layerColorSupported, type StreamScene } from "@/lib/stream-scenes";
+import { StreamPlaylistPlayer } from "@/app/stream/stream-playlist-player";
 
 export type SceneLayerHandle = { isPlaying: () => boolean } | null;
 
@@ -25,6 +26,7 @@ export function StreamSceneLayers({
   liveCameras = true,
   liveNetwork = true,
   liveDisplay = true,
+  muteMedia = true,
   registerHandle,
   onActive,
 }: {
@@ -36,6 +38,8 @@ export function StreamSceneLayers({
   liveNetwork?: boolean;
   /** Uit in de studio terwijl de stream loopt: dan heeft het streamvenster het LED-venster al open. */
   liveDisplay?: boolean;
+  /** Uit in de studio: mediabestanden en afspeellijsten zonder geluid (dat loopt via de mixer). */
+  muteMedia?: boolean;
   registerHandle?: (layerId: string, handle: SceneLayerHandle) => void;
   onActive?: () => void;
 }) {
@@ -90,12 +94,30 @@ export function StreamSceneLayers({
           const src = mediaUrl(input.mediaPath);
           content = (className) =>
             isVideoMediaPath(input.mediaPath) ? (
-              // Zonder geluid: het geluid van een mediabestand loopt via de mixer, niet via dit venster.
-              <video key={src} src={src} autoPlay muted playsInline loop={input.mediaLoop} className={className} />
+              // Zonder geluid in de studio: het geluid van een mediabestand loopt via de mixer.
+              <video
+                key={src}
+                src={src}
+                autoPlay
+                muted={muteMedia}
+                playsInline
+                loop={input.mediaLoop}
+                className={className}
+              />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
               <img key={src} src={src} alt="" className={className} />
             );
+        } else if (input.kind === "playlist" && input.playlistItems.length > 0) {
+          content = (className) => (
+            <StreamPlaylistPlayer
+              items={input.playlistItems}
+              loop={input.mediaLoop}
+              className={className}
+              muted={muteMedia}
+              onActive={onActive}
+            />
+          );
         }
         return (
           <div key={layer.id} className="absolute inset-0" style={{ zIndex: z }} data-stream-scene-layer={layer.id}>

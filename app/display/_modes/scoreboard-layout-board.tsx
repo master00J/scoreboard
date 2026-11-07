@@ -35,6 +35,7 @@ export function ScoreboardSurfaceBoard({
   period,
   addedTime = 0,
   shotClock = 0,
+  picture = false,
 }: {
   surface: LayoutPreviewSurface | StreamSurface;
   theme: ResolvedScoreboardTheme;
@@ -44,13 +45,15 @@ export function ScoreboardSurfaceBoard({
   period: string;
   addedTime?: number;
   shotClock?: number;
+  /** Overlay op camerabeeld: geen dambordplaat voor de sponsorclip. */
+  picture?: boolean;
 }) {
   const props = { match, elapsed, running, period, addedTime, shotClock, theme };
   if (surface === "stream" || surface === "streamBreak") {
     // Doorzichtig zoals op de stream: de editor legt er zelf een dambord onder.
     return (
       <CustomScoreboardLayout {...props} elements={theme.elements[surface]} transparent>
-        <SponsorVideoPlate />
+        {picture ? null : <SponsorVideoPlate />}
       </CustomScoreboardLayout>
     );
   }

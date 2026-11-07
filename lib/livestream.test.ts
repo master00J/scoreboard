@@ -384,6 +384,46 @@ describe("helpers", () => {
     expect(merged.audioChannels.some((channel) => channel.device === mediaAudioDeviceId("v-clip"))).toBe(true);
   });
 
+  it("accepteert een afspeellijst met volgorde en duur per item", () => {
+    const merged = mergeLivestreamSettings({
+      videoInputs: partialInputs([
+        {
+          id: "v-pl",
+          name: "Slides",
+          kind: "playlist",
+          mediaLoop: true,
+          playlistItems: [
+            { id: "a", path: "C:\\intro.jpg", durationSec: 5 },
+            { id: "b", path: "C:\\clip.mp4", durationSec: 0 },
+          ],
+        },
+      ]),
+      activeVideoInputId: "v-pl",
+    });
+    expect(merged.source).toBe("playlist");
+    expect(merged.videoInputs[0]?.playlistItems).toEqual([
+      { id: "a", path: "C:\\intro.jpg", durationSec: 5 },
+      { id: "b", path: "C:\\clip.mp4", durationSec: 0 },
+    ]);
+    expect(merged.audioChannels.some((channel) => channel.device === mediaAudioDeviceId("v-pl"))).toBe(true);
+    const sameDuration = programSourceKey(merged);
+    expect(
+      programSourceKey({
+        ...merged,
+        videoInputs: merged.videoInputs.map((input) =>
+          input.id === "v-pl"
+            ? {
+                ...input,
+                playlistItems: input.playlistItems.map((item) =>
+                  item.id === "a" ? { ...item, durationSec: 12 } : item,
+                ),
+              }
+            : input,
+        ),
+      }),
+    ).toBe(sameDuration);
+  });
+
   it("kiest sport-defaults voor fps en audio", () => {
     expect(DEFAULT_LIVESTREAM_SETTINGS.fps).toBe(30);
     expect(dshowAudioInputArgs("Microphone (USB)")).toContain(String(DSHOW_AUDIO_BUFFER_MS));
@@ -573,6 +613,7 @@ describe("score en sponsors over de bron", () => {
     expect(sourceShowsStreamLayers("network")).toBe(true);
     expect(sourceShowsStreamLayers("browser")).toBe(true);
     expect(sourceShowsStreamLayers("media")).toBe(true);
+    expect(sourceShowsStreamLayers("playlist")).toBe(true);
     // Het stadionscherm bevat het scorebord al; eroverheen zou het dubbel zijn.
     expect(sourceShowsStreamLayers("display")).toBe(false);
   });
@@ -580,10 +621,10 @@ describe("score en sponsors over de bron", () => {
 
 describe("live wisselen van bron", () => {
   const inputs = [
-    { id: "cam", name: "Camera", kind: "camera" as const, cameraDevice: "BRIO", browserUrl: "", mediaPath: "", mediaLoop: false, networkUrl: "", audioFollow: {} },
-    { id: "led", name: "LED", kind: "display" as const, cameraDevice: "", browserUrl: "", mediaPath: "", mediaLoop: false, networkUrl: "", audioFollow: {} },
-    { id: "clip", name: "Clip", kind: "media" as const, cameraDevice: "", browserUrl: "", mediaPath: "/uploads/a.mp4", mediaLoop: true, networkUrl: "", audioFollow: {} },
-    { id: "ipcam", name: "IP-camera", kind: "network" as const, cameraDevice: "", browserUrl: "", mediaPath: "", mediaLoop: false, networkUrl: "rtsp://admin:pw@192.168.1.64:554/Streaming/Channels/101", audioFollow: {} },
+    { id: "cam", name: "Camera", kind: "camera" as const, cameraDevice: "BRIO", browserUrl: "", mediaPath: "", mediaLoop: false, playlistItems: [], networkUrl: "", audioFollow: {} },
+    { id: "led", name: "LED", kind: "display" as const, cameraDevice: "", browserUrl: "", mediaPath: "", mediaLoop: false, playlistItems: [], networkUrl: "", audioFollow: {} },
+    { id: "clip", name: "Clip", kind: "media" as const, cameraDevice: "", browserUrl: "", mediaPath: "/uploads/a.mp4", mediaLoop: true, playlistItems: [], networkUrl: "", audioFollow: {} },
+    { id: "ipcam", name: "IP-camera", kind: "network" as const, cameraDevice: "", browserUrl: "", mediaPath: "", mediaLoop: false, playlistItems: [], networkUrl: "rtsp://admin:pw@192.168.1.64:554/Streaming/Channels/101", audioFollow: {} },
   ];
   const base = { ...DEFAULT_LIVESTREAM_SETTINGS, videoInputs: inputs, activeVideoInputId: "cam", source: "camera" as const, cameraDevice: "BRIO" };
 

@@ -321,6 +321,9 @@ export function SetupScoreboardThemeSection({
   previewSport,
   seedLayout,
   onSeedConsumed,
+  variant = "full",
+  onSaved,
+  picture = false,
 }: {
   settings: AppSettings | null | undefined;
   reloadSettings: () => void;
@@ -332,7 +335,13 @@ export function SetupScoreboardThemeSection({
   /** Gekozen via "Bewerken" in de Layout-bibliotheek. */
   seedLayout?: ScoreboardTemplate | null;
   onSeedConsumed?: () => void;
+  /** `stream`: overlay voor de livestream, niet het LED-scherm. */
+  variant?: "full" | "stream";
+  onSaved?: () => void;
+  /** Overlay-kaders in een livestream-monitor, zoals bronnen in OBS. */
+  picture?: boolean;
 }) {
+  const streamOnly = variant === "stream";
   const { t } = useTranslation();
   const resolved = useMemo(
     () => mergeScoreboardTheme(settings?.scoreboardThemeJson ?? null),
@@ -358,7 +367,10 @@ export function SetupScoreboardThemeSection({
   const repeatSponsorBudgetCycles = present.repeatSponsorBudgetCycles;
   const dirty = layoutDraftIsDirty(base, history?.present ?? null);
   const gestureStartRef = useRef<LayoutEditorDraft | null>(null);
-  const [surface, setSurface] = useState<EditorSurface>("sponsor");
+  const [surface, setSurface] = useState<EditorSurface>(streamOnly ? "stream" : "sponsor");
+  useEffect(() => {
+    if (streamOnly && !isStreamSurface(surface)) setSurface("stream");
+  }, [streamOnly, surface]);
   const [layouts, setLayouts] = useState<ScoreboardTemplate[]>([]);
   const [tryUntil, setTryUntil] = useState<number | null>(null);
   /** De sport die het canvas toont; "Probeer op scherm" neemt die mee. */
@@ -523,14 +535,15 @@ export function SetupScoreboardThemeSection({
   }
 
   async function save() {
-    if (editingTemplate) {
+    if (!streamOnly && editingTemplate) {
       await saveLayout(editingTemplate);
       return;
     }
     const json = JSON.stringify(themePayload());
     // Een regel kan deze indeling tijdens de wedstrijd vervangen. Die wedstrijd-indeling
     // gaat automatisch mee, anders blijft het scherm de oude bibliotheekversie tonen.
-    const alsoUpdate = playLayoutsToSync;
+    // De stream-overlay schrijft alleen het thema; LED-bibliotheekindelingen blijven ongemoeid.
+    const alsoUpdate = streamOnly ? [] : playLayoutsToSync;
     const alsoUpdateNames = alsoUpdate.map((layout) => `“${templateDisplayName(layout)}”`).join(", ");
     const updateOverriding = alsoUpdate.length > 0;
     if (updateOverriding) {
@@ -560,13 +573,16 @@ export function SetupScoreboardThemeSection({
     store().markSaved(json);
     if (tryUntil) await endTryPreview();
     toast({
-      title: updateOverriding
-        ? t("setup.themeSavedWithLayouts", { names: alsoUpdateNames })
-        : t("setup.themeSaved"),
+      title: streamOnly
+        ? t("livestream.overlayLayoutSaved")
+        : updateOverriding
+          ? t("setup.themeSavedWithLayouts", { names: alsoUpdateNames })
+          : t("setup.themeSaved"),
       variant: "success",
     });
     if (updateOverriding) void loadLayouts();
     reloadSettings();
+    onSaved?.();
   }
 
   /**
@@ -711,13 +727,98 @@ export function SetupScoreboardThemeSection({
     </div>
   );
 
+  const placer = (
+    <SetupScoreboardPlacer
+      theme={draft}
+      onChange={setDraft}
+      onGestureStart={() => {
+        gestureStartRef.current = store().history?.present ?? null;
+      }}
+      onGestureEnd={() => {
+        if (gestureStartRef.current) store().commitGesture(gestureStartRef.current);
+        gestureStartRef.current = null;
+      }}
+      onUndo={() => store().undo()}
+      onRedo={() => store().redo()}
+      homeTeam={homeTeam}
+      awayTeam={awayTeam}
+      liveMatch={liveMatch}
+      initialSport={previewSport}
+      onPreviewSportChange={setCanvasSport}
+      surface={surface}
+      canvasWidth={streamSurface ? 1920 : canvasWidth}
+      canvasHeight={streamSurface ? 1080 : canvasHeight}
+      safeZonePx={streamSurface ? 0 : Math.max(0, Number(settings?.displaySafeZoneMarginPx ?? 40))}
+      picture={picture}
+    />
+  );
+
+  if (picture) {
+    return (
+      <div className="pointer-events-none absolute inset-0 z-[45]" data-stream-overlay-editor data-stream-overlay-transform>
+        <div className="pointer-events-auto absolute left-1 top-1 z-50 flex max-w-[calc(100%-16.5rem)] flex-wrap items-center gap-1 rounded bg-black/80 p-1">
+          {(["stream", "streamBreak"] as const).map((id) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setSurface(id)}
+              className={`h-6 rounded px-1.5 text-[10px] font-semibold ${
+                surface === id ? "bg-white text-black" : "bg-white/10 text-white hover:bg-white/20"
+              }`}
+            >
+              {t(`setup.${id === "stream" ? "themeSurfaceStream" : "themeSurfaceStreamBreak"}`)}
+            </button>
+          ))}
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-1.5"
+            disabled={!history || !canUndo(history)}
+            title={t("layoutEditor.undo")}
+            aria-label={t("layoutEditor.undo")}
+            onClick={() => store().undo()}
+          >
+            <Undo2 className="size-3.5" />
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 px-1.5"
+            disabled={!history || !canRedo(history)}
+            title={t("layoutEditor.redo")}
+            aria-label={t("layoutEditor.redo")}
+            onClick={() => store().redo()}
+          >
+            <Redo2 className="size-3.5" />
+          </Button>
+          {dirty ? (
+            <span className="rounded px-1.5 text-[10px] font-semibold text-amber-200">{t("layoutEditor.unsaved")}</span>
+          ) : null}
+          <Button size="sm" className="h-6 px-1.5 text-[10px]" onClick={() => void save()}>
+            {t("livestream.overlayLayoutSave")}
+          </Button>
+        </div>
+        {placer}
+      </div>
+    );
+  }
+
   return (
-    <section id="scoreboard-layout-editor" className="bg-card border border-border rounded-xl p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+    <section
+      id={streamOnly ? "livestream-overlay-layout-editor" : "scoreboard-layout-editor"}
+      className={
+        streamOnly
+          ? "rounded-md border border-border bg-zinc-950/40 p-3"
+          : "rounded-xl border border-border bg-card p-6"
+      }
+    >
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">{t("setup.themeTitle")}</h2>
-          <p className="text-sm text-muted-foreground mt-1 max-w-3xl">
-            {t("setup.themeBody")}
+          <h2 className={streamOnly ? "text-sm font-semibold" : "text-lg font-semibold"}>
+            {t(streamOnly ? "livestream.overlayLayoutTitle" : "setup.themeTitle")}
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+            {t(streamOnly ? "livestream.overlayLayoutBody" : "setup.themeBody")}
           </p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -749,7 +850,7 @@ export function SetupScoreboardThemeSection({
           >
             <Redo2 className="size-4" />
           </Button>
-          {tryUntil ? (
+          {streamOnly ? null : tryUntil ? (
             <Button variant="warning" size="sm" onClick={() => void stopTryOnScreen()}>
               {t("layoutEditor.trying")}
             </Button>
@@ -769,20 +870,24 @@ export function SetupScoreboardThemeSection({
               {t("layoutEditor.discard")}
             </Button>
           ) : null}
-          <Button variant="outline" size="sm" onClick={() => void resetDefault()}>
-            {t("setup.themeDefault")}
-          </Button>
+          {streamOnly ? null : (
+            <Button variant="outline" size="sm" onClick={() => void resetDefault()}>
+              {t("setup.themeDefault")}
+            </Button>
+          )}
           <Button size="sm" onClick={() => void save()}>
-            {editingTemplate
-              ? t("layoutEditor.saveInLayout", { name: editingTemplate.name })
-              : playLayoutsToSync.length > 0
-                ? t("layoutEditor.saveLiveWithLayouts", { names: playLayoutsToSyncNames })
-                : t("layoutEditor.saveLive")}
+            {streamOnly
+              ? t("livestream.overlayLayoutSave")
+              : editingTemplate
+                ? t("layoutEditor.saveInLayout", { name: editingTemplate.name })
+                : playLayoutsToSync.length > 0
+                  ? t("layoutEditor.saveLiveWithLayouts", { names: playLayoutsToSyncNames })
+                  : t("layoutEditor.saveLive")}
           </Button>
         </div>
       </div>
 
-      {editingTemplate ? (
+      {!streamOnly && editingTemplate ? (
         <div
           className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-sky-500/50 bg-sky-500/10 px-4 py-3 text-sm"
           data-layout-editing-template
@@ -798,7 +903,7 @@ export function SetupScoreboardThemeSection({
         </div>
       ) : null}
 
-      {overriddenPhases.length > 0 ? (
+      {!streamOnly && overriddenPhases.length > 0 ? (
         <div
           className="mb-4 space-y-2 rounded-lg border border-amber-500/60 bg-amber-500/10 px-4 py-3 text-sm"
           data-layout-rule-override
@@ -833,12 +938,17 @@ export function SetupScoreboardThemeSection({
         <div className="font-semibold text-sm">{t("setup.themePlacerTitle")}</div>
         <div className="flex flex-wrap gap-2">
           {(
-            [
-              ["sponsor", "themeSurfaceSponsor"],
-              ["full", "themeSurfaceFull"],
-              ["stream", "themeSurfaceStream"],
-              ["streamBreak", "themeSurfaceStreamBreak"],
-            ] as const
+            streamOnly
+              ? ([
+                  ["stream", "themeSurfaceStream"],
+                  ["streamBreak", "themeSurfaceStreamBreak"],
+                ] as const)
+              : ([
+                  ["sponsor", "themeSurfaceSponsor"],
+                  ["full", "themeSurfaceFull"],
+                  ["stream", "themeSurfaceStream"],
+                  ["streamBreak", "themeSurfaceStreamBreak"],
+                ] as const)
           ).map(([id, labelKey]) => (
             <button
               key={id}
@@ -857,31 +967,10 @@ export function SetupScoreboardThemeSection({
         <p className="max-w-3xl text-xs text-muted-foreground">
           {streamSurface ? t("setup.themeSurfaceStreamHint") : t("setup.themeSurfaceHint")}
         </p>
-        <SetupScoreboardPlacer
-          theme={draft}
-          onChange={setDraft}
-          onGestureStart={() => {
-            gestureStartRef.current = store().history?.present ?? null;
-          }}
-          onGestureEnd={() => {
-            if (gestureStartRef.current) store().commitGesture(gestureStartRef.current);
-            gestureStartRef.current = null;
-          }}
-          onUndo={() => store().undo()}
-          onRedo={() => store().redo()}
-          homeTeam={homeTeam}
-          awayTeam={awayTeam}
-          liveMatch={liveMatch}
-          initialSport={previewSport}
-          onPreviewSportChange={setCanvasSport}
-          surface={surface}
-          // De stream is altijd 1920×1080, wat het stadionscherm ook is.
-          canvasWidth={streamSurface ? 1920 : canvasWidth}
-          canvasHeight={streamSurface ? 1080 : canvasHeight}
-          safeZonePx={streamSurface ? 0 : Math.max(0, Number(settings?.displaySafeZoneMarginPx ?? 40))}
-        />
+        {placer}
       </div>
 
+      {streamOnly ? null : (
       <LayoutRulesSection
         rules={rules}
         layouts={layouts}
@@ -889,7 +978,10 @@ export function SetupScoreboardThemeSection({
         onChange={setRules}
         onFocus={() => void loadLayouts()}
       />
+      )}
 
+      {streamOnly ? null : (
+      <>
       <div className="mb-6 space-y-4 rounded-lg border border-border p-4">
         <div>
           <div className="font-semibold text-sm">{t("setup.themeBackgroundsTitle")}</div>
@@ -1202,6 +1294,8 @@ export function SetupScoreboardThemeSection({
         </div>
       </div>
       </details>
+      </>
+      )}
     </section>
   );
 }

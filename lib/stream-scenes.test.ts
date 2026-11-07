@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   addSceneLayer,
   canAddSceneLayer,
+  createNamedScene,
   createSceneLayer,
+  FULL_FRAME_RECT,
   PIP_RECT,
   removeSceneLayer,
   sceneHasInput,
@@ -18,6 +20,7 @@ import {
   migrateScenes,
   moveSceneLayer,
   resetSceneLayer,
+  transformSceneLayer,
   resolveSceneSelection,
   sanitizeLayerCrop,
   sanitizeLayerRect,
@@ -97,13 +100,29 @@ describe("mergeStreamScenes", () => {
       { id: "s-b", name: "B", layers: [{ id: "l2", inputId: "v1" }, { id: "l3", inputId: "gone" }] },
     ];
     const scenes = mergeStreamScenes(raw, inputs);
-    expect(scenes.map((scene) => scene.id)).toEqual(["s-b", "s-v2"]);
+    expect(scenes.map((scene) => scene.id)).toEqual(["s-b"]);
     expect(scenes[0]!.layers.map((layer) => layer.id)).toEqual(["l2"]);
   });
 
-  it("adds a scene for an input that has none", () => {
-    const scenes = mergeStreamScenes([{ id: "s1", name: "", layers: [{ id: "l1", inputId: "v1" }] }], inputs);
-    expect(scenes.map(sceneInputId)).toEqual(["v1", "v2"]);
+  it("keeps a named scene that was saved with no sources", () => {
+    const scenes = mergeStreamScenes(
+      [
+        { id: "s-empty", name: "Pauze", layers: [] },
+        { id: "s1", name: "", layers: [{ id: "l1", inputId: "v1" }] },
+      ],
+      inputs,
+    );
+    expect(scenes.map((scene) => scene.id)).toEqual(["s-empty", "s1"]);
+    expect(scenes[0]!.layers).toEqual([]);
+  });
+
+  it("does not make a new scene for a source that is only used as a layer", () => {
+    const scenes = mergeStreamScenes(
+      [{ id: "s1", name: "", layers: [{ id: "l1", inputId: "v1" }, { id: "l2", inputId: "v2" }] }],
+      inputs,
+    );
+    expect(scenes.map((scene) => scene.id)).toEqual(["s1"]);
+    expect(scenes[0]!.layers.map((layer) => layer.inputId)).toEqual(["v1", "v2"]);
   });
 
   it("makes duplicate ids unique", () => {
@@ -173,6 +192,27 @@ describe("scene selection", () => {
     expect(partial.activeSceneId).toBe("s-v1");
     expect(partial.previewSceneId).toBe("s-v2");
     expect(partial.previewVideoInputId).toBe("v2");
+  });
+
+  it("keeps an empty named scene on preview", () => {
+    const scenes = mergeStreamScenes(
+      [
+        { id: "s1", name: "", layers: [{ id: "l1", inputId: "v1" }] },
+        { id: "s-empty", name: "Pauze", layers: [] },
+      ],
+      [
+        { id: "v1" },
+        { id: "v2" },
+      ],
+    );
+    const sel = resolveSceneSelection(scenes, {
+      activeSceneId: "s1",
+      activeInputId: "v1",
+      previewSceneId: "s-empty",
+      previewInputId: "v1",
+    });
+    expect(sel.activeSceneId).toBe("s1");
+    expect(sel.previewSceneId).toBe("s-empty");
   });
 
   it("falls back to the first scene for an unknown input", () => {
@@ -278,6 +318,36 @@ describe("layerPlacement", () => {
     expect(visibleLeft).toBeCloseTo(px.src.x, 0);
     expect((100 / css.media.w) * 1440).toBeCloseTo(px.src.w, 0);
   });
+
+  it("keeps 16:9 contain as a full 16:9 frame in CSS, not a square letterbox", () => {
+    const layer = createSceneLayer({ inputId: "v1" });
+    const css = layerCssPlacement(1920, 1080, layer);
+    expect(css.box.x).toBeCloseTo(0, 5);
+    expect(css.box.y).toBeCloseTo(0, 5);
+    expect(css.box.w).toBeCloseTo(100, 5);
+    expect(css.box.h).toBeCloseTo(100, 5);
+  });
+
+  it("does not jump format when a 16:9 fit-layer is a few pixels narrower", () => {
+    const layer = createSceneLayer({
+      inputId: "v1",
+      rect: { x: 0, y: 0, w: (1274 / 1280) * 100, h: 100 },
+    });
+    const css = layerCssPlacement(1920, 1080, layer);
+    expect(css.box.h).toBeGreaterThan(99);
+    expect(css.box.w).toBeCloseTo((1274 / 1280) * 100, 1);
+    expect(css.box.y).toBeLessThan(1);
+  });
+
+  it("gives CSS contain sizes that match 16:9 pixel placement", () => {
+    const layer = createSceneLayer({ inputId: "v1", fit: "contain", rect: { x: 10, y: 20, w: 40, h: 50 } });
+    const css = layerCssPlacement(1920, 1080, layer);
+    const px = layerPlacement(1920, 1080, layer, 1920, 1080)!;
+    expect(css.box.x).toBeCloseTo((px.dst.x / 1920) * 100, 1);
+    expect(css.box.y).toBeCloseTo((px.dst.y / 1080) * 100, 1);
+    expect(css.box.w).toBeCloseTo((px.dst.w / 1920) * 100, 1);
+    expect(css.box.h).toBeCloseTo((px.dst.h / 1080) * 100, 1);
+  });
 });
 
 describe("layer values", () => {
@@ -341,6 +411,30 @@ describe("picture-in-picture scenes", () => {
   const kindOf = (id: string) => settings.videoInputs.find((input) => input.id === id)?.kind;
   const cam1 = settings.scenes.find((scene) => scene.id === "s-v1")!;
 
+  it("stretches, fits and fills a layer to the screen like OBS", () => {
+    const layer = createSceneLayer({ inputId: "v1", rect: PIP_RECT, fit: "contain" });
+    expect(transformSceneLayer(layer, "stretch")).toEqual({
+      rect: FULL_FRAME_RECT,
+      crop: { top: 0, right: 0, bottom: 0, left: 0 },
+      fit: "stretch",
+    });
+    expect(transformSceneLayer(layer, "fit").fit).toBe("contain");
+    expect(transformSceneLayer(layer, "fill").fit).toBe("cover");
+    const centered = transformSceneLayer(layer, "center").rect!;
+    expect(centered.w).toBe(PIP_RECT.w);
+    expect(centered.x).toBeCloseTo((100 - PIP_RECT.w) / 2);
+    expect(centered.y).toBeCloseTo((100 - PIP_RECT.h) / 2);
+  });
+
+  it("fills the frame with the first source, then stacks the next one", () => {
+    const empty = createNamedScene("Pauze");
+    expect(empty?.layers).toEqual([]);
+    const first = addSceneLayer(empty!, "v1");
+    expect(first.scene.layers[0]!.rect).toEqual(FULL_FRAME_RECT);
+    const second = addSceneLayer(first.scene, "v2");
+    expect(second.scene.layers[1]!.rect).toEqual(PIP_RECT);
+  });
+
   it("adds a layer on top as a picture-in-picture box", () => {
     const { scene, layerId } = addSceneLayer(cam1, "v2");
     expect(scene.layers.map((layer) => layer.inputId)).toEqual(["v1", "v2"]);
@@ -355,10 +449,11 @@ describe("picture-in-picture scenes", () => {
     expect(canAddSceneLayer(cam1, input("v2"), kindOf)).toBe(true);
     expect(canAddSceneLayer(cam1, input("v-led"), kindOf)).toBe(true);
     expect(canAddSceneLayer(cam1, input("v5"), kindOf)).toBe(false);
+    expect(canAddSceneLayer(createNamedScene("Leeg")!, input("v5"), kindOf)).toBe(true);
     const led = settings.scenes.find((scene) => scene.id === "s-v-led")!;
     expect(canAddSceneLayer(led, input("v1"), kindOf)).toBe(true);
     const withIp = addSceneLayer(cam1, "v3").scene;
-    expect(canAddSceneLayer(withIp, input("v3"), kindOf)).toBe(true);
+    expect(canAddSceneLayer(withIp, input("v3"), kindOf)).toBe(false);
     expect(canAddSceneLayer(withIp, input("v4"), kindOf)).toBe(false);
     const site = settings.scenes.find((scene) => scene.id === "s-v5")!;
     expect(canAddSceneLayer(site, input("v1"), kindOf)).toBe(false);
@@ -374,10 +469,10 @@ describe("picture-in-picture scenes", () => {
     expect(pumpProgramLayer(live)).toBeNull();
   });
 
-  it("keeps at least one layer", () => {
+  it("can remove every source from a scene", () => {
     const { scene, layerId } = addSceneLayer(cam1, "v2");
     expect(removeSceneLayer(scene, layerId).layers.map((layer) => layer.inputId)).toEqual(["v1"]);
-    expect(removeSceneLayer(cam1, cam1.layers[0]!.id)).toBe(cam1);
+    expect(removeSceneLayer(cam1, cam1.layers[0]!.id).layers).toEqual([]);
   });
 
   it("reopens the stream only when a source joins or leaves the live scene", () => {

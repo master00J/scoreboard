@@ -10,7 +10,8 @@ import { isElectron } from "@/lib/electron";
 import { useApi } from "@/lib/use-api";
 import { useDisplayStore } from "@/lib/store";
 import { streamProgramPhase } from "@/lib/stream-program-layout";
-import type { Match, MediaItem } from "@/lib/types";
+import type { AppSettings, Match, MediaItem } from "@/lib/types";
+import { SetupScoreboardThemeSection } from "@/app/control/_components/setup-scoreboard-theme";
 import StreamProgramPage from "@/app/stream/page";
 import { useDisplayPreviewFrame } from "@/lib/use-display-preview-frame";
 import { shouldPauseDisplayPreviewCapture } from "@/lib/preview-capture-modes";
@@ -36,12 +37,15 @@ import {
   programScene,
   takeScene,
   mergeLivestreamSettings,
+  resolutionSize,
   resolveActiveVideoInput,
   sanitizeBrowserUrl,
   sourceShowsStreamLayers,
   sanitizeMediaPath,
   mediaPathFileName,
   MEDIA_FILE_EXTENSIONS,
+  isMediaLikeSource,
+  playlistItemsFromPaths,
   sourceAudioDevices,
   audioDeviceLabel,
   mergeStreamScoreWidget,
@@ -103,16 +107,18 @@ import { sendCommand } from "@/lib/use-socket";
 import {
   addSceneLayer,
   canAddSceneLayer,
+  createNamedScene,
   duplicateScene,
+  sceneForInput,
   layerColorSupported,
   layerKindInPage,
   moveSceneLayer,
   removeSceneLayer,
-  resetSceneLayer,
   sceneHasInput,
   sceneInputId,
   sceneIsComposite,
   sceneMainLayer,
+  transformSceneLayer,
   STREAM_SCENE_LAYER_LIMIT,
   STREAM_SCENE_LIMIT,
   updateSceneLayer,
@@ -121,10 +127,11 @@ import {
 } from "@/lib/stream-scenes";
 import { StreamLayerFrame } from "@/components/stream-layer-frame";
 import {
+  SceneSourcesDock,
   StreamLayerEditor,
-  StreamLayerPanel,
   type StreamLayerPatch,
 } from "@/app/control/_components/stream-layer-editor";
+import { StreamPlaylistEditor } from "@/app/control/_components/stream-playlist-editor";
 import {
   STREAM_DECK_HTTP_PORT,
   STREAM_DECK_KINDS,
@@ -162,6 +169,7 @@ export function videoKindLabel(
   if (kind === "display") return short ? t("livestream.sourceDisplayShort") : t("livestream.sourceDisplay");
   if (kind === "browser") return short ? t("livestream.sourceBrowserShort") : t("livestream.sourceBrowser");
   if (kind === "media") return short ? t("livestream.sourceMediaShort") : t("livestream.sourceMedia");
+  if (kind === "playlist") return short ? t("livestream.sourcePlaylistShort") : t("livestream.sourcePlaylist");
   if (kind === "network") return short ? t("livestream.sourceNetworkShort") : t("livestream.sourceNetwork");
   if (isWindowCaptureSourceId(cameraDevice)) {
     return short ? t("livestream.sourceWindowShort") : t("livestream.sourceWindow");
@@ -227,6 +235,7 @@ export function videoInputReady(input: LivestreamVideoInput): boolean {
   if (input.kind === "camera") return Boolean(input.cameraDevice.trim());
   if (input.kind === "browser") return Boolean(input.browserUrl.trim());
   if (input.kind === "media") return Boolean(input.mediaPath.trim());
+  if (input.kind === "playlist") return input.playlistItems.length > 0;
   if (input.kind === "network") return Boolean(input.networkUrl.trim());
   return true;
 }
@@ -366,6 +375,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const displayMode = useDisplayStore((s) => s.state?.mode);
   const { data: match } = useApi<Match>(matchId ? `/api/matches/${matchId}` : null);
   const { data: libraryMedia } = useApi<MediaItem[]>("/api/media");
+  const { data: appSettings, reload: reloadAppSettings } = useApi<AppSettings>("/api/settings");
   const programPhase = streamProgramPhase(match?.status);
   const [settings, setSettings] = useState<LivestreamSettings>(DEFAULT_LIVESTREAM_SETTINGS);
   const [status, setStatus] = useState<LivestreamStatus>(idleStatus);
@@ -398,8 +408,12 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [livePreviewInputId, setLivePreviewInputId] = useState<string | null>(null);
   /** Scène die klaarstaat om in beeld te komen (oranje), los van wat nu program is. */
   const [previewSceneId, setPreviewSceneId] = useState<string | null>(null);
-  /** Welke monitor het rode kader toont, en welke laag van die scène. */
-  const [editing, setEditing] = useState<{ role: "program" | "preview"; layerId: string | null } | null>(null);
+  /** Welke monitor je bewerkt: bronkader (crop/schaal) of overlay, nooit allebei tegelijk. */
+  const [editing, setEditing] = useState<{
+    role: "program" | "preview";
+    layerId: string | null;
+    tool: "source" | "overlay";
+  } | null>(null);
   /** Tijdens slepen: wat binnenkomt van het hoofdproces is ouder dan wat de operator ziet. */
   const draggingRef = useRef(false);
   const liveSaveRef = useRef<{ timer: number | null; scenes: StreamScene[] | null }>({ timer: null, scenes: null });
@@ -408,6 +422,10 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const [addPick, setAddPick] = useState<
     null | "camera" | "browser" | "media" | "window" | "screen" | "network"
   >(null);
+  /** Open naamveld voor een nieuwe, nog lege scène. `null` = dicht. */
+  const [sceneDraft, setSceneDraft] = useState<string | null>(null);
+  /** + bij Bronnen: het OBS-menu om een bron in deze scène te zetten. */
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [addBrowserUrl, setAddBrowserUrl] = useState("");
   const [addNetworkUrl, setAddNetworkUrl] = useState("");
   const [networkUrlDrafts, setNetworkUrlDrafts] = useState<Record<string, string>>({});
@@ -464,6 +482,15 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       filters: [{ name: t("livestream.mediaFilter"), extensions: [...MEDIA_FILE_EXTENSIONS] }],
     });
     return sanitizeMediaPath(paths[0] ?? "");
+  }, [t]);
+
+  const pickLocalMediaFiles = useCallback(async () => {
+    const paths = await selectFilesViaDialog({
+      title: t("livestream.mediaPickTitle"),
+      filters: [{ name: t("livestream.mediaFilter"), extensions: [...MEDIA_FILE_EXTENSIONS] }],
+      multiSelections: true,
+    });
+    return paths.map((path) => sanitizeMediaPath(path)).filter(Boolean);
   }, [t]);
 
   const loadAudioDevices = useCallback(async () => {
@@ -655,6 +682,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       camera: t("livestream.videoInputCameraName", { n }),
       browser: t("livestream.videoInputBrowserName", { n }),
       media: t("livestream.videoInputMediaName", { n }),
+      playlist: t("livestream.videoInputPlaylistName", { n }),
       network: t("livestream.videoInputNetworkName", { n }),
       display: t("livestream.sourceDisplayShort"),
     };
@@ -664,44 +692,96 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       kind,
       ...extra,
     });
-    void saveVideoInputs([...settings.videoInputs, input]);
-    // Het hoofdproces maakt er meteen een scène bij (`s-<bron>`); die komt klaar te staan.
-    setPreviewSceneId(`s-${input.id}`);
-    void persist({ previewVideoInputId: input.id });
+    const scene = sceneForInput(input);
+    const scenes =
+      settings.scenes.length >= STREAM_SCENE_LIMIT ? settings.scenes : [...settings.scenes, scene];
+    setPreviewSceneId(scene.id);
+    void persist({
+      videoInputs: [...settings.videoInputs, input],
+      scenes,
+      previewSceneId: scene.id,
+      previewVideoInputId: input.id,
+    });
+  };
+
+  const closeSourceMenu = () => {
+    setSourceMenuOpen(false);
+    setAddPick(null);
+    setAddBrowserUrl("");
+    setAddNetworkUrl("");
+  };
+
+  const dockTarget = () => {
+    const scene = editing?.role === "program" ? activeScene : (previewScene ?? activeScene);
+    const role: "program" | "preview" =
+      editing?.role === "program" || !previewScene ? "program" : "preview";
+    return scene ? { scene, role } : null;
+  };
+
+  /** Nieuwe bron in de gekozen scène, zoals + bij Bronnen in OBS. */
+  const addSourceIntoCurrentScene = (kind: LivestreamSource, extra?: Partial<LivestreamVideoInput>) => {
+    const target = dockTarget();
+    if (!target) {
+      addVideoSource(kind, extra);
+      closeSourceMenu();
+      return;
+    }
+    if (kind === "display") {
+      addScoreboardLayer(target.scene, target.role);
+      closeSourceMenu();
+      return;
+    }
+    if (busy || settings.videoInputs.length >= 8) return;
+    const n = settings.videoInputs.filter((item) => item.kind === kind).length + 1;
+    const defaultNames: Record<LivestreamSource, string> = {
+      camera: t("livestream.videoInputCameraName", { n }),
+      browser: t("livestream.videoInputBrowserName", { n }),
+      media: t("livestream.videoInputMediaName", { n }),
+      playlist: t("livestream.videoInputPlaylistName", { n }),
+      network: t("livestream.videoInputNetworkName", { n }),
+      display: t("livestream.sourceDisplayShort"),
+    };
+    const input = createVideoInput({
+      name: extra?.name?.trim() || defaultNames[kind],
+      kind,
+      ...extra,
+    });
+    const kindOf = (id: string) =>
+      id === input.id ? kind : settings.videoInputs.find((item) => item.id === id)?.kind;
+    if (!canAddSceneLayer(target.scene, input, kindOf)) return;
+    addLayer(target.scene, input.id, target.role, input);
+    closeSourceMenu();
   };
 
   const addCaptureSource = (cameraDevice: string) => {
     const named =
       cameras.find((item) => item.id === cameraDevice)?.name ??
       desktopSources.find((item) => item.id === cameraDevice)?.name;
-    addVideoSource("camera", {
+    addSourceIntoCurrentScene("camera", {
       cameraDevice,
       name: named?.trim().slice(0, 40) || undefined,
     });
-    setAddPick(null);
   };
 
   const addBrowserSource = () => {
     const browserUrl = sanitizeBrowserUrl(addBrowserUrl);
     if (!browserUrl) return;
-    addVideoSource("browser", { browserUrl });
-    setAddBrowserUrl("");
-    setAddPick(null);
+    addSourceIntoCurrentScene("browser", { browserUrl });
   };
 
   const addLibraryMedia = (mediaPath: string, title?: string) => {
     const path = sanitizeMediaPath(mediaPath);
     if (!path) return;
-    addVideoSource("media", {
+    addSourceIntoCurrentScene("media", {
       mediaPath: path,
       name: (title ?? mediaPathFileName(path)).slice(0, 40) || undefined,
     });
-    setAddPick(null);
   };
 
   const startAddPick = (
     kind: "camera" | "browser" | "media" | "window" | "screen" | "network",
   ) => {
+    setSourceMenuOpen(true);
     setAddPick(kind);
     setAddBrowserUrl("");
     setAddNetworkUrl("");
@@ -712,9 +792,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const addNetworkSource = () => {
     const networkUrl = sanitizeNetworkUrl(addNetworkUrl);
     if (!networkUrl) return;
-    addVideoSource("network", { networkUrl });
-    setAddNetworkUrl("");
-    setAddPick(null);
+    addSourceIntoCurrentScene("network", { networkUrl });
   };
 
   const addMediaSource = () => {
@@ -848,7 +926,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
 
   /** Scène live zetten (overgangsknop, dubbelklik, Stream Deck); de volgende komt klaar te staan. */
   const takeSceneNow = (scene: StreamScene | null | undefined) => {
-    if (!scene) return;
+    if (!scene || scene.layers.length === 0) return;
     if (!sceneReady(scene)) {
       openSetup("sources");
       return;
@@ -862,10 +940,23 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   };
 
   const cueScene = (scene: StreamScene) => {
-    if (busy || !sceneReady(scene)) return;
+    if (busy) return;
+    if (scene.layers.length > 0 && !sceneReady(scene)) return;
     setPreviewSceneId(scene.id);
-    if (editing?.role === "preview") setEditing(null);
-    void persist(applyScenePreview(settings, scene.id));
+    if (editing) setEditing(null);
+    void persist({ previewSceneId: scene.id, ...applyScenePreview(settings, scene.id) });
+  };
+
+  /** Nieuwe scène, nog zonder bron. Daarna kies je in Bronnen wat erin komt. */
+  const createSceneNow = () => {
+    if (busy || settings.scenes.length >= STREAM_SCENE_LIMIT) return;
+    const scene = createNamedScene(sceneDraft ?? "");
+    if (!scene) return;
+    const scenes = [...settings.scenes, scene];
+    setSceneDraft(null);
+    setPreviewSceneId(scene.id);
+    if (editing) setEditing(null);
+    void persist({ scenes, previewSceneId: scene.id });
   };
 
   const duplicateSceneNow = (scene: StreamScene) => {
@@ -874,7 +965,11 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     const index = settings.scenes.findIndex((item) => item.id === scene.id);
     const scenes = [...settings.scenes.slice(0, index + 1), copy, ...settings.scenes.slice(index + 1)];
     setPreviewSceneId(copy.id);
-    void persist({ scenes, ...applyScenePreview({ ...settings, scenes }, copy.id) });
+    void persist({
+      scenes,
+      previewSceneId: copy.id,
+      ...applyScenePreview({ ...settings, scenes }, copy.id),
+    });
   };
 
   /**
@@ -885,9 +980,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     if (busy || settings.scenes.length <= 1) return;
     const scenes = settings.scenes.filter((item) => item.id !== scene.id);
     const inputId = sceneInputId(scene);
-    const stillUsed = scenes.some((item) => item.layers.some((layer) => layer.inputId === inputId));
+    const stillUsed = Boolean(inputId) && scenes.some((item) => item.layers.some((layer) => layer.inputId === inputId));
     if (editing) setEditing(null);
-    if (!stillUsed && settings.videoInputs.length > 1) {
+    if (inputId && !stillUsed && settings.videoInputs.length > 1) {
       removeVideoSource(inputId);
       return;
     }
@@ -902,7 +997,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     void persist({
       scenes,
       ...(wasActive ? applySceneSelection(base, nextActive.id) : { activeSceneId: nextActive.id }),
-      ...(nextPreview ? applyScenePreview(base, nextPreview.id) : { previewSceneId: "" }),
+      ...(nextPreview
+        ? { previewSceneId: nextPreview.id, ...applyScenePreview(base, nextPreview.id) }
+        : { previewSceneId: "" }),
     });
   };
 
@@ -939,7 +1036,12 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
   const editedLayer: StreamSceneLayer | null = editedScene
     ? editedScene.layers.find((layer) => layer.id === editing?.layerId) ?? sceneMainLayer(editedScene)
     : null;
-  const editedInput = editedLayer ? settings.videoInputs.find((input) => input.id === editedLayer.inputId) : undefined;
+  const sceneShowsOverlay = (scene: StreamScene | null) =>
+    Boolean(
+      scene?.layers.some(
+        (layer) => settings.videoInputs.find((item) => item.id === layer.inputId)?.kind !== "display",
+      ),
+    );
 
   useEffect(() => {
     // De bewerkte scène verdween (verwijderd, of de monitor toont nu niets): kader dicht.
@@ -948,23 +1050,87 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
 
   /** Het rode kader over een monitor, als die monitor bewerkt wordt. */
   const renderEditor = (scene: StreamScene | null, role: "program" | "preview") => {
-    if (!editing || editing.role !== role || !scene || !editedLayer || editedScene?.id !== scene.id) return null;
+    if (!editing || editing.role !== role || editing.tool !== "source" || !scene || !editedLayer || editedScene?.id !== scene.id) {
+      return null;
+    }
     return (
       <StreamLayerEditor
         layer={editedLayer}
         live={role === "program" && status.running}
+        canvas={resolutionSize(settings.resolution)}
+        t={t}
         onChange={(patch, commit) => changeLayer(scene.id, editedLayer.id, patch, commit)}
         others={scene.layers.filter((layer) => layer.id !== editedLayer.id && layer.visible)}
-        onSelect={(layerId) => setEditing({ role, layerId })}
+        onSelect={(layerId) => setEditing({ role, layerId, tool: "source" })}
+        onRemove={() => removeLayer(scene, editedLayer.id, role)}
       />
     );
   };
 
-  /** Bron als beeld-in-beeld bovenop een scène; daarna bewerk je meteen die nieuwe laag. */
-  const addLayer = (scene: StreamScene, inputId: string, role: "program" | "preview") => {
+  const renderOverlayEditor = (scene: StreamScene | null, role: "program" | "preview") => {
+    if (studioTab !== "live") return null;
+    if (!editing || editing.role !== role || editing.tool !== "overlay" || !scene) return null;
+    if (!sceneShowsOverlay(scene)) return null;
+    if (role === "program" && status.running && livePreview) return null;
+    return (
+      <SetupScoreboardThemeSection
+        variant="stream"
+        picture
+        settings={appSettings}
+        reloadSettings={reloadAppSettings}
+        homeTeam={match?.homeTeam}
+        awayTeam={match?.awayTeam}
+        liveMatch={match}
+        previewSport={match?.sport ?? null}
+        onSaved={() => void persist({ overlayPlay: "custom", overlayBreak: "custom" })}
+      />
+    );
+  };
+
+  /**
+   * Bron in een scène. De eerste vult het beeld, een volgende komt er als beeld-in-beeld op.
+   * Daarna bewerk je meteen die nieuwe laag. De scène blijft geselecteerd, ook als dit de eerste bron is.
+   */
+  const addLayer = (
+    scene: StreamScene,
+    inputId: string,
+    role: "program" | "preview",
+    extraInput?: LivestreamVideoInput,
+  ) => {
     const added = addSceneLayer(scene, inputId);
-    void persist({ scenes: settings.scenes.map((item) => (item.id === scene.id ? added.scene : item)) });
-    setEditing({ role, layerId: added.layerId });
+    const scenes = settings.scenes.map((item) => (item.id === scene.id ? added.scene : item));
+    const videoInputs = extraInput ? [...settings.videoInputs, extraInput] : settings.videoInputs;
+    const base = { ...settings, scenes, videoInputs };
+    const partial: Partial<LivestreamSettings> = extraInput ? { scenes, videoInputs } : { scenes };
+    const mainId = sceneInputId(added.scene);
+    if (role === "preview" || scene.id === settings.previewSceneId) {
+      partial.previewSceneId = scene.id;
+      if (scene.layers.length === 0 || !sceneHasInput(added.scene, settings.previewVideoInputId)) {
+        partial.previewVideoInputId = mainId;
+      }
+    }
+    if (
+      (role === "program" || scene.id === settings.activeSceneId) &&
+      (scene.layers.length === 0 || !sceneHasInput(added.scene, settings.activeVideoInputId))
+    ) {
+      Object.assign(partial, applySceneSelection(base, scene.id));
+    }
+    void persist(partial);
+    setEditing({ role, layerId: added.layerId, tool: "source" });
+  };
+
+  /**
+   * LED-scorebord als bron in deze scène. Bestaat de bron nog niet, dan maken we hem en leggen we
+   * hem meteen rechtsonder, zoals beeld-in-beeld in OBS.
+   */
+  const addScoreboardLayer = (scene: StreamScene, role: "program" | "preview") => {
+    const existing = settings.videoInputs.find((item) => item.kind === "display");
+    if (existing) {
+      addLayer(scene, existing.id, role);
+      return;
+    }
+    const input = createVideoInput({ kind: "display", name: t("livestream.sourceDisplayShort") });
+    addLayer(scene, input.id, role, input);
   };
 
   /**
@@ -972,8 +1138,13 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
    * andere hoofdbron verder: anders zou de stream naar een andere scène springen.
    */
   const removeLayer = (scene: StreamScene, layerId: string, role: "program" | "preview") => {
-    const next = removeSceneLayer(scene, layerId);
+    const removed = scene.layers.find((layer) => layer.id === layerId);
+    let next = removeSceneLayer(scene, layerId);
     if (next === scene) return;
+    if (next.layers.length === 0 && !next.name.trim() && removed) {
+      const input = settings.videoInputs.find((item) => item.id === removed.inputId);
+      next = { ...next, name: (input ? inputLabel(input) : labelOfScene(scene)).slice(0, 40) };
+    }
     const scenes = settings.scenes.map((item) => (item.id === scene.id ? next : item));
     const base = { ...settings, scenes };
     const partial: Partial<LivestreamSettings> = { scenes };
@@ -984,7 +1155,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
       Object.assign(partial, applyScenePreview(base, scene.id));
     }
     void persist(partial);
-    if (editing?.layerId === layerId) setEditing({ role, layerId: null });
+    if (editing?.layerId === layerId) {
+      setEditing(next.layers.length === 0 ? null : { role, layerId: null, tool: editing.tool });
+    }
   };
 
   /** Welke bronnen er nog bij kunnen in deze scène, en anders waarom niet. */
@@ -1004,28 +1177,338 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     };
   };
 
-  /** Knop op een monitor om het kader van die scène te bewerken. */
-  const renderEditToggle = (scene: StreamScene | null, role: "program" | "preview") => {
-    if (!scene || !settings.studioPreview || !active) return null;
-    if (role === "preview" && scene.id === settings.activeSceneId) return null;
-    const on = editing?.role === role;
+  /** Bronnenlijst van de scène die je nu instelt: live, of de volgende als je die bewerkt. */
+  const renderSourcesDock = () => {
+    // Bronnen horen bij de scène die je in de lijst koos (blauw). Alleen tijdens bewerken van LIVE
+    // blijft de lijst op de live scène, zodat het rode kader en de lijst hetzelfde beeld zijn.
+    const dockScene = editing?.role === "program" ? activeScene : (previewScene ?? activeScene);
+    if (!dockScene) return null;
+    const dockRole: "program" | "preview" =
+      editing?.role === "program" || !previewScene ? "program" : "preview";
+    const options = layerOptions(dockScene);
+    const displayInput = settings.videoInputs.find((item) => item.kind === "display");
+    const scoreboardInScene = Boolean(
+      displayInput && dockScene.layers.some((layer) => layer.inputId === displayInput.id),
+    );
+    const scoreboardAddable =
+      !scoreboardInScene &&
+      (displayInput
+        ? options.sources.some((source) => source.id === displayInput.id)
+        : options.sources.length > 0 || !options.hint);
+    const sourceLabel = (layer: StreamSceneLayer) => {
+      const input = settings.videoInputs.find((item) => item.id === layer.inputId);
+      return input ? inputLabel(input) : "—";
+    };
+    const kindOf = (id: string) => settings.videoInputs.find((input) => input.id === id)?.kind;
+    const canNew = (kind: LivestreamSource) =>
+      canAddSceneLayer(dockScene, { id: "__new__", kind }, kindOf) &&
+      (kind === "display" || settings.videoInputs.length < 8) &&
+      !(kind === "display" && scoreboardInScene);
+    const addPanel = (
+      <div className="flex flex-col gap-0.5">
+        {addPick ? (
+          <>
+            <div className="px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white/50">
+              {addPick === "camera"
+                ? t("livestream.cameraPick")
+                : addPick === "window"
+                  ? t("livestream.windowPick")
+                  : addPick === "screen"
+                    ? t("livestream.screenPick")
+                    : addPick === "browser"
+                      ? t("livestream.browserUrl")
+                      : addPick === "network"
+                        ? t("livestream.networkUrl")
+                        : t("livestream.mediaPick")}
+            </div>
+            {addPick === "camera" || addPick === "window" || addPick === "screen" ? (
+              <div className="max-h-40 overflow-y-auto">
+                {addPick === "camera" && cameras.length === 0 ? (
+                  <button
+                    type="button"
+                    disabled={sourceLocked}
+                    onClick={() => void loadCameras()}
+                    className="h-7 w-full truncate rounded px-1 text-left text-xs text-amber-200 hover:bg-zinc-800"
+                  >
+                    {t("livestream.refreshCameras")}
+                  </button>
+                ) : null}
+                {(addPick === "window" || addPick === "screen") &&
+                (addPick === "window" ? windowSources : screenSources).length === 0 ? (
+                  <button
+                    type="button"
+                    disabled={sourceLocked}
+                    onClick={() => void loadDesktopSources()}
+                    className="h-7 w-full truncate rounded px-1 text-left text-xs text-amber-200 hover:bg-zinc-800"
+                  >
+                    {t("livestream.refreshWindows")}
+                  </button>
+                ) : null}
+                {(addPick === "camera"
+                  ? cameras
+                  : addPick === "window"
+                    ? windowSources
+                    : screenSources
+                ).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    disabled={sourceLocked || usedCameraIds.has(item.id)}
+                    title={item.name}
+                    onClick={() => addCaptureSource(item.id)}
+                    className="h-7 w-full truncate rounded px-1 text-left text-xs font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    {item.name}
+                  </button>
+                ))}
+              </div>
+            ) : addPick === "network" ? (
+              <div className="flex flex-col gap-0.5 p-0.5">
+                <Input
+                  aria-label={t("livestream.networkUrl")}
+                  className="h-7 px-1 text-xs"
+                  inputMode="url"
+                  placeholder={t("livestream.networkUrlPlaceholder")}
+                  value={addNetworkUrl}
+                  disabled={sourceLocked}
+                  onChange={(e) => setAddNetworkUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addNetworkSource();
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={sourceLocked || !sanitizeNetworkUrl(addNetworkUrl)}
+                  onClick={addNetworkSource}
+                  className="h-7 rounded text-xs font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  {t("common.add")}
+                </button>
+              </div>
+            ) : addPick === "browser" ? (
+              <div className="flex flex-col gap-0.5 p-0.5">
+                <Input
+                  aria-label={t("livestream.browserUrl")}
+                  className="h-7 px-1 text-xs"
+                  type="url"
+                  inputMode="url"
+                  placeholder={t("livestream.browserUrlPlaceholder")}
+                  value={addBrowserUrl}
+                  disabled={sourceLocked}
+                  onChange={(e) => setAddBrowserUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addBrowserSource();
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={sourceLocked || !sanitizeBrowserUrl(addBrowserUrl)}
+                  onClick={addBrowserSource}
+                  className="h-7 rounded text-xs font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  {t("common.add")}
+                </button>
+              </div>
+            ) : (
+              <div className="max-h-36 overflow-y-auto">
+                <button
+                  type="button"
+                  disabled={sourceLocked}
+                  onClick={() => {
+                    void (async () => {
+                      const mediaPath = await pickLocalMedia();
+                      if (!mediaPath) return;
+                      addLibraryMedia(mediaPath);
+                    })();
+                  }}
+                  className="h-7 w-full truncate rounded px-1 text-left text-xs font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                >
+                  {t("livestream.mediaPick")}
+                </button>
+                {(libraryMedia ?? [])
+                  .filter((item) => item.active !== false && !item.hideFromLibrary)
+                  .map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      disabled={sourceLocked}
+                      title={item.title || mediaPathFileName(item.path)}
+                      onClick={() => addLibraryMedia(item.path, item.title)}
+                      className="h-7 w-full truncate rounded px-1 text-left text-xs font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                    >
+                      {item.title || mediaPathFileName(item.path)}
+                    </button>
+                  ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setAddPick(null)}
+              className="h-6 text-[10px] text-muted-foreground hover:text-foreground"
+            >
+              {t("common.cancel")}
+            </button>
+          </>
+        ) : (
+          <>
+            {(
+              [
+                ["camera", t("livestream.sourceCamera")],
+                ["window", t("livestream.sourceWindow")],
+                ["screen", t("livestream.sourceScreen")],
+                ["network", t("livestream.sourceNetwork")],
+                ["browser", t("livestream.sourceBrowser")],
+                ["media", t("livestream.sourceMedia")],
+                ["playlist", t("livestream.sourcePlaylist")],
+                ["display", t("livestream.sourceDisplay")],
+              ] as const
+            ).map(([kind, label]) => (
+              <button
+                key={kind}
+                type="button"
+                disabled={sourceLocked || !canNew(kind === "window" || kind === "screen" ? "camera" : kind)}
+                onClick={() => {
+                  if (kind === "display") {
+                    addSourceIntoCurrentScene("display");
+                    return;
+                  }
+                  if (kind === "playlist") {
+                    addSourceIntoCurrentScene("playlist");
+                    return;
+                  }
+                  startAddPick(kind);
+                }}
+                className="h-7 w-full truncate rounded px-1.5 text-left text-xs font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+              >
+                {label}
+              </button>
+            ))}
+            {options.sources.length > 0 ? (
+              <>
+                <div className="mt-0.5 border-t border-border px-1.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-white/40">
+                  {t("livestream.sourceAddExisting")}
+                </div>
+                {options.sources.map((source) => (
+                  <button
+                    key={source.id}
+                    type="button"
+                    disabled={sourceLocked}
+                    onClick={() => {
+                      addLayer(dockScene, source.id, dockRole);
+                      closeSourceMenu();
+                    }}
+                    className="h-7 w-full truncate rounded px-1.5 text-left text-xs font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
+                  >
+                    {source.label}
+                  </button>
+                ))}
+              </>
+            ) : options.hint ? (
+              <p className="px-1.5 py-1 text-[10px] text-muted-foreground">{options.hint}</p>
+            ) : null}
+          </>
+        )}
+      </div>
+    );
     return (
-      <button
-        type="button"
-        aria-pressed={on}
-        title={on ? t("livestream.sceneEditDone") : t("livestream.sceneEdit")}
-        onClick={(event) => {
-          event.stopPropagation();
-          setEditing(on ? null : { role, layerId: null });
+      <SceneSourcesDock
+        scene={dockScene}
+        selectedLayerId={editing?.role === dockRole ? editedLayer?.id ?? null : null}
+        sourceLabel={sourceLabel}
+        addOpen={sourceMenuOpen}
+        addPanel={addPanel}
+        properties={(() => {
+          if (editing?.role !== dockRole || !editedLayer) return null;
+          const input = settings.videoInputs.find((item) => item.id === editedLayer.inputId);
+          if (!input || input.kind !== "playlist") return null;
+          return (
+            <StreamPlaylistEditor
+              items={input.playlistItems}
+              loop={input.mediaLoop}
+              disabled={sourceLocked}
+              library={libraryMedia}
+              t={t}
+              onItems={(playlistItems) => void patchVideoInput(input.id, { playlistItems })}
+              onLoop={(mediaLoop) => void patchVideoInput(input.id, { mediaLoop })}
+              onPickFiles={pickLocalMediaFiles}
+            />
+          );
+        })()}
+        t={t}
+        onSelect={(layerId) => setEditing({ role: dockRole, layerId, tool: "source" })}
+        onToggleAdd={() => {
+          setSourceMenuOpen((open) => !open);
+          setAddPick(null);
         }}
-        onDoubleClick={(event) => event.stopPropagation()}
-        className={`absolute bottom-1 right-1 z-50 flex h-6 items-center gap-1 rounded px-1.5 text-[10px] font-semibold ${
-          on ? "bg-primary text-primary-foreground" : "bg-black/70 text-white/80 hover:bg-black/90 hover:text-white"
-        }`}
-      >
-        <Crop className="h-3 w-3" aria-hidden />
-        {on ? t("livestream.sceneEditDone") : t("livestream.sceneEdit")}
-      </button>
+        onToggleVisible={(layerId) => {
+          const layer = dockScene.layers.find((item) => item.id === layerId);
+          if (layer) changeLayer(dockScene.id, layerId, { visible: !layer.visible }, true);
+        }}
+        onToggleLock={(layerId) => {
+          const layer = dockScene.layers.find((item) => item.id === layerId);
+          if (layer) changeLayer(dockScene.id, layerId, { locked: !layer.locked }, true);
+        }}
+        onMove={(layerId, delta) =>
+          void persist({
+            scenes: settings.scenes.map((scene) =>
+              scene.id === dockScene.id ? { ...scene, layers: moveSceneLayer(scene.layers, layerId, delta) } : scene,
+            ),
+          })
+        }
+        onRemove={(layerId) => removeLayer(dockScene, layerId, dockRole)}
+        onTransform={(layerId, action) => {
+          const layer = dockScene.layers.find((item) => item.id === layerId);
+          if (!layer || layer.locked) return;
+          changeLayer(dockScene.id, layerId, transformSceneLayer(layer, action), true);
+        }}
+      />
+    );
+  };
+
+  /** Knoppen op een monitor: kader van de bron, of de overlay, nooit tegelijk. */
+  const renderEditToggle = (scene: StreamScene | null, role: "program" | "preview") => {
+    if (!scene || scene.layers.length === 0 || !settings.studioPreview || !active) return null;
+    if (role === "preview" && scene.id === settings.activeSceneId) return null;
+    const onSource = editing?.role === role && editing.tool === "source";
+    const onOverlay = editing?.role === role && editing.tool === "overlay";
+    const showOverlay = sceneShowsOverlay(scene);
+    const btn = (on: boolean) =>
+      on
+        ? "bg-primary text-primary-foreground"
+        : "bg-black/70 text-white/80 hover:bg-black/90 hover:text-white";
+    return (
+      <div className="absolute bottom-1 left-1 z-50 flex gap-1">
+        <button
+          type="button"
+          aria-pressed={onSource}
+          title={onSource ? t("livestream.sceneEditDone") : t("livestream.sceneEdit")}
+          onClick={(event) => {
+            event.stopPropagation();
+            setEditing(onSource ? null : { role, layerId: editing?.layerId ?? null, tool: "source" });
+          }}
+          onDoubleClick={(event) => event.stopPropagation()}
+          className={`flex h-6 items-center gap-1 rounded px-1.5 text-[10px] font-semibold ${btn(onSource)}`}
+        >
+          <Crop className="h-3 w-3" aria-hidden />
+          {onSource ? t("livestream.sceneEditDone") : t("livestream.sceneEdit")}
+        </button>
+        {showOverlay ? (
+          <button
+            type="button"
+            aria-pressed={onOverlay}
+            title={onOverlay ? t("livestream.overlayEditDone") : t("livestream.overlayEdit")}
+            onClick={(event) => {
+              event.stopPropagation();
+              setEditing(onOverlay ? null : { role, layerId: null, tool: "overlay" });
+            }}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className={`flex h-6 items-center gap-1 rounded px-1.5 text-[10px] font-semibold ${btn(onOverlay)}`}
+          >
+            <Layers className="h-3 w-3" aria-hidden />
+            {onOverlay ? t("livestream.overlayEditDone") : t("livestream.overlayEdit")}
+          </button>
+        ) : null}
+      </div>
     );
   };
 
@@ -1041,6 +1524,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
 
   const renderPicture = (scene: StreamScene, role: "program" | "preview") => {
     const input = inputOf(scene);
+    if (scene.layers.length === 0) return <StudioMonitorEmpty>{t("livestream.sceneEmpty")}</StudioMonitorEmpty>;
     if (!input) return <StudioMonitorEmpty>{t("livestream.switcherNeedsSetup")}</StudioMonitorEmpty>;
     if (!settings.studioPreview) {
       return <StudioMonitorEmpty>{t("livestream.studioPreviewDisabled")}</StudioMonitorEmpty>;
@@ -1070,6 +1554,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           sceneMode
           liveCameras={!status.running && !holdPreview}
           liveDisplay={!status.running && !holdPreview}
+          hideOverlay={editing?.role === role && editing.tool === "overlay" && sceneShowsOverlay(scene)}
           settingsOverride={{
             ...settings,
             ...applySceneSelection(settings, scene.id),
@@ -1093,12 +1578,12 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     const showJpeg =
       jpegForInput &&
       (input.kind === "browser" ||
-        input.kind === "media" ||
+        isMediaLikeSource(input.kind) ||
         (input.kind === "camera" && status.running));
     if (showJpeg) {
       // Website en media: rauw bronbeeld, dus hier in het kader zetten. Een live camera komt als beeld
       // van de streampagina, met kader, score en sponsors er al in.
-      if (input.kind === "browser" || input.kind === "media") return framedImage(livePreview ?? "", scene, input);
+      if (input.kind === "browser" || isMediaLikeSource(input.kind)) return framedImage(livePreview ?? "", scene, input);
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={livePreview ?? undefined} alt="" className="absolute inset-0 h-full w-full object-contain" />
@@ -1113,6 +1598,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         <StreamProgramPage
           embedded
           cameraOverride={input.cameraDevice}
+          hideOverlay={editing?.role === role && editing.tool === "overlay" && sceneShowsOverlay(scene)}
           settingsOverride={{
             ...settings,
             ...applySceneSelection(settings, scene.id),
@@ -1141,6 +1627,27 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         <StudioMonitorEmpty>
           {input.mediaPath ? t("livestream.previewMediaLoading") : t("livestream.previewMedia")}
         </StudioMonitorEmpty>
+      );
+    }
+    if (input.kind === "playlist") {
+      if (role === "program" && status.running && livePreview) {
+        return (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={livePreview} alt="" className="absolute inset-0 h-full w-full object-contain" />
+        );
+      }
+      return (
+        <StreamProgramPage
+          embedded
+          sceneMode
+          liveCameras={!status.running && !holdPreview}
+          liveDisplay={!status.running && !holdPreview}
+          hideOverlay={editing?.role === role && editing.tool === "overlay" && sceneShowsOverlay(scene)}
+          settingsOverride={{
+            ...settings,
+            ...applySceneSelection(settings, scene.id),
+          }}
+        />
       );
     }
     if (status.running) {
@@ -1200,7 +1707,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     if (
       livePreview &&
       (livePreviewInputId ? livePreviewInputId === input.id : input.id === settings.activeVideoInputId) &&
-      (input.kind === "browser" || input.kind === "media")
+      (input.kind === "browser" || isMediaLikeSource(input.kind))
     ) {
       return framedImage(livePreview, scene, input);
     }
@@ -1236,8 +1743,9 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     );
   };
 
-  const mixer = settings.audioEnabled ? (
+  const renderMixer = (compact = false) => settings.audioEnabled ? (
     <LivestreamAudioMixer
+      compact={compact}
       channels={settings.audioChannels}
       masterVolume={settings.audioMasterVolume}
       devices={mergeAudioDeviceLists(audioDevices, sourceAudioDevices(settings.videoInputs))}
@@ -1552,6 +2060,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                   <StudioMonitorEmpty>{t("livestream.monitorSame")}</StudioMonitorEmpty>
                 )}
                 {renderEditor(previewScene, "preview")}
+                {renderOverlayEditor(previewScene, "preview")}
                 {renderEditToggle(previewScene, "preview")}
               </StudioMonitor>
             </div>
@@ -1613,61 +2122,32 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                   <StudioMonitorEmpty>{t("livestream.switcherNeedsSetup")}</StudioMonitorEmpty>
                 )}
                 {renderEditor(activeScene, "program")}
+                {renderOverlayEditor(activeScene, "program")}
                 {renderEditToggle(activeScene, "program")}
               </StudioMonitor>
             </div>
           </div>
 
-          {editing && editedScene && editedLayer ? (
-            <StreamLayerPanel
-              scene={editedScene}
-              layer={editedLayer}
-              sceneLabel={labelOfScene(editedScene)}
-              sourceLabel={(layer) => {
-                const input = settings.videoInputs.find((item) => item.id === layer.inputId);
-                return input ? inputLabel(input) : "—";
-              }}
-              colorSupported={layerColorSupported(editedInput?.kind ?? "", sceneIsComposite(editedScene))}
-              addableSources={layerOptions(editedScene).sources}
-              addHint={layerOptions(editedScene).hint}
-              onAddLayer={(inputId) => addLayer(editedScene, inputId, editing.role)}
-              onRemoveLayer={(layerId) => removeLayer(editedScene, layerId, editing.role)}
-              live={editing.role === "program" && status.running}
-              t={t}
-              onLayerChange={(patch, commit) => changeLayer(editedScene.id, editedLayer.id, patch, commit)}
-              onSceneName={(name) =>
-                void persist({
-                  scenes: settings.scenes.map((scene) =>
-                    scene.id === editedScene.id ? { ...scene, name: name.trim().slice(0, 40) } : scene,
-                  ),
-                })
-              }
-              onSelectLayer={(layerId) => setEditing({ role: editing.role, layerId })}
-              onMoveLayer={(layerId, delta) =>
-                void persist({
-                  scenes: settings.scenes.map((scene) =>
-                    scene.id === editedScene.id ? { ...scene, layers: moveSceneLayer(scene.layers, layerId, delta) } : scene,
-                  ),
-                })
-              }
-              onReset={() => changeLayer(editedScene.id, editedLayer.id, resetSceneLayer(editedLayer), true)}
-              onClose={() => setEditing(null)}
-            />
-          ) : null}
-
-          <div className="grid shrink-0 grid-cols-1 items-start gap-1.5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
-            <div className="overflow-x-auto rounded-md border border-border bg-zinc-950/50 p-1">
-              <div className="grid grid-cols-[repeat(auto-fit,minmax(8.5rem,1fr))] gap-1">
+          <div className="grid h-[24rem] shrink-0 grid-cols-1 gap-1 lg:grid-cols-[minmax(13rem,16rem)_minmax(15rem,18rem)_minmax(22rem,1fr)_12.5rem]">
+            <section className="flex min-h-0 flex-col overflow-hidden rounded-md border border-border bg-zinc-950/50">
+              <div className="border-b border-border px-2 py-1.5 text-xs font-semibold uppercase text-zinc-200">
+                {t("livestream.dockScenes")}
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-1">
+              <div className="flex flex-col gap-0.5">
                 {settings.scenes.map((scene, index) => {
                   const input = inputOf(scene);
-                  if (!input) return null;
+                  const empty = scene.layers.length === 0;
+                  if (!input && !empty) return null;
                   const on = scene.id === activeScene?.id;
                   const next = scene.id === previewScene?.id;
-                  const ready = videoInputReady(input);
+                  const named = !input || videoInputReady(input);
                   return (
                     <div
                       key={scene.id}
-                      className="relative overflow-hidden rounded bg-zinc-900 text-left ring-1 ring-white/10 hover:ring-white/25"
+                      className={`relative overflow-hidden rounded text-left ${
+                        next ? "bg-blue-700 text-white" : "bg-zinc-900 text-zinc-100 hover:bg-zinc-800"
+                      }`}
                     >
                       <div
                         role="button"
@@ -1681,11 +2161,14 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                           event.preventDefault();
                           cueScene(scene);
                         }}
-                        className="relative aspect-video bg-black"
+                        className={named ? "flex h-8 items-center px-2 pr-12 text-xs font-medium" : "relative min-h-[4.25rem] bg-black"}
                       >
-                        <div className={`absolute inset-x-0 top-0 z-10 h-1 ${on ? "bg-emerald-500" : next ? "bg-amber-500" : "bg-zinc-700"}`} />
-                        {ready ? (
-                          renderTilePicture(scene, input)
+                        <div className={named ? "hidden" : `absolute inset-x-0 top-0 z-10 h-1 ${on ? "bg-emerald-500" : next ? "bg-amber-500" : "bg-zinc-700"}`} />
+                        {named ? (
+                          <span className="truncate">
+                            {labelOfScene(scene)}
+                            {on ? " · LIVE" : ""}
+                          </span>
                         ) : input.kind === "camera" ? (
                           <div
                             className="absolute inset-0 z-20 flex items-center p-1"
@@ -1765,10 +2248,32 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                               {t("livestream.mediaPick")}
                             </Button>
                           </div>
+                        ) : input.kind === "playlist" ? (
+                          <div
+                            className="absolute inset-0 z-20 flex items-center justify-center p-1"
+                            onClick={(event) => event.stopPropagation()}
+                            onDoubleClick={(event) => event.stopPropagation()}
+                          >
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[10px]"
+                              disabled={sourceLocked}
+                              onClick={() => {
+                                void (async () => {
+                                  const paths = await pickLocalMediaFiles();
+                                  if (paths.length === 0) return;
+                                  void patchVideoInput(input.id, { playlistItems: playlistItemsFromPaths(paths) });
+                                })();
+                              }}
+                            >
+                              {t("livestream.playlistAddFiles")}
+                            </Button>
+                          </div>
                         ) : (
                           renderTilePicture(scene, input)
                         )}
-                        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 truncate bg-black/70 px-1 py-0.5 text-[10px] font-medium text-white">
+                        <div className={`pointer-events-none absolute inset-x-0 bottom-0 z-10 truncate bg-black/70 px-1 py-0.5 text-[10px] font-medium text-white ${named ? "hidden" : ""}`}>
                           <span className="mr-0.5 text-white/40">{index + 1}</span>
                           {labelOfScene(scene)}
                           {sceneIsComposite(scene) ? (
@@ -1778,7 +2283,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                           ) : null}
                         </div>
                       </div>
-                      {ready && settings.scenes.length < STREAM_SCENE_LIMIT ? (
+                      {named && settings.scenes.length < STREAM_SCENE_LIMIT ? (
                         <button
                           type="button"
                           aria-label={t("livestream.sceneDuplicate")}
@@ -1813,222 +2318,102 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                     </div>
                   );
                 })}
-                {settings.videoInputs.length < 8 ? (
-                  <div className="flex min-h-[4.75rem] flex-col justify-center gap-0.5 rounded bg-zinc-900/80 p-1 ring-1 ring-dashed ring-white/20">
-                    {addPick ? (
-                      <>
-                        <div className="px-0.5 text-[9px] font-semibold uppercase tracking-wide text-white/50">
-                          {addPick === "camera"
-                            ? t("livestream.cameraPick")
-                            : addPick === "window"
-                              ? t("livestream.windowPick")
-                              : addPick === "screen"
-                                ? t("livestream.screenPick")
-                                : addPick === "browser"
-                                  ? t("livestream.browserUrl")
-                                  : addPick === "network"
-                                    ? t("livestream.networkUrl")
-                                    : t("livestream.mediaPick")}
-                        </div>
-                        {addPick === "camera" || addPick === "window" || addPick === "screen" ? (
-                          <div className="max-h-28 overflow-y-auto">
-                            {addPick === "camera" && cameras.length === 0 ? (
-                              <button
-                                type="button"
-                                disabled={sourceLocked}
-                                onClick={() => void loadCameras()}
-                                className="h-6 w-full truncate rounded text-left text-[10px] text-amber-200 hover:bg-zinc-800"
-                              >
-                                {t("livestream.refreshCameras")}
-                              </button>
-                            ) : null}
-                            {(addPick === "window" || addPick === "screen") &&
-                            (addPick === "window" ? windowSources : screenSources).length === 0 ? (
-                              <button
-                                type="button"
-                                disabled={sourceLocked}
-                                onClick={() => void loadDesktopSources()}
-                                className="h-6 w-full truncate rounded text-left text-[10px] text-amber-200 hover:bg-zinc-800"
-                              >
-                                {t("livestream.refreshWindows")}
-                              </button>
-                            ) : null}
-                            {(addPick === "camera"
-                              ? cameras
-                              : addPick === "window"
-                                ? windowSources
-                                : screenSources
-                            ).map((item) => (
-                              <button
-                                key={item.id}
-                                type="button"
-                                disabled={sourceLocked || usedCameraIds.has(item.id)}
-                                title={item.name}
-                                onClick={() => addCaptureSource(item.id)}
-                                className="h-6 w-full truncate rounded px-1 text-left text-[10px] font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
-                              >
-                                {item.name}
-                              </button>
-                            ))}
-                          </div>
-                        ) : addPick === "network" ? (
-                          <div className="flex flex-col gap-0.5">
-                            <Input
-                              aria-label={t("livestream.networkUrl")}
-                              className="h-7 px-1 text-[10px]"
-                              inputMode="url"
-                              placeholder={t("livestream.networkUrlPlaceholder")}
-                              value={addNetworkUrl}
-                              disabled={sourceLocked}
-                              onChange={(e) => setAddNetworkUrl(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") addNetworkSource();
-                              }}
-                            />
-                            <button
-                              type="button"
-                              disabled={sourceLocked || !sanitizeNetworkUrl(addNetworkUrl)}
-                              onClick={addNetworkSource}
-                              className="h-6 rounded text-[10px] font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
-                            >
-                              {t("common.add")}
-                            </button>
-                          </div>
-                        ) : addPick === "browser" ? (
-                          <div className="flex flex-col gap-0.5">
-                            <Input
-                              aria-label={t("livestream.browserUrl")}
-                              className="h-7 px-1 text-[10px]"
-                              type="url"
-                              inputMode="url"
-                              placeholder={t("livestream.browserUrlPlaceholder")}
-                              value={addBrowserUrl}
-                              disabled={sourceLocked}
-                              onChange={(e) => setAddBrowserUrl(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") addBrowserSource();
-                              }}
-                            />
-                            <button
-                              type="button"
-                              disabled={sourceLocked || !sanitizeBrowserUrl(addBrowserUrl)}
-                              onClick={addBrowserSource}
-                              className="h-6 rounded text-[10px] font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
-                            >
-                              {t("common.add")}
-                            </button>
-                          </div>
-                        ) : (
-                          <div className="max-h-24 overflow-y-auto">
-                            <button
-                              type="button"
-                              disabled={sourceLocked}
-                              onClick={() => {
-                                void (async () => {
-                                  const mediaPath = await pickLocalMedia();
-                                  if (!mediaPath) return;
-                                  addLibraryMedia(mediaPath);
-                                })();
-                              }}
-                              className="h-6 w-full truncate rounded px-1 text-left text-[10px] font-semibold text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
-                            >
-                              {t("livestream.mediaPick")}
-                            </button>
-                            {(libraryMedia ?? [])
-                              .filter((item) => item.active !== false && !item.hideFromLibrary)
-                              .map((item) => (
-                                <button
-                                  key={item.id}
-                                  type="button"
-                                  disabled={sourceLocked}
-                                  title={item.title || mediaPathFileName(item.path)}
-                                  onClick={() => addLibraryMedia(item.path, item.title)}
-                                  className="h-6 w-full truncate rounded px-1 text-left text-[10px] font-medium text-zinc-100 hover:bg-zinc-800 disabled:opacity-40"
-                                >
-                                  {item.title || mediaPathFileName(item.path)}
-                                </button>
-                              ))}
-                          </div>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setAddPick(null);
-                            setAddBrowserUrl("");
-                            setAddNetworkUrl("");
-                          }}
-                          className="h-5 text-[10px] text-muted-foreground hover:text-foreground"
-                        >
-                          {t("common.cancel")}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          type="button"
-                          disabled={sourceLocked}
-                          onClick={() => startAddPick("camera")}
-                          className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                        >
-                          {t("livestream.videoInputsAdd")}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={sourceLocked}
-                          onClick={() => startAddPick("window")}
-                          className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                        >
-                          {t("livestream.videoInputsAddWindow")}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={sourceLocked}
-                          onClick={() => startAddPick("screen")}
-                          className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                        >
-                          {t("livestream.videoInputsAddScreen")}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={sourceLocked}
-                          onClick={() => startAddPick("network")}
-                          className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                        >
-                          {t("livestream.videoInputsAddNetwork")}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={sourceLocked}
-                          onClick={() => startAddPick("browser")}
-                          className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                        >
-                          {t("livestream.videoInputsAddBrowser")}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={sourceLocked}
-                          onClick={() => startAddPick("media")}
-                          className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                        >
-                          {t("livestream.videoInputsAddMedia")}
-                        </button>
-                        {settings.videoInputs.some((item) => item.kind === "display") ? null : (
-                          <button
-                            type="button"
-                            disabled={sourceLocked}
-                            onClick={() => addVideoSource("display")}
-                            className="h-6 rounded text-[10px] font-semibold text-zinc-200 hover:bg-zinc-800 disabled:opacity-40"
-                          >
-                            {t("livestream.videoInputsAddDisplay")}
-                          </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ) : null}
               </div>
-            </div>
-            <div className="overflow-x-auto rounded-md border border-border bg-zinc-950/50 p-1.5">{mixer}</div>
+              </div>
+              <form
+                className="flex items-center gap-1 border-t border-border p-1"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (sceneDraft == null) {
+                    setSceneDraft(t("livestream.sceneNewDefault", { n: settings.scenes.length + 1 }));
+                    return;
+                  }
+                  createSceneNow();
+                }}
+              >
+                {sceneDraft == null ? (
+                  <button
+                    type="submit"
+                    disabled={sourceLocked || settings.scenes.length >= STREAM_SCENE_LIMIT}
+                    className="h-8 rounded bg-zinc-800 px-2 text-xs font-semibold text-zinc-100 hover:bg-zinc-700 disabled:opacity-40"
+                  >
+                    {t("livestream.sceneAdd")}
+                  </button>
+                ) : (
+                  <>
+                    <Input
+                      aria-label={t("livestream.sceneNewTitle")}
+                      className="h-8 min-w-0 flex-1 px-2 text-xs"
+                      value={sceneDraft}
+                      autoFocus
+                      maxLength={40}
+                      placeholder={t("livestream.sceneNewPlaceholder")}
+                      onChange={(e) => setSceneDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") setSceneDraft(null);
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!sceneDraft.trim()}
+                      className="h-8 rounded bg-primary px-2 text-xs font-semibold text-primary-foreground disabled:opacity-40"
+                    >
+                      {t("common.ok")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSceneDraft(null)}
+                      className="h-8 rounded bg-zinc-800 px-2 text-xs text-zinc-200 hover:bg-zinc-700"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  </>
+                )}
+              </form>
+            </section>
+            {renderSourcesDock()}
+            <section className="flex min-h-0 flex-col overflow-hidden rounded-md border border-border bg-zinc-950/50">
+              <div className="border-b border-border px-2 py-1.5 text-xs font-semibold uppercase text-zinc-200">
+                {t("livestream.dockAudio")}
+              </div>
+              <div className="min-h-0 flex-1 overflow-x-auto p-1.5">{renderMixer(true)}</div>
+            </section>
+            <section className="flex min-h-0 flex-col gap-1.5 overflow-hidden rounded-md border border-border bg-zinc-950/50 p-2">
+              <div className="whitespace-nowrap text-xs font-semibold uppercase text-zinc-200">
+                {t("livestream.dockTransitions")}
+              </div>
+              <div className="whitespace-nowrap text-xs text-muted-foreground">{t("livestream.transitionDuration")}</div>
+              <Select
+                aria-label={t("livestream.transitionDuration")}
+                className="h-8 px-1 text-xs"
+                value={String(settings.transitionMs)}
+                onChange={(e) => void persist({ transitionMs: Number(e.target.value) })}
+              >
+                {transitionDurationOptions(settings.transitionMs).map((ms) => (
+                  <option key={ms} value={ms}>
+                    {(ms / 1000).toLocaleString(undefined, { maximumFractionDigits: 1 })} s
+                  </option>
+                ))}
+              </Select>
+              <div className="grid grid-cols-1 gap-0.5" role="group" aria-label={t("livestream.transition")}>
+                {STREAM_TRANSITIONS.map((kind) => (
+                  <button
+                    key={kind}
+                    type="button"
+                    aria-pressed={settings.transition === kind}
+                    title={t(`livestream.transitionHint_${kind}`)}
+                    onClick={() => void persist({ transition: kind })}
+                    className={`h-8 whitespace-nowrap rounded text-xs font-semibold ${
+                      settings.transition === kind
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                    }`}
+                  >
+                    {t(`livestream.transition_${kind}`)}
+                  </button>
+                ))}
+              </div>
+            </section>
           </div>
 
           <div className="flex shrink-0 flex-wrap items-center gap-1 rounded-md border border-border bg-zinc-950/70 p-1">
@@ -2156,6 +2541,8 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                             ? t("livestream.sourceBrowser")
                             : input.kind === "media"
                               ? t("livestream.videoInputMediaName", { n: index + 1 })
+                              : input.kind === "playlist"
+                                ? t("livestream.videoInputPlaylistName", { n: index + 1 })
                               : t("livestream.videoInputCameraName", { n: index + 1 })
                       }
                       onChange={(e) => void patchVideoInput(input.id, { name: e.target.value })}
@@ -2178,7 +2565,18 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
                   ) : null}
                 </div>
 
-                {input.kind === "media" ? (
+                {input.kind === "playlist" ? (
+                  <StreamPlaylistEditor
+                    items={input.playlistItems}
+                    loop={input.mediaLoop}
+                    disabled={sourceLocked}
+                    library={libraryMedia}
+                    t={t}
+                    onItems={(playlistItems) => void patchVideoInput(input.id, { playlistItems })}
+                    onLoop={(mediaLoop) => void patchVideoInput(input.id, { mediaLoop })}
+                    onPickFiles={pickLocalMediaFiles}
+                  />
+                ) : input.kind === "media" ? (
                   <div className="flex flex-col gap-1">
                     <StudioField label={t("livestream.mediaFile")} htmlFor={`ls-vin-media-${input.id}`}>
                       <div className="flex flex-wrap gap-2">
@@ -2451,7 +2849,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           </label>
           {settings.audioEnabled && (
             <>
-              {mixer}
+              {renderMixer()}
               {audioDevices.length === 0 ? (
                 <Button size="sm" variant="outline" onClick={() => void loadAudioDevices()} disabled={locked}>
                   {t("livestream.refreshAudio")}
@@ -2473,6 +2871,16 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
               {t("livestream.setupOverlayUnavailable")}
             </p>
           ) : null}
+          <SetupScoreboardThemeSection
+            variant="stream"
+            settings={appSettings}
+            reloadSettings={reloadAppSettings}
+            homeTeam={match?.homeTeam}
+            awayTeam={match?.awayTeam}
+            liveMatch={match}
+            previewSport={match?.sport ?? null}
+            onSaved={() => void persist({ overlayPlay: "custom", overlayBreak: "custom" })}
+          />
           <StudioSection
             title={t("livestream.layersSection")}
             summary={

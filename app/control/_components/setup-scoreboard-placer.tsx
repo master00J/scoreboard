@@ -240,6 +240,7 @@ export function SetupScoreboardPlacer({
   canvasWidth,
   canvasHeight,
   safeZonePx,
+  picture = false,
 }: {
   theme: ResolvedScoreboardTheme;
   onChange: (next: ResolvedScoreboardTheme, opts?: LayoutChangeOptions) => void;
@@ -259,6 +260,8 @@ export function SetupScoreboardPlacer({
   canvasWidth: number;
   canvasHeight: number;
   safeZonePx: number;
+  /** Overlay in een livestream-monitor: kaders op het beeld, geen apart canvas eronder. */
+  picture?: boolean;
 }) {
   const { t } = useTranslation();
   const liveElapsed = useLiveTimerSeconds();
@@ -574,7 +577,8 @@ export function SetupScoreboardPlacer({
   const px = (pct: number, total: number) => Math.round((pct / 100) * total);
 
   return (
-    <div className="space-y-3">
+    <div className={picture ? "pointer-events-none absolute inset-0" : "space-y-3"}>
+      {picture ? null : (
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <p className="max-w-2xl text-sm text-muted-foreground">
           {surface === "full"
@@ -609,23 +613,34 @@ export function SetupScoreboardPlacer({
           </label>
         </div>
       </div>
+      )}
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]">
-        <div className="min-w-0">
+      <div className={picture ? "pointer-events-none absolute inset-0" : "grid gap-4 lg:grid-cols-[minmax(0,1fr)_19rem]"}>
+        <div className={picture ? "pointer-events-none absolute inset-0" : "min-w-0"}>
           <div
             ref={canvasRef}
             tabIndex={0}
             role="application"
             aria-label={t("setup.themePlacerTitle")}
-            className="relative mx-auto overflow-hidden rounded-xl border border-border bg-[#050607] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className={
+              picture
+                ? "absolute inset-0 overflow-hidden bg-transparent outline-none"
+                : "relative mx-auto overflow-hidden rounded-xl border border-border bg-[#050607] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            }
             style={{
-              aspectRatio: `${canvasWidth} / ${canvasHeight}`,
-              width: `min(100%, calc(70vh * ${canvasWidth / canvasHeight}))`,
               touchAction: "none",
-              // De livestream-overlay is doorzichtig: een dambord laat zien waar straks het camerabeeld komt.
-              ...(isStreamSurface(surface)
-                ? { background: "repeating-conic-gradient(#1c222b 0% 25%, #161b22 0% 50%) 50% / 32px 32px" }
-                : {}),
+              ...(picture
+                ? { pointerEvents: "none" }
+                : {
+                    aspectRatio: `${canvasWidth} / ${canvasHeight}`,
+                    width: `min(100%, calc(70vh * ${canvasWidth / canvasHeight}))`,
+                    ...(isStreamSurface(surface)
+                      ? {
+                          background:
+                            "repeating-conic-gradient(#1c222b 0% 25%, #161b22 0% 50%) 50% / 32px 32px",
+                        }
+                      : {}),
+                  }),
             }}
             onPointerMove={onMove}
             onPointerUp={endDrag}
@@ -655,6 +670,7 @@ export function SetupScoreboardPlacer({
                 addedTime={addedTime}
                 shotClock={shotClock}
                 theme={previewTheme}
+                picture={picture}
               />
             </div>
 
@@ -688,7 +704,7 @@ export function SetupScoreboardPlacer({
                 <div
                   key={element.id}
                   data-layout-box={element.id}
-                  className={`absolute cursor-grab rounded-md border-2 bg-transparent ${TYPE_TONE[element.type]} ${
+                  className={`pointer-events-auto absolute cursor-grab rounded-md border-2 bg-transparent ${TYPE_TONE[element.type]} ${
                     isActive ? "border-white ring-2 ring-white/70" : "border-white/35 hover:border-white/70"
                   } ${element.hidden ? "border-dashed opacity-45" : ""}`}
                   style={{
@@ -728,12 +744,20 @@ export function SetupScoreboardPlacer({
               );
             })}
           </div>
+          {picture ? null : (
           <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
             {t("layoutEditor.canvasNote", { width: canvasWidth, height: canvasHeight })} {t("layoutEditor.keyboardHint")}
           </p>
+          )}
         </div>
 
-        <div className="space-y-3">
+        <div
+          className={
+            picture
+              ? "pointer-events-auto absolute right-1 top-8 z-50 max-h-[min(22rem,calc(100%-5rem))] w-[14.5rem] space-y-3 overflow-y-auto rounded-md border border-white/15 bg-zinc-950/90 p-2"
+              : "space-y-3"
+          }
+        >
           <div className="rounded-xl border border-border p-3">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold">{t("layoutEditor.elementsTitle")}</div>
@@ -985,6 +1009,7 @@ export function SetupScoreboardPlacer({
             </div>
           ) : null}
 
+          {picture ? null : (
           <details className="rounded-xl border border-border p-3">
             <summary className="cursor-pointer text-sm font-semibold">{t("setup.themeColorsTitle")}</summary>
             <div className="mt-3 space-y-3">
@@ -1002,10 +1027,11 @@ export function SetupScoreboardPlacer({
               ) : null}
             </div>
           </details>
+          )}
         </div>
       </div>
 
-      {active ? (
+      {picture || !active ? null : (
         <div className="text-xs text-muted-foreground" data-layout-status>
           {t("layoutEditor.posLine", {
             slot: elementLabel(active),
@@ -1020,7 +1046,7 @@ export function SetupScoreboardPlacer({
             layers: elements.length,
           })}
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

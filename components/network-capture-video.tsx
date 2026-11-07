@@ -3,7 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
-import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
+import { captureMediaStyle } from "@/lib/display-cover-media-style";
 import {
   NETWORK_SOURCE_CODEC_CANDIDATES,
   NETWORK_SOURCE_H264_CODEC,
@@ -283,7 +283,7 @@ export const NetworkCaptureVideo = forwardRef<NetworkCaptureVideoHandle, Network
           muted
           playsInline
           className={className}
-          style={DISPLAY_COVER_MEDIA_STYLE}
+          style={captureMediaStyle(className)}
         />
       </DisplayMediaStage>
     );

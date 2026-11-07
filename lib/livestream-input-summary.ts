@@ -56,12 +56,13 @@ export function summarizeAudioFollow(
 /** Korte naam voor een bron, met terugval op het type. */
 export function videoInputLabel(
   input: Pick<LivestreamVideoInput, "name" | "kind">,
-  labels: { camera: string; display: string; browser?: string; media?: string },
+  labels: { camera: string; display: string; browser?: string; media?: string; playlist?: string },
 ): string {
   if (input.name.trim()) return input.name.trim();
   if (input.kind === "display") return labels.display;
   if (input.kind === "browser") return labels.browser ?? "Browser";
   if (input.kind === "media") return labels.media ?? "Media";
+  if (input.kind === "playlist") return labels.playlist ?? labels.media ?? "Playlist";
   return labels.camera;
 }
 

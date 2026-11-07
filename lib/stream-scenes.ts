@@ -28,6 +28,8 @@ export type StreamSceneLayer = {
   rect: StreamLayerRect;
   crop: StreamLayerCrop;
   fit: StreamLayerFit;
+  /** Vastgezet: het kader op de monitor beweegt niet, zoals het slot in OBS. */
+  locked: boolean;
   /** 0–100. */
   opacity: number;
   /** 0–200, 100 = ongewijzigd. */
@@ -124,6 +126,7 @@ export function createSceneLayer(partial: Partial<StreamSceneLayer> & { inputId:
     rect: sanitizeLayerRect(partial.rect ?? FULL_FRAME_RECT),
     crop: sanitizeLayerCrop(partial.crop ?? NO_CROP),
     fit: parseLayerFit(partial.fit),
+    locked: partial.locked === true,
     opacity: Math.round(clamp(num(partial.opacity, 100), 0, 100)),
     brightness: filterValue(partial.brightness),
     contrast: filterValue(partial.contrast),
@@ -133,7 +136,42 @@ export function createSceneLayer(partial: Partial<StreamSceneLayer> & { inputId:
 
 /** De laag zoals een nieuwe bron hem krijgt: volledig beeld, ingepast, zonder filters. */
 export function resetSceneLayer(layer: StreamSceneLayer): StreamSceneLayer {
-  return createSceneLayer({ id: layer.id, inputId: layer.inputId, visible: layer.visible });
+  return createSceneLayer({ id: layer.id, inputId: layer.inputId, visible: layer.visible, locked: layer.locked });
+}
+
+/** OBS-transformatie: inpassen, vullen, uitrekken, midden, reset. */
+export type StreamLayerTransform = "fit" | "fill" | "stretch" | "center" | "reset";
+
+export function transformSceneLayer(
+  layer: StreamSceneLayer,
+  action: StreamLayerTransform,
+): Partial<Omit<StreamSceneLayer, "id" | "inputId">> {
+  if (action === "center") {
+    return {
+      rect: sanitizeLayerRect({
+        ...layer.rect,
+        x: (100 - layer.rect.w) / 2,
+        y: (100 - layer.rect.h) / 2,
+      }),
+    };
+  }
+  if (action === "reset") {
+    const next = resetSceneLayer(layer);
+    return {
+      rect: next.rect,
+      crop: next.crop,
+      fit: next.fit,
+      opacity: next.opacity,
+      brightness: next.brightness,
+      contrast: next.contrast,
+      saturation: next.saturation,
+    };
+  }
+  return {
+    rect: FULL_FRAME_RECT,
+    crop: NO_CROP,
+    fit: action === "fill" ? "cover" : action === "stretch" ? "stretch" : "contain",
+  };
 }
 
 /** Scène met één laag over het hele beeld: zo zag elke bron er uit vóór de scènes. */
@@ -151,8 +189,9 @@ export function migrateScenes(inputs: StreamSceneInputRef[]): StreamScene[] {
 }
 
 /**
- * Leest opgeslagen scènes. Lagen naar een verwijderde bron vallen weg, een scène zonder lagen ook.
- * Een bron die in geen enkele scène zit, krijgt er een: zo blijft elke bron te kiezen.
+ * Leest opgeslagen scènes. Lagen naar een verwijderde bron vallen weg. Een scène die daardoor leeg
+ * raakt ook. Een scène die leeg is opgeslagen, blijft: de bronnen zijn bewust weggehaald.
+ * Een bron die nergens als laag zit, krijgt geen extra scène: die voeg je zelf weer toe.
  */
 export function mergeStreamScenes(raw: unknown, inputs: StreamSceneInputRef[]): StreamScene[] {
   if (!Array.isArray(raw) || raw.length === 0) return migrateScenes(inputs);
@@ -173,18 +212,14 @@ export function mergeStreamScenes(raw: unknown, inputs: StreamSceneInputRef[]): 
       layerIds.add(layer.id);
       layers.push(layer);
     }
-    if (layers.length === 0) continue;
     let id = typeof r.id === "string" && ID_RE.test(r.id) ? r.id : randomId("s");
     if (sceneIds.has(id)) id = randomId("s");
     sceneIds.add(id);
-    out.push({ id, name: typeof r.name === "string" ? r.name.trim().slice(0, 40) : "", layers });
-  }
-  for (const input of inputs) {
-    if (out.length >= STREAM_SCENE_LIMIT) break;
-    if (out.some((scene) => sceneInputId(scene) === input.id)) continue;
-    const scene = sceneForInput(input, sceneIds.has(`s-${input.id}`) ? randomId("s") : `s-${input.id}`);
-    if (layerIds.has(scene.layers[0]!.id)) scene.layers[0]!.id = randomId("l");
-    out.push(scene);
+    const name = typeof r.name === "string" ? r.name.trim().slice(0, 40) : "";
+    const savedEmpty = Array.isArray(r.layers) && r.layers.length === 0;
+    // Leeg opgeslagen = bewust zonder bronnen. Alleen lagen naar weggehaalde bronnen: scène valt weg.
+    if (layers.length === 0 && !savedEmpty) continue;
+    out.push({ id, name, layers });
   }
   return out.length > 0 ? out : migrateScenes(inputs);
 }
@@ -224,7 +259,10 @@ export function resolveSceneSelection(
     scenes[0];
   const requestedPreview = byId(opts.previewSceneId);
   const preview =
-    (requestedPreview && sceneHasInput(requestedPreview, opts.previewInputId) ? requestedPreview : undefined) ??
+    (requestedPreview &&
+    (requestedPreview.layers.length === 0 || sceneHasInput(requestedPreview, opts.previewInputId))
+      ? requestedPreview
+      : undefined) ??
     scenes.find((scene) => scene.id !== active?.id && sceneInputId(scene) === opts.previewInputId) ??
     scenes.find((scene) => sceneInputId(scene) === opts.previewInputId) ??
     scenes.find((scene) => scene.id !== active?.id);
@@ -248,7 +286,7 @@ export function sceneIsComposite(scene: StreamScene | null | undefined): boolean
  * Bronnen die de streampagina zelf kan tekenen, zoals lagen in OBS. Het LED-scherm is een kopie van
  * het stadionscherm. Een website heeft een eigen venster en kan nog geen laag naast andere bronnen zijn.
  */
-export const LAYER_KINDS_IN_PAGE = ["camera", "media", "network", "display"] as const;
+export const LAYER_KINDS_IN_PAGE = ["camera", "media", "playlist", "network", "display"] as const;
 
 export function layerKindInPage(kind: string): boolean {
   return (LAYER_KINDS_IN_PAGE as readonly string[]).includes(kind);
@@ -267,7 +305,8 @@ export function canAddSceneLayer(
   kindOf: (inputId: string) => string | undefined,
 ): boolean {
   if (scene.layers.length >= STREAM_SCENE_LAYER_LIMIT) return false;
-  if (!layerKindInPage(input.kind)) return false;
+  if (scene.layers.some((layer) => layer.inputId === input.id)) return false;
+  if (!layerKindInPage(input.kind)) return scene.layers.length === 0 && input.kind === "browser";
   if (!scene.layers.every((layer) => layerKindInPage(kindOf(layer.inputId) ?? ""))) return false;
   if (input.kind === "network") {
     const networks = new Set(
@@ -278,15 +317,21 @@ export function canAddSceneLayer(
   return true;
 }
 
-/** Nieuwe laag bovenop, als beeld-in-beeld. */
+/** Lege scène met een naam. Bronnen komen er daarna in, zoals in OBS. */
+export function createNamedScene(name: string): StreamScene | null {
+  const trimmed = name.trim().slice(0, 40);
+  if (!trimmed) return null;
+  return { id: randomId("s"), name: trimmed, layers: [] };
+}
+
+/** Nieuwe laag. De eerste vult het beeld, een volgende komt er als beeld-in-beeld op. */
 export function addSceneLayer(scene: StreamScene, inputId: string): { scene: StreamScene; layerId: string } {
-  const layer = createSceneLayer({ inputId, rect: PIP_RECT });
+  const layer = createSceneLayer({ inputId, rect: scene.layers.length === 0 ? FULL_FRAME_RECT : PIP_RECT });
   return { scene: { ...scene, layers: [...scene.layers, layer] }, layerId: layer.id };
 }
 
-/** Laag weg; de laatste laag van een scène blijft. */
+/** Laag weg, ook de laatste: de scène mag leeg zijn, zoals in OBS. */
 export function removeSceneLayer(scene: StreamScene, layerId: string): StreamScene {
-  if (scene.layers.length <= 1) return scene;
   const layers = scene.layers.filter((layer) => layer.id !== layerId);
   return layers.length === scene.layers.length ? scene : { ...scene, layers };
 }
@@ -465,17 +510,34 @@ export function layerPlacement(
 }
 
 /**
+ * Programmabeeld is altijd 16:9. CSS-% mag dus niet in een vierkant 100×100 gerekend worden:
+ * `contain` van 16:9 in een vierkant letterbox’t tot ~56% hoog, en dat is precies de sprong
+ * zodra Fit/crop het identity-pad verlaat.
+ */
+export const STREAM_FRAME_ASPECT = { w: 16, h: 9 };
+
+/**
  * Dezelfde plaatsing als CSS-maten. `box` is het zichtbare vak in % van het programmabeeld (met
- * `overflow: hidden`), `media` is de hele bron in % van dat vak.
+ * `overflow: hidden`), `media` is de hele bron in % van dat vak. `outW`/`outH` zijn het
+ * canvasformaat; alleen de verhouding telt, standaard 16:9.
  */
 export function layerCssPlacement(
   srcW: number,
   srcH: number,
   layer: Pick<StreamSceneLayer, "rect" | "crop" | "fit">,
+  outW = STREAM_FRAME_ASPECT.w,
+  outH = STREAM_FRAME_ASPECT.h,
 ): { box: PixelRect; media: PixelRect } {
-  const { src, dst } = layerPlacementExact(srcW, srcH, layer, 100, 100);
+  const canvasW = Math.max(1e-6, outW);
+  const canvasH = Math.max(1e-6, outH);
+  const { src, dst } = layerPlacementExact(srcW, srcH, layer, canvasW, canvasH);
   return {
-    box: dst,
+    box: {
+      x: (dst.x / canvasW) * 100,
+      y: (dst.y / canvasH) * 100,
+      w: (dst.w / canvasW) * 100,
+      h: (dst.h / canvasH) * 100,
+    },
     media: {
       x: (-src.x / src.w) * 100,
       y: (-src.y / src.h) * 100,

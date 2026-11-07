@@ -805,10 +805,13 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     { ok: true; programWindow: BrowserWindow; plans: CapturePlan[] } | { ok: false; error: string }
   > => {
     const scene = programScene(settings);
-    if (sceneIsComposite(scene)) {
-      // Beeld-in-beeld: het streamvenster tekent alle lagen (camera's, media, LED, één netwerkbron).
+    if (sceneIsComposite(scene) || settings.source === "playlist") {
+      // Beeld-in-beeld, of een afspeellijst: de streampagina tekent de lagen (en de overlay).
       await deps.closeBrowserWindow();
       await deps.closeMediaWindow();
+      if (settings.source === "playlist" && resolveActiveVideoInput(settings).playlistItems.length === 0) {
+        return { ok: false, error: "Voeg bestanden toe aan de afspeellijst" };
+      }
       const networkUrl = compositeNetworkUrl(scene, settings.videoInputs);
       const ensured = await deps.ensureStreamWindow({
         camera: "",
@@ -1438,8 +1441,10 @@ export function createLivestreamController(deps: Deps): LivestreamController {
         getWindow: () => {
           const active = resolveActiveVideoInput(settings);
           if (isMediaAudioDevice(device)) {
-            if (settings.source !== "media" || active.id !== mediaAudioInputId(device)) return null;
-            return deps.getMediaWindow();
+            if (active.id !== mediaAudioInputId(device)) return null;
+            if (settings.source === "media") return deps.getMediaWindow();
+            if (settings.source === "playlist") return deps.getStreamWindow();
+            return null;
           }
           if (settings.source !== "browser" || active.id !== browserAudioInputId(device)) return null;
           return deps.getBrowserWindow();

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
+  STREAM_FRAME_ASPECT,
   layerCssFilter,
   layerCssPlacement,
   layerFramingIsIdentity,
@@ -35,6 +36,7 @@ export function StreamLayerFrame({
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [canvas, setCanvas] = useState(STREAM_FRAME_ASPECT);
   const framed = Boolean(layer) && !layerFramingIsIdentity(layer);
 
   useEffect(() => {
@@ -57,8 +59,19 @@ export function StreamLayerFrame({
     // Deze gebeurtenissen borrelen niet op, maar komen in de capture-fase wel langs het vak.
     const events = ["loadedmetadata", "resize", "load"] as const;
     for (const name of events) box.addEventListener(name, read, true);
+    const parent = box.parentElement;
+    const readCanvas = () => {
+      if (!parent) return;
+      const w = parent.clientWidth;
+      const h = parent.clientHeight;
+      if (w > 0 && h > 0) setCanvas((prev) => (prev.w === w && prev.h === h ? prev : { w, h }));
+    };
+    readCanvas();
+    const ro = parent ? new ResizeObserver(readCanvas) : null;
+    if (parent && ro) ro.observe(parent);
     return () => {
       for (const name of events) box.removeEventListener(name, read, true);
+      ro?.disconnect();
     };
   }, []);
 
@@ -66,7 +79,7 @@ export function StreamLayerFrame({
   let mediaStyle: CSSProperties = { left: 0, top: 0, width: "100%", height: "100%" };
   if (layer && framed) {
     const source = size ?? FALLBACK_SIZE;
-    const placed = layerCssPlacement(source.w, source.h, layer);
+    const placed = layerCssPlacement(source.w, source.h, layer, canvas.w, canvas.h);
     boxStyle = { left: pct(placed.box.x), top: pct(placed.box.y), width: pct(placed.box.w), height: pct(placed.box.h) };
     mediaStyle = {
       left: pct(placed.media.x),

@@ -100,9 +100,9 @@ function MixerStrip({
   onRemove?: () => void;
 }) {
   return (
-    <div className="flex w-[96px] shrink-0 flex-col gap-1 rounded-md border border-border/70 bg-zinc-950/50 p-1.5">
+    <div className="flex w-36 shrink-0 flex-col gap-1 rounded-md border border-border/70 bg-zinc-950/50 p-1.5">
       <div className="flex items-start justify-between gap-1">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</div>
+        <div className="truncate text-xs font-semibold text-muted-foreground" title={title}>{title}</div>
         {canRemove && (
           <button
             type="button"
@@ -119,7 +119,7 @@ function MixerStrip({
         <LevelMeter peak={peak} muted={muted} />
         <VerticalFader id={faderId} value={volume} onChange={onVolume} />
       </div>
-      <div className="text-center text-[11px] tabular-nums text-muted-foreground">
+      <div className="text-center text-xs tabular-nums text-muted-foreground">
         {muted ? t("livestream.audioMuted") : `${volume}%`}
       </div>
       {showMute && onMute ? (
@@ -163,6 +163,7 @@ export function LivestreamAudioMixer({
   monitorCueIds,
   locked,
   live: _live,
+  compact = false,
   t,
   onMaster,
   onChannels,
@@ -178,6 +179,8 @@ export function LivestreamAudioMixer({
   monitorCueIds: string[];
   locked: boolean;
   live: boolean;
+  /** Alleen de faders, zodat ze in de live-balk helemaal zichtbaar zijn. */
+  compact?: boolean;
   t: (key: string, opts?: Record<string, string | number>) => string;
   onMaster: (volume: number) => void;
   onChannels: (channels: LivestreamAudioChannel[]) => void;
@@ -246,7 +249,7 @@ export function LivestreamAudioMixer({
                 id={`ls-audio-${channel.id}`}
                 value={channel.device}
                 disabled={locked || isSourceAudioDevice(channel.device)}
-                className="h-8 px-1 text-[10px]"
+                className="h-8 px-1 text-xs"
                 onChange={(e) => update(channel.id, { device: e.target.value })}
               >
                 <option value="">{t("livestream.audioPick")}</option>
@@ -273,36 +276,40 @@ export function LivestreamAudioMixer({
           onVolume={onMaster}
           onCue={() => toggleCue(AUDIO_MONITOR_MASTER_ID)}
           deviceSelect={
-            <div className="h-8 text-center text-[10px] leading-8 text-muted-foreground">
+            <div className="h-8 truncate text-center text-xs leading-8 text-muted-foreground">
               {t("livestream.audioMixOut")}
             </div>
           }
         />
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Headphones className="size-3.5 text-muted-foreground" />
-        <span className="text-[11px] text-muted-foreground">{t("livestream.audioMonitor")}</span>
-        <Select
-          id="ls-monitor-out"
-          value={monitorDevice}
-          disabled={locked}
-          className="h-8 max-w-[260px] px-1 text-[10px]"
-          onChange={(e) => onMonitorDevice(e.target.value)}
-        >
-          <option value="">{t("livestream.audioMonitorDefault")}</option>
-          {outputs.map((dev) => (
-            <option key={dev.name} value={dev.name}>
-              {dev.name}
-            </option>
-          ))}
-        </Select>
-      </div>
-      {monitorConflict && (
-        <p className="text-[11px] text-amber-600/90">{t("livestream.audioMonitorConflict")}</p>
-      )}
-      <Button size="sm" variant="outline" disabled={locked} onClick={add}>
-        {t("livestream.audioAdd")}
-      </Button>
+      {!compact ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Headphones className="size-3.5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">{t("livestream.audioMonitor")}</span>
+            <Select
+              id="ls-monitor-out"
+              value={monitorDevice}
+              disabled={locked}
+              className="h-8 max-w-[260px] px-1 text-xs"
+              onChange={(e) => onMonitorDevice(e.target.value)}
+            >
+              <option value="">{t("livestream.audioMonitorDefault")}</option>
+              {outputs.map((dev) => (
+                <option key={dev.name} value={dev.name}>
+                  {dev.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+          {monitorConflict ? (
+            <p className="text-xs text-amber-600/90">{t("livestream.audioMonitorConflict")}</p>
+          ) : null}
+          <Button size="sm" variant="outline" disabled={locked} onClick={add}>
+            {t("livestream.audioAdd")}
+          </Button>
+        </>
+      ) : null}
     </div>
   );
 }

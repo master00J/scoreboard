@@ -40,13 +40,28 @@ import {
   type StreamScene,
   type StreamSceneLayer,
 } from "./stream-scenes";
+import { mergePlaylistItems, type LivestreamPlaylistItem } from "./stream-playlist";
+
+export type { LivestreamPlaylistItem } from "./stream-playlist";
+export {
+  appendPlaylistItems,
+  createPlaylistItem,
+  mergePlaylistItems,
+  movePlaylistItem,
+  playlistItemsFromPaths,
+  PLAYLIST_ITEM_LIMIT,
+} from "./stream-playlist";
 
 export type { StreamScoreWidgetDesign, StreamScoreWidgetSettings };
 export { mergeStreamScoreWidget, sixteenByNineScaleFilter } from "./stream-score-widget";
 
 export type LivestreamPlatform = "youtube" | "twitch" | "facebook" | "custom";
 
-export type LivestreamSource = "camera" | "display" | "browser" | "media" | "network";
+export type LivestreamSource = "camera" | "display" | "browser" | "media" | "network" | "playlist";
+
+export function isMediaLikeSource(kind: LivestreamSource | string): boolean {
+  return kind === "media" || kind === "playlist";
+}
 
 export type LivestreamEncoder = "h264_nvenc" | "libx264";
 
@@ -174,6 +189,8 @@ export type LivestreamVideoInput = {
   /** Alleen `kind === "media"`: lokaal pad of `/uploads/…`. */
   mediaPath: string;
   mediaLoop: boolean;
+  /** Alleen `kind === "playlist"`: bestanden in afspeelvolgorde. */
+  playlistItems: LivestreamPlaylistItem[];
   /** Alleen `kind === "network"`: rtsp/udp/rtp/srt/rtmp-adres van een camera of feed. */
   networkUrl: string;
   audioFollow: Record<string, LivestreamAudioFollowAction>;
@@ -201,7 +218,7 @@ export function browserAudioDevices(inputs: LivestreamVideoInput[]): LivestreamA
 
 export function mediaAudioDevices(inputs: LivestreamVideoInput[]): LivestreamAudioDevice[] {
   return inputs
-    .filter((input) => input.kind === "media")
+    .filter((input) => isMediaLikeSource(input.kind))
     .map((input) => ({ name: mediaAudioDeviceId(input.id) }));
 }
 
@@ -410,6 +427,7 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
       browserUrl: "",
       mediaPath: "",
       mediaLoop: true,
+      playlistItems: [],
       networkUrl: "",
       audioFollow: {},
     },
@@ -421,6 +439,7 @@ export const DEFAULT_LIVESTREAM_SETTINGS: LivestreamSettings = {
       browserUrl: "",
       mediaPath: "",
       mediaLoop: true,
+      playlistItems: [],
       networkUrl: "",
       audioFollow: {},
     },
@@ -560,6 +579,7 @@ export function parseLivestreamSource(value: unknown): LivestreamSource {
     value === "display" ||
     value === "browser" ||
     value === "media" ||
+    value === "playlist" ||
     value === "camera" ||
     value === "network"
   ) {
@@ -623,14 +643,16 @@ export function createVideoInput(partial?: Partial<LivestreamVideoInput>): Lives
     }
   }
   const name = typeof partial?.name === "string" ? partial.name.trim().slice(0, 40) : "";
+  const kind = parseLivestreamSource(partial?.kind);
   return {
     id,
     name,
-    kind: parseLivestreamSource(partial?.kind),
+    kind,
     cameraDevice: typeof partial?.cameraDevice === "string" ? partial.cameraDevice : "",
     browserUrl: sanitizeBrowserUrl(partial?.browserUrl),
     mediaPath: sanitizeMediaPath(partial?.mediaPath),
     mediaLoop: partial?.mediaLoop !== false,
+    playlistItems: kind === "playlist" ? mergePlaylistItems(partial?.playlistItems) : [],
     networkUrl: sanitizeNetworkUrl(partial?.networkUrl),
     audioFollow,
   };
@@ -701,7 +723,8 @@ export function resolvePreviewVideoInput(
 
 export function videoInputPreviewKey(input: LivestreamVideoInput | null | undefined): string {
   if (!input) return "";
-  return `${input.id}:${input.kind}:${input.browserUrl}:${input.mediaPath}:${input.mediaLoop ? 1 : 0}:${input.networkUrl}`;
+  const playlist = (input.playlistItems ?? []).map((item) => item.path).join("|");
+  return `${input.id}:${input.kind}:${input.browserUrl}:${input.mediaPath}:${input.mediaLoop ? 1 : 0}:${input.networkUrl}:${playlist}`;
 }
 
 /**
@@ -720,8 +743,10 @@ export function programSourceKey(
   const camera = settings.source === "camera" ? settings.cameraDevice : "";
   const browser = settings.source === "browser" ? (input?.browserUrl ?? "") : "";
   const media = settings.source === "media" ? `${input?.mediaPath ?? ""}:${input?.mediaLoop ? 1 : 0}` : "";
+  const playlist =
+    settings.source === "playlist" ? `${input?.id ?? ""}:${input?.mediaLoop ? 1 : 0}` : "";
   const network = settings.source === "network" ? (input?.networkUrl ?? "") : "";
-  return `${settings.source}|${camera}|${browser}|${media}|${network}`;
+  return `${settings.source}|${camera}|${browser}|${media}|${playlist}|${network}`;
 }
 
 export function applyVideoInputSelection(
@@ -825,6 +850,7 @@ export function compositeSourceSignature(scene: StreamScene, inputs: LivestreamV
     if (input.kind === "camera") keys.add(`camera:${input.cameraDevice}`);
     else if (input.kind === "network") keys.add(`network:${input.networkUrl}`);
     else if (input.kind === "media") keys.add(`media:${input.mediaPath}:${input.mediaLoop ? 1 : 0}`);
+    else if (input.kind === "playlist") keys.add(`playlist:${input.id}:${input.mediaLoop ? 1 : 0}`);
     else keys.add(`${input.kind}:${input.id}`);
   }
   return [...keys].sort().join(",");
@@ -1406,9 +1432,9 @@ export function syncBrowserAudioChannels(
   channels: LivestreamAudioChannel[],
   activeVideoInputId: string,
 ): { audioChannels: LivestreamAudioChannel[]; videoInputs: LivestreamVideoInput[] } {
-  const sourced = videoInputs.filter((input) => input.kind === "browser" || input.kind === "media");
+  const sourced = videoInputs.filter((input) => input.kind === "browser" || isMediaLikeSource(input.kind));
   const deviceFor = (input: LivestreamVideoInput) =>
-    input.kind === "media" ? mediaAudioDeviceId(input.id) : browserAudioDeviceId(input.id);
+    isMediaLikeSource(input.kind) ? mediaAudioDeviceId(input.id) : browserAudioDeviceId(input.id);
   const ownerOf = (device: string) =>
     isMediaAudioDevice(device) ? mediaAudioInputId(device) : browserAudioInputId(device);
   const want = new Set(sourced.map((input) => deviceFor(input)));
