@@ -51,6 +51,15 @@ import { withLayoutPreviewMeta } from "@/lib/scoreboard-preview-match";
 import { SPORT_TYPES, type SportType } from "@/lib/sports";
 import { canRedo, canUndo } from "@/lib/undo-history";
 import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
+import {
+  surfaceInfo,
+  surfacesForDevice,
+  tryOnScreenMatchesReality,
+} from "@/lib/scoreboard-surface-info";
+
+/** De tabs van de editor, in de volgorde waarin ze getoond worden. */
+const EDITOR_ALL_SURFACES = ["sponsor", "full", "stream", "streamBreak"] as const;
+const EDITOR_STREAM_SURFACES = ["stream", "streamBreak"] as const;
 
 const FONT_PRESETS = [
   {
@@ -492,7 +501,16 @@ export function SetupScoreboardThemeSection({
     const seconds = 60;
     try {
       setTryUntil(await sendTryPreview(tryPayloadJson, seconds));
-      toast({ title: t("layoutEditor.tryStarted", { seconds }), variant: "success" });
+      // De proef dwingt het vlak af dat je bewerkt. Voor de andere drie vlakken is dat niet wat
+      // de wand tijdens een wedstrijd doet, en dan moet de melding dat zeggen: een club heeft
+      // hier dagen op vastgelopen omdat de proef een indeling bevestigde die zo nooit te zien was.
+      toast({
+        title: t("layoutEditor.tryStarted", { seconds }),
+        description: tryOnScreenMatchesReality(surface)
+          ? undefined
+          : t("layoutEditor.tryOtherSurface", { when: t(surfaceInfo(surface).whenKey) }),
+        variant: "success",
+      });
     } catch {
       toast({ title: t("layoutEditor.tryFailed"), variant: "error" });
     }
@@ -936,34 +954,44 @@ export function SetupScoreboardThemeSection({
 
       <div className="mb-6 space-y-3 rounded-lg border border-border p-4">
         <div className="font-semibold text-sm">{t("setup.themePlacerTitle")}</div>
-        <div className="flex flex-wrap gap-2">
-          {(
-            streamOnly
-              ? ([
-                  ["stream", "themeSurfaceStream"],
-                  ["streamBreak", "themeSurfaceStreamBreak"],
-                ] as const)
-              : ([
-                  ["sponsor", "themeSurfaceSponsor"],
-                  ["full", "themeSurfaceFull"],
-                  ["stream", "themeSurfaceStream"],
-                  ["streamBreak", "themeSurfaceStreamBreak"],
-                ] as const)
-          ).map(([id, labelKey]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setSurface(id)}
-              className={`rounded-md border px-3 py-1.5 text-sm ${
-                surface === id
-                  ? "border-primary bg-primary/10 font-medium"
-                  : "border-border hover:bg-muted/50"
-              }`}
-            >
-              {t(`setup.${labelKey}`)}
-            </button>
-          ))}
+        {/*
+          Per apparaat gegroepeerd. Vier tabs op één rij zagen er gelijkwaardig uit, terwijl twee
+          naar het stadionscherm gaan en twee naar de livestream-overlay.
+        */}
+        <div className="flex flex-col gap-2">
+          {(["wall", "stream"] as const).map((device) => {
+            const ids = surfacesForDevice(
+              streamOnly ? EDITOR_STREAM_SURFACES : EDITOR_ALL_SURFACES,
+              device,
+            );
+            if (ids.length === 0) return null;
+            return (
+              <div key={device} className="flex flex-wrap items-center gap-2">
+                <span className="w-32 shrink-0 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {t(device === "wall" ? "setup.themeSurfaceDeviceWall" : "setup.themeSurfaceDeviceStream")}
+                </span>
+                {ids.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setSurface(id)}
+                    className={`rounded-md border px-3 py-1.5 text-sm ${
+                      surface === id
+                        ? "border-primary bg-primary/10 font-medium"
+                        : "border-border hover:bg-muted/50"
+                    }`}
+                  >
+                    {t(surfaceInfo(id).labelKey)}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </div>
+        {/* Wanneer de kijker dit vlak echt ziet. Zonder deze regel lijkt elke tab "het scorebord". */}
+        <p className="max-w-3xl text-xs font-medium text-sky-300/90">
+          {t(surfaceInfo(surface).whenKey)}
+        </p>
         <p className="max-w-3xl text-xs text-muted-foreground">
           {streamSurface ? t("setup.themeSurfaceStreamHint") : t("setup.themeSurfaceHint")}
         </p>
