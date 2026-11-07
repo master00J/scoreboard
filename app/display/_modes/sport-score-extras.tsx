@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import type { Match } from "@/lib/types";
+import { FitToBox } from "@/components/fit-to-box";
 import { formatShotClock, getSportProfile } from "@/lib/sports";
 import {
   sportTeamExtraChips,
@@ -42,10 +43,14 @@ export function SportTeamExtras({
     overflowWrap: "normal",
   };
   return (
-    <div
-      className={`flex w-full min-w-0 max-w-full flex-nowrap items-center justify-center overflow-hidden px-[2cqw] text-center font-black uppercase leading-none text-white ${compact ? "tracking-normal" : "tracking-wide"}`}
+    // De vuistregel hierboven kiest een lettergrootte; FitToBox meet daarna of het ook echt past
+    // en krimpt zo nodig. Zonder dat verdween wat ernaast viel in de `overflow: hidden` van het
+    // vak: een club met scorevakken van 15% breed zag "SETS 0 TO 0/2" halverwege ophouden.
+    <FitToBox
+      className={`px-[2cqw] text-center font-black uppercase leading-none text-white ${compact ? "tracking-normal" : "tracking-wide"}`}
       style={style}
     >
+      <div className="flex flex-nowrap items-center justify-center" style={{ gap: style.gap }}>
       {chips.map((chip) => {
         if (chip.kind === "possession") {
           return (
@@ -78,7 +83,8 @@ export function SportTeamExtras({
           </span>
         );
       })}
-    </div>
+      </div>
+    </FitToBox>
   );
 }
 
