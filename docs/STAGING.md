@@ -16,18 +16,42 @@ feature-branch  ──PR──▶  staging  ──PR──▶  master  ──Rel
 Niets bereikt een club vanuit staging. Alleen **Release Windows** publiceert, en die
 draait alleen op `master` (`if: github.ref == 'refs/heads/master'`).
 
-## Een staging-build ophalen
+## Een staging-build ophalen en installeren
 
-Elke push naar `staging` start **Preview Windows**. Als die klaar is:
+Vaste link naar de lijst, nieuwste bovenaan — zet die in je favorieten:
 
-1. GitHub → Actions → Preview Windows → de laatste run
-2. Onderaan bij **Artifacts**: `Stadium-Scoreboard-staging-<nummer>`
-3. Uitpakken en `Stadium-Scoreboard.exe` draaien
+**https://github.com/master00J/scoreboard/actions/workflows/preview-win.yml?query=branch%3Astaging+is%3Asuccess**
 
-De build is **niet gesigneerd**, dus Windows SmartScreen waarschuwt: "Meer informatie" →
-"Toch uitvoeren". Dat hoort zo; alleen de release-build wordt gesigneerd.
+1. Klik de bovenste run aan
+2. Onderaan bij **Artifacts**: `Stadium-Scoreboard-staging-<nummer>` → downloaden
+3. Zip uitpakken. Er zitten twee bestanden in:
+
+| Bestand | Wat het doet |
+|---|---|
+| `Stadium-Scoreboard-Setup-0.1.54-staging.23.exe` | **Installeert** de app: menu-item, snelkoppeling, verwijderen via Windows. Dit is wat je wil om echt te testen. |
+| `Stadium-Scoreboard.exe` | Draagbaar: dubbelklikken en het draait, zonder te installeren. Handig om even iets te proberen. |
+
+4. Windows SmartScreen waarschuwt: **Meer informatie** → **Toch uitvoeren**
+
+Die waarschuwing hoort erbij. Een staging-build wordt niet gesigneerd; alleen Release
+Windows signeert met het Azure-certificaat. Zie je die waarschuwing níet bij een bestand
+dat je van een club krijgt, dan is het een echte release.
+
+Het downloaden vraagt een GitHub-login. Dat is bewust: de repo is publiek, maar
+Actions-artefacten zijn dat niet, en een ongesigneerde build met de productnaam hoort niet
+vrij rond te zwerven.
 
 Artefacten blijven 7 dagen staan.
+
+### Naast je echte installatie?
+
+Dat kan niet: een staging-build gebruikt dezelfde app-id en dezelfde gegevensmap als de
+versie die clubs draaien. Installeer je staging op een pc waar de echte versie op staat,
+dan vervangt hij die, en ze delen één database.
+
+Dat is meestal juist wat je wil — testen met echte wedstrijden en indelingen. De app maakt
+vóór elke schema-wijziging een kopie van de database (`backupDatabaseBeforeUpgrade`), dus
+teruggaan naar de release kan. Wil je zeker spelen, test dan op een aparte pc.
 
 ## Welke versie draai ik?
 

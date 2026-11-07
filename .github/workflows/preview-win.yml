@@ -44,13 +44,25 @@ jobs:
       - name: Build Windows (unsigned)
         run: npm run electron:build:win
 
-      - name: Upload test .exe
+      # De draagbare .exe echt laten starten. Een build die hier blijft hangen, hoeft niemand
+      # eerst 116 MB voor te downloaden om daarna te zien dat hij niet opkomt.
+      - name: Smoke test packaged app
+        run: node scripts/smoke-start.mjs --exe dist/Stadium-Scoreboard.exe
+        env:
+          # De portable .exe pakt zich eerst uit; op een runner duurt dat langer dan lokaal.
+          SMOKE_TIMEOUT_MS: "120000"
+
+      # Allebei: de Setup om te installeren (menu, snelkoppeling, verwijderen via Windows) en
+      # de draagbare om even te proberen zonder iets te installeren.
+      - name: Upload test build
         uses: actions/upload-artifact@v4
         with:
           name: >-
             ${{ github.event_name == 'pull_request'
                 && format('Stadium-Scoreboard-preview-pr{0}', github.event.pull_request.number)
                 || format('Stadium-Scoreboard-staging-{0}', github.run_number) }}
-          path: dist/Stadium-Scoreboard.exe
+          path: |
+            dist/Stadium-Scoreboard-Setup-*.exe
+            dist/Stadium-Scoreboard.exe
           if-no-files-found: error
           retention-days: 7
