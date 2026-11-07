@@ -628,6 +628,22 @@ async function seedThemeJson(): Promise<void> {
   }
 }
 
+/**
+ * Na een schrijving de indeling teruglézen in plaats van onthouden wat we stuurden.
+ *
+ * Kruisen twee opslagen elkaar, dan bepaalt SQLite wie het laatst was, en de kopie moet die
+ * volgen — niet degene wiens eigen waarde het laatst in het geheugen landde. Terugleggen is
+ * ook zelfherstellend: elke volgende schrijving zet een afwijking weer recht. Opslagen zijn
+ * zeldzaam (iemand klikt op Opslaan), dus de extra lezing kost niets waar het op aankomt.
+ */
+async function refreshThemeJsonFromDb(): Promise<void> {
+  try {
+    rememberThemeJson((await getAppSettings()).scoreboardThemeJson ?? null);
+  } catch {
+    /** Mislukt de lezing, dan laten we de kopie staan; de volgende schrijving leest opnieuw. */
+  }
+}
+
 async function startThemePreview(json: string, seconds: number): Promise<number> {
   if (themePreview) clearTimeout(themePreview.timer);
   const until = Date.now() + seconds * 1000;
@@ -825,7 +841,7 @@ async function setScoreboardThemeJson(json: string | null) {
     `UPDATE "AppSettings" SET "scoreboardThemeJson" = ? WHERE "id" = 1`,
     json,
   );
-  rememberThemeJson(json);
+  await refreshThemeJsonFromDb();
 }
 
 async function setProofOfPlayBrandJson(json: string | null) {
@@ -2092,7 +2108,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       } else {
         await prisma.appSettings.create({ data: { scoreboardThemeJson: nextJson } });
       }
-      rememberThemeJson(nextJson);
+      await refreshThemeJsonFromDb();
       await touchState();
       await broadcastDisplayState();
       return json(200, { ok: true, scoreboardThemeJson: nextJson });
