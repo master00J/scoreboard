@@ -242,7 +242,18 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const [allPlayers, setAllPlayers] = useState<Record<string, Player>>({});
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
-  const [themeJson, setThemeJson] = useState<string | null>(null);
+  /** Opgeslagen indeling uit `/api/settings`; alleen nog de terugval. */
+  const [themeJsonFromSettings, setThemeJsonFromSettings] = useState<string | null>(null);
+  /**
+   * De opgeslagen indeling zoals het hoofdproces ze meestuurt op elke `display:state`.
+   *
+   * Dit is de route die telt. De fetch hieronder vuurt alleen bij een wissel van
+   * `state.updatedAt` en slikt zijn eigen fout, dus kon een opgeslagen indeling stil blijven
+   * hangen terwijl de proef — die deze korte route al nam — het wel deed. Een gepushte string
+   * wint; null of ontbrekend valt terug op de fetch, zodat niets stuk gaat waar het al werkte.
+   */
+  const themeJsonFromState = useDisplayStore((store) => store.state?.scoreboardThemeJson ?? null);
+  const themeJson = themeJsonFromState ?? themeJsonFromSettings;
   /** Fallback als de socket-state de proef nog niet meeneemt. */
   const [themePreviewFromSettings, setThemePreviewFromSettings] = useState<string | null>(null);
   const themePreviewFromState = useDisplayStore((store) => store.state?.themePreviewJson ?? null);
@@ -272,7 +283,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       fullShowAddedTime: profile.supportsInjuryTime ? scoreboardTheme.fullShowAddedTime : false,
     };
   }, [scoreboardTheme, match?.sport]);
-  const [sponsorRepeatBudgetCycles, setSponsorRepeatBudgetCycles] = useState(false);
+  /** Volgt de indeling die echt getoond wordt, niet alleen die van de laatste fetch. */
+  const sponsorRepeatBudgetCycles = useMemo(
+    () => sponsorRepeatBudgetCyclesFromThemeJson(themeJson),
+    [themeJson],
+  );
   const [sponsorLayoutsJson, setSponsorLayoutsJson] = useState<string | null>(null);
   const [displayCanvas, setDisplayCanvas] = useState<{
     width: number;
@@ -309,21 +324,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         if (!embedInControl && s.uiLocale) {
           window.dispatchEvent(new CustomEvent("arenacue:ui-locale", { detail: s.uiLocale }));
         }
-        setThemeJson(s.scoreboardThemeJson ?? null);
+        setThemeJsonFromSettings(s.scoreboardThemeJson ?? null);
         setThemePreviewFromSettings(s.scoreboardThemePreviewJson ?? null);
-        if (layoutRulesFromThemeJson(s.scoreboardThemeJson ?? null).length > 0) {
-          fetch("/api/scoreboard-templates")
-            .then((r) => r.json())
-            .then((list: unknown) => {
-              if (!cancelled) setLayoutTemplates(Array.isArray(list) ? list : []);
-            })
-            .catch(() => {});
-        } else {
-          setLayoutTemplates([]);
-        }
-        setSponsorRepeatBudgetCycles(
-          sponsorRepeatBudgetCyclesFromThemeJson(s.scoreboardThemeJson ?? null),
-        );
         setSponsorLayoutsJson(s.sponsorLayoutsJson ?? null);
         setDisplayExtras(displayExtrasFromJson(s.displayExtrasJson));
         const w = Math.max(320, Number(s.displayCanvasWidth ?? 1920));
@@ -365,6 +367,29 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       cancelled = true;
     };
   }, [previewIframe, state?.updatedAt]);
+
+  /**
+   * Clubregels wijzen naar opgeslagen indelingen. Die lijst volgt de indeling die in werking is,
+   * zodat ze ook meekomt wanneer die indeling via `display:state` arriveert in plaats van via
+   * de fetch hierboven.
+   */
+  useEffect(() => {
+    if (previewIframe) return;
+    if (layoutRulesFromThemeJson(themeJson).length === 0) {
+      setLayoutTemplates([]);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/scoreboard-templates")
+      .then((r) => r.json())
+      .then((list: unknown) => {
+        if (!cancelled) setLayoutTemplates(Array.isArray(list) ? list : []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [previewIframe, themeJson]);
 
   useEffect(() => {
     if (previewIframe) return;

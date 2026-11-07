@@ -372,6 +372,8 @@ function serializeDisplay(): SerializedDisplayState {
     sponsorPeriodBreakPending,
     themePreviewJson: preview?.json ?? null,
     themePreviewUntil: preview?.until ?? null,
+    /** Zelfde korte route als de proef: het scherm hoeft niet op /api/settings te wachten. */
+    scoreboardThemeJson: store.settings.scoreboardThemeJson ?? null,
   };
 }
 

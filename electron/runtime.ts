@@ -593,6 +593,41 @@ async function clearThemePreview(): Promise<void> {
   await broadcastDisplayState();
 }
 
+/**
+ * De opgeslagen schermindeling, in het geheugen, zodat ze op élke `display:state` mee kan.
+ *
+ * Het stadionscherm haalde haar alleen via `fetch("/api/settings")`, aangezwengeld door een
+ * wissel van `DisplayState.updatedAt`. Drie stappen die allemaal moeten lukken, en die fetch
+ * slikt zijn eigen fout: valt er één weg, dan blijft de wand stil op de oude indeling zonder
+ * dat iemand iets ziet. De proef ("Probeer op scherm") ging altijd goed omdat ze deze korte
+ * route al nam. Vandaar dat een club haar proef zag werken en haar opslag niet.
+ *
+ * `seeded` blijft false tot de indeling één keer uit SQLite gelezen is; tot dan laten we het
+ * veld weg en valt het scherm terug op zijn eigen fetch.
+ */
+let liveThemeJson: string | null = null;
+let liveThemeJsonSeeded = false;
+
+function rememberThemeJson(json: string | null): void {
+  liveThemeJson = json;
+  liveThemeJsonSeeded = true;
+}
+
+/** Synchroon: de tick-loop zendt elke seconde uit en mag daar geen SQLite-lezing bij doen. */
+function themeJsonForBroadcast(): { scoreboardThemeJson?: string | null } {
+  return liveThemeJsonSeeded ? { scoreboardThemeJson: liveThemeJson } : {};
+}
+
+async function seedThemeJson(): Promise<void> {
+  if (liveThemeJsonSeeded) return;
+  try {
+    const settings = await getAppSettings();
+    rememberThemeJson(settings.scoreboardThemeJson ?? null);
+  } catch {
+    /** Lukt de lezing niet, dan blijft het veld weg en doet het scherm het op de oude manier. */
+  }
+}
+
 async function startThemePreview(json: string, seconds: number): Promise<number> {
   if (themePreview) clearTimeout(themePreview.timer);
   const until = Date.now() + seconds * 1000;
@@ -790,6 +825,7 @@ async function setScoreboardThemeJson(json: string | null) {
     `UPDATE "AppSettings" SET "scoreboardThemeJson" = ? WHERE "id" = 1`,
     json,
   );
+  rememberThemeJson(json);
 }
 
 async function setProofOfPlayBrandJson(json: string | null) {
@@ -1029,11 +1065,13 @@ function rememberState(state: DisplayStateRow) {
 export async function getDisplaySnapshot() {
   const state = await getStateRow();
   rememberState(state);
+  await seedThemeJson();
   const preview = activeThemePreview();
   return {
     ...serializeDisplayState(state),
     themePreviewJson: preview?.json ?? null,
     themePreviewUntil: preview?.until ?? null,
+    ...themeJsonForBroadcast(),
   };
 }
 
@@ -1241,6 +1279,7 @@ function startTickLoop() {
           ...serializeDisplayState(state),
           themePreviewJson: preview?.json ?? null,
           themePreviewUntil: preview?.until ?? null,
+          ...themeJsonForBroadcast(),
         });
       }
       const clocksLive =
@@ -2053,6 +2092,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       } else {
         await prisma.appSettings.create({ data: { scoreboardThemeJson: nextJson } });
       }
+      rememberThemeJson(nextJson);
       await touchState();
       await broadcastDisplayState();
       return json(200, { ok: true, scoreboardThemeJson: nextJson });
