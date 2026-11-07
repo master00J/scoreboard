@@ -249,11 +249,15 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
    *
    * Dit is de route die telt. De fetch hieronder vuurt alleen bij een wissel van
    * `state.updatedAt` en slikt zijn eigen fout, dus kon een opgeslagen indeling stil blijven
-   * hangen terwijl de proef — die deze korte route al nam — het wel deed. Een gepushte string
-   * wint; null of ontbrekend valt terug op de fetch, zodat niets stuk gaat waar het al werkte.
+   * hangen terwijl de proef — die deze korte route al nam — het wel deed.
+   *
+   * `undefined` betekent "het hoofdproces heeft de indeling nog niet meegestuurd": dan geldt de
+   * fetch, zodat niets stuk gaat waar het al werkte. Een meegestuurde waarde wint, `null`
+   * inbegrepen — wie zijn indeling terugzet naar standaard moet de standaard krijgen en niet
+   * zijn oude indeling tot de volgende fetch lukt.
    */
-  const themeJsonFromState = useDisplayStore((store) => store.state?.scoreboardThemeJson ?? null);
-  const themeJson = themeJsonFromState ?? themeJsonFromSettings;
+  const themeJsonFromState = useDisplayStore((store) => store.state?.scoreboardThemeJson);
+  const themeJson = themeJsonFromState !== undefined ? themeJsonFromState : themeJsonFromSettings;
   /** Fallback als de socket-state de proef nog niet meeneemt. */
   const [themePreviewFromSettings, setThemePreviewFromSettings] = useState<string | null>(null);
   const themePreviewFromState = useDisplayStore((store) => store.state?.themePreviewJson ?? null);
@@ -389,7 +393,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     return () => {
       cancelled = true;
     };
-  }, [previewIframe, themeJson]);
+  }, [previewIframe, themeJson, state?.updatedAt]);
 
   useEffect(() => {
     if (previewIframe) return;

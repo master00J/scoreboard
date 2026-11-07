@@ -81,6 +81,32 @@ describe("opgeslagen schermindeling naar het stadionscherm", () => {
     expect(await pushedToWall()).toBeNull();
   });
 
+  /**
+   * Een clubregel kan naar een opgeslagen indeling verwijzen, dus bumpt het aanpassen van zo'n
+   * indeling `updatedAt` met juist dat doel: het stadionscherm moet zijn lijst opnieuw ophalen.
+   * Het scherm hangt die herlading weer aan deze trigger, dus hier wordt vastgelegd dat hij vuurt.
+   */
+  it("laat het aanpassen van een opgeslagen indeling de herlaad-trigger afvuren", async () => {
+    const created = await runtime.apiRequest({
+      method: "POST",
+      path: "/api/scoreboard-templates",
+      bodyText: JSON.stringify({ name: "Eigen indeling", themeJson: CUSTOM }),
+    });
+    expect(created.status).toBe(200);
+    const id = (created.json as { id: string }).id;
+
+    const before = (await runtime.getDisplaySnapshot()) as { updatedAt: string };
+    const edited = await runtime.apiRequest({
+      method: "PATCH",
+      path: `/api/scoreboard-templates/${id}`,
+      bodyText: JSON.stringify({ themeJson: JSON.stringify({ layoutMode: "bottom-strip", elements: {} }) }),
+    });
+    expect(edited.status).toBe(200);
+    const after = (await runtime.getDisplaySnapshot()) as { updatedAt: string };
+
+    expect(Date.parse(after.updatedAt)).toBeGreaterThan(Date.parse(before.updatedAt));
+  });
+
   it("zet een indeling uit een template ook op het kanaal", async () => {
     await saveLayout(CUSTOM);
     const list = await runtime.apiRequest({ method: "GET", path: "/api/scoreboard-templates" });

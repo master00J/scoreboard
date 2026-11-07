@@ -45,7 +45,16 @@ export const useDisplayStore = create<Store>((set) => ({
               ...s,
               themePreviewJson: s.themePreviewJson ?? prev.state.themePreviewJson ?? null,
               themePreviewUntil: s.themePreviewUntil ?? prev.state.themePreviewUntil ?? null,
-              scoreboardThemeJson: s.scoreboardThemeJson ?? prev.state.scoreboardThemeJson ?? null,
+              /**
+               * Niet samenvouwen naar null: het stadionscherm moet "nooit meegestuurd" kunnen
+               * onderscheiden van "bewust leeggemaakt". Bij het eerste valt het terug op zijn
+               * eigen fetch, bij het tweede moet het de standaardindeling tonen in plaats van
+               * de oude te laten staan.
+               */
+              scoreboardThemeJson:
+                s.scoreboardThemeJson !== undefined
+                  ? s.scoreboardThemeJson
+                  : prev.state.scoreboardThemeJson,
             }
           : s;
       return {
