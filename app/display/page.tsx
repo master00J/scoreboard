@@ -1282,9 +1282,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     !!match &&
     scoreboardUsesLeftFrame(scoreboardTheme, autoLeftLayout);
   // Welke indeling de club koos — bewust los van `allowScoreFrame`. Die vlag bepaalt of er een
-  // frame komt, niet welk. Stond hij hier wél in, dan viel de keuze bij IDLE, rust, een intro of
-  // een wissel terug op de L-balk, en tekenden de twee sponsor-naast-blokken hieronder een clip
-  // met `leftBarWidthPx` over het scorebord heen in plaats van in het vak van de club.
+  // frame komt, niet welk. Stond hij hier wél in, dan viel de keuze terug op de L-balk zodra de
+  // vlag wegviel, en kreeg een sponsorclip `leftBarWidthPx` in plaats van het mediavak van de
+  // club. Bereikbaar bij SPONSOR_ROTATION of SPONSOR met een status die geen spelende helft is
+  // en een lopende geplande clip; de overige gevallen zijn exclusief fullscreen en slaan het
+  // frame toch over.
   const frameKind = scoreboardFrameKind(scoreboardTheme, autoLeftLayout);
   const ScoreFrame =
     frameKind === "custom"

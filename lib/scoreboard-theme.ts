@@ -900,11 +900,14 @@ export function scoreboardUsesCustom(theme: LayoutModeTheme): boolean {
  * Welke indeling de club koos, los van de vraag of het frame nu getoond mag worden.
  *
  * Die twee liepen door elkaar. Het stadionscherm koos zijn component uit `useCustomLayout`
- * en vrienden, en die dragen `allowScoreFrame` in zich. Viel die weg — bij IDLE, rust, een
- * intro of een wissel — dan werden alle drie false en viel de ternary terug op de L-balk.
- * Twee plekken tekenen het frame toch (een sponsorclip naast het bord), en die kregen zo de
- * L-balk met `leftBarWidthPx` in plaats van de vrije indeling van de club: de clip ging over
- * de score heen staan in plaats van in zijn eigen vak.
+ * en vrienden, en die dragen `allowScoreFrame` in zich. Valt die weg, dan worden alle drie
+ * false en valt de ternary terug op de L-balk.
+ *
+ * Meestal maakt dat niets uit: waar `allowScoreFrame` false is, is het ook een exclusieve
+ * fullscreen-modus, en dan slaan de twee sponsor-naast-blokken het frame sowieso over. Eén
+ * geval blijft over: SPONSOR_ROTATION of SPONSOR met een status die geen spelende helft is
+ * (rust, voor de wedstrijd) terwijl er een geplande clip loopt. Dan tekent het tweede blok
+ * wel, en kreeg de clip de L-balk met `leftBarWidthPx` in plaats van het mediavak van de club.
  *
  * Welke indeling het is, hangt alleen van het thema af. Of hij getoond wordt, is een andere vraag.
  */
