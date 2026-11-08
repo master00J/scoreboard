@@ -23,6 +23,7 @@ import {
   cueLeftClockWindow,
   pickDueScheduledCue,
   scheduledCueFiredKey,
+  scheduledCueMediaKey,
 } from "./scheduled-media-cue";
 
 describe("rundown per sport", () => {
@@ -280,5 +281,20 @@ describe("pickDueScheduledCue", () => {
   it("deelt de gespeeld-sleutel tussen voor- en nawedstrijd-statussen", () => {
     expect(scheduledCueFiredKey("m1", "SETUP", "x", 2)).toBe("m1:PREMATCH:x:2");
     expect(scheduledCueFiredKey("m1", "FULL_TIME", "x", 0)).toBe("m1:POST_MATCH:x:0");
+  });
+});
+
+describe("scheduledCueMediaKey", () => {
+  it("laat opeenvolgende beelden één mediavak delen", () => {
+    const a = { id: "a", media: { type: "IMAGE" } };
+    const b = { id: "b", media: { type: "IMAGE" } };
+    expect(scheduledCueMediaKey(a, 0)).toBe(scheduledCueMediaKey(b, 3));
+  });
+
+  it("start een video per cue en per doorloop in een nieuw vak", () => {
+    const v = { id: "v", media: { type: "VIDEO" } };
+    expect(scheduledCueMediaKey(v, 0)).not.toBe(scheduledCueMediaKey(v, 1));
+    expect(scheduledCueMediaKey(v, 0)).not.toBe(scheduledCueMediaKey({ id: "w", media: { type: "VIDEO" } }, 0));
+    expect(scheduledCueMediaKey(v, 0)).not.toBe(scheduledCueMediaKey({ id: "i", media: { type: "IMAGE" } }, 0));
   });
 });

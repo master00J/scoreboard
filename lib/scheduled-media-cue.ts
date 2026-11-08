@@ -428,3 +428,15 @@ export function pickDueScheduledCue<C extends DueCueCandidate>({
   }
   return null;
 }
+
+/**
+ * React-key van het mediavak van een cue. Een video start per cue (en per doorloop) in een
+ * nieuw vak, zoals altijd. Opeenvolgende beelden delen één vak, zodat het vorige beeld kan
+ * blijven staan tot het volgende klaar is (`HeldImage`) in plaats van kort zwart te tonen.
+ */
+export function scheduledCueMediaKey(
+  cue: { id: string; media: { type: string } },
+  cycle: number,
+): string {
+  return cue.media.type === "IMAGE" ? "image" : `${cue.id}-${cycle}`;
+}
