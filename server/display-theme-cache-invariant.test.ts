@@ -33,7 +33,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   runtime.disposeDesktopRuntime();
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  await prisma?.$disconnect();
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* Windows kan het bestand nog even vasthouden */
+  }
 });
 
 /** Wat er écht in SQLite staat. */

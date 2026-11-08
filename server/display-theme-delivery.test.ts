@@ -37,7 +37,12 @@ beforeAll(async () => {
 
 afterAll(async () => {
   runtime.disposeDesktopRuntime();
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  await (await import("../lib/prisma")).prisma.$disconnect();
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch {
+    /* Windows kan het bestand nog even vasthouden */
+  }
 });
 
 /** Precies wat de editor doet als je op Opslaan drukt. */
