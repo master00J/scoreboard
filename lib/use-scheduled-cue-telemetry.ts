@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { ScheduledMediaCue } from "@/lib/types";
 import { sectionForStatus } from "@/lib/sponsor-display-helpers";
 import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
+import { scheduledCueExpectedPlaySec } from "@/lib/scheduled-media-cue";
 import {
   reportSponsorClipEnd,
   reportSponsorClipProgress,
@@ -17,11 +18,15 @@ import {
 export function useScheduledCueTelemetry(opts: {
   cue: ScheduledMediaCue | null;
   cycle: number;
+  /** Speelkop van de rundown; alleen het moment waarop de cue start telt. */
+  playheadSec?: number;
   match: { id: string; status: string } | null;
   enabled: boolean;
 }) {
   const { cue, cycle, match, enabled } = opts;
   const startedAtRef = useRef(0);
+  const playheadRef = useRef(opts.playheadSec ?? 0);
+  playheadRef.current = opts.playheadSec ?? 0;
 
   useEffect(() => {
     if (!enabled || !cue || !match) return;
@@ -33,7 +38,7 @@ export function useScheduledCueTelemetry(opts: {
     const clipSessionId = `cue:${cue.id}:${cycle}:${cue.media.id}`;
     const startedAtMs = Date.now();
     startedAtRef.current = startedAtMs;
-    const expectedPlaySec = Math.max(1, cue.media.durationSec || 15);
+    const expectedPlaySec = scheduledCueExpectedPlaySec(cue, playheadRef.current);
 
     void reportSponsorClipStart({
       matchId: match.id,

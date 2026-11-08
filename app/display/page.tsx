@@ -6,6 +6,7 @@ import {
   useTimedSlideProgress,
 } from "./_components/preview-slide-progress";
 import { DisplayMediaStage } from "@/components/display-media-stage";
+import { HeldImage } from "@/components/held-image";
 import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import { AnimatePresence, motion } from "framer-motion";
@@ -69,7 +70,7 @@ import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import { automaticSponsorMediaAllowed } from "@/lib/live-cycle-settings";
 import { useScheduledCueTelemetry } from "@/lib/use-scheduled-cue-telemetry";
-import { cueHasClockWindow, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
+import { cueHasClockWindow, scheduledCueMediaKey, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 import {
   applySponsorBudgetCapToSpreadPhase,
   idleMayPlayPrematchSponsors,
@@ -492,7 +493,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     return () => clearInterval(id);
   }, [previewIframe, embedInControl, mode, match?.id]);
 
-  const { activeScheduledCue, scheduledCueCycle, dismissActiveScheduledCue } = useScheduledMediaCueActive({
+  const { activeScheduledCue, scheduledCueCycle, scheduledCuePlayheadSec, dismissActiveScheduledCue } = useScheduledMediaCueActive({
     match,
     state,
     mode,
@@ -502,6 +503,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   useScheduledCueTelemetry({
     cue: activeScheduledCue,
     cycle: scheduledCueCycle,
+    playheadSec: scheduledCuePlayheadSec,
     match: match ? { id: match.id, status: match.status } : null,
     enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT",
   });
@@ -1907,7 +1909,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             theme={liveTheme}
           >
             <SingleMediaMode
-              key={`scheduled-cue-panel-${activeScheduledCue.id}-${scheduledCueCycle}`}
+              key={`scheduled-cue-panel-${scheduledCueMediaKey(activeScheduledCue, scheduledCueCycle)}`}
               media={activeScheduledCue.media}
               showPreviewProgress={embedInControl}
               loop={
@@ -1936,7 +1938,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         !(match && sponsorRotationBesideScoreboard(match.status)) && (
         <div className="absolute inset-0 z-[88] bg-black">
             <SingleMediaMode
-              key={`scheduled-cue-fullscreen-${activeScheduledCue.id}-${scheduledCueCycle}`}
+              key={`scheduled-cue-fullscreen-${scheduledCueMediaKey(activeScheduledCue, scheduledCueCycle)}`}
               media={activeScheduledCue.media}
               showPreviewProgress={embedInControl}
               loop={
@@ -2505,7 +2507,7 @@ function SingleMediaMode({
           }}
         />
       ) : (
-        <img src={mediaUrl(media.path)} alt="" decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
+        <HeldImage src={mediaUrl(media.path)} style={DISPLAY_COVER_MEDIA_STYLE} />
       )}
       </DisplayMediaStage>
       {wallClockBar}
