@@ -346,6 +346,41 @@ export function moveSceneLayer(layers: StreamSceneLayer[], id: string, delta: 1 
   return next;
 }
 
+/**
+ * Volgorde zoals in OBS. Opgeslagen staat de onderste laag eerst: index 0 tekent achteraan, de
+ * laatste vooraan. `front` en `back` brengen een laag helemaal naar de voorgrond of achtergrond.
+ */
+export type StreamLayerOrder = "front" | "up" | "down" | "back";
+export const STREAM_LAYER_ORDERS: readonly StreamLayerOrder[] = ["front", "up", "down", "back"];
+
+/** Verandert er niets (al vooraan, onbekende laag), dan komt dezelfde lijst terug. */
+export function orderSceneLayer(
+  layers: StreamSceneLayer[],
+  id: string,
+  order: StreamLayerOrder,
+): StreamSceneLayer[] {
+  if (order === "up") return moveSceneLayer(layers, id, 1);
+  if (order === "down") return moveSceneLayer(layers, id, -1);
+  const from = layers.findIndex((layer) => layer.id === id);
+  const to = order === "front" ? layers.length - 1 : 0;
+  if (from < 0 || from === to) return layers;
+  const next = layers.filter((layer) => layer.id !== id);
+  next.splice(to, 0, layers[from]!);
+  return next;
+}
+
+export function canOrderSceneLayer(layers: StreamSceneLayer[], id: string, order: StreamLayerOrder): boolean {
+  return orderSceneLayer(layers, id, order) !== layers;
+}
+
+/**
+ * De bronnenlijst zoals in OBS: de voorste laag bovenaan. Lijst en beeld lezen dezelfde `layers`,
+ * dus ze lopen nooit uit elkaar; opgeslagen scènes blijven zoals ze waren.
+ */
+export function sceneSourcesTopFirst(layers: StreamSceneLayer[]): StreamSceneLayer[] {
+  return [...layers].reverse();
+}
+
 export function updateSceneLayer(
   scenes: StreamScene[],
   sceneId: string,

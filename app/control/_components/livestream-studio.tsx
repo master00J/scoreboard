@@ -112,7 +112,8 @@ import {
   sceneForInput,
   layerColorSupported,
   layerKindInPage,
-  moveSceneLayer,
+  canOrderSceneLayer,
+  orderSceneLayer,
   removeSceneLayer,
   sceneHasInput,
   sceneInputId,
@@ -122,6 +123,7 @@ import {
   STREAM_SCENE_LAYER_LIMIT,
   STREAM_SCENE_LIMIT,
   updateSceneLayer,
+  type StreamLayerOrder,
   type StreamScene,
   type StreamSceneLayer,
 } from "@/lib/stream-scenes";
@@ -1032,6 +1034,20 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     }, 140);
   };
 
+  /**
+   * Bron naar voren, naar achteren, naar voorgrond of achtergrond: vanuit de bronnenlijst en het
+   * rechtsklikmenu op het scherm. De lijst en het beeld volgen dezelfde lagen.
+   */
+  const reorderLayer = (sceneId: string, layerId: string, order: StreamLayerOrder) => {
+    const scene = settingsRef.current.scenes.find((item) => item.id === sceneId);
+    if (!scene) return;
+    const layers = orderSceneLayer(scene.layers, layerId, order);
+    if (layers === scene.layers) return;
+    void persist({
+      scenes: settingsRef.current.scenes.map((item) => (item.id === sceneId ? { ...item, layers } : item)),
+    });
+  };
+
   const editedScene = editing ? (editing.role === "program" ? activeScene : previewScene) : null;
   const editedLayer: StreamSceneLayer | null = editedScene
     ? editedScene.layers.find((layer) => layer.id === editing?.layerId) ?? sceneMainLayer(editedScene)
@@ -1063,6 +1079,8 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
         others={scene.layers.filter((layer) => layer.id !== editedLayer.id && layer.visible)}
         onSelect={(layerId) => setEditing({ role, layerId, tool: "source" })}
         onRemove={() => removeLayer(scene, editedLayer.id, role)}
+        canOrder={(order) => canOrderSceneLayer(scene.layers, editedLayer.id, order)}
+        onOrder={(order) => reorderLayer(scene.id, editedLayer.id, order)}
       />
     );
   };
@@ -1448,13 +1466,7 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
           const layer = dockScene.layers.find((item) => item.id === layerId);
           if (layer) changeLayer(dockScene.id, layerId, { locked: !layer.locked }, true);
         }}
-        onMove={(layerId, delta) =>
-          void persist({
-            scenes: settings.scenes.map((scene) =>
-              scene.id === dockScene.id ? { ...scene, layers: moveSceneLayer(scene.layers, layerId, delta) } : scene,
-            ),
-          })
-        }
+        onOrder={(layerId, order) => reorderLayer(dockScene.id, layerId, order)}
         onRemove={(layerId) => removeLayer(dockScene, layerId, dockRole)}
         onTransform={(layerId, action) => {
           const layer = dockScene.layers.find((item) => item.id === layerId);

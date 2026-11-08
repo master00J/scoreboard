@@ -19,6 +19,9 @@ import {
   mergeStreamScenes,
   migrateScenes,
   moveSceneLayer,
+  canOrderSceneLayer,
+  orderSceneLayer,
+  sceneSourcesTopFirst,
   resetSceneLayer,
   transformSceneLayer,
   resolveSceneSelection,
@@ -249,6 +252,56 @@ describe("layer order", () => {
     expect(moveSceneLayer(layers, "c", -1).map((l) => l.id)).toEqual(["a", "c", "b"]);
     expect(moveSceneLayer(layers, "c", 1)).toBe(layers);
     expect(moveSceneLayer(layers, "x", 1)).toBe(layers);
+  });
+
+  it("shows the front layer at the top of the sources list, like OBS", () => {
+    // Opgeslagen: onderste eerst. "c" tekent dus vooraan en staat bovenaan in de lijst.
+    expect(sceneSourcesTopFirst(layers).map((l) => l.id)).toEqual(["c", "b", "a"]);
+    expect(layers.map((l) => l.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("moves up and down in the list the way the arrows say", () => {
+    const top = (list: typeof layers) => sceneSourcesTopFirst(list).map((l) => l.id);
+    expect(top(orderSceneLayer(layers, "b", "up"))).toEqual(["b", "c", "a"]);
+    expect(top(orderSceneLayer(layers, "b", "down"))).toEqual(["c", "a", "b"]);
+  });
+
+  it("brings a layer to the front or sends it to the back", () => {
+    expect(orderSceneLayer(layers, "a", "front").map((l) => l.id)).toEqual(["b", "c", "a"]);
+    expect(orderSceneLayer(layers, "c", "back").map((l) => l.id)).toEqual(["c", "a", "b"]);
+    expect(orderSceneLayer(layers, "b", "front").map((l) => l.id)).toEqual(["a", "c", "b"]);
+    expect(orderSceneLayer(layers, "b", "back").map((l) => l.id)).toEqual(["b", "a", "c"]);
+    // De lijst volgt: naar voorgrond = bovenaan, naar achtergrond = onderaan.
+    expect(sceneSourcesTopFirst(orderSceneLayer(layers, "a", "front"))[0]!.id).toBe("a");
+    expect(sceneSourcesTopFirst(orderSceneLayer(layers, "c", "back")).at(-1)!.id).toBe("c");
+  });
+
+  it("leaves the list alone when the layer is already there", () => {
+    expect(orderSceneLayer(layers, "c", "front")).toBe(layers);
+    expect(orderSceneLayer(layers, "c", "up")).toBe(layers);
+    expect(orderSceneLayer(layers, "a", "back")).toBe(layers);
+    expect(orderSceneLayer(layers, "a", "down")).toBe(layers);
+    expect(orderSceneLayer(layers, "x", "front")).toBe(layers);
+    expect(canOrderSceneLayer(layers, "c", "front")).toBe(false);
+    expect(canOrderSceneLayer(layers, "c", "back")).toBe(true);
+    expect(canOrderSceneLayer(layers, "a", "down")).toBe(false);
+    expect(canOrderSceneLayer(layers, "a", "up")).toBe(true);
+  });
+
+  it("keeps every layer and its settings when reordering", () => {
+    const moved = orderSceneLayer(layers, "a", "front");
+    expect(moved).toHaveLength(3);
+    expect(moved.find((l) => l.id === "a")).toBe(layers[0]);
+  });
+
+  it("reads saved scenes in the same order, so they look the same as before", () => {
+    const saved = [{ id: "s1", name: "PiP", layers: [
+      { id: "back", inputId: "v1" },
+      { id: "front", inputId: "v2" },
+    ] }];
+    const [scene] = mergeStreamScenes(saved, [{ id: "v1" }, { id: "v2" }]);
+    expect(scene!.layers.map((l) => l.id)).toEqual(["back", "front"]);
+    expect(sceneSourcesTopFirst(scene!.layers)[0]!.id).toBe("front");
   });
 });
 

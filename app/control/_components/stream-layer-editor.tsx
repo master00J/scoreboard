@@ -23,13 +23,23 @@ import {
 } from "@/lib/stream-layer-drag";
 import {
   STREAM_LAYER_FITS,
+  STREAM_LAYER_ORDERS,
+  canOrderSceneLayer,
+  sceneSourcesTopFirst,
   transformSceneLayer,
+  type StreamLayerOrder,
   type StreamLayerTransform,
   type StreamScene,
   type StreamSceneLayer,
 } from "@/lib/stream-scenes";
 
 export type StreamLayerPatch = Partial<Omit<StreamSceneLayer, "id" | "inputId">>;
+
+/** Ctrl+Home / Ctrl+End, zoals in OBS: helemaal naar voorgrond of achtergrond. */
+function orderFromKey(event: KeyboardEvent<HTMLElement>): StreamLayerOrder | null {
+  if (!(event.ctrlKey || event.metaKey)) return null;
+  return event.key === "Home" ? "front" : event.key === "End" ? "back" : null;
+}
 
 
 /** Grepen iets naar binnen, anders knipt overflow van de monitor de hoeken af. */
@@ -59,6 +69,8 @@ export function StreamLayerEditor({
   others = [],
   onSelect,
   onRemove,
+  canOrder,
+  onOrder,
 }: {
   layer: StreamSceneLayer;
   /** Deze monitor is wat er nu de stream in gaat. */
@@ -71,6 +83,9 @@ export function StreamLayerEditor({
   others?: StreamSceneLayer[];
   onSelect?: (layerId: string) => void;
   onRemove?: () => void;
+  /** Volgorde van de geselecteerde laag: naar voorgrond, naar voren, … (rechtsklikmenu). */
+  canOrder?: (order: StreamLayerOrder) => boolean;
+  onOrder?: (order: StreamLayerOrder) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -137,10 +152,22 @@ export function StreamLayerEditor({
     setMenu(null);
   };
 
+  const pickOrder = (order: StreamLayerOrder) => {
+    // Ook een vastgezette laag mag van plaats wisselen, zoals in OBS: het slot houdt alleen het kader vast.
+    if (canOrder?.(order)) onOrder?.(order);
+    setMenu(null);
+  };
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
       onRemove?.();
+      return;
+    }
+    const order = orderFromKey(event);
+    if (order) {
+      event.preventDefault();
+      pickOrder(order);
       return;
     }
     if (event.ctrlKey || event.metaKey) {
@@ -194,6 +221,13 @@ export function StreamLayerEditor({
             event.preventDefault();
             event.stopPropagation();
             onSelect?.(other.id);
+          }}
+          onContextMenu={(event) => {
+            // Zoals in OBS: rechtsklik kiest de bron en opent meteen zijn menu.
+            event.preventDefault();
+            event.stopPropagation();
+            onSelect?.(other.id);
+            setMenu({ x: event.clientX, y: event.clientY });
           }}
         />
       ))}
@@ -306,6 +340,8 @@ export function StreamLayerEditor({
           t={t}
           disabled={layer.locked}
           onPick={applyTransform}
+          canOrder={onOrder ? canOrder : undefined}
+          onOrder={pickOrder}
           onClose={() => setMenu(null)}
         />
       ) : null}
@@ -315,12 +351,30 @@ export function StreamLayerEditor({
 
 const TRANSFORM_ACTIONS: StreamLayerTransform[] = ["fit", "fill", "stretch", "center", "reset"];
 
+const ORDER_LABELS: Record<StreamLayerOrder, string> = {
+  front: "livestream.layerToFront",
+  up: "livestream.layerUp",
+  down: "livestream.layerDown",
+  back: "livestream.layerToBack",
+};
+const ORDER_KEYS: Record<StreamLayerOrder, string> = { front: "Ctrl+Home", up: "", down: "", back: "Ctrl+End" };
+
+const MENU_ITEM =
+  "flex h-7 w-full items-center justify-between gap-4 px-2.5 text-left text-xs text-zinc-100 hover:bg-blue-700 hover:text-white disabled:opacity-40 disabled:hover:bg-transparent";
+const MENU_HEADING = "px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/40";
+
+/**
+ * Rechtsklikmenu van een bron, in de lijst en op het scherm: volgorde en transformeren, zoals in OBS.
+ * `disabled` (vastgezet) geldt alleen voor transformeren.
+ */
 function LayerTransformMenu({
   x,
   y,
   t,
   disabled,
   onPick,
+  canOrder,
+  onOrder,
   onClose,
 }: {
   x: number;
@@ -328,6 +382,9 @@ function LayerTransformMenu({
   t: TFunction;
   disabled?: boolean;
   onPick: (action: StreamLayerTransform) => void;
+  /** Zonder dit geen volgorde-items. */
+  canOrder?: (order: StreamLayerOrder) => boolean;
+  onOrder?: (order: StreamLayerOrder) => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -346,9 +403,26 @@ function LayerTransformMenu({
       style={{ left: x, top: y }}
       onPointerDown={(event) => event.stopPropagation()}
     >
-      <div className="px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white/40">
-        {t("livestream.layerTransform")}
-      </div>
+      {canOrder && onOrder ? (
+        <>
+          <div className={MENU_HEADING}>{t("livestream.layerOrder")}</div>
+          {STREAM_LAYER_ORDERS.map((order) => (
+            <button
+              key={order}
+              type="button"
+              role="menuitem"
+              disabled={!canOrder(order)}
+              onClick={() => onOrder(order)}
+              className={MENU_ITEM}
+            >
+              {t(ORDER_LABELS[order])}
+              <span className="text-[10px] text-white/40">{ORDER_KEYS[order]}</span>
+            </button>
+          ))}
+          <div className="my-1 h-px bg-zinc-700" aria-hidden />
+        </>
+      ) : null}
+      <div className={MENU_HEADING}>{t("livestream.layerTransform")}</div>
       {TRANSFORM_ACTIONS.map((action) => (
         <button
           key={action}
@@ -356,7 +430,7 @@ function LayerTransformMenu({
           role="menuitem"
           disabled={disabled}
           onClick={() => onPick(action)}
-          className="flex h-7 w-full items-center justify-between gap-4 px-2.5 text-left text-xs text-zinc-100 hover:bg-blue-700 hover:text-white disabled:opacity-40"
+          className={MENU_ITEM}
         >
           {t(`livestream.layerTransform_${action}`)}
           <span className="text-[10px] text-white/40">
@@ -459,6 +533,7 @@ function Slider({
 /**
  * Bronnen van de gekozen scène, als de lijst in OBS. De bovenste regel ligt vooraan in beeld.
  * Klikken selecteert de bron, daarna versleep je het kader. Shift houdt de verhouding.
+ * Rechtsklik: naar voorgrond/achtergrond en transformeren; Ctrl+Home/End doet hetzelfde.
  */
 export function SceneSourcesDock({
   scene,
@@ -472,7 +547,7 @@ export function SceneSourcesDock({
   onToggleAdd,
   onToggleVisible,
   onToggleLock,
-  onMove,
+  onOrder,
   onRemove,
   onTransform,
 }: {
@@ -488,13 +563,14 @@ export function SceneSourcesDock({
   onToggleAdd: () => void;
   onToggleVisible: (layerId: string) => void;
   onToggleLock: (layerId: string) => void;
-  onMove: (layerId: string, delta: 1 | -1) => void;
+  /** Lijst en beeld lezen dezelfde lagen: wat hier bovenaan komt, staat ook vooraan in beeld. */
+  onOrder: (layerId: string, order: StreamLayerOrder) => void;
   onRemove: (layerId: string) => void;
   onTransform: (layerId: string, action: StreamLayerTransform) => void;
 }) {
-  const frontFirst = [...scene.layers].reverse();
+  const frontFirst = sceneSourcesTopFirst(scene.layers);
   const selected = frontFirst.find((item) => item.id === selectedLayerId) ?? null;
-  const selectedIndex = selected ? frontFirst.findIndex((item) => item.id === selected.id) : -1;
+  const canOrder = (layerId: string, order: StreamLayerOrder) => canOrderSceneLayer(scene.layers, layerId, order);
   const [menu, setMenu] = useState<{ x: number; y: number; layerId: string } | null>(null);
   return (
     <section
@@ -508,6 +584,12 @@ export function SceneSourcesDock({
         if (event.key === "Delete" || event.key === "Backspace") {
           event.preventDefault();
           onRemove(selected.id);
+          return;
+        }
+        const order = orderFromKey(event);
+        if (order) {
+          event.preventDefault();
+          if (canOrder(selected.id, order)) onOrder(selected.id, order);
           return;
         }
         if (event.ctrlKey || event.metaKey) {
@@ -609,8 +691,9 @@ export function SceneSourcesDock({
         <button
           type="button"
           aria-label={t("livestream.layerUp")}
-          disabled={!selected || selectedIndex === 0}
-          onClick={() => selected && onMove(selected.id, 1)}
+          title={t("livestream.layerUp")}
+          disabled={!selected || !canOrder(selected.id, "up")}
+          onClick={() => selected && onOrder(selected.id, "up")}
           className="h-8 w-8 rounded bg-zinc-800 text-xs disabled:opacity-30"
         >
           ↑
@@ -618,8 +701,9 @@ export function SceneSourcesDock({
         <button
           type="button"
           aria-label={t("livestream.layerDown")}
-          disabled={!selected || selectedIndex === frontFirst.length - 1}
-          onClick={() => selected && onMove(selected.id, -1)}
+          title={t("livestream.layerDown")}
+          disabled={!selected || !canOrder(selected.id, "down")}
+          onClick={() => selected && onOrder(selected.id, "down")}
           className="h-8 w-8 rounded bg-zinc-800 text-xs disabled:opacity-30"
         >
           ↓
@@ -633,6 +717,11 @@ export function SceneSourcesDock({
           disabled={scene.layers.find((layer) => layer.id === menu.layerId)?.locked}
           onPick={(action) => {
             onTransform(menu.layerId, action);
+            setMenu(null);
+          }}
+          canOrder={(order) => canOrder(menu.layerId, order)}
+          onOrder={(order) => {
+            onOrder(menu.layerId, order);
             setMenu(null);
           }}
           onClose={() => setMenu(null)}
@@ -838,7 +927,7 @@ export function StreamLayerPanel({
         {scene.layers.length > 1 ? (
           <>
           {/* Bovenste laag eerst, zoals in de scorebord-editor; opgeslagen staat de onderste eerst. */}
-          {[...scene.layers].reverse().map((item, index, list) => (
+          {sceneSourcesTopFirst(scene.layers).map((item, index, list) => (
             <div
               key={item.id}
               className={`flex items-center gap-1 rounded px-1 py-0.5 ${
