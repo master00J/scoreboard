@@ -7,10 +7,10 @@ import {
   computePrematchRundownClock,
   cueClockPhaseKey,
   cueHasClockWindow,
-  cueIsDueAtElapsed,
   cueLeftClockWindow,
   cuePhaseMatches,
   cueUsesLiveWallClock,
+  pickDueScheduledCue,
   liveWallCueClockFromPersisted,
   liveWallCueElapsedSec,
   cueWindowExpired,
@@ -209,6 +209,29 @@ export function useScheduledMediaCueActive({
     lastScheduledCueClockRef.current = { matchId, status, elapsed: cueElapsed };
   }, [skip, match?.id, match?.status, cueElapsed, holdLiveWallOnBreak, persistedLiveWallClock.block]);
 
+  /**
+   * Volgende cue die nu aan de beurt is, gemarkeerd als gespeeld; null als er niets mag of hoeft.
+   * Wordt alleen vanuit de effecten hieronder aangeroepen, met de waarden van deze render.
+   */
+  const takeNextDueCue = (): ScheduledMediaCue | null => {
+    if (!state || !match || mode === "BLACKOUT") return null;
+    if (!scheduledCueLiveProgramActive(mode, holdLiveWallOnBreak)) return null;
+    if (holdLiveWallOnBreak || prematchBlocked) return null;
+    const next = pickDueScheduledCue({
+      cues: scheduledCues,
+      matchId: match.id,
+      matchStatus: match.status,
+      playhead,
+      cycle: scheduledCueCycle,
+      timerRunning: state.timerRunning ?? false,
+      usesLiveWallClock,
+      fired: firedScheduledCueKeysRef.current,
+    });
+    if (!next) return null;
+    firedScheduledCueKeysRef.current.add(next.firedKey);
+    return next.cue;
+  };
+
   useEffect(() => {
     if (skip) return;
     if (!state || !match || mode === "BLACKOUT") return;
@@ -219,27 +242,9 @@ export function useScheduledMediaCueActive({
       if (activeScheduledCue) setActiveScheduledCue(null);
       return;
     }
-    if (holdLiveWallOnBreak) return;
-    if (prematchBlocked) return;
     if (activeScheduledCue) return;
-    const due = scheduledCues
-      .filter((cue) => {
-        if (!cue.enabled || !cue.media?.active || !cuePhaseMatches(cue.matchStatus, match.status)) return false;
-        if (!cueIsDueAtElapsed(cue, playhead)) return false;
-        if (!cueHasClockWindow(cue) && !(state.timerRunning ?? false) && !usesLiveWallClock) {
-          return false;
-        }
-        return true;
-      })
-      .sort((a, b) => a.triggerSec - b.triggerSec);
-    const phaseKey = cueClockPhaseKey(match.status) ?? match.status;
-    const cue = due.find((candidate) => {
-      const key = `${match.id}:${phaseKey}:${candidate.id}:${scheduledCueCycle}`;
-      return !firedScheduledCueKeysRef.current.has(key);
-    });
-    if (!cue) return;
-    firedScheduledCueKeysRef.current.add(`${match.id}:${phaseKey}:${cue.id}:${scheduledCueCycle}`);
-    setActiveScheduledCue(cue);
+    const cue = takeNextDueCue();
+    if (cue) setActiveScheduledCue(cue);
   }, [
     skip,
     activeScheduledCue,
@@ -262,15 +267,13 @@ export function useScheduledMediaCueActive({
       setActiveScheduledCue(null);
       return;
     }
-    if (rundownLoops) {
-      if (cueLeftClockWindow(activeScheduledCue, playhead)) {
-        setActiveScheduledCue(null);
-      }
-      return;
-    }
-    if (cueWindowExpired(activeScheduledCue, cueElapsed)) {
-      setActiveScheduledCue(null);
-    }
+    const windowDone = rundownLoops
+      ? cueLeftClockWindow(activeScheduledCue, playhead)
+      : cueWindowExpired(activeScheduledCue, cueElapsed);
+    if (!windowDone) return;
+    // Sluit de volgende cue in dezelfde stap aan. Via null verdween het hele cue-scorebord
+    // (z-88) voor één beeld en laadde het daarna opnieuw: het scherm knipperde bij elke wissel.
+    setActiveScheduledCue(takeNextDueCue());
   }, [skip, activeScheduledCue, cueElapsed, playhead, rundownLoops, prematchBlocked]);
 
   useEffect(() => {

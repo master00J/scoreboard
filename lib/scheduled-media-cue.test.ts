@@ -20,6 +20,9 @@ import {
   rundownPhasesForSport,
   rundownSport,
   wrapRundownElapsed,
+  cueLeftClockWindow,
+  pickDueScheduledCue,
+  scheduledCueFiredKey,
 } from "./scheduled-media-cue";
 
 describe("rundown per sport", () => {
@@ -210,5 +213,72 @@ describe("scheduled media cue window", () => {
     expect(rundownCycleIndex(90, 90, true)).toBe(1);
     expect(cueIsDueAtElapsed(cues[0]!, wrapRundownElapsed(90, 90, true))).toBe(true);
     expect(cueIsDueAtElapsed(cues[1]!, wrapRundownElapsed(90, 90, true))).toBe(false);
+  });
+});
+
+describe("pickDueScheduledCue", () => {
+  const cue = (id: string, triggerSec: number, endSec: number | null, extra: Record<string, unknown> = {}) => ({
+    id,
+    triggerSec,
+    endSec,
+    enabled: true,
+    matchStatus: "FIRST_HALF",
+    loop: true,
+    media: { active: true },
+    ...extra,
+  });
+  /** Zoals de volleybalclub ze zette: sponsorbeelden die naadloos op elkaar volgen. */
+  const rundown = [cue("a", 0, 15), cue("b", 15, 30), cue("c", 30, 45)];
+  const base = {
+    cues: rundown,
+    matchId: "m1",
+    matchStatus: "FIRST_HALF",
+    cycle: 0,
+    timerRunning: false,
+    usesLiveWallClock: true,
+  };
+
+  it("geeft de volgende cue op precies het moment dat de vorige zijn venster verlaat", () => {
+    const fired = new Set([scheduledCueFiredKey("m1", "FIRST_HALF", "a", 0)]);
+    expect(cueLeftClockWindow(rundown[0]!, 15)).toBe(true);
+    expect(pickDueScheduledCue({ ...base, playhead: 15, fired })).toEqual({
+      cue: rundown[1],
+      firedKey: "m1:FIRST_HALF:b:0",
+    });
+  });
+
+  it("sluit na de laatste cue aan op de eerste van de volgende doorloop", () => {
+    const fired = new Set(["a", "b", "c"].map((id) => scheduledCueFiredKey("m1", "FIRST_HALF", id, 0)));
+    expect(cueLeftClockWindow(rundown[2]!, 0)).toBe(true);
+    expect(pickDueScheduledCue({ ...base, playhead: 0, cycle: 0, fired })).toBeNull();
+    expect(pickDueScheduledCue({ ...base, playhead: 0, cycle: 1, fired })?.cue.id).toBe("a");
+  });
+
+  it("geeft niets in een gat tussen twee cues, zodat het scorebord terugkomt", () => {
+    const gap = [cue("a", 0, 10), cue("b", 20, 30)];
+    expect(pickDueScheduledCue({ ...base, cues: gap, playhead: 15, fired: new Set() })).toBeNull();
+  });
+
+  it("slaat uitgeschakelde, inactieve en andere fases over en neemt de vroegste starttijd", () => {
+    const cues = [
+      cue("late", 5, 20),
+      cue("off", 0, 20, { enabled: false }),
+      cue("inactive", 0, 20, { media: { active: false } }),
+      cue("second-half", 0, 20, { matchStatus: "SECOND_HALF" }),
+      cue("early", 2, 20),
+    ];
+    expect(pickDueScheduledCue({ ...base, cues, playhead: 10, fired: new Set() })?.cue.id).toBe("early");
+  });
+
+  it("start een cue zonder eindtijd alleen als de klok loopt of de wandklok telt", () => {
+    const cues = [cue("trigger", 10, null)];
+    const at = { ...base, cues, playhead: 11, fired: new Set<string>() };
+    expect(pickDueScheduledCue({ ...at, usesLiveWallClock: false })).toBeNull();
+    expect(pickDueScheduledCue({ ...at, usesLiveWallClock: false, timerRunning: true })?.cue.id).toBe("trigger");
+  });
+
+  it("deelt de gespeeld-sleutel tussen voor- en nawedstrijd-statussen", () => {
+    expect(scheduledCueFiredKey("m1", "SETUP", "x", 2)).toBe("m1:PREMATCH:x:2");
+    expect(scheduledCueFiredKey("m1", "FULL_TIME", "x", 0)).toBe("m1:POST_MATCH:x:0");
   });
 });

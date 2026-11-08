@@ -366,3 +366,65 @@ export function cueLeftClockWindow(
 ): boolean {
   return cueHasClockWindow(cue) && !cueIsDueAtElapsed(cue, elapsed);
 }
+
+type DueCueCandidate = {
+  id: string;
+  triggerSec: number;
+  endSec?: number | null;
+  enabled: boolean;
+  matchStatus: string;
+  media?: { active?: boolean | null } | null;
+};
+
+/** Sleutel waarmee het stadionscherm onthoudt dat een cue in deze doorloop al speelde. */
+export function scheduledCueFiredKey(
+  matchId: string,
+  matchStatus: string,
+  cueId: string,
+  cycle: number,
+): string {
+  return `${matchId}:${cueClockPhaseKey(matchStatus) ?? matchStatus}:${cueId}:${cycle}`;
+}
+
+/**
+ * De cue die nu aan de beurt is en in deze doorloop nog niet speelde, met de vroegste
+ * starttijd eerst. Null als er niets te tonen is.
+ *
+ * Het stadionscherm vraagt dit ook op het moment dat de vorige cue zijn venster verlaat, en
+ * zet de volgende dan in één stap neer. Liep die wissel via "geen cue", dan verdween het
+ * hele scorebord van de cue voor één beeld en werd het daarna opnieuw opgebouwd: achtergrond,
+ * logo's en scores knipperden bij elke sponsorwissel in plaats van alleen het mediavak.
+ */
+export function pickDueScheduledCue<C extends DueCueCandidate>({
+  cues,
+  matchId,
+  matchStatus,
+  playhead,
+  cycle,
+  timerRunning,
+  usesLiveWallClock,
+  fired,
+}: {
+  cues: readonly C[];
+  matchId: string;
+  matchStatus: string;
+  playhead: number;
+  cycle: number;
+  timerRunning: boolean;
+  usesLiveWallClock: boolean;
+  fired: ReadonlySet<string>;
+}): { cue: C; firedKey: string } | null {
+  const due = cues
+    .filter((cue) => {
+      if (!cue.enabled || !cue.media?.active || !cuePhaseMatches(cue.matchStatus, matchStatus)) return false;
+      if (!cueIsDueAtElapsed(cue, playhead)) return false;
+      if (!cueHasClockWindow(cue) && !timerRunning && !usesLiveWallClock) return false;
+      return true;
+    })
+    .sort((a, b) => a.triggerSec - b.triggerSec);
+  for (const cue of due) {
+    const firedKey = scheduledCueFiredKey(matchId, matchStatus, cue.id, cycle);
+    if (!fired.has(firedKey)) return { cue, firedKey };
+  }
+  return null;
+}
