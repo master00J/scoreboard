@@ -38,6 +38,8 @@ type UseScheduledMediaCueActiveResult = {
   activeScheduledCue: ScheduledMediaCue | null;
   /** Doorloop van een loopende rundown; verandert de React-key zodat dezelfde clip opnieuw start. */
   scheduledCueCycle: number;
+  /** Speelkop binnen de rundown (seconden), voor de resterende tijd van de actieve cue. */
+  scheduledCuePlayheadSec: number;
   /** Sluit de cue-overlay (na video `ended` of handmatig). */
   dismissActiveScheduledCue: () => void;
 };
@@ -288,6 +290,6 @@ export function useScheduledMediaCueActive({
   }, [skip, activeScheduledCue]);
 
   return skip
-    ? { activeScheduledCue: null, scheduledCueCycle: 0, dismissActiveScheduledCue: () => {} }
-    : { activeScheduledCue, scheduledCueCycle, dismissActiveScheduledCue };
+    ? { activeScheduledCue: null, scheduledCueCycle: 0, scheduledCuePlayheadSec: 0, dismissActiveScheduledCue: () => {} }
+    : { activeScheduledCue, scheduledCueCycle, scheduledCuePlayheadSec: playhead, dismissActiveScheduledCue };
 }

@@ -24,6 +24,7 @@ import {
   pickDueScheduledCue,
   scheduledCueFiredKey,
   scheduledCueMediaKey,
+  scheduledCueExpectedPlaySec,
 } from "./scheduled-media-cue";
 
 describe("rundown per sport", () => {
@@ -296,5 +297,29 @@ describe("scheduledCueMediaKey", () => {
     expect(scheduledCueMediaKey(v, 0)).not.toBe(scheduledCueMediaKey(v, 1));
     expect(scheduledCueMediaKey(v, 0)).not.toBe(scheduledCueMediaKey({ id: "w", media: { type: "VIDEO" } }, 0));
     expect(scheduledCueMediaKey(v, 0)).not.toBe(scheduledCueMediaKey({ id: "i", media: { type: "IMAGE" } }, 0));
+  });
+});
+
+describe("scheduledCueExpectedPlaySec", () => {
+  const image = { triggerSec: 15, endSec: 30, media: { durationSec: 10 } };
+
+  it("telt het hele klokvenster als de cue op tijd start, niet de beeldduur", () => {
+    expect(scheduledCueExpectedPlaySec(image, 15)).toBe(15);
+    expect(scheduledCueExpectedPlaySec(image, 15.2)).toBeCloseTo(14.8);
+  });
+
+  it("telt alleen de rest van het venster als het scherm halverwege instapt", () => {
+    expect(scheduledCueExpectedPlaySec(image, 22)).toBe(8);
+  });
+
+  it("blijft binnen het venster en nooit onder 1 s", () => {
+    expect(scheduledCueExpectedPlaySec(image, 3)).toBe(15);
+    expect(scheduledCueExpectedPlaySec(image, 29.9)).toBe(1);
+    expect(scheduledCueExpectedPlaySec(image, Number.NaN)).toBe(15);
+  });
+
+  it("houdt de mediaduur aan voor een cue zonder eindtijd", () => {
+    expect(scheduledCueExpectedPlaySec({ triggerSec: 15, endSec: null, media: { durationSec: 10 } }, 15)).toBe(10);
+    expect(scheduledCueExpectedPlaySec({ triggerSec: 15, endSec: null, media: { durationSec: 0 } }, 15)).toBe(15);
   });
 });

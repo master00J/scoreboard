@@ -440,3 +440,21 @@ export function scheduledCueMediaKey(
 ): string {
   return cue.media.type === "IMAGE" ? "image" : `${cue.id}-${cycle}`;
 }
+
+/**
+ * Hoe lang deze cue nog in beeld blijft, voor de Sponsor HUD en de live budgetteller.
+ * Met een eindtijd is dat de rest van het klokvenster: een beeld van 10 s in een venster van
+ * 15 s staat 15 s op het scherm, en de HUD stond anders al 5 s op 0.0 terwijl het beeld nog
+ * te zien was. Zonder eindtijd blijft het de duur van het mediabestand, zoals voorheen.
+ */
+export function scheduledCueExpectedPlaySec(
+  cue: { triggerSec: number; endSec?: number | null; media: { durationSec?: number | null } },
+  playheadSec: number,
+): number {
+  const end = cueEndSec(cue);
+  if (end != null) {
+    const at = Number.isFinite(playheadSec) ? Math.min(end, Math.max(cue.triggerSec, playheadSec)) : cue.triggerSec;
+    return Math.max(1, end - at);
+  }
+  return Math.max(1, cue.media.durationSec || 15);
+}

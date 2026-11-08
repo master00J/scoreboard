@@ -493,7 +493,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     return () => clearInterval(id);
   }, [previewIframe, embedInControl, mode, match?.id]);
 
-  const { activeScheduledCue, scheduledCueCycle, dismissActiveScheduledCue } = useScheduledMediaCueActive({
+  const { activeScheduledCue, scheduledCueCycle, scheduledCuePlayheadSec, dismissActiveScheduledCue } = useScheduledMediaCueActive({
     match,
     state,
     mode,
@@ -503,6 +503,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   useScheduledCueTelemetry({
     cue: activeScheduledCue,
     cycle: scheduledCueCycle,
+    playheadSec: scheduledCuePlayheadSec,
     match: match ? { id: match.id, status: match.status } : null,
     enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT",
   });
