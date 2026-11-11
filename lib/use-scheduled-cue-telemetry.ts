@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { ScheduledMediaCue } from "@/lib/types";
+import { cueClipSessionId, cueExpectedPlaySec } from "@/lib/scheduled-media-cue";
 import { sectionForStatus } from "@/lib/sponsor-display-helpers";
 import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
 import {
@@ -17,11 +18,18 @@ import {
 export function useScheduledCueTelemetry(opts: {
   cue: ScheduledMediaCue | null;
   cycle: number;
+  /** 0 bij de eerste keer in beeld; hoger als de cue na een onderbreking terugkomt. */
+  stint?: number;
   match: { id: string; status: string } | null;
   enabled: boolean;
+  /** Speelkop binnen de rundown: bepaalt hoeveel van het venster van de cue nog rest als hij start. */
+  playheadSec: number;
 }) {
-  const { cue, cycle, match, enabled } = opts;
+  const { cue, cycle, match, enabled, stint = 0 } = opts;
   const startedAtRef = useRef(0);
+  // Alleen bij de start gelezen; de speelkop loopt door en mag de melding niet opnieuw starten.
+  const playheadRef = useRef(opts.playheadSec);
+  playheadRef.current = opts.playheadSec;
 
   useEffect(() => {
     if (!enabled || !cue || !match) return;
@@ -30,10 +38,12 @@ export function useScheduledCueTelemetry(opts: {
     if (!segmentKey) return;
 
     const sponsorId = cue.media.sponsorId ?? "scheduled-cue";
-    const clipSessionId = `cue:${cue.id}:${cycle}:${cue.media.id}`;
+    const clipSessionId = cueClipSessionId({ cueId: cue.id, cycle, mediaId: cue.media.id, stint });
     const startedAtMs = Date.now();
     startedAtRef.current = startedAtMs;
-    const expectedPlaySec = Math.max(1, cue.media.durationSec || 15);
+    // Een cue blijft staan tot zijn venster om is. De duur van de foto zelf melden liet de
+    // operator "0,0 s resterend" zien terwijl het beeld nog seconden bleef staan.
+    const expectedPlaySec = cueExpectedPlaySec(cue, playheadRef.current);
 
     void reportSponsorClipStart({
       matchId: match.id,
@@ -71,5 +81,17 @@ export function useScheduledCueTelemetry(opts: {
         startedAtMs: startedAtRef.current,
       });
     };
-  }, [enabled, cue?.id, cue?.media.id, cue?.media.sponsorId, cue?.media.durationSec, cycle, match?.id, match?.status]);
+  }, [
+    enabled,
+    cue?.id,
+    cue?.triggerSec,
+    cue?.endSec,
+    cue?.media.id,
+    cue?.media.sponsorId,
+    cue?.media.durationSec,
+    cycle,
+    stint,
+    match?.id,
+    match?.status,
+  ]);
 }

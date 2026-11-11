@@ -5,9 +5,12 @@ import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
 } from "./_components/preview-slide-progress";
+import { DisplayHeldImage } from "@/components/display-held-image";
+import { displayModeToShow } from "@/lib/display-handover";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
+import { overlayEpisodeKey } from "@/lib/display-guards";
 import { AnimatePresence, motion } from "framer-motion";
 import { ScaleContainer } from "@/components/scale-container";
 import { useSocketSync, sendCommand, onDisplayHorn } from "@/lib/use-socket";
@@ -69,7 +72,7 @@ import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import { automaticSponsorMediaAllowed } from "@/lib/live-cycle-settings";
 import { useScheduledCueTelemetry } from "@/lib/use-scheduled-cue-telemetry";
-import { cueHasClockWindow, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
+import { cueHasClockWindow, cueWindowLengthSec, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 import {
   applySponsorBudgetCapToSpreadPhase,
   idleMayPlayPrematchSponsors,
@@ -241,6 +244,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   });
   const [allPlayers, setAllPlayers] = useState<Record<string, Player>>({});
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
+  /** Media-id waarvoor het opzoeken klaar is. Tot dan is "geen media" nog geen antwoord. */
+  const [activeMediaSettledId, setActiveMediaSettledId] = useState<string | null>(null);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   /** Opgeslagen indeling uit `/api/settings`; alleen nog de terugval. */
   const [themeJsonFromSettings, setThemeJsonFromSettings] = useState<string | null>(null);
@@ -429,21 +434,27 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   useEffect(() => {
     if (previewIframe) return;
-    if (!state?.activeMediaId) {
+    const mediaId = state?.activeMediaId ?? null;
+    if (!mediaId) {
       setActiveMedia(null);
+      setActiveMediaSettledId(null);
       return;
     }
+    let cancelled = false;
+    const settle = (found: MediaItem | null) => {
+      if (cancelled) return;
+      setActiveMedia(found);
+      setActiveMediaSettledId(mediaId);
+    };
     fetch(`/api/media`)
       .then((r) => r.json())
       .then((list: MediaItem[]) => {
-        if (!Array.isArray(list)) {
-          setActiveMedia(null);
-          return;
-        }
-        const found = list.find((m) => m.id === state.activeMediaId);
-        setActiveMedia(found ?? null);
+        settle(Array.isArray(list) ? (list.find((m) => m.id === mediaId) ?? null) : null);
       })
-      .catch(() => setActiveMedia(null));
+      .catch(() => settle(null));
+    return () => {
+      cancelled = true;
+    };
   }, [state?.activeMediaId, previewIframe]);
 
   useEffect(() => {
@@ -467,7 +478,18 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       .catch(() => {});
   }, [state?.updatedAt, previewIframe]);
 
-  const mode = state?.mode ?? "IDLE";
+  // Een losse clip begint pas als zijn bestand bekend is; tot dan blijft het vorige beeld staan.
+  // Anders stond tussendoor het volledige scorebord of een leeg vak op het scherm.
+  const shownModeRef = useRef<string | null>(null);
+  const mode = displayModeToShow<string>({
+    mode: state?.mode ?? "IDLE",
+    activeMediaId: previewIframe ? null : state?.activeMediaId,
+    settledMediaId: activeMediaSettledId,
+    shownMode: shownModeRef.current,
+  });
+  useEffect(() => {
+    shownModeRef.current = state ? mode : null;
+  }, [state, mode]);
   const programResumeModeRef = useRef<DisplayModeT>("SPONSOR_ROTATION");
   useEffect(() => {
     if (mode === "MATCH" || mode === "SPONSOR_ROTATION" || mode === "IDLE") {
@@ -492,19 +514,40 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     return () => clearInterval(id);
   }, [previewIframe, embedInControl, mode, match?.id]);
 
-  const { activeScheduledCue, scheduledCueCycle, dismissActiveScheduledCue } = useScheduledMediaCueActive({
-    match,
-    state,
-    mode,
-    elapsed,
-    skip: previewIframe,
-  });
+  const {
+    activeScheduledCue,
+    scheduledCueCycle,
+    scheduledCueStint,
+    scheduledCuePlayheadSec,
+    dismissActiveScheduledCue,
+  } = useScheduledMediaCueActive({
+      match,
+      state,
+      mode,
+      elapsed,
+      skip: previewIframe,
+    });
   useScheduledCueTelemetry({
     cue: activeScheduledCue,
     cycle: scheduledCueCycle,
+    stint: scheduledCueStint,
     match: match ? { id: match.id, status: match.status } : null,
     enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT",
+    playheadSec: scheduledCuePlayheadSec,
   });
+  /**
+   * Foto's uit de rundown delen één element: bij een wissel verandert alleen het beeld en blijft
+   * de vorige sponsor staan tot de volgende klaar is. Een video start per cue en per doorloop opnieuw.
+   */
+  const scheduledCueMediaKey = (surface: "panel" | "fullscreen") =>
+    activeScheduledCue?.media.type === "IMAGE"
+      ? `scheduled-cue-${surface}-image`
+      : `scheduled-cue-${surface}-${activeScheduledCue?.id}-${scheduledCueCycle}`;
+  /** Een foto met klokvenster blijft staan tot het venster om is, niet haar eigen duur. */
+  const scheduledCueImageHoldSec =
+    activeScheduledCue && cueHasClockWindow(activeScheduledCue)
+      ? cueWindowLengthSec(activeScheduledCue)
+      : undefined;
 
   /** Alleen het echte display-venster meldt afgespeelde sponsorclips (niet de ingebouwde preview). */
   const sponsorPlaybackTelemetry = useMemo(
@@ -544,6 +587,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     );
   }, [match, prematchClock]);
 
+  const overlayEpisode = overlayEpisodeKey(state, { home: match?.homeScore, away: match?.awayScore });
   useEffect(() => {
     if (!state) return;
     /** GOAL_PLAYER_VIDEO: gebruik de echte clipduur (+klein eindbufferke) i.p.v. lange default. */
@@ -572,14 +616,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       }
     }, t.ms);
     return () => clearTimeout(id);
-  }, [
-    state?.mode,
-    state?.updatedAt,
-    state?.activeSubInId,
-    state?.activeSubOutId,
-    activeMedia?.durationSec,
-    match?.sport,
-  ]);
+    // `state` zelf hoort hier niet bij: elke klokstart of shotclock-reset geeft een nieuwe stand,
+    // en dan begon de timer opnieuw en bleef de overlay staan. `overlayEpisode` verandert alleen
+    // als er een nieuwe vertoning begint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayEpisode, activeMedia?.durationSec, match?.sport]);
 
   const finishOneOffMedia = useCallback((endedMediaId?: string) => {
     if (embedInControl) return;
@@ -1418,6 +1459,21 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     exclusiveFullscreen,
   });
 
+  /** Scorebord met mediavak voor goal, kaart of een losse clip (niet de sponsorrotatie zelf). */
+  const showFramedContent =
+    showScoreFrame &&
+    !layoutPreviewActive &&
+    !!match &&
+    (!keepLiveSponsorBesideMounted || !showLiveSponsorBeside);
+  /**
+   * Stond dat vak er bij de vorige tekenbeurt? Dan verschijnt het volledige scorebord erna in één
+   * keer. Het vak verdwijnt zelf ook in één keer; een infade liet het scherm dan eerst zwart zien.
+   */
+  const scoreFrameOnScreenRef = useRef(false);
+  useEffect(() => {
+    scoreFrameOnScreenRef.current = showFramedContent;
+  }, [showFramedContent]);
+
   // Content that goes in the right panel (when the left scoreboard is shown)
   // or fullscreen (when it isn't).
   const activeContent = useMemo(() => {
@@ -1487,6 +1543,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           <SingleMediaMode
             key={`sm-panel-${activeMedia.id}`}
             media={activeMedia}
+            holdSlot="panel"
             showPreviewProgress={embedInControl}
             finishAfterMs={oneOffMediaHoldMs(activeMedia)}
             onVideoEnded={() => finishOneOffMedia(activeMedia.id)}
@@ -1666,6 +1723,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               period={period}
               addedTime={addedTimeMinutes}
               theme={liveTheme}
+              instant={scoreFrameOnScreenRef.current}
             />
             </div>
           )}
@@ -1810,6 +1868,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             <SingleMediaMode
               key={`sm-${activeMedia.id}`}
               media={activeMedia}
+              holdSlot="fullscreen"
               showPreviewProgress={embedInControl}
               finishAfterMs={oneOffMediaHoldMs(activeMedia)}
               onVideoEnded={() => finishOneOffMedia(activeMedia.id)}
@@ -1907,8 +1966,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             theme={liveTheme}
           >
             <SingleMediaMode
-              key={`scheduled-cue-panel-${activeScheduledCue.id}-${scheduledCueCycle}`}
+              key={scheduledCueMediaKey("panel")}
               media={activeScheduledCue.media}
+              holdSlot="panel"
+              imageHoldSec={scheduledCueImageHoldSec}
               showPreviewProgress={embedInControl}
               loop={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -1936,8 +1997,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         !(match && sponsorRotationBesideScoreboard(match.status)) && (
         <div className="absolute inset-0 z-[88] bg-black">
             <SingleMediaMode
-              key={`scheduled-cue-fullscreen-${activeScheduledCue.id}-${scheduledCueCycle}`}
+              key={scheduledCueMediaKey("fullscreen")}
               media={activeScheduledCue.media}
+              holdSlot="fullscreen"
+              imageHoldSec={scheduledCueImageHoldSec}
               showPreviewProgress={embedInControl}
               loop={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -2020,19 +2083,23 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         </div>
       )}
 
-      {/* Active-match modes: wrap content in the left-scoreboard / strip layout */}
-      {showScoreFrame && !layoutPreviewActive && match && (!keepLiveSponsorBesideMounted || !showLiveSponsorBeside) && (
-        <ScoreFrame
-          match={match}
-          elapsed={scoreboardClock}
-          shotClock={shotClock}
-          running={state?.timerRunning ?? false}
-          period={period}
-          addedTime={addedTimeMinutes}
-          theme={liveTheme}
-        >
-          <AnimatePresence mode="wait">{activeContent}</AnimatePresence>
-        </ScoreFrame>
+      {/* Active-match modes: wrap content in the left-scoreboard / strip layout.
+          Boven het volledige scorebord: dat faadt nog uit als dit vak verschijnt en lag er
+          anders een moment overheen. */}
+      {showFramedContent && match && (
+        <div className="absolute inset-0 z-[12]">
+          <ScoreFrame
+            match={match}
+            elapsed={scoreboardClock}
+            shotClock={shotClock}
+            running={state?.timerRunning ?? false}
+            period={period}
+            addedTime={addedTimeMinutes}
+            theme={liveTheme}
+          >
+            <AnimatePresence mode="wait">{activeContent}</AnimatePresence>
+          </ScoreFrame>
+        </div>
       )}
 
       {state && layoutPreview && (
@@ -2292,11 +2359,21 @@ function SingleMediaMode({
   previewProgressWallClock,
   onVideoEnded,
   finishAfterMs,
+  imageHoldSec,
+  holdSlot,
 }: {
   media: MediaItem | null;
   loop?: boolean;
   fallback?: React.ReactNode;
   showPreviewProgress?: boolean;
+  /**
+   * Het vak dat deze clip vult: het mediavak naast het scorebord, of het hele scherm. Een foto
+   * sluit aan op de foto die daar net stond, ook als die uit een andere laag kwam (sponsor uit het
+   * programma, losse clip), zodat het vak tussendoor niet zwart wordt.
+   */
+  holdSlot?: "panel" | "fullscreen";
+  /** Hoe lang een foto blijft staan als dat niet haar eigen duur is, bv. het venster van een cue. */
+  imageHoldSec?: number;
   /** Preview-balk over muurklok-tijdvenster (bijv. 5 min matchsponsor), niet media-duur. */
   previewProgressWallClock?: {
     windowStartMs: number;
@@ -2315,7 +2392,7 @@ function SingleMediaMode({
     media?.type === "IMAGE" &&
     showPreviewProgress &&
     !previewProgressWallClock
-      ? Math.max(1500, Math.max(1, media.durationSec) * 1000)
+      ? Math.max(1500, Math.max(1, imageHoldSec ?? media.durationSec) * 1000)
       : 0;
   const imageElapsed = useTimedSlideProgress(
     imageTotalMs,
@@ -2505,7 +2582,7 @@ function SingleMediaMode({
           }}
         />
       ) : (
-        <img src={mediaUrl(media.path)} alt="" decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
+        <DisplayHeldImage src={mediaUrl(media.path)} style={DISPLAY_COVER_MEDIA_STYLE} slot={holdSlot} />
       )}
       </DisplayMediaStage>
       {wallClockBar}

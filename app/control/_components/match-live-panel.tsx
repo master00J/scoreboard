@@ -13,6 +13,7 @@ import { defaultFieldFromRoster } from "@/lib/match-field-lineup";
 import { squadOnFieldAndBench } from "@/lib/match-squad";
 import { toast } from "@/components/ui/toast";
 import { getSportProfile } from "@/lib/sports";
+import { createRepeatGuard, SCORE_REPEAT_GUARD_MS } from "@/lib/operator-guards";
 import { tMatchStatus } from "@/lib/i18n/t-phase";
 import { tScoreLabel } from "@/lib/i18n/t-sport";
 import { SportLiveControls } from "./sport-live-controls";
@@ -28,6 +29,8 @@ export function MatchLivePanel() {
   const [subModal, setSubModal] = useState(false);
   const [lineupModal, setLineupModal] = useState(false);
   const [cardModal, setCardModal] = useState<null | "YELLOW" | "RED" | "GREEN">(null);
+  /** Een dubbelklik op een scoreknop telt één keer; twee bewuste klikken tellen allebei. */
+  const acceptScoreClick = useRef(createRepeatGuard(SCORE_REPEAT_GUARD_MS)).current;
 
   useEffect(() => {
     reload();
@@ -46,7 +49,13 @@ export function MatchLivePanel() {
   const homeGoalVisualEnabled = isGoalSport && (settings?.goalVisualHomeEnabled ?? true);
   const awayGoalVisualEnabled = isGoalSport && (settings?.goalVisualAwayEnabled ?? false);
 
+  function handleAdjust(side: "home" | "away", delta: number) {
+    if (!acceptScoreClick(`${side}:${delta}`)) return;
+    void sendCommand({ type: "score:adjust", side, delta });
+  }
+
   async function handleScoreClick(side: "home" | "away", points: number) {
+    if (!acceptScoreClick(`${side}:+${points}`)) return;
     const visualEnabled = side === "home" ? homeGoalVisualEnabled : awayGoalVisualEnabled;
     if (isGoalSport && points === 1) {
       if (visualEnabled) {
@@ -81,7 +90,7 @@ export function MatchLivePanel() {
           supportsGoalVisuals={profile.supportsGoalVisuals}
           increments={profile.scoreIncrements}
           onScoreClick={(points) => void handleScoreClick("home", points)}
-          onAdjust={(d) => sendCommand({ type: "score:adjust", side: "home", delta: d })}
+          onAdjust={(d) => handleAdjust("home", d)}
         />
         <SideControl
           side="away"
@@ -92,7 +101,7 @@ export function MatchLivePanel() {
           supportsGoalVisuals={profile.supportsGoalVisuals}
           increments={profile.scoreIncrements}
           onScoreClick={(points) => void handleScoreClick("away", points)}
-          onAdjust={(d) => sendCommand({ type: "score:adjust", side: "away", delta: d })}
+          onAdjust={(d) => handleAdjust("away", d)}
         />
       </div>
 

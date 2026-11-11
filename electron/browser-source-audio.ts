@@ -1,9 +1,21 @@
 import net from "node:net";
 import type { BrowserWindow, WebFrameMain } from "electron";
+import { createPcmPacer } from "../lib/pcm-pacer";
 
 const SAMPLE_RATE = 48000;
-const SILENCE_MS = 20;
+/** s16le stereo. */
+const BYTES_PER_FRAME = 4;
 const POLL_MS = 40;
+/**
+ * Zolang de pagina zelf geluid levert, komt dat in blokken van 2048 frames (43 ms) via een ronde
+ * langs de renderer. Pas als er langer dan dit niets komt, vullen we stilte bij; anders zou elke
+ * kleine vertraging een hap stilte midden in het geluid zetten.
+ */
+const LIVE_SLACK_MS = 250;
+/** Grootste stuk stilte in één keer (na een hapering van het hoofdproces). */
+const MAX_FILL_MS = 2000;
+/** Leest ffmpeg niet meer, dan stapelen we geen minuten geluid op in het geheugen. */
+const MAX_SOCKET_BACKLOG_BYTES = SAMPLE_RATE * BYTES_PER_FRAME * 5;
 
 const TAP_JS = `(() => {
   if (window.__acBrowserTap) return "ok";
@@ -88,14 +100,27 @@ export function createBrowserAudioTap(options: {
   log: (line: string) => void;
 }): BrowserAudioTap {
   const sockets = new Set<net.Socket>();
-  const silence = Buffer.alloc(Math.max(4, Math.round((SAMPLE_RATE * 4 * SILENCE_MS) / 1000)));
-  let lastWrite = 0;
+  const silence = Buffer.alloc(Math.round((SAMPLE_RATE * MAX_FILL_MS) / 1000) * BYTES_PER_FRAME);
+  /**
+   * ffmpeg telt de tijd van dit kanaal in frames. Het kanaal levert daarom precies 48000 frames
+   * per seconde, of de bron nu geluid geeft, zwijgt of niet in beeld staat. Vroeger kwam er zonder
+   * venster maar 20 ms stilte per 40 ms: de geluidsmix kon de stream dan niet bijhouden. Mét
+   * venster kwam die stilte bovenop het echte geluid.
+   */
+  const pacer = createPcmPacer({
+    sampleRate: SAMPLE_RATE,
+    startMs: performance.now(),
+    maxLeadMs: LIVE_SLACK_MS,
+    maxFillMs: MAX_FILL_MS,
+  });
   let peak = 0;
+  /** Laatste keer dat de pagina zelf geluid aanleverde (ook stil geluid telt). */
+  let lastAudioMs = Number.NEGATIVE_INFINITY;
 
   const write = (buf: Buffer) => {
-    lastWrite = Date.now();
     for (const socket of sockets) {
       if (socket.destroyed || !socket.writable) continue;
+      if (socket.writableLength > MAX_SOCKET_BACKLOG_BYTES) continue;
       try {
         socket.write(buf);
       } catch {
@@ -142,14 +167,20 @@ export function createBrowserAudioTap(options: {
     }
     peak = nextPeak;
     options.onPeak(peak);
-    if (combined.length >= 2) {
-      const buf = Buffer.allocUnsafe(combined.length * 2);
-      for (let i = 0; i < combined.length; i++) {
-        const v = Math.max(-32768, Math.min(32767, combined[i] ?? 0));
-        buf.writeInt16LE(v, i * 2);
-      }
-      write(buf);
+    const frames = Math.floor(combined.length / 2);
+    if (frames < 1) return;
+    // Wat verder dan de speling voor zou lopen op de klok, valt weg: het oudste eerst.
+    const now = performance.now();
+    lastAudioMs = now;
+    const accepted = pacer.admit(now, frames);
+    if (accepted < 1) return;
+    const skip = (frames - accepted) * 2;
+    const buf = Buffer.allocUnsafe(accepted * BYTES_PER_FRAME);
+    for (let i = 0; i < accepted * 2; i++) {
+      const v = Math.max(-32768, Math.min(32767, combined[skip + i] ?? 0));
+      buf.writeInt16LE(v, i * 2);
     }
+    write(buf);
   };
 
   const hooked = new WeakSet<Electron.WebContents>();
@@ -166,14 +197,20 @@ export function createBrowserAudioTap(options: {
 
   let poll: ReturnType<typeof setInterval> | null = setInterval(() => {
     const win = options.getWindow();
-    if (win && !win.isDestroyed()) {
+    const live = !!win && !win.isDestroyed();
+    if (live) {
       attach(win);
       void drain(win);
     } else {
       peak = 0;
       options.onPeak(0);
     }
-    if (Date.now() - lastWrite >= SILENCE_MS) write(silence);
+    // Levert de pagina geluid, dan wachten we daar even op. Zonder venster, of met een pagina die
+    // (nog) niets afspeelt, is er niets om op te wachten: meteen bijvullen tot het tempo van de klok.
+    const now = performance.now();
+    const sourceActive = live && now - lastAudioMs < LIVE_SLACK_MS * 2;
+    const fill = pacer.fill(now, sourceActive ? LIVE_SLACK_MS : 0);
+    if (fill > 0) write(silence.subarray(0, fill * BYTES_PER_FRAME));
   }, POLL_MS);
 
   return {

@@ -146,7 +146,10 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       .then((r) => r.json())
       .then((list: MediaItem[]) => setMediaLibrary(Array.isArray(list) ? list : []))
       .catch(() => setMediaLibrary([]));
-  }, [state?.updatedAt, state?.activeMediaId, sponsorLedger?.updatedAtMs]);
+    // Niet aan het sponsor-logboek hangen: dat verandert bij elke voortgangsmelding van een clip,
+    // en dan werd de hele mediabibliotheek meermaals per seconde opnieuw opgehaald. Een wijziging
+    // in de bibliotheek zelf ververst `updatedAt`.
+  }, [state?.updatedAt, state?.activeMediaId]);
 
   /**
    * Detecteer of de display geconfigureerd is om sponsorbudgetten oneindig te herhalen.

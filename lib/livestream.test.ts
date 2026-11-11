@@ -9,6 +9,7 @@ import {
   clampBitrateKbps,
   escapeTeeUrl,
   ffmpegOutputArgs,
+  recordSegmentPath,
   guessDshowAudioForCameraLabel,
   audioChannelGain,
   audioMonitorGains,
@@ -150,6 +151,32 @@ describe("dual destinations", () => {
     const args = ffmpegOutputArgs(["C:\\\\Videos\\\\clip.mp4"]);
     expect(args).toContain("mp4");
     expect(args.at(-1)).toContain("clip.mp4");
+  });
+});
+
+describe("recordSegmentPath", () => {
+  const base = "C:\\Videos\\arenacue-2026-11-11T14-00-00.mp4";
+
+  it("houdt de gewone naam voor het eerste deel", () => {
+    expect(recordSegmentPath(base, 1)).toBe(base);
+    expect(recordSegmentPath(base, 0)).toBe(base);
+    expect(recordSegmentPath(base, Number.NaN)).toBe(base);
+  });
+
+  it("nummert volgende delen vóór de extensie", () => {
+    expect(recordSegmentPath(base, 2)).toBe("C:\\Videos\\arenacue-2026-11-11T14-00-00-part2.mp4");
+    expect(recordSegmentPath(base, 12)).toBe("C:\\Videos\\arenacue-2026-11-11T14-00-00-part12.mp4");
+    expect(recordSegmentPath("/home/club/opname.mp4", 3)).toBe("/home/club/opname-part3.mp4");
+  });
+
+  it("laat een punt in de mapnaam met rust", () => {
+    expect(recordSegmentPath("C:\\Club v1.2\\opname", 2)).toBe("C:\\Club v1.2\\opname-part2");
+    expect(recordSegmentPath("C:\\Club v1.2\\.verborgen", 2)).toBe("C:\\Club v1.2\\.verborgen-part2");
+  });
+
+  it("geeft elk deel een andere naam", () => {
+    const names = new Set([1, 2, 3, 4].map((n) => recordSegmentPath(base, n)));
+    expect(names.size).toBe(4);
   });
 });
 

@@ -55,6 +55,9 @@ const bridge: ElectronBridge = {
   submitFeatureRequest: (input) => ipcRenderer.invoke("feature:submit", input),
   getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
   getStreamDeckInfo: () => ipcRenderer.invoke("streamdeck:getInfo"),
+  setQuickMediaButtons: (mediaIds: string[]) => {
+    ipcRenderer.send("control:setQuickMediaButtons", mediaIds);
+  },
   getOfficialClockSettings: () => ipcRenderer.invoke("officialclock:getSettings"),
   saveOfficialClockSettings: (settings) => ipcRenderer.invoke("officialclock:saveSettings", settings),
   getOfficialClockStatus: () => ipcRenderer.invoke("officialclock:getStatus"),

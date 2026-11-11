@@ -357,6 +357,96 @@ describe("basketbal", () => {
     expect(s.breakBaseSec).toBe(900);
     expect(s.breakWarnArmed).toBe(false);
   });
+
+  it("laat de klok staan als de lopende periode opnieuw wordt gekozen", async () => {
+    const m = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "sport:setPeriod", period: 2 });
+    await run({ type: "timer:set", seconds: 250 });
+    await run({ type: "shotclock:set", seconds: 9 });
+    await run({ type: "sport:statAdjust", stat: "foul", side: "home", delta: 1 });
+    const before = await state();
+    expect(before.timerBaseSec).toBe(250);
+
+    // Tweede klik op Q2 (of een dubbelklik): geen nieuwe periode, dus niets terugzetten.
+    const ack = await run({ type: "sport:setPeriod", period: 2 });
+    expect(ack).toMatchObject({ ok: true, result: { unchanged: true } });
+    const after = await state();
+    expect(after.timerBaseSec).toBe(250);
+    expect(after.timerRunning).toBe(before.timerRunning);
+    expect(after.shotClockBaseSec).toBe(9);
+    const row = await matchRow(m.id);
+    expect(row.currentPeriod).toBe(2);
+    expect(row.homeFouls).toBe(1);
+    expect(await prisma.matchEvent.count({ where: { matchId: m.id, type: "PERIOD" } })).toBe(1);
+
+    // Een andere periode begint wel opnieuw.
+    await run({ type: "sport:setPeriod", period: 3 });
+    expect((await state()).timerBaseSec).toBe(0);
+    expect((await matchRow(m.id)).currentPeriod).toBe(3);
+  });
+
+  it("begint een periode opnieuw als de wedstrijd in de pauze staat", async () => {
+    const m = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "sport:setPeriod", period: 2 });
+    await run({ type: "timer:set", seconds: 250 });
+    await run({ type: "match:setStatus", status: "HALF_TIME" });
+    await run({ type: "sport:setPeriod", period: 2 });
+    expect((await state()).timerBaseSec).toBe(0);
+    expect((await matchRow(m.id)).status).not.toBe("HALF_TIME");
+  });
+});
+
+describe("actieve wedstrijd wisselen", () => {
+  it("geeft een andere wedstrijd een stilstaande klok op de beginstand", async () => {
+    await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "timer:set", seconds: 321 });
+    await run({ type: "timer:start" });
+    expect((await state()).timerRunning).toBe(true);
+
+    const next = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    const s = await state();
+    expect(s.matchId).toBe(next.id);
+    expect(s.timerRunning).toBe(false);
+    expect(s.timerStartedAt).toBeNull();
+    expect(s.timerBaseSec).toBe(0);
+  });
+
+  it("zet een oplopende klok op het begin van de periode van de nieuwe wedstrijd", async () => {
+    await seedMatch("FOOTBALL");
+    await run({ type: "timer:set", seconds: 1234 });
+    await run({ type: "timer:start" });
+
+    const next = await seedMatch("FOOTBALL", { currentPeriod: 2, status: "SECOND_HALF", periodDurationSec: 2700 });
+    const s = await state();
+    expect(s.matchId).toBe(next.id);
+    expect(s.timerRunning).toBe(false);
+    expect(s.timerBaseSec).toBe(2700);
+  });
+
+  it("laat de klok lopen als dezelfde wedstrijd opnieuw actief wordt gezet", async () => {
+    const m = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "timer:set", seconds: 321 });
+    await run({ type: "timer:start" });
+    const before = await state();
+
+    await run({ type: "match:setActive", matchId: m.id });
+    const after = await state();
+    expect(after.timerRunning).toBe(true);
+    expect(after.timerBaseSec).toBe(before.timerBaseSec);
+    expect(after.timerStartedAt?.getTime()).toBe(before.timerStartedAt?.getTime());
+  });
+
+  it("zet de klok stil als er geen wedstrijd meer actief is", async () => {
+    await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "timer:set", seconds: 321 });
+    await run({ type: "timer:start" });
+
+    await run({ type: "match:setActive", matchId: null });
+    const s = await state();
+    expect(s.matchId).toBeNull();
+    expect(s.timerRunning).toBe(false);
+    expect(s.timerBaseSec).toBe(0);
+  });
 });
 
 describe("volleybal", () => {
