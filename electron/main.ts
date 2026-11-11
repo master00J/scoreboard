@@ -603,6 +603,28 @@ function configureDesktopContext() {
   };
 }
 
+/**
+ * Commando van een operator, vanuit het bedienpaneel of van een Stream Deck-knop.
+ * "Scorebord + sponsors" hoort bij de licentie; zonder die functie weigert de app het, waar de vraag
+ * ook vandaan komt.
+ */
+async function runOperatorCommand(cmd: any) {
+  if (!runtime) throw new Error("Runtime not initialized");
+  if (
+    desktopContext &&
+    cmd?.type === "display:setMode" &&
+    cmd?.mode === "SPONSOR_ROTATION" &&
+    licenseSvc.readStoredLicense(desktopContext.userDataDir)?.features?.automatic_sponsor_rotation === false
+  ) {
+    const payload = { message: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("display:error", payload);
+    }
+    return { ok: false, error: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
+  }
+  return runtime.runCommand(cmd);
+}
+
 async function loadRuntime() {
   desktopContext = configureDesktopContext();
   runtime = await import("./runtime");
@@ -2102,8 +2124,11 @@ function registerIpc() {
   if (!streamDeck && livestream && runtime) {
     streamDeck = startStreamDeck({
       livestream,
-      runCommand: (command) => runtime!.runCommand(command as any),
+      runCommand: (command) => runOperatorCommand(command),
       getSnapshot: () => runtime!.getDisplaySnapshot(),
+      getState: () => runtime!.getDeckState(),
+      getMatch: (matchId) => runtime!.getMatchForDeck(matchId),
+      getLocale: () => runtime!.getUiLocale(),
       log: bootLog,
     });
   }
@@ -2313,22 +2338,7 @@ function registerIpc() {
     return response;
   });
 
-  ipcMain.handle("display:command", async (_, cmd) => {
-    if (!runtime) throw new Error("Runtime not initialized");
-    if (
-      desktopContext &&
-      cmd?.type === "display:setMode" &&
-      cmd?.mode === "SPONSOR_ROTATION" &&
-      licenseSvc.readStoredLicense(desktopContext.userDataDir)?.features?.automatic_sponsor_rotation === false
-    ) {
-      const payload = { message: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
-      if (controlWindow && !controlWindow.isDestroyed()) {
-        controlWindow.webContents.send("display:error", payload);
-      }
-      return { ok: false, error: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
-    }
-    return runtime.runCommand(cmd);
-  });
+  ipcMain.handle("display:command", async (_, cmd) => runOperatorCommand(cmd));
 
   ipcMain.on("control:setDisplayPreviewCapture", (event, enabled: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);

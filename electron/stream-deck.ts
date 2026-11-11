@@ -6,18 +6,44 @@ import {
   parseStreamDeckPath,
   STREAM_DECK_BINDINGS,
   STREAM_DECK_HTTP_PORT,
-      STREAM_DECK_SLOT_ACCELERATORS,
-      runScoreDeckAction,
-      streamDeckSlotShortTitle,
-      type StreamDeckAction,
+  STREAM_DECK_SLOT_ACCELERATORS,
+  runScoreDeckAction,
+  streamDeckSlotShortTitle,
+  type StreamDeckAction,
   type StreamDeckInfo,
 } from "../lib/stream-deck";
+import {
+  boardDeckPlan,
+  parseBoardDeckPath,
+  type BoardDeckAction,
+  type DeckLive,
+  type DeckMatch,
+  type DeckState,
+} from "../lib/stream-deck-board";
+import {
+  DECK_FACES_MAX_PATHS,
+  DECK_TEXTS,
+  deckFaces,
+  normalizeDeckLocale,
+  type DeckStream,
+  type DeckTexts,
+} from "../lib/stream-deck-faces";
+import { getSportProfile } from "../lib/sports";
 import type { LivestreamController } from "./livestream";
 import { installStreamDeckPlugin } from "./stream-deck-plugin";
 
-type Snapshot = {
-  timerRunning?: boolean;
+type Snapshot = DeckState & {
+  matchId?: string | null;
+  updatedAt?: string;
 };
+
+/** Zo lang houdt de app een vraag van de plug-in open als er niets op de knoppen verandert. */
+const FACES_HOLD_MS = 20_000;
+/** Zo vaak kijkt de app, zolang de plug-in wacht, of een knop er anders uit moet zien. */
+const FACES_CHECK_MS = 250;
+/** Wedstrijdgegevens (stand, periode) opnieuw lezen, ook als het scherm geen wijziging meldde. */
+const MATCH_MAX_AGE_MS = 5_000;
+const LOCALE_MAX_AGE_MS = 10_000;
 
 export type StreamDeckHandle = {
   info: () => StreamDeckInfo;
@@ -27,12 +53,83 @@ export type StreamDeckHandle = {
 export function startStreamDeck(options: {
   livestream: LivestreamController;
   runCommand: (command: unknown) => Promise<unknown>;
+  /** Verse schermtoestand uit de database: voor een druk op een knop. */
   getSnapshot: () => Promise<unknown>;
+  /** Schermtoestand die hooguit een seconde oud is: voor wat er op de knoppen staat. */
+  getState: () => Promise<unknown>;
+  getMatch: (matchId: string) => Promise<DeckMatch | null>;
+  getLocale: () => Promise<string>;
   log: (line: string) => void;
 }): StreamDeckHandle {
   const port = STREAM_DECK_HTTP_PORT;
   const baseUrl = `http://127.0.0.1:${port}`;
-  const pluginInstalled = installStreamDeckPlugin(options.log);
+  let stopped = false;
+
+  // De plug-in krijgt de taal van de app, dus eerst die lezen en dan pas wegschrijven.
+  let pluginInstalled = false;
+  let texts: DeckTexts = DECK_TEXTS.nl;
+  let textsAt = 0;
+  const readTexts = async (): Promise<DeckTexts> => {
+    if (Date.now() - textsAt > LOCALE_MAX_AGE_MS) {
+      textsAt = Date.now();
+      try {
+        texts = DECK_TEXTS[normalizeDeckLocale(await options.getLocale())];
+      } catch {
+        /* de vorige taal blijft staan */
+      }
+    }
+    return texts;
+  };
+  void options
+    .getLocale()
+    .catch(() => "nl")
+    .then((locale) => {
+      pluginInstalled = installStreamDeckPlugin(normalizeDeckLocale(locale), options.log);
+    });
+
+  let matchCache: { key: string; at: number; match: DeckMatch | null } | null = null;
+  const readLive = async (fresh = false): Promise<DeckLive> => {
+    const state = (await (fresh ? options.getSnapshot() : options.getState())) as Snapshot | null;
+    if (fresh) matchCache = null;
+    if (!state) return { state: null, match: null };
+    if (!state.matchId) return { state, match: null };
+    // Elke wijziging aan de wedstrijd tikt ook de schermtoestand aan; dat is het sein om opnieuw te lezen.
+    const key = `${state.matchId}|${state.updatedAt ?? ""}`;
+    if (!matchCache || matchCache.key !== key || Date.now() - matchCache.at > MATCH_MAX_AGE_MS) {
+      matchCache = { key, at: Date.now(), match: await options.getMatch(state.matchId) };
+    }
+    return { state, match: matchCache.match };
+  };
+
+  const readStream = (): DeckStream => {
+    const settings = options.livestream.getSettings();
+    const status = options.livestream.getStatus();
+    return {
+      running: status.running,
+      recording: status.recording,
+      scenes: settings.scenes.map((scene) => ({
+        name: scene.name || settings.videoInputs.find((item) => item.id === sceneInputId(scene))?.name || "",
+        program: scene.id === settings.activeSceneId,
+        preview: scene.id === settings.previewSceneId,
+      })),
+      slots: settings.streamDeckSlots,
+    };
+  };
+
+  const readFaces = async (paths: string[]) =>
+    deckFaces(paths, {
+      live: await readLive(),
+      stream: readStream(),
+      texts: await readTexts(),
+      now: Date.now(),
+    });
+
+  /** Stuurt een commando; een weigering (geen wedstrijd, niet voor deze sport) wordt een fout op de knop. */
+  const send = async (command: unknown): Promise<unknown> => {
+    const ack = (await options.runCommand(command)) as { ok?: boolean; error?: string } | null;
+    if (ack && ack.ok === false) throw new Error(ack.error ?? "Commando geweigerd");
+    return ack;
+  };
 
   const runAction = async (action: StreamDeckAction): Promise<{ ok: boolean; error?: string }> => {
     try {
@@ -81,17 +178,32 @@ export function startStreamDeck(options: {
         const snap = (await options.getSnapshot()) as Snapshot | null;
         const running = Boolean(snap?.timerRunning);
         if (action.mode === "pause" || (action.mode === "toggle" && running)) {
-          await options.runCommand({ type: "timer:pause" });
+          await send({ type: "timer:pause" });
         } else {
-          await options.runCommand({ type: "timer:start" });
+          await send({ type: "timer:start" });
         }
         return { ok: true };
       }
       if (action.id === "score") {
-        await runScoreDeckAction(action, (cmd) => options.runCommand(cmd));
+        const { match } = await readLive(true);
+        const goalSport = match ? getSportProfile(match.sport).supportsGoalVisuals : true;
+        await runScoreDeckAction(action, send, goalSport);
         return { ok: true };
       }
-      await options.runCommand({ type: "display:blackout" });
+      await send({ type: "display:blackout" });
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  };
+
+  /** Scorebordknop: de live toestand bepaalt welke commando's hij stuurt. */
+  const runBoardAction = async (action: BoardDeckAction): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      // Vers lezen: de druk hoort bij de wedstrijd van nu, niet bij die van enkele seconden terug.
+      const plan = boardDeckPlan(action, await readLive(true));
+      if (!plan.ok) return { ok: false, error: plan.issue };
+      for (const command of plan.commands) await send(command);
       return { ok: true };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -114,30 +226,60 @@ export function startStreamDeck(options: {
     }
   });
 
+  const writeJson = (res: http.ServerResponse, status: number, payload: unknown) => {
+    res.statusCode = status;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify(payload));
+  };
+
+  /**
+   * De plug-in vraagt hoe zijn knoppen eruitzien en krijgt antwoord zodra dat anders is dan wat hij
+   * al heeft (`since`). Zo staat een lopende klok of een nieuwe stand meteen op de knop, zonder dat
+   * de plug-in zelf op een timer moet vragen.
+   */
+  const serveFaces = async (url: URL, res: http.ServerResponse) => {
+    const paths = url.searchParams.getAll("p").slice(0, DECK_FACES_MAX_PATHS);
+    const since = url.searchParams.get("since") ?? "";
+    let gone = false;
+    res.on("close", () => {
+      gone = true;
+    });
+    const deadline = Date.now() + FACES_HOLD_MS;
+    for (;;) {
+      const body = await readFaces(paths);
+      if (gone || stopped) return;
+      if (body.etag !== since || Date.now() >= deadline) {
+        writeJson(res, 200, { ok: true, ...body });
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, FACES_CHECK_MS));
+    }
+  };
+
   const server = http.createServer(async (req, res) => {
     const ip = req.socket.remoteAddress ?? "";
     if (ip !== "127.0.0.1" && ip !== "::1" && ip !== ":ffff:127.0.0.1") {
-      res.statusCode = 403;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.end(JSON.stringify({ ok: false, error: "Alleen vanaf deze pc." }));
+      writeJson(res, 403, { ok: false, error: "Alleen vanaf deze pc." });
       return;
     }
     const url = new URL(req.url ?? "/", baseUrl);
-    if (url.pathname === "/" || url.pathname === "" || url.pathname === "/status") {
-      const settings = options.livestream.getSettings();
-      const status = options.livestream.getStatus();
-      const programIndex = Math.max(
-        1,
-        settings.scenes.findIndex((scene) => scene.id === settings.activeSceneId) + 1,
-      );
-      const previewIndex = Math.max(
-        1,
-        settings.scenes.findIndex((scene) => scene.id === settings.previewSceneId) + 1,
-      );
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.end(
-        JSON.stringify({
+    try {
+      if (url.pathname === "/faces") {
+        await serveFaces(url, res);
+        return;
+      }
+      if (url.pathname === "/" || url.pathname === "" || url.pathname === "/status") {
+        const settings = options.livestream.getSettings();
+        const status = options.livestream.getStatus();
+        const programIndex = Math.max(
+          1,
+          settings.scenes.findIndex((scene) => scene.id === settings.activeSceneId) + 1,
+        );
+        const previewIndex = Math.max(
+          1,
+          settings.scenes.findIndex((scene) => scene.id === settings.previewSceneId) + 1,
+        );
+        writeJson(res, 200, {
           ok: true,
           service: "arenacue-stream-deck",
           running: status.running,
@@ -152,7 +294,7 @@ export function startStreamDeck(options: {
             action: slot.action,
             accelerator: STREAM_DECK_SLOT_ACCELERATORS[index] ?? "",
           })),
-          // Heet nog "inputs" voor de plug-in; elke knop is nu een scène.
+          // Heet nog "inputs" voor Companion; elke knop is nu een scène.
           inputs: settings.scenes.map((scene, index) => {
             const input = settings.videoInputs.find((item) => item.id === sceneInputId(scene));
             return {
@@ -165,21 +307,21 @@ export function startStreamDeck(options: {
             };
           }),
           bindings: STREAM_DECK_BINDINGS,
-        }),
-      );
-      return;
+        });
+        return;
+      }
+      const action = parseStreamDeckPath(url.pathname);
+      const board = action ? null : parseBoardDeckPath(url.pathname);
+      if (!action && !board) {
+        writeJson(res, 404, { ok: false, error: "Onbekende knop." });
+        return;
+      }
+      const result = action ? await runAction(action) : await runBoardAction(board!);
+      writeJson(res, result.ok ? 200 : 400, result);
+    } catch (error) {
+      options.log(`[stream-deck] ${url.pathname}: ${error instanceof Error ? error.message : String(error)}`);
+      if (!res.headersSent) writeJson(res, 500, { ok: false, error: "Interne fout." });
     }
-    const action = parseStreamDeckPath(url.pathname);
-    if (!action) {
-      res.statusCode = 404;
-      res.setHeader("Content-Type", "application/json; charset=utf-8");
-      res.end(JSON.stringify({ ok: false, error: "Onbekende knop." }));
-      return;
-    }
-    const result = await runAction(action);
-    res.statusCode = result.ok ? 200 : 400;
-    res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.end(JSON.stringify(result));
   });
 
   server.listen(port, "127.0.0.1", () => {
@@ -199,8 +341,11 @@ export function startStreamDeck(options: {
     }),
     stop: () =>
       new Promise((resolve) => {
+        stopped = true;
         for (const accelerator of registered) globalShortcut.unregister(accelerator);
         server.close(() => resolve());
+        // Open vragen van de plug-in houden de server anders tot hun wachttijd open.
+        server.closeAllConnections();
       }),
   };
 }

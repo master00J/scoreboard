@@ -1094,6 +1094,40 @@ export async function getDisplaySnapshot() {
   };
 }
 
+/**
+ * Schermtoestand voor de Stream Deck-knoppen. Die kijken een paar keer per seconde, dus dit leest de
+ * gedeelde kopie (elk commando en elke tick ververst die) en niet telkens de database.
+ */
+export async function getDeckState() {
+  return serializeDisplayState(await getStateRowCached());
+}
+
+/** Wat een Stream Deck-knop van de wedstrijd moet weten: stand, periode en tellers, zonder spelers of events. */
+export async function getMatchForDeck(matchId: string) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    select: {
+      sport: true,
+      status: true,
+      currentPeriod: true,
+      periodDurationSec: true,
+      homeScore: true,
+      awayScore: true,
+      homeFouls: true,
+      awayFouls: true,
+      homeTimeouts: true,
+      awayTimeouts: true,
+      setsToWin: true,
+      timeoutsPerSet: true,
+      homeTeam: { select: { shortName: true } },
+      awayTeam: { select: { shortName: true } },
+    },
+  });
+  if (!match) return null;
+  const { homeTeam, awayTeam, ...rest } = match;
+  return { ...rest, homeName: homeTeam?.shortName ?? "", awayName: awayTeam?.shortName ?? "" };
+}
+
 export async function broadcastDisplayState() {
   const state = await getDisplaySnapshot();
   sendAll("display:state", state);
