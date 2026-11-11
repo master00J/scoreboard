@@ -53,6 +53,23 @@ export function isSponsorPlaybackInterrupted(
   );
 }
 
+/**
+ * Telt de rotatie over deze tick heen als "aan"? Een onderbreking (goal, kaart, wissel) zet de
+ * rotatie niet uit: daarna hoort de onderbroken clip opnieuw te starten en het rooster verder
+ * te lopen waar het stond. Alleen na een modus die geen onderbreking is (alleen scorebord)
+ * begint het rooster opnieuw op de actuele wedstrijdtijd.
+ *
+ * Zonder dit onderscheid sprong het rooster na elk doelpunt naar de actuele tijd: de
+ * onderbroken clip kwam niet terug en de slots die onder het doelpunt vielen waren weg.
+ */
+export function sponsorRotationStaysActive(
+  wasActive: boolean,
+  rotationActive: boolean,
+  interrupted: boolean,
+): boolean {
+  return rotationActive || (interrupted && wasActive);
+}
+
 /** Time-out-overlay is actief (geen blackout). */
 export function timeoutCoversDisplay(state: {
   timeoutRunning?: boolean | null;

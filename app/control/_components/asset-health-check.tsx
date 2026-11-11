@@ -170,7 +170,9 @@ export function AssetHealthCheck() {
                 ? t("setup.healthPlaybackRiskHighFps", { fps: Math.round(risk.fps ?? 60) })
                 : risk.reason === "unsupported_codec"
                   ? t("setup.healthPlaybackRiskCodec", { codec: risk.codec || "?" })
-                  : t("setup.healthPlaybackRiskPixel");
+                  : risk.reason === "unsafe_encoder" || risk.reason === "playback_fault"
+                    ? t("setup.healthPlaybackRiskEncoder")
+                    : t("setup.healthPlaybackRiskPixel");
           }
           setRows([...results]);
           setRiskIds(foundRisk);

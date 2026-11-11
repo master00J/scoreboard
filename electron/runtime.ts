@@ -46,12 +46,14 @@ import type {
   HornPayload,
   TickPayload,
 } from "../lib/desktop-bridge";
+import type { MediaItem, Sponsor } from "../lib/types";
 import type {
   SponsorLedgerPayload,
   SponsorTelemetryClipEnd,
   SponsorTelemetryClipProgress,
   SponsorTelemetryClipStart,
 } from "../lib/sponsor-telemetry";
+import { sponsorPlayLogIdentity } from "../lib/sponsor-telemetry";
 import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
@@ -66,9 +68,19 @@ import { handleCommand } from "../server/handlers";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
 import { startupDisplayStatePatch } from "../lib/display-startup";
-import { isDisplayPlaybackRisk } from "../lib/media-playback-compat";
+import {
+  isCurrentStadiumCompatPath,
+  isDisplayPlaybackRisk,
+  isStadiumPlaybackHangEvent,
+} from "../lib/media-playback-compat";
 import { inspectVideoForDisplay, prepareVideoForDisplay } from "./media-transcode";
 import { cueEndSec } from "../lib/scheduled-media-cue";
+import {
+  isClubRotationSponsorId,
+  mergeSponsorsWithClubMedia,
+  parseClubPhaseBudgetJson,
+  serializeClubPhaseBudgetJson,
+} from "../lib/club-media-rotation";
 import { quickMediaButtons } from "../lib/quick-media-button";
 import {
   gameSyncHasWork,
@@ -253,11 +265,14 @@ async function persistSponsorPlayLog(
   expectedSec: number,
   bestActualSec: number,
 ): Promise<void> {
+  const clubClip = isClubRotationSponsorId(payload.sponsorId);
   const [sponsor, media, match] = await Promise.all([
-    prisma.sponsor.findUnique({
-      where: { id: payload.sponsorId },
-      select: { name: true },
-    }),
+    clubClip
+      ? Promise.resolve(null)
+      : prisma.sponsor.findUnique({
+          where: { id: payload.sponsorId },
+          select: { name: true },
+        }),
     prisma.mediaItem.findUnique({
       where: { id: payload.mediaId },
       select: { title: true, durationSec: true },
@@ -278,12 +293,17 @@ async function persistSponsorPlayLog(
   });
 
   if (!existing) {
+    const identity = sponsorPlayLogIdentity({
+      sponsorId: payload.sponsorId,
+      sponsorRowName: sponsor?.name,
+      mediaTitle: media?.title,
+    });
     await prisma.sponsorPlayLog.create({
       data: {
         matchId: payload.matchId,
-        sponsorId: payload.sponsorId,
+        sponsorId: identity.sponsorId,
         mediaId: payload.mediaId,
-        sponsorName: sponsor?.name ?? "(verwijderd)",
+        sponsorName: identity.sponsorName,
         mediaTitle: media?.title ?? "(verwijderd)",
         segmentKey: payload.segmentKey,
         matchStatus: match?.status ?? null,
@@ -1471,8 +1491,9 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
 
 async function persistPreparedVideo(
   item: { id: string; title: string; path: string; durationSec: number },
+  opts?: { force?: boolean },
 ): Promise<boolean> {
-  const prepared = await prepareVideoForDisplay(item.path);
+  const prepared = await prepareVideoForDisplay(item.path, opts);
   if (!prepared.transcoded) {
     if (prepared.reason === "ok" && item.path) {
       await prisma.mediaItem.update({
@@ -1538,11 +1559,45 @@ async function prepareRiskyVideosInBackground() {
   }
 }
 
+/** Eén omzetpoging per media-id per sessie — voorkomt een ffmpeg-storm als de watchdog blijft vuren. */
+const hangingPrepareQueued = new Set<string>();
+
+/**
+ * Clip hing op het stadionscherm (t=0, geen metadata, decoderfout). Zet hem om naar
+ * Chromium-H.264, ook als de probe “ok” was — sponsors exporteren allemaal anders.
+ */
+export function queuePrepareAfterPlaybackFault(mediaId: string | undefined, event: string): void {
+  if (!mediaId || !isStadiumPlaybackHangEvent(event)) return;
+  if (hangingPrepareQueued.has(mediaId)) return;
+  hangingPrepareQueued.add(mediaId);
+  void (async () => {
+    try {
+      const item = await prisma.mediaItem.findUnique({
+        where: { id: mediaId },
+        select: { id: true, title: true, path: true, durationSec: true, type: true },
+      });
+      if (!item || item.type !== "VIDEO") return;
+      if (isCurrentStadiumCompatPath(item.path)) return;
+      requireOpts().log(`[media] hang op scherm (${event}) — omzetten ${item.title}`);
+      if (await persistPreparedVideo(item, { force: true })) {
+        await touchState();
+        await broadcastDisplayState();
+        return;
+      }
+      hangingPrepareQueued.delete(mediaId);
+    } catch (err) {
+      hangingPrepareQueued.delete(mediaId);
+      requireOpts().log(`[media] omzetting na hang mislukt: ${String(err)}`);
+    }
+  })();
+}
+
 export function disposeDesktopRuntime() {
   if (tickInterval) {
     clearInterval(tickInterval);
     tickInterval = null;
   }
+  hangingPrepareQueued.clear();
   sponsorLedgerSnapshot = null;
   sponsorClipBestActualSec.clear();
   cachedState = null;
@@ -2227,6 +2282,16 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         include: { media: { orderBy: { createdAt: "asc" } } },
         orderBy: { createdAt: "asc" },
       });
+      if (searchParams.get("rotation") === "1") {
+        const clubMedia = await prisma.mediaItem.findMany({
+          where: { sponsorId: null, active: true, hideFromLibrary: false },
+          orderBy: { createdAt: "asc" },
+        });
+        return json(
+          200,
+          mergeSponsorsWithClubMedia(sponsors as unknown as Sponsor[], clubMedia as unknown as MediaItem[]),
+        );
+      }
       return json(200, sponsors);
     }
 
@@ -2944,9 +3009,17 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
 
     const mediaId = pathname.match(/^\/api\/media\/([^/]+)$/)?.[1];
     if (mediaId && method === "PATCH") {
+      const body = parseJsonBody(req) as Record<string, unknown>;
+      if ("clubPhaseBudgetJson" in body) {
+        body.clubPhaseBudgetJson = serializeClubPhaseBudgetJson(
+          parseClubPhaseBudgetJson(
+            typeof body.clubPhaseBudgetJson === "string" ? body.clubPhaseBudgetJson : null,
+          ),
+        );
+      }
       const media = await prisma.mediaItem.update({
         where: { id: mediaId },
-        data: parseJsonBody(req),
+        data: body,
       });
       await touchState();
       await broadcastDisplayState();

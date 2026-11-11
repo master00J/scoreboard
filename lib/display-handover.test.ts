@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { HELD_IMAGE_HANDOVER_MS, displayModeToShow, heldImageToContinue } from "./display-handover";
+import { HELD_IMAGE_HANDOVER_MS, displayModeToShow, heldImageToContinue, spreadShowsMedia } from "./display-handover";
 
 describe("displayModeToShow", () => {
   it("houdt het programma vast tot het bestand van de losse clip bekend is", () => {
@@ -56,6 +56,13 @@ describe("displayModeToShow", () => {
         shownMode: "SPONSOR",
       }),
     ).toBe("SPONSOR_ROTATION");
+  });
+});
+
+describe("spreadShowsMedia", () => {
+  it("toont media alleen in de sponsor-fase, zodat het scorebord eronder mag blijven staan", () => {
+    expect(spreadShowsMedia("sponsor")).toBe(true);
+    expect(spreadShowsMedia("scoreboard")).toBe(false);
   });
 });
 

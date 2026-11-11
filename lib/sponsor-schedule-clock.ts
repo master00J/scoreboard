@@ -83,3 +83,25 @@ export function sponsorScheduleTime(
   clock.lastRawT = rawT;
   return Math.min(Math.max(0, clock.adjustedT), maxT);
 }
+
+/**
+ * Hoeveel seconden het rooster achterloopt op de ruwe klok. Elke onderbreking (rundown-cue,
+ * goal, kaart) zet de roosterklok stil terwijl de ruwe klok doorloopt. Wie het rooster op de
+ * ruwe klok afleest, telt af naar een slot dat het scherm pas later bereikt: de teller staat
+ * op 0,0 en er start niets.
+ *
+ * Leest alleen: verzet de klok niet. `rawT` en `frozen` zijn dezelfde waarden die
+ * `sponsorScheduleTime` voor deze klok krijgt.
+ */
+export function sponsorScheduleLagSec(
+  clock: SponsorScheduleClock,
+  rawT: number,
+  frozen: boolean,
+): number {
+  if (!clock.initialized) return 0;
+  const scheduleT =
+    frozen || clock.wasFrozen
+      ? clock.adjustedT
+      : clock.adjustedT + Math.max(0, rawT - clock.lastRawT);
+  return Math.max(0, rawT - scheduleT);
+}

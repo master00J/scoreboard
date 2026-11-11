@@ -167,6 +167,8 @@ model MediaItem {
   playbackWarning String?
   /// Toon als sneltoets op Display (waarschuwingen, manuele clips).
   quickLaunch Boolean @default(false)
+  /// JSON: totale zendtijd in seconden per fase voor losse clubmedia. Null = niet in de rotatie.
+  clubPhaseBudgetJson String?
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")

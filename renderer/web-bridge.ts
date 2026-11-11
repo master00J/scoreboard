@@ -9,6 +9,7 @@ import { displayExtrasFromJson, serializeDisplayExtras } from "@/lib/display-ext
 import { applyTemplateToThemeJson, builtInTemplateRows, sanitizeTemplateThemeJson } from "@/lib/scoreboard-templates";
 import type { CommandAck, DesktopApiRequest, DesktopApiResponse, ElectronBridge, TickPayload } from "@/lib/desktop-bridge";
 import type { SerializedDisplayState } from "@/lib/timer";
+import { mergeSponsorsWithClubMedia } from "@/lib/club-media-rotation";
 
 const CHANNEL = "arenacue-web-scoreboard";
 const STORAGE_KEY = "arenacue_web_scoreboard_v5";
@@ -620,7 +621,11 @@ function handleApi(req: DesktopApiRequest): DesktopApiResponse {
   }
 
   if (pathname === "/api/sponsors" && method === "GET") {
-    return json(200, store.sponsors.map((s) => sponsorById(s.id)));
+    const list = store.sponsors.map((s) => sponsorById(s.id)).filter(Boolean);
+    if (url.searchParams.get("rotation") === "1") {
+      return json(200, mergeSponsorsWithClubMedia(list, store.media));
+    }
+    return json(200, list);
   }
   if (pathname === "/api/sponsors" && method === "POST") {
     const sponsor = {

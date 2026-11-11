@@ -8,6 +8,8 @@ import {
 import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 import type { SponsorLedgerPayload } from "./sponsor-telemetry";
 import {
+  ledgerActiveClipStillLiveForMatchSegment,
+  sponsorLedgerMatchesSegment,
   sponsorTelemetryActiveClipStillLive,
   sponsorTelemetryConsumedSec,
 } from "./sponsor-telemetry";
@@ -15,7 +17,135 @@ import {
 export type SponsorSpreadPhaseView = {
   phase: "scoreboard" | "sponsor";
   sponsorFilterId: string | null;
+  /** Wisselt per vertoning, ook bij dezelfde sponsor. */
+  appearanceStartedAtMs?: number | null;
+  /** Index van de clip in de rotatie van deze sponsor die bij deze vertoning hoort. */
+  appearanceIndex?: number | null;
 };
+
+/**
+ * Loopt er volgens de ledger nog een clip terwijl het rooster naar het scorebord wil, dan
+ * blijft de sponsorfase staan tot die clip uit is; anders verdwijnt het mediavak onder de
+ * laatste beelden vandaan.
+ *
+ * Wijst het rooster zelf een sponsor aan, dan volgt die. Voorheen kreeg de speler dan de
+ * sponsor van de lopende clip met het startmoment van de nieuwe vertoning. Was die clip net
+ * klaar maar nog niet afgemeld, dan zag de speler "nieuwe vertoning van dezelfde sponsor" en
+ * speelde hij hem een tweede keer, in het slot van de volgende sponsor; de rest van de ronde
+ * schoof een clip op.
+ */
+export function spreadPhaseKeepingLiveClip(
+  base: SponsorSpreadPhaseView,
+  liveClipSponsorId: string | null | undefined,
+): SponsorSpreadPhaseView {
+  if (base.phase === "sponsor" || !liveClipSponsorId) return base;
+  return {
+    phase: "sponsor",
+    sponsorFilterId: liveClipSponsorId,
+    appearanceStartedAtMs: null,
+    appearanceIndex: null,
+  };
+}
+
+/**
+ * Maakt van de roosterfase de fase die het scherm toont: eerst het budgetplafond op de sponsor
+ * die het rooster aanwijst, daarna het uitspelen van een clip die nog loopt. Display en
+ * sponsor-HUD gebruiken dezelfde regels; de simulatie in de tests ook.
+ */
+export function finalizeSponsorDistPhase(
+  match: { id: string; status?: string },
+  section: SponsorSection,
+  matchStatus: string | undefined,
+  sponsorLedger: SponsorLedgerPayload | null,
+  base: SponsorSpreadPhaseView,
+  hangRef: { current: unknown },
+  slotMap: (string | null)[],
+  slotT: number,
+  sponsors: Sponsor[],
+  cycleBudgetForever: boolean,
+  nowMs: number,
+  /** Quick button / goal / cue: hang niet wissen, anders hervat de clip niet. */
+  freezeBudgetCap: boolean,
+  budgetOf?: SponsorBudgetResolver,
+): SponsorSpreadPhaseView {
+  const liveClipSponsorId = sponsorLedger
+    ? (ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, nowMs)?.sponsorId ?? null)
+    : null;
+  if (freezeBudgetCap) return spreadPhaseKeepingLiveClip(base, liveClipSponsorId);
+  const capOpts = {
+    cycleBudgetForever,
+    sponsors,
+    section,
+    matchStatus,
+    slotMap,
+    slotT,
+    sponsorLedger,
+    ledgerMatchesSegment: sponsorLedgerMatchesSegment(match, section, sponsorLedger),
+    nowMs,
+    budgetOf,
+  };
+  /** Eerst de sponsor die het rooster aanwijst tegen zijn budget; die bepaalt wat er start. */
+  let capped = applySponsorBudgetCapToSpreadPhase(base, capOpts);
+  if (capped.phase === "scoreboard") {
+    hangRef.current = null;
+    /** Het rooster is door, maar een clip die nog loopt speelt uit (en telt tegen zijn eigen budget). */
+    const kept = spreadPhaseKeepingLiveClip(capped, liveClipSponsorId);
+    if (kept.phase === "sponsor") capped = applySponsorBudgetCapToSpreadPhase(kept, capOpts);
+  }
+  if (capped.phase === "sponsor") {
+    const started =
+      (hangRef.current as { startedAtMs?: number } | null)?.startedAtMs ??
+      capped.appearanceStartedAtMs ??
+      null;
+    return { ...capped, appearanceStartedAtMs: started };
+  }
+  return capped;
+}
+
+export type ScheduledSlotIdentity = {
+  sponsorId: string | null;
+  /** Startmoment van de ingeroosterde vertoning; null als het rooster er geen aanwijst. */
+  appearanceKey: string | null;
+};
+
+/**
+ * In een ingeroosterd slot speelt de speler één clip en wacht dan. Hij mag opnieuw starten bij
+ * een andere sponsor, of bij een nieuwe vertoning van dezelfde sponsor. Een vertoning die
+ * wegvalt (sleutel wordt null: het rooster is door, alleen de lopende clip houdt de fase nog
+ * vast) is geen nieuwe vertoning.
+ */
+export function scheduledSlotRearms(prev: ScheduledSlotIdentity, next: ScheduledSlotIdentity): boolean {
+  if (next.sponsorId !== prev.sponsorId) return true;
+  return next.appearanceKey != null && next.appearanceKey !== prev.appearanceKey;
+}
+
+/**
+ * HUD mag “Bezig / Café Lawijt” alleen tonen als het stadionscherm de clip meldt.
+ * Het eigen rooster loopt soms voor (hang start, LED nog scorebord) — na een korte
+ * start-marge volgen we de ledger, niet de voorspelling.
+ */
+export const HUD_UNCONFIRMED_GRACE_MS = 2500;
+
+export function hudRosterPhase(opts: {
+  predictedPhase: "scoreboard" | "sponsor";
+  predictedStartedAtMs: number | null | undefined;
+  ledgerConfirmed: boolean;
+  interrupted: boolean;
+  nowMs: number;
+}): "scoreboard" | "sponsor" {
+  if (opts.interrupted) return opts.predictedPhase;
+  if (opts.ledgerConfirmed) return "sponsor";
+  if (opts.predictedPhase !== "sponsor") return "scoreboard";
+  const started = opts.predictedStartedAtMs;
+  if (
+    started != null &&
+    opts.nowMs - started >= 0 &&
+    opts.nowMs - started < HUD_UNCONFIRMED_GRACE_MS
+  ) {
+    return "sponsor";
+  }
+  return "scoreboard";
+}
 
 /** Eerste/tweede helft / verlenging: sponsor-slides naast scorebord; rust en voor/na: fullscreen. */
 export function sponsorRotationBesideScoreboard(status: string | undefined): boolean {
@@ -261,12 +391,17 @@ function sponsorConsumedForBudgetCap(
   );
   const ledger = opts.ledgerMatchesSegment ? opts.sponsorLedger : null;
   if (!ledger) return consumedSlot;
-  const consumedTelem = sponsorTelemetryConsumedSec(ledger, sponsorId, opts.nowMs);
   const ac = ledger.activeClip;
   if (ac && ac.sponsorId === sponsorId && sponsorTelemetryActiveClipStillLive(ac, opts.nowMs)) {
-    return consumedTelem;
+    /**
+     * De lopende clip telt pas mee als hij klaar is. Het rooster start een clip zolang er
+     * budget over is en laat die helemaal uitspelen, ook over het budget heen. Telde het
+     * lopende deel hier al mee, dan haalde het plafond een clip van 25 s met nog 15 s budget
+     * na 15 s van het scherm.
+     */
+    return ledger.bySponsorSec[sponsorId] ?? 0;
   }
-  return Math.max(consumedSlot, consumedTelem);
+  return Math.max(consumedSlot, sponsorTelemetryConsumedSec(ledger, sponsorId, opts.nowMs));
 }
 
 /**

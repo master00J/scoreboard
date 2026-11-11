@@ -12,7 +12,9 @@ import { buildSponsorRotationMediaList } from "@/lib/sponsor-playback-order";
 import {
   activeSponsorsForSection,
   buildSponsorSlotMap,
+  catchUpSponsorSchedule,
   halfWindowElapsed,
+  halfWindowElapsedOpenEnded,
   sectionSpreadClock,
   sectionPlayheadExhausted,
   holdSecondsCappedBySlotRun,
@@ -33,6 +35,7 @@ import {
 import {
   applySponsorBudgetCapToSpreadPhase,
   allActiveSponsorSectionBudgetsExhausted,
+  hudRosterPhase,
   secondsUntilNextSponsorSlot,
   sectionForStatus,
   sponsorBesideShowsPanel,
@@ -41,13 +44,19 @@ import {
 } from "@/lib/sponsor-display-helpers";
 import {
   createSponsorScheduleClock,
+  sponsorScheduleLagSec,
   sponsorScheduleTime,
   type SponsorScheduleClock,
 } from "@/lib/sponsor-schedule-clock";
 import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { periodStartHoldsFullScoreboard } from "@/lib/live-cycle-settings";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
-import { isSponsorPlaybackInterrupted, externalCaptureCoversDisplay, timeoutCoversDisplay } from "@/lib/sponsor-playback-interruption";
+import {
+  isSponsorPlaybackInterrupted,
+  externalCaptureCoversDisplay,
+  sponsorRotationStaysActive,
+  timeoutCoversDisplay,
+} from "@/lib/sponsor-playback-interruption";
 import { useResolvedSponsorWindow } from "@/lib/use-resolved-sponsor-window";
 import { getSportProfile } from "@/lib/sports";
 import {
@@ -72,6 +81,7 @@ export type SponsorPhaseHudModel =
       sponsorName: string | null;
       mediaTitle: string | null;
       mediaFileName: string | null;
+      mediaKind?: "IMAGE" | "VIDEO" | null;
       hasLiveClip: boolean;
       sponsorClipProgress: number | null;
       nextSlotEtaSec: number | null;
@@ -135,7 +145,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     useState<Record<PlaylistSlot, Playlist | null>>(EMPTY_PLAYLISTS);
 
   useEffect(() => {
-    fetch("/api/sponsors")
+    fetch("/api/sponsors?rotation=1")
       .then((r) => r.json())
       .then((list: Sponsor[]) => setSponsors(Array.isArray(list) ? list : []))
       .catch(() => setSponsors([]));
@@ -442,19 +452,37 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
           sponsorPhaseHangRef.current = null;
         }
       }
-      matchSponsorRotationWasActiveRef.current = rotationActive;
+      /** Zelfde regel als het scherm: een goal of kaart zet de rotatie niet uit. */
+      matchSponsorRotationWasActiveRef.current = sponsorRotationStaysActive(
+        matchSponsorRotationWasActiveRef.current,
+        rotationActive,
+        sponsorInterrupted,
+      );
+      const tLiveOpen = football
+        ? halfWindowElapsedOpenEnded(elapsed, match.status, match.halfDurationSec)
+        : tLive;
+      const scheduleRawT = rotationActive || sponsorInterrupted ? tLiveOpen : tInterruptFrozen.current;
 
       const matchH = football
         ? Math.max(60, match.halfDurationSec)
         : windowTimelineSeconds(sponsorWindow, match, sponsors);
       const section = football ? sectionForStatus(match.status) : sponsorWindow.section;
-      const t = sponsorScheduleTime(
+      sponsorScheduleTime(
         sponsorScheduleClockRef,
         football ? `${match.id}:${match.status}:match` : `${match.id}:${sponsorWindow.id}:match`,
-        rotationActive ? tLive : tInterruptFrozen.current,
+        scheduleRawT,
         scheduleFrozen,
         matchH,
       );
+      const t = catchUpSponsorSchedule({
+        clock: sponsorScheduleClockRef.current,
+        rawT: scheduleRawT,
+        frozen: scheduleFrozen,
+        hang: sponsorPhaseHangRef.current,
+        nowMs: now,
+        slotMap: sponsorSlotMapMatch,
+        maxT: matchH,
+      });
       if (sponsorScheduleClockRef.current.hardReset) {
         sponsorPhaseHangRef.current = null;
       }
@@ -486,6 +514,11 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         slotMap: sponsorSlotMapMatch,
         slotT: t,
         interrupted: hangFrozen,
+        restartsClip: sponsorInterrupted,
+        scheduleClock: sponsorScheduleClockRef.current,
+        liveClipSponsorId: match
+          ? (ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, now)?.sponsorId ?? null)
+          : null,
       });
       if (sponsorInterrupted) return base;
       const capped = applySponsorBudgetCapToSpreadPhase(base, {
@@ -507,13 +540,22 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       const H = Math.max(60, match.halfBreakSec);
       const rawElapsed = (now - rustEpochRef.current) / 1000;
       const { t: loopT } = sectionSpreadClock(rawElapsed, H, true);
-      const t = sponsorScheduleTime(
+      sponsorScheduleTime(
         halftimeScheduleClockRef,
         `${match.id}:${match.status}:halftime`,
         cycleBudgetForever ? loopT : rawElapsed,
         sponsorInterrupted,
         H,
       );
+      const t = catchUpSponsorSchedule({
+        clock: halftimeScheduleClockRef.current,
+        rawT: cycleBudgetForever ? loopT : rawElapsed,
+        frozen: sponsorInterrupted,
+        hang: sponsorPhaseHangRef.current,
+        nowMs: now,
+        slotMap: sponsorSlotMapHalftime,
+        maxT: H,
+      });
       if (sectionPlayheadExhausted(t, H, cycleBudgetForever)) {
         sponsorPhaseHangRef.current = null;
         return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
@@ -526,6 +568,11 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         slotMap: sponsorSlotMapHalftime,
         slotT: t,
         interrupted: sponsorInterrupted,
+        restartsClip: sponsorInterrupted,
+        scheduleClock: halftimeScheduleClockRef.current,
+        liveClipSponsorId: match
+          ? (ledgerActiveClipStillLiveForMatchSegment(match, "halftime", sponsorLedger, now)?.sponsorId ?? null)
+          : null,
       });
       if (sponsorInterrupted) return base;
       const capped = applySponsorBudgetCapToSpreadPhase(base, {
@@ -590,13 +637,22 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
     const { t: rawT } = prematchSpreadClock(timing.elapsedSec, H);
-    const t = sponsorScheduleTime(
+    sponsorScheduleTime(
       prematchScheduleClockRef,
       "prematch",
       rawT,
       sponsorInterrupted,
       H,
     );
+    const t = catchUpSponsorSchedule({
+      clock: prematchScheduleClockRef.current,
+      rawT: rawT,
+      frozen: sponsorInterrupted,
+      hang: prematchPhaseHangRef.current,
+      nowMs: now,
+      slotMap: sponsorSlotMapPrematch,
+      maxT: H,
+    });
     if (prematchScheduleClockRef.current.hardReset) {
       prematchPhaseHangRef.current = null;
     }
@@ -605,6 +661,11 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       slotMap: sponsorSlotMapPrematch,
       slotT: t,
       interrupted: sponsorInterrupted,
+      restartsClip: sponsorInterrupted,
+      scheduleClock: prematchScheduleClockRef.current,
+      liveClipSponsorId: match
+        ? (ledgerActiveClipStillLiveForMatchSegment(match, "prematch", sponsorLedger, now)?.sponsorId ?? null)
+        : null,
     });
     if (sponsorInterrupted) return base;
     const capped = applySponsorBudgetCapToSpreadPhase(base, {
@@ -634,13 +695,22 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     const H = postmatchSpreadTimelineSeconds(sponsors);
     const rawElapsed = (now - postmatchEpochRef.current) / 1000;
     const { t: loopT } = sectionSpreadClock(rawElapsed, H, true);
-    const t = sponsorScheduleTime(
+    sponsorScheduleTime(
       postmatchScheduleClockRef,
       `${match.id}:postmatch`,
       cycleBudgetForever ? loopT : rawElapsed,
       sponsorInterrupted,
       H,
     );
+    const t = catchUpSponsorSchedule({
+      clock: postmatchScheduleClockRef.current,
+      rawT: cycleBudgetForever ? loopT : rawElapsed,
+      frozen: sponsorInterrupted,
+      hang: postmatchPhaseHangRef.current,
+      nowMs: now,
+      slotMap: sponsorSlotMapPostmatch,
+      maxT: H,
+    });
     if (sectionPlayheadExhausted(t, H, cycleBudgetForever)) {
       postmatchPhaseHangRef.current = null;
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
@@ -653,6 +723,11 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       slotMap: sponsorSlotMapPostmatch,
       slotT: t,
       interrupted: sponsorInterrupted,
+      restartsClip: sponsorInterrupted,
+      scheduleClock: postmatchScheduleClockRef.current,
+      liveClipSponsorId: match
+        ? (ledgerActiveClipStillLiveForMatchSegment(match, "postmatch", sponsorLedger, now)?.sponsorId ?? null)
+        : null,
     });
     if (sponsorInterrupted) return base;
     const capped = applySponsorBudgetCapToSpreadPhase(base, {
@@ -718,7 +793,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
 
     if (activeScheduledCue && match && !captureCovers) {
       const cueMedia = activeScheduledCue.media;
-      const cueLabel = mediaLabel(cueMedia.title, cueMedia.path);
+      const cueLabel = mediaLabel(cueMedia.title, cueMedia.path, cueMedia.type);
       const cueSponsor =
         (cueMedia.sponsorId
           ? sponsors.find((s) => s.id === cueMedia.sponsorId)?.name
@@ -748,6 +823,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         sponsorName: cueSponsor,
         mediaTitle: cueLabel.title,
         mediaFileName: cueLabel.fileName,
+        mediaKind: cueMedia.type === "IMAGE" || cueMedia.type === "VIDEO" ? cueMedia.type : null,
         hasLiveClip: confirmed,
         sponsorClipProgress,
         nextSlotEtaSec: null,
@@ -890,10 +966,27 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       }
       /**
        * Sponsorfase zonder bevestiging uit de ledger: het scherm speelt mogelijk niets.
-       * Tijdens een onderbreking (capture, goal, cue) is dat verwacht en geen storing.
+       * Na een korte start-marge toont de HUD het scorebord (wat er wél staat) in plaats
+       * van een misleidende “Café Lawijt · niet bevestigd”.
        */
-      const playbackUnconfirmed =
-        effectivePhase === "sponsor" && !playbackConfirmed && !sponsorInterrupted;
+      const shownPhase = hudRosterPhase({
+        predictedPhase: effectivePhase,
+        predictedStartedAtMs: hangRef.current?.startedAtMs,
+        ledgerConfirmed: playbackConfirmed,
+        interrupted: sponsorInterrupted,
+        nowMs: now,
+      });
+      if (shownPhase === "scoreboard" && effectivePhase === "sponsor") {
+        effectivePhase = "scoreboard";
+        sponsorClipProgress = null;
+        clipRemainingSec = null;
+      }
+      /**
+       * Geen oranje "niet bevestigd" in het rooster. Een sponsorfase zonder bevestiging bestaat
+       * hier alleen nog binnen de start-marge: dat is de clip die opstart, en daarna toont de
+       * HUD het scorebord. De waarschuwing flitste zo bij elke clipstart een fractie in beeld.
+       */
+      const playbackUnconfirmed = false;
       if (effectivePhase === "scoreboard") {
         if (
           !cycleBudgetForever &&
@@ -941,6 +1034,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         sponsorName: name,
         mediaTitle: media?.title ?? null,
         mediaFileName: media?.fileName ?? null,
+        mediaKind: media?.kind ?? null,
         hasLiveClip: liveClip != null,
         sponsorClipProgress,
         nextSlotEtaSec,
@@ -970,10 +1064,25 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
               nowMs: now,
             }),
           });
-      const t =
-        mode === "SPONSOR_ROTATION" && !sponsorInterrupted && !matchClockFrozen
-          ? tLive
-          : tInterruptFrozen.current;
+      /**
+       * Zelfde roosterklok als het scherm en als `sponsorDistView`: die staat stil tijdens elke
+       * onderbreking. Op de wedstrijdklok telde de HUD af naar een slot dat het scherm pas
+       * later bereikt, en stond de teller op 0,0 zonder dat er iets startte.
+       */
+      const rotationActive = mode === "SPONSOR_ROTATION";
+      const tLiveOpen = football
+        ? halfWindowElapsedOpenEnded(elapsed, match.status, match.halfDurationSec)
+        : tLive;
+      const rawT = rotationActive || sponsorInterrupted ? tLiveOpen : tInterruptFrozen.current;
+      const t = Math.max(
+        0,
+        rawT -
+          sponsorScheduleLagSec(
+            sponsorScheduleClockRef.current,
+            rawT,
+            !rotationActive || sponsorInterrupted || matchClockFrozen,
+          ),
+      );
       const section = football ? sectionForStatus(match.status) : sponsorWindow.section;
       return rosterFrom(
         tMatchStatus(tUi, match.status, match.sport),
@@ -995,8 +1104,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
     ) {
       const H = Math.max(60, match.halfBreakSec);
       const tUnbounded = (now - rustEpochRef.current) / 1000;
-      const t = tUnbounded % H;
-      const tNextEta = Math.min(tUnbounded, Math.max(0, H - 1e-6));
+      const lag = sponsorScheduleLagSec(
+        halftimeScheduleClockRef.current,
+        cycleBudgetForever ? tUnbounded % H : tUnbounded,
+        sponsorInterrupted,
+      );
+      const t = Math.max(0, (tUnbounded % H) - lag);
+      const tNextEta = Math.max(0, Math.min(tUnbounded, Math.max(0, H - 1e-6)) - lag);
       return rosterFrom(
         tUi("phases.HALF_TIME"),
         "halftime",
@@ -1014,7 +1128,12 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       const H = postmatchSpreadTimelineSeconds(sponsors);
       const tUnbounded =
         postmatchEpochRef.current != null ? (now - postmatchEpochRef.current) / 1000 : 0;
-      const t = Math.min(tUnbounded, Math.max(0, H - 1e-6));
+      const lag = sponsorScheduleLagSec(
+        postmatchScheduleClockRef.current,
+        cycleBudgetForever ? tUnbounded % Math.max(1, Math.floor(H)) : tUnbounded,
+        sponsorInterrupted,
+      );
+      const t = Math.max(0, Math.min(tUnbounded, Math.max(0, H - 1e-6)) - lag);
       return rosterFrom(
         tUi("phases.POST_MATCH"),
         "postmatch",
@@ -1073,7 +1192,12 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
           prematchTimelineComplete: true,
         };
       }
-      const t = timing.elapsedSec;
+      const lag = sponsorScheduleLagSec(
+        prematchScheduleClockRef.current,
+        prematchSpreadClock(timing.elapsedSec, H).t,
+        sponsorInterrupted,
+      );
+      const t = Math.max(0, timing.elapsedSec - lag);
       const tNextEta = Math.min(t, Math.max(0, H - 1e-6));
       return {
         ...rosterFrom(
@@ -1126,24 +1250,32 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
   ]);
 }
 
-function mediaLabel(title: string, path: string): { title: string; fileName: string } {
+function mediaKindOf(type: string | undefined): "IMAGE" | "VIDEO" | null {
+  return type === "IMAGE" || type === "VIDEO" ? type : null;
+}
+
+function mediaLabel(
+  title: string,
+  path: string,
+  type?: string,
+): { title: string; fileName: string; kind: "IMAGE" | "VIDEO" | null } {
   const fileName = path.split(/[/\\]/).pop() || title;
-  return { title: title || fileName, fileName };
+  return { title: title || fileName, fileName, kind: mediaKindOf(type) };
 }
 
 function resolveSponsorMedia(
   sponsors: Sponsor[],
   mediaId: string | null,
   library: MediaItem[] = [],
-): { title: string; fileName: string } | null {
+): { title: string; fileName: string; kind: "IMAGE" | "VIDEO" | null } | null {
   if (!mediaId) return null;
   for (const sponsor of sponsors) {
     const item = sponsor.media?.find((m) => m.id === mediaId);
     if (!item) continue;
-    return mediaLabel(item.title, item.path);
+    return mediaLabel(item.title, item.path, item.type);
   }
   const item = library.find((m) => m.id === mediaId);
-  if (item) return mediaLabel(item.title, item.path);
+  if (item) return mediaLabel(item.title, item.path, item.type);
   return null;
 }
 
@@ -1151,7 +1283,7 @@ function plannedMediaForSponsor(
   sponsor: Sponsor | null,
   section: SponsorSection,
   matchStatus?: string,
-): { title: string; fileName: string } | null {
+): { title: string; fileName: string; kind: "IMAGE" | "VIDEO" | null } | null {
   if (!sponsor) return null;
   const active = (sponsor.media ?? []).filter((m) => m.active);
   const list = buildSponsorRotationMediaList(
@@ -1161,5 +1293,5 @@ function plannedMediaForSponsor(
   );
   const item = list[0];
   if (!item) return null;
-  return mediaLabel(item.title, item.path);
+  return mediaLabel(item.title, item.path, item.type);
 }
