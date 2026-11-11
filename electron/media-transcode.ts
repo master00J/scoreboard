@@ -4,8 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
+  isCurrentStadiumCompatPath,
+  isDisplayPlaybackRisk,
   parseFfmpegInputProbe,
   stadiumTranscodeReason,
+  STADIUM_COMPAT_PROFILE,
   type StadiumTranscodeReason,
 } from "../lib/media-playback-compat";
 
@@ -60,7 +63,7 @@ function destPathFor(src: string): string {
     .replace(/[^a-zA-Z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
-  return path.join(compatDir(), `${base || "clip"}-${hash}.mp4`);
+  return path.join(compatDir(), `${base || "clip"}-${hash}-${STADIUM_COMPAT_PROFILE}.mp4`);
 }
 
 async function probeWithFfmpeg(ffmpeg: string, src: string) {
@@ -80,8 +83,12 @@ export async function inspectVideoForDisplay(src: string): Promise<MediaInspectR
   if (!src || !fs.existsSync(src)) {
     return { reason: "probe_failed" };
   }
-  if (/[\\/]compat[\\/]/.test(src)) {
+  if (isCurrentStadiumCompatPath(src)) {
     return { reason: "ok" };
+  }
+  if (/[\\/]compat[\\/]/i.test(src)) {
+    /** Oude compat-kopie (B-frames, lange GOP) — opnieuw omzetten. */
+    return { reason: "playback_fault" };
   }
   const ffmpeg = resolveFfmpegPath();
   if (!ffmpeg) return { reason: "ffmpeg_missing" };
@@ -96,10 +103,25 @@ export async function inspectVideoForDisplay(src: string): Promise<MediaInspectR
   };
 }
 
-export async function prepareVideoForDisplay(src: string): Promise<MediaPrepareResult> {
+export async function prepareVideoForDisplay(
+  src: string,
+  opts?: { force?: boolean },
+): Promise<MediaPrepareResult> {
+  if (isCurrentStadiumCompatPath(src)) {
+    return { reason: "ok", path: src, transcoded: false };
+  }
   const inspected = await inspectVideoForDisplay(src);
-  if (inspected.reason === "ok" || inspected.reason === "ffmpeg_missing" || inspected.reason === "probe_failed") {
+  if (inspected.reason === "ffmpeg_missing" || inspected.reason === "probe_failed") {
     return { ...inspected, path: src, transcoded: false };
+  }
+  if (!opts?.force && inspected.reason === "ok") {
+    return { ...inspected, path: src, transcoded: false };
+  }
+  if (!opts?.force && !isDisplayPlaybackRisk(inspected.reason)) {
+    return { ...inspected, path: src, transcoded: false };
+  }
+  if (opts?.force && inspected.reason === "ok") {
+    inspected.reason = "playback_fault";
   }
 
   const ffmpeg = resolveFfmpegPath();
@@ -110,28 +132,47 @@ export async function prepareVideoForDisplay(src: string): Promise<MediaPrepareR
     return { ...inspected, path: dest, transcoded: true };
   }
 
-  /** Zelfde resolutie en fps; alleen Chromium-vriendelijk Main-profiel. Geen 60→30. */
+  /**
+   * Zelfde resolutie en fps. Baseline + geen B-frames + GOP 1s: Chromium blijft
+   * anders `waiting` geven midden in een ogenschijnlijk “gewone” libx264-Main-clip.
+   */
   const args = [
     "-y",
     "-hide_banner",
     "-i",
     src,
+    "-map_metadata",
+    "-1",
     "-map",
     "0:v:0",
     "-map",
     "0:a:0?",
+    "-fps_mode",
+    "cfr",
     "-c:v",
     "libx264",
     "-profile:v",
-    "main",
+    "baseline",
     "-level",
-    "4.2",
+    "4.0",
     "-pix_fmt",
     "yuv420p",
     "-preset",
-    "medium",
+    "veryfast",
+    "-tune",
+    "fastdecode",
     "-crf",
-    "16",
+    "18",
+    "-g",
+    "30",
+    "-keyint_min",
+    "30",
+    "-sc_threshold",
+    "0",
+    "-bf",
+    "0",
+    "-refs",
+    "1",
     "-c:a",
     "aac",
     "-b:a",

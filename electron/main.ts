@@ -2209,6 +2209,11 @@ function registerIpc() {
 
   ipcMain.on("display:mediaDiagnostic", (_event, raw: unknown) => {
     bootLog(`[display-media] ${sanitizeMediaDiagnostic(raw)}`);
+    if (!runtime || !raw || typeof raw !== "object") return;
+    const o = raw as Record<string, unknown>;
+    if (typeof o.event === "string" && typeof o.mediaId === "string") {
+      runtime.queuePrepareAfterPlaybackFault(o.mediaId, o.event);
+    }
   });
 
   ipcMain.handle("app:getVersion", () => app.getVersion());

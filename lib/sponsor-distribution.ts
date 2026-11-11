@@ -564,7 +564,15 @@ export function buildSponsorSlotMap(
     items.reduce((sum, item) => sum + item.sec, 0),
   );
   const totalSponsorSec = roundDurations.reduce((sum, dur) => sum + dur, 0);
-  const gapSec = totalSponsorSec < Hc ? (Hc - totalSponsorSec) / (roundItems.length + 1) : 0;
+  const leftover = Math.max(0, Hc - totalSponsorSec);
+  const gapCount = roundItems.length + 1;
+  const rawGap = leftover / gapCount;
+  /**
+   * Resttijd in spleten van 1–2 s tussen clips oogt als een flits. Alleen spreiden
+   * als elke spleet lang genoeg is om het scorebord te lezen; anders clips aaneen
+   * en de rest achteraan.
+   */
+  const gapSec = rawGap >= MIN_VISIBLE_SCOREBOARD_SEC ? leftover / gapCount : 0;
 
   let cursor = gapSec;
   for (let r = 0; r < roundItems.length; r++) {
@@ -585,6 +593,130 @@ export function buildSponsorSlotMap(
   return map;
 }
 
+/**
+ * Kortste scorebord tussen clips dat nog als rust leesbaar is.
+ * Korter (typisch 1 s na elke clip) oogt als een flits — die spleet overslaan.
+ */
+export const MIN_VISIBLE_SCOREBOARD_SEC = 5;
+
+/** Eerste sponsor-trigger vanaf `fromSec` op de slotmap, of null. */
+export function nextSponsorTriggerFrom(
+  map: (string | null)[],
+  fromSec: number,
+): { id: string; atSec: number } | null {
+  if (map.length === 0) return null;
+  const start = Math.min(Math.max(0, Math.floor(fromSec)), map.length - 1);
+  for (let i = start; i < map.length; i++) {
+    const id = map[i];
+    if (id != null) return { id, atSec: i };
+  }
+  return null;
+}
+
+/**
+ * Seconden in de lopende helft zonder plafond op de helftduur. De roosterklok krijgt deze
+ * tijd: liep het rooster achter door onderbrekingen, dan loopt het in de blessuretijd door tot
+ * alle geplande vertoningen geweest zijn. De klok zelf stopt het rooster op de helftduur.
+ */
+export function halfWindowElapsedOpenEnded(
+  elapsed: number,
+  status: string | undefined,
+  halfDurationSec: number,
+): number {
+  const H = Math.max(60, halfDurationSec);
+  if (status === "FIRST_HALF") return Math.max(0, elapsed);
+  if (status === "SECOND_HALF") return Math.max(0, elapsed - H);
+  return halfWindowElapsed(elapsed, status, halfDurationSec);
+}
+
+/**
+ * Haalt achterstand van het rooster in met scorebordtijd.
+ *
+ * Een goal, kaart of cue zet het rooster stil en laat de onderbroken clip daarna opnieuw
+ * spelen: het rooster loopt dan achter op de klok. Zonder inhalen schuift alles op en vallen
+ * de laatste vertoningen van de fase weg, zodat een sponsor minder krijgt dan hij boekte.
+ * Daarom springt het rooster, zolang het achterloopt en er geen clip speelt, door de
+ * scorebordpauze heen tot kort voor de volgende vertoning. Er blijft altijd
+ * `MIN_VISIBLE_SCOREBOARD_SEC` scorebord staan en het rooster loopt nooit vóór op de klok.
+ *
+ * Geeft de roostertijd terug die deze tick geldt.
+ */
+export function catchUpSponsorSchedule(opts: {
+  clock: { adjustedT: number };
+  /** Actuele kloktijd, dezelfde waarde die `sponsorScheduleTime` kreeg. */
+  rawT: number;
+  /** Rooster staat stil (onderbreking of klok stil): dan niets inhalen. */
+  frozen: boolean;
+  hang: SponsorPhaseHangRef["current"];
+  nowMs: number;
+  slotMap: (string | null)[];
+  /** Lengte van de tijdlijn; het rooster loopt nooit verder. */
+  maxT: number;
+}): number {
+  const t = opts.clock.adjustedT;
+  if (opts.frozen || opts.slotMap.length === 0) return t;
+  /** Zolang een vertoning loopt (of net afloopt en de volgende aansluit) niets overslaan. */
+  if (opts.hang) return t;
+  const liveT = Math.min(opts.rawT, opts.maxT);
+  if (liveT - t <= 0) return t;
+  const here = Math.min(opts.slotMap.length - 1, Math.max(0, Math.floor(t)));
+  if (opts.slotMap[here] != null) return t;
+  const next = nextSponsorTriggerFrom(opts.slotMap, t);
+  const target = next ? next.atSec - MIN_VISIBLE_SCOREBOARD_SEC : opts.maxT;
+  const caughtUp = Math.min(liveT, target);
+  if (caughtUp > t) opts.clock.adjustedT = caughtUp;
+  return opts.clock.adjustedT;
+}
+
+function beginSponsorSpreadHang(
+  hangRef: SponsorPhaseHangRef,
+  sponsorId: string,
+  holdSec: number,
+  nowMs: number,
+  slotIdx: number | undefined,
+  appearanceIndex: number | null,
+): void {
+  hangRef.current = {
+    sponsorId,
+    untilMs: nowMs + holdSec * 1000,
+    startedAtMs: nowMs,
+    startedAtSlotIdx: slotIdx,
+    lastSeenAtMs: nowMs,
+    appearanceIndex,
+  };
+}
+
+/**
+ * De hoeveelste vertoning van deze sponsor het rooster hier start (0-based), of null zonder
+ * slotmap. Hiermee kiest de speler dezelfde clip als waarmee het rooster de duur berekende.
+ */
+function scheduledAppearanceIndex(
+  slotMap: (string | null)[] | undefined,
+  sponsorId: string,
+  slotT: number | undefined,
+): number | null {
+  if (!slotMap || slotMap.length === 0 || slotT === undefined) return null;
+  return sponsorAppearanceIndexAt(slotMap, sponsorId, slotT);
+}
+
+export type ResolvedSponsorSpreadPhase = {
+  phase: "scoreboard" | "sponsor";
+  sponsorFilterId: string | null;
+  appearanceStartedAtMs?: number | null;
+  /** Index van de clip in de rotatie van deze sponsor die bij deze vertoning hoort. */
+  appearanceIndex?: number | null;
+};
+
+function spreadPhaseView(
+  phase: "scoreboard" | "sponsor",
+  sponsorFilterId: string | null,
+  appearanceStartedAtMs: number | null = null,
+  appearanceIndex: number | null = null,
+): ResolvedSponsorSpreadPhase {
+  if (phase !== "sponsor") return { phase: "scoreboard", sponsorFilterId: null };
+  return { phase: "sponsor", sponsorFilterId, appearanceStartedAtMs, appearanceIndex };
+}
+
 /** Ref voor vol te houden sponsor-slide terwijl de slotmap al naar scorebord zou gaan. */
 export type SponsorPhaseHangRef = {
   current: {
@@ -595,8 +727,15 @@ export type SponsorPhaseHangRef = {
     startedAtSlotIdx?: number;
     /** Laatste tick-tijd waarop deze hang is geëvalueerd (voor interrupt-vriesklok). */
     lastSeenAtMs?: number;
+    /** De hoeveelste vertoning van deze sponsor dit is; bepaalt welke clip er speelt. */
+    appearanceIndex?: number | null;
+    /** Laatste tick waarop de duur om was maar de clip nog op het scherm stond. */
+    overrunSeenAtMs?: number;
   } | null;
 };
+
+/** Hoe ver het startvenster van een vertoning voorbij mag zijn om haar toch nog te starten. */
+const LATE_SPONSOR_TRIGGER_TOLERANCE_SEC = 2;
 
 export type ResolveSponsorSpreadOptions = {
   /** Slotmap + huidige tijd `t` (zelfde eenheid als `lookupSponsorAtSecond`): cap hang per segment. */
@@ -607,6 +746,24 @@ export type ResolveSponsorSpreadOptions = {
    * Resterende hangtijd schuift mee zodat de sponsor zijn volle clip krijgt na de overlay.
    */
   interrupted?: boolean;
+  /**
+   * De onderbreking vervangt het beeld (goal, kaart, wissel, cue): de speler start de
+   * onderbroken clip daarna opnieuw vanaf 0:00. De vertoning begint dan ook opnieuw, met haar
+   * volle duur. Staat alleen de wedstrijdklok stil, dan loopt de clip gewoon verder en schuift
+   * de resterende tijd mee (uit laten).
+   */
+  restartsClip?: boolean;
+  /**
+   * Roosterklok van deze sectie. Bij `restartsClip` gaat hij terug naar het begin van de
+   * onderbroken vertoning; anders is het rooster na de herhaalde clip het slot van de volgende
+   * sponsor al voorbij en valt die weg.
+   */
+  scheduleClock?: { adjustedT: number } | null;
+  /**
+   * Sponsor van de clip die volgens de ledger nu op het scherm staat. Is dat de sponsor van de
+   * lopende vertoning, dan eindigt die pas als de clip klaar is.
+   */
+  liveClipSponsorId?: string | null;
   /** Optionele scorebordperiode na een sponsorclip; standaard uit, blokplanning bepaalt de pauzes. */
   minScoreboardMsAfterHang?: number;
 };
@@ -622,7 +779,7 @@ export function resolveSponsorSpreadPhase(
   nowMs: number,
   hangRef: SponsorPhaseHangRef,
   options?: ResolveSponsorSpreadOptions,
-): { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } {
+): ResolvedSponsorSpreadPhase {
   const slotIdx =
     options?.slotMap && options.slotT !== undefined && options.slotMap.length > 0
       ? Math.min(options.slotMap.length - 1, Math.max(0, Math.floor(options.slotT)))
@@ -632,27 +789,55 @@ export function resolveSponsorSpreadPhase(
   const hang = hangRef.current;
 
   /**
-   * Onderbreking (goal-overlay, spelervideo, kaart, wissel): hang-klok bevriezen door
-   * `untilMs` per tick met de werkelijke deltatijd op te schuiven. Zo speelt de sponsor
-   * zijn volledige clip uit nadat de overlay weer weg is.
+   * Onderbreking (goal-overlay, spelervideo, kaart, wissel): de hang-klok staat stil.
+   *
+   * Start de clip daarna opnieuw (`restartsClip`), dan begint de vertoning ook opnieuw: volle
+   * duur vanaf het einde van de onderbreking, en de roosterklok terug naar het begin van deze
+   * vertoning. Zo lopen clip en rooster daarna weer gelijk. Was de vertoning al voorbij toen de
+   * onderbreking begon, dan blijft ze voorbij.
+   *
+   * Loopt de clip gewoon verder (klok stil), dan schuift `untilMs` per tick mee met de
+   * werkelijke deltatijd en blijft de resterende tijd gelijk.
    */
   if (interrupted && hang) {
     const lastSeen = hang.lastSeenAtMs ?? nowMs;
     const dt = Math.max(0, nowMs - lastSeen);
-    if (dt > 0) {
+    /** Ook "duur om, clip stond nog op het scherm" telt als lopend: die clip start straks opnieuw. */
+    const stillRunning = hang.untilMs > lastSeen || hang.overrunSeenAtMs === lastSeen;
+    if (options?.restartsClip && stillRunning) {
+      const holdMs = hang.untilMs - hang.startedAtMs;
+      hang.startedAtMs = nowMs;
+      hang.untilMs = nowMs + holdMs;
+      if (options.scheduleClock && hang.startedAtSlotIdx !== undefined) {
+        options.scheduleClock.adjustedT = Math.min(
+          options.scheduleClock.adjustedT,
+          hang.startedAtSlotIdx,
+        );
+      }
+    } else if (dt > 0) {
       hang.untilMs += dt;
       hang.startedAtMs += dt;
     }
     hang.lastSeenAtMs = nowMs;
-    return { phase: "sponsor", sponsorFilterId: hang.sponsorId };
+    return spreadPhaseView("sponsor", hang.sponsorId, hang.startedAtMs, hang.appearanceIndex ?? null);
   }
 
   if (hang && nowMs < hang.untilMs) {
     hang.lastSeenAtMs = nowMs;
-    return {
-      phase: "sponsor",
-      sponsorFilterId: hang.sponsorId,
-    };
+    return spreadPhaseView("sponsor", hang.sponsorId, hang.startedAtMs, hang.appearanceIndex ?? null);
+  }
+
+  /**
+   * De duur is om, maar de clip van deze vertoning staat nog op het scherm: hij startte een
+   * fractie later dan het rooster, of het bestand is iets langer dan opgegeven. De vertoning
+   * loopt tot de clip klaar is en pas dan komt de volgende. Zo loopt de speler nooit achter het
+   * rooster aan: een clip die nog speelde toen het rooster al verder was, kreeg na een goal het
+   * slot van de volgende sponsor, of werd opnieuw gestart.
+   */
+  if (hang && options?.liveClipSponsorId != null && options.liveClipSponsorId === hang.sponsorId) {
+    hang.lastSeenAtMs = nowMs;
+    hang.overrunSeenAtMs = nowMs;
+    return spreadPhaseView("sponsor", hang.sponsorId, hang.startedAtMs, hang.appearanceIndex ?? null);
   }
 
   const minScoreboardMsAfterHang = Math.max(0, options?.minScoreboardMsAfterHang ?? 0);
@@ -667,20 +852,67 @@ export function resolveSponsorSpreadPhase(
   }
 
   /**
-   * Hang net verlopen: altijd minstens één scorebord-tick vóór een nieuwe vertoning.
-   * Zonder die null-filter blijft `sponsorIdFilter` soms dezelfde sponsor-id (geen unmount),
-   * waardoor `completedScheduledSponsorSlotRef` in SponsorBudgetRotation gezet blijft en
-   * de volgende clip nooit meer start — HUD-timer loopt wél door, beeld blijft stil/zwart.
+   * Hang net verlopen. Stond er een verplichte scorebord-tick tussen elke clip, dan
+   * zag het publiek ~1 s bord — dat oogt als een flits. Start de volgende clip meteen
+   * als die nu (of binnen `MIN_VISIBLE_SCOREBOARD_SEC`) gepland is.
    *
-   * Pauze-bescherming zit hierin: zelfde slot-index + zelfde sponsor ⇒ ook scorebord
-   * (geen nieuwe hang tot de klok echt verder tikt).
+   * Zelfde slot-index + dezelfde sponsor: de klok is niet verder getikt, dus geen
+   * nieuwe hang (anders herhaalt dezelfde vertoning zich).
    */
   if (hang && nowMs >= hang.untilMs) {
+    const expired = hang;
     hangRef.current = null;
+    const frozenSameSlot =
+      slotIdx !== undefined &&
+      expired.startedAtSlotIdx === slotIdx &&
+      raw.sponsorId === expired.sponsorId;
+    if (!frozenSameSlot) {
+      let nextId: string | null = raw.phase === "sponsor" ? raw.sponsorId : null;
+      let nextSlotT = options?.slotT;
+      if (!nextId && options?.slotMap && options.slotT !== undefined) {
+        const upcoming = nextSponsorTriggerFrom(options.slotMap, options.slotT);
+        if (upcoming && upcoming.atSec - options.slotT < MIN_VISIBLE_SCOREBOARD_SEC) {
+          nextId = upcoming.id;
+          nextSlotT = upcoming.atSec;
+        } else {
+          /**
+           * Liep de vorige clip uit, dan kan het startvenster van de volgende sponsor net
+           * voorbij zijn. Die vertoning hoort er nog te komen: start haar nu en zet de
+           * roosterklok terug naar haar slot, zodat de rest van de ronde aansluit.
+           */
+          const late = nextSponsorTriggerFrom(
+            options.slotMap,
+            Math.max(0, options.slotT - LATE_SPONSOR_TRIGGER_TOLERANCE_SEC),
+          );
+          if (late && late.atSec < options.slotT && late.id !== expired.sponsorId) {
+            nextId = late.id;
+            nextSlotT = late.atSec;
+            if (options.scheduleClock) {
+              options.scheduleClock.adjustedT = Math.min(options.scheduleClock.adjustedT, late.atSec);
+            }
+          }
+        }
+      }
+      if (nextId) {
+        const holdSec = holdSecondsCappedBySlotRun(
+          sponsors,
+          section,
+          matchStatus,
+          nextId,
+          options?.slotMap,
+          nextSlotT,
+        );
+        const appearanceIndex = scheduledAppearanceIndex(options?.slotMap, nextId, nextSlotT);
+        beginSponsorSpreadHang(hangRef, nextId, holdSec, nowMs, slotIdx, appearanceIndex);
+        return spreadPhaseView("sponsor", nextId, nowMs, appearanceIndex);
+      }
+    }
     return { phase: "scoreboard", sponsorFilterId: null };
   }
 
   hangRef.current = null;
+  let appearanceStartedAtMs: number | null = null;
+  let appearanceIndex: number | null = null;
   if (raw.phase === "sponsor" && raw.sponsorId) {
     const holdSec = holdSecondsCappedBySlotRun(
       sponsors,
@@ -690,16 +922,12 @@ export function resolveSponsorSpreadPhase(
       options?.slotMap,
       options?.slotT,
     );
-    hangRef.current = {
-      sponsorId: raw.sponsorId,
-      untilMs: nowMs + holdSec * 1000,
-      startedAtMs: nowMs,
-      startedAtSlotIdx: slotIdx,
-      lastSeenAtMs: nowMs,
-    };
+    appearanceIndex = scheduledAppearanceIndex(options?.slotMap, raw.sponsorId, options?.slotT);
+    beginSponsorSpreadHang(hangRef, raw.sponsorId, holdSec, nowMs, slotIdx, appearanceIndex);
+    appearanceStartedAtMs = nowMs;
   }
   const filterOut = raw.phase === "sponsor" ? raw.sponsorId : null;
-  return { phase: raw.phase, sponsorFilterId: filterOut };
+  return spreadPhaseView(raw.phase, filterOut, appearanceStartedAtMs, appearanceIndex);
 }
 
 export function lookupSponsorAtSecond(

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  isCurrentStadiumCompatPath,
   isDisplayPlaybackRisk,
+  isStadiumPlaybackHangEvent,
   needsStadiumTranscode,
   parseFfmpegInputProbe,
   stadiumTranscodeReason,
@@ -13,6 +15,13 @@ const BB_PROBE = `Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'BB.mp4':
 
 const CRISTAL_PROBE = `Duration: 00:00:15.00, start: 0.000000, bitrate: 7178 kb/s
   Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080 [SAR 1:1 DAR 16:9], 6856 kb/s, 30 fps, 30 tbr, 30k tbn (default)`;
+
+const PLENTY_PROBE = `Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'RAFCPlenty_2.mp4':
+  Duration: 00:00:24.82, start: 0.000000, bitrate: 10644 kb/s
+  Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080, 10638 kb/s, 29.97 fps, 29.97 tbr, 30k tbn (default)
+      Metadata:
+        handler_name    : ?Mainconcept Video Media Handler
+        encoder         : AVC Coding`;
 
 describe("parseFfmpegInputProbe", () => {
   it("leest Mainconcept 1080p60 High", () => {
@@ -52,6 +61,17 @@ describe("parseFfmpegInputProbe", () => {
       fps: 30,
     });
   });
+
+  it("leest Mainconcept-handler uit Plenty-metadata", () => {
+    const info = parseFfmpegInputProbe(PLENTY_PROBE);
+    expect(info).toMatchObject({
+      codec: "h264",
+      profile: "Main",
+      fps: 29.97,
+      encoder: "AVC Coding",
+    });
+    expect(info?.handlerName).toMatch(/Mainconcept/i);
+  });
 });
 
 describe("stadiumTranscodeReason", () => {
@@ -64,6 +84,21 @@ describe("stadiumTranscodeReason", () => {
   it("laat 1080p30 Main met rust", () => {
     const info = parseFfmpegInputProbe(CRISTAL_PROBE)!;
     expect(stadiumTranscodeReason(info)).toBe("ok");
+  });
+
+  it("zet Mainconcept Main @ 30 fps om (Plenty hapert anders op t=0)", () => {
+    const info = parseFfmpegInputProbe(PLENTY_PROBE)!;
+    expect(stadiumTranscodeReason(info)).toBe("unsafe_encoder");
+    expect(needsStadiumTranscode(info)).toBe(true);
+    expect(isDisplayPlaybackRisk("unsafe_encoder")).toBe(true);
+  });
+
+  it("laat een libx264-kopie met rest-Mainconcept-handler met rust", () => {
+    const info = parseFfmpegInputProbe(`Duration: 00:00:24.82, start: 0.000000, bitrate: 7596 kb/s
+  Stream #0:0[0x1](eng): Video: h264 (Main) (avc1 / 0x31637661), yuv420p(tv, bt709, progressive), 1920x1080, 7593 kb/s, 29.97 fps, 29.97 tbr, 30k tbn (default)
+        handler_name    : ?Mainconcept Video Media Handler
+        encoder         : Lavc61.19.101 libx264`);
+    expect(stadiumTranscodeReason(info!)).toBe("ok");
   });
 
   it("zet HEVC en 10-bit om", () => {
@@ -94,7 +129,57 @@ describe("stadiumTranscodeReason", () => {
   it("onderscheidt een echt afspeelrisico van een probe-fout", () => {
     expect(isDisplayPlaybackRisk("high_fps")).toBe(true);
     expect(isDisplayPlaybackRisk("ffmpeg_missing")).toBe(true);
+    expect(isDisplayPlaybackRisk("playback_fault")).toBe(true);
     expect(isDisplayPlaybackRisk("ok")).toBe(false);
     expect(isDisplayPlaybackRisk("probe_failed")).toBe(false);
+  });
+
+  it("zet Mainconcept AVC Coding om, ook zonder handler-naam", () => {
+    const info = parseFfmpegInputProbe(
+      "Stream #0:0: Video: h264 (Main) (avc1 / 0x31637661), yuv420p, 1920x1080, 30 fps, 30 tbr\n        encoder         : AVC Coding",
+    );
+    expect(stadiumTranscodeReason(info!)).toBe("unsafe_encoder");
+  });
+
+  it("zet interlaced H.264 om", () => {
+    const info = parseFfmpegInputProbe(
+      "Stream #0:0: Video: h264 (Main) (avc1 / 0x31637661), yuv420p, 1920x1080, 25 fps, 25 tbr, 25k tbn, top first",
+    );
+    expect(info?.interlaced).toBe(true);
+    expect(stadiumTranscodeReason(info!)).toBe("unsafe_encoder");
+  });
+
+  it("zet Adobe Media Encoder-clips om", () => {
+    const info = parseFfmpegInputProbe(
+      "Stream #0:0: Video: h264 (Main) (avc1 / 0x31637661), yuv420p, 1920x1080, 25 fps, 25 tbr\n        handler_name    : Adobe Media Encoder",
+    );
+    expect(stadiumTranscodeReason(info!)).toBe("unsafe_encoder");
+  });
+});
+
+describe("isCurrentStadiumCompatPath", () => {
+  it("herkent alleen de huidige fastdecode-kopie", () => {
+    expect(
+      isCurrentStadiumCompatPath(
+        "C:/Users/x/AppData/Roaming/stadium-scoreboard/uploads/compat/RAFCPlenty_2-a9e6a3274c-fd1.mp4",
+      ),
+    ).toBe(true);
+    expect(
+      isCurrentStadiumCompatPath(
+        "C:/Users/x/AppData/Roaming/stadium-scoreboard/uploads/compat/RAFCPlenty_2-a9e6a3274c.mp4",
+      ),
+    ).toBe(false);
+    expect(isCurrentStadiumCompatPath("/uploads/RAFCPlenty_2.mp4")).toBe(false);
+  });
+});
+
+describe("isStadiumPlaybackHangEvent", () => {
+  it("herkent decoder-hangs, niet gewone start-events", () => {
+    expect(isStadiumPlaybackHangEvent("watchdog_stuck_t0")).toBe(true);
+    expect(isStadiumPlaybackHangEvent("watchdog_never_playing")).toBe(true);
+    expect(isStadiumPlaybackHangEvent("error")).toBe(true);
+    expect(isStadiumPlaybackHangEvent("waiting")).toBe(false);
+    expect(isStadiumPlaybackHangEvent("suspend")).toBe(false);
+    expect(isStadiumPlaybackHangEvent("loaded_metadata")).toBe(false);
   });
 });

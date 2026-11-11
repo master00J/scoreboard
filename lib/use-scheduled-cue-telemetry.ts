@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import type { ScheduledMediaCue } from "@/lib/types";
 import { cueClipSessionId, cueExpectedPlaySec } from "@/lib/scheduled-media-cue";
 import { sectionForStatus } from "@/lib/sponsor-display-helpers";
-import { sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
+import { SCHEDULED_CUE_SPONSOR_ID, sponsorTelemetrySegmentKey } from "@/lib/sponsor-telemetry";
 import {
   reportSponsorClipEnd,
   reportSponsorClipProgress,
@@ -37,7 +37,7 @@ export function useScheduledCueTelemetry(opts: {
     const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, section);
     if (!segmentKey) return;
 
-    const sponsorId = cue.media.sponsorId ?? "scheduled-cue";
+    const sponsorId = cue.media.sponsorId ?? SCHEDULED_CUE_SPONSOR_ID;
     const clipSessionId = cueClipSessionId({ cueId: cue.id, cycle, mediaId: cue.media.id, stint });
     const startedAtMs = Date.now();
     startedAtRef.current = startedAtMs;

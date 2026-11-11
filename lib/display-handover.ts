@@ -25,6 +25,14 @@ export function displayModeToShow<M extends string>(opts: {
   return opts.settledMediaId === opts.activeMediaId ? opts.mode : opts.shownMode;
 }
 
+/**
+ * Prematch/rust/na de wedstrijd: het scorebord blijft getekend; media komt eroverheen.
+ * Unmount van de media-laag onthult het bord — geen zwart tussenframe.
+ */
+export function spreadShowsMedia(phase: "scoreboard" | "sponsor"): boolean {
+  return phase === "sponsor";
+}
+
 /** Zo lang na het verdwijnen van een beeld mag zijn opvolger in hetzelfde vak er nog op aansluiten. */
 export const HELD_IMAGE_HANDOVER_MS = 100;
 
