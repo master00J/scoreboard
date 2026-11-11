@@ -1,6 +1,6 @@
 {
   "name": "stadium-scoreboard",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Desktop scorebord- en sponsorweergave voor stadions (Electron + Next).",
   "author": "ArenaCue",
   "private": true,
