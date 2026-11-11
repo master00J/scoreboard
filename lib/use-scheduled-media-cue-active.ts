@@ -7,10 +7,10 @@ import {
   computePrematchRundownClock,
   cueClockPhaseKey,
   cueHasClockWindow,
-  cueIsDueAtElapsed,
   cueLeftClockWindow,
   cuePhaseMatches,
   cueUsesLiveWallClock,
+  pickDueScheduledCue,
   liveWallCueClockFromPersisted,
   liveWallCueElapsedSec,
   cueWindowExpired,
@@ -38,6 +38,8 @@ type UseScheduledMediaCueActiveResult = {
   activeScheduledCue: ScheduledMediaCue | null;
   /** Doorloop van een loopende rundown; verandert de React-key zodat dezelfde clip opnieuw start. */
   scheduledCueCycle: number;
+  /** Speelkop binnen de rundown, in seconden: zegt hoeveel van het venster van de cue al voorbij is. */
+  scheduledCuePlayheadSec: number;
   /** Sluit de cue-overlay (na video `ended` of handmatig). */
   dismissActiveScheduledCue: () => void;
 };
@@ -209,6 +211,23 @@ export function useScheduledMediaCueActive({
     lastScheduledCueClockRef.current = { matchId, status, elapsed: cueElapsed };
   }, [skip, match?.id, match?.status, cueElapsed, holdLiveWallOnBreak, persistedLiveWallClock.block]);
 
+  /** De cue die nu hoort te starten, of null. Telt meteen als gestart in deze doorloop. */
+  const takeDueCue = (): ScheduledMediaCue | null => {
+    if (!state || !match || mode === "BLACKOUT") return null;
+    if (!scheduledCueLiveProgramActive(mode, holdLiveWallOnBreak)) return null;
+    if (holdLiveWallOnBreak || prematchBlocked) return null;
+    const phaseKey = cueClockPhaseKey(match.status) ?? match.status;
+    const keyOf = (cue: ScheduledMediaCue) => `${match.id}:${phaseKey}:${cue.id}:${scheduledCueCycle}`;
+    const cue = pickDueScheduledCue(scheduledCues, {
+      matchStatus: match.status,
+      playheadSec: playhead,
+      clockRuns: (state.timerRunning ?? false) || usesLiveWallClock,
+      alreadyStarted: (candidate) => firedScheduledCueKeysRef.current.has(keyOf(candidate)),
+    });
+    if (cue) firedScheduledCueKeysRef.current.add(keyOf(cue));
+    return cue;
+  };
+
   useEffect(() => {
     if (skip) return;
     if (!state || !match || mode === "BLACKOUT") return;
@@ -219,27 +238,9 @@ export function useScheduledMediaCueActive({
       if (activeScheduledCue) setActiveScheduledCue(null);
       return;
     }
-    if (holdLiveWallOnBreak) return;
-    if (prematchBlocked) return;
     if (activeScheduledCue) return;
-    const due = scheduledCues
-      .filter((cue) => {
-        if (!cue.enabled || !cue.media?.active || !cuePhaseMatches(cue.matchStatus, match.status)) return false;
-        if (!cueIsDueAtElapsed(cue, playhead)) return false;
-        if (!cueHasClockWindow(cue) && !(state.timerRunning ?? false) && !usesLiveWallClock) {
-          return false;
-        }
-        return true;
-      })
-      .sort((a, b) => a.triggerSec - b.triggerSec);
-    const phaseKey = cueClockPhaseKey(match.status) ?? match.status;
-    const cue = due.find((candidate) => {
-      const key = `${match.id}:${phaseKey}:${candidate.id}:${scheduledCueCycle}`;
-      return !firedScheduledCueKeysRef.current.has(key);
-    });
-    if (!cue) return;
-    firedScheduledCueKeysRef.current.add(`${match.id}:${phaseKey}:${cue.id}:${scheduledCueCycle}`);
-    setActiveScheduledCue(cue);
+    const cue = takeDueCue();
+    if (cue) setActiveScheduledCue(cue);
   }, [
     skip,
     activeScheduledCue,
@@ -262,15 +263,16 @@ export function useScheduledMediaCueActive({
       setActiveScheduledCue(null);
       return;
     }
-    if (rundownLoops) {
-      if (cueLeftClockWindow(activeScheduledCue, playhead)) {
-        setActiveScheduledCue(null);
-      }
-      return;
-    }
-    if (cueWindowExpired(activeScheduledCue, cueElapsed)) {
-      setActiveScheduledCue(null);
-    }
+    const windowOver = rundownLoops
+      ? cueLeftClockWindow(activeScheduledCue, playhead)
+      : cueWindowExpired(activeScheduledCue, cueElapsed);
+    if (!windowOver) return;
+    // Meteen door naar de clip die aansluit. Eerst even "geen clip" melden haalt het hele vak met
+    // scorebord en sponsor weg en bouwt het daarna opnieuw op: het publiek ziet dan het volledige
+    // scherm flitsen bij elke sponsorwissel, in plaats van alleen de sponsor die verandert.
+    setActiveScheduledCue(takeDueCue());
+    // takeDueCue leest de waarden van deze render; de speelkop hieronder bepaalt wanneer dit loopt.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [skip, activeScheduledCue, cueElapsed, playhead, rundownLoops, prematchBlocked]);
 
   useEffect(() => {
@@ -285,6 +287,6 @@ export function useScheduledMediaCueActive({
   }, [skip, activeScheduledCue]);
 
   return skip
-    ? { activeScheduledCue: null, scheduledCueCycle: 0, dismissActiveScheduledCue: () => {} }
-    : { activeScheduledCue, scheduledCueCycle, dismissActiveScheduledCue };
+    ? { activeScheduledCue: null, scheduledCueCycle: 0, scheduledCuePlayheadSec: 0, dismissActiveScheduledCue: () => {} }
+    : { activeScheduledCue, scheduledCueCycle, scheduledCuePlayheadSec: playhead, dismissActiveScheduledCue };
 }

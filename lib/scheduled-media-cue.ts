@@ -359,6 +359,59 @@ export function rundownCycleIndex(elapsed: number, cycleSec: number, loop: boole
   return Math.floor(t / cycleSec);
 }
 
+/**
+ * Hoe lang een cue naar verwachting in beeld staat. Met een klokvenster is dat de rest van het
+ * venster en niet de duur van de clip: een foto van 10 s in een venster van 15 s blijft 15 s staan.
+ * `playheadSec` is de speelkop op het moment dat de cue start; die ligt later dan het begin van het
+ * venster als de rotatie halverwege aangezet wordt.
+ */
+export function cueExpectedPlaySec(
+  cue: { triggerSec: number; endSec?: number | null; media?: { durationSec?: number | null } | null },
+  playheadSec?: number | null,
+): number {
+  const end = cueEndSec(cue);
+  if (end == null) {
+    const dur = cue.media?.durationSec;
+    return Math.max(1, typeof dur === "number" && Number.isFinite(dur) && dur > 0 ? dur : 15);
+  }
+  const from =
+    typeof playheadSec === "number" && Number.isFinite(playheadSec)
+      ? Math.min(Math.max(playheadSec, cue.triggerSec), end)
+      : cue.triggerSec;
+  return Math.max(1, end - from);
+}
+
+/**
+ * De cue die nu moet starten: de vroegste die volgens de speelkop aan de beurt is en in deze
+ * doorloop nog niet gestart is. Een cue zonder klokvenster start alleen terwijl de klok loopt.
+ */
+export function pickDueScheduledCue<
+  T extends {
+    enabled: boolean;
+    matchStatus: string;
+    triggerSec: number;
+    endSec?: number | null;
+    media?: { active?: boolean } | null;
+  },
+>(
+  cues: T[],
+  opts: {
+    matchStatus: string;
+    playheadSec: number;
+    clockRuns: boolean;
+    alreadyStarted: (cue: T) => boolean;
+  },
+): T | null {
+  const due = cues
+    .filter((cue) => {
+      if (!cue.enabled || !cue.media?.active || !cuePhaseMatches(cue.matchStatus, opts.matchStatus)) return false;
+      if (!cueIsDueAtElapsed(cue, opts.playheadSec)) return false;
+      return cueHasClockWindow(cue) || opts.clockRuns;
+    })
+    .sort((a, b) => a.triggerSec - b.triggerSec);
+  return due.find((cue) => !opts.alreadyStarted(cue)) ?? null;
+}
+
 /** Actieve cue met klokvenster is niet meer aan de beurt (ook na wrap naar 0). */
 export function cueLeftClockWindow(
   cue: { triggerSec: number; endSec?: number | null },

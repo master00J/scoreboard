@@ -5,6 +5,7 @@ import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
 } from "./_components/preview-slide-progress";
+import { DisplayHeldImage } from "@/components/display-held-image";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
@@ -70,7 +71,7 @@ import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import { automaticSponsorMediaAllowed } from "@/lib/live-cycle-settings";
 import { useScheduledCueTelemetry } from "@/lib/use-scheduled-cue-telemetry";
-import { cueHasClockWindow, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
+import { cueHasClockWindow, cueWindowLengthSec, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 import {
   applySponsorBudgetCapToSpreadPhase,
   idleMayPlayPrematchSponsors,
@@ -493,19 +494,34 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     return () => clearInterval(id);
   }, [previewIframe, embedInControl, mode, match?.id]);
 
-  const { activeScheduledCue, scheduledCueCycle, dismissActiveScheduledCue } = useScheduledMediaCueActive({
-    match,
-    state,
-    mode,
-    elapsed,
-    skip: previewIframe,
-  });
+  const { activeScheduledCue, scheduledCueCycle, scheduledCuePlayheadSec, dismissActiveScheduledCue } =
+    useScheduledMediaCueActive({
+      match,
+      state,
+      mode,
+      elapsed,
+      skip: previewIframe,
+    });
   useScheduledCueTelemetry({
     cue: activeScheduledCue,
     cycle: scheduledCueCycle,
     match: match ? { id: match.id, status: match.status } : null,
     enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT",
+    playheadSec: scheduledCuePlayheadSec,
   });
+  /**
+   * Foto's uit de rundown delen één element: bij een wissel verandert alleen het beeld en blijft
+   * de vorige sponsor staan tot de volgende klaar is. Een video start per cue en per doorloop opnieuw.
+   */
+  const scheduledCueMediaKey = (surface: "panel" | "fullscreen") =>
+    activeScheduledCue?.media.type === "IMAGE"
+      ? `scheduled-cue-${surface}-image`
+      : `scheduled-cue-${surface}-${activeScheduledCue?.id}-${scheduledCueCycle}`;
+  /** Een foto met klokvenster blijft staan tot het venster om is, niet haar eigen duur. */
+  const scheduledCueImageHoldSec =
+    activeScheduledCue && cueHasClockWindow(activeScheduledCue)
+      ? cueWindowLengthSec(activeScheduledCue)
+      : undefined;
 
   /** Alleen het echte display-venster meldt afgespeelde sponsorclips (niet de ingebouwde preview). */
   const sponsorPlaybackTelemetry = useMemo(
@@ -1906,8 +1922,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             theme={liveTheme}
           >
             <SingleMediaMode
-              key={`scheduled-cue-panel-${activeScheduledCue.id}-${scheduledCueCycle}`}
+              key={scheduledCueMediaKey("panel")}
               media={activeScheduledCue.media}
+              imageHoldSec={scheduledCueImageHoldSec}
               showPreviewProgress={embedInControl}
               loop={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -1935,8 +1952,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         !(match && sponsorRotationBesideScoreboard(match.status)) && (
         <div className="absolute inset-0 z-[88] bg-black">
             <SingleMediaMode
-              key={`scheduled-cue-fullscreen-${activeScheduledCue.id}-${scheduledCueCycle}`}
+              key={scheduledCueMediaKey("fullscreen")}
               media={activeScheduledCue.media}
+              imageHoldSec={scheduledCueImageHoldSec}
               showPreviewProgress={embedInControl}
               loop={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -2291,11 +2309,14 @@ function SingleMediaMode({
   previewProgressWallClock,
   onVideoEnded,
   finishAfterMs,
+  imageHoldSec,
 }: {
   media: MediaItem | null;
   loop?: boolean;
   fallback?: React.ReactNode;
   showPreviewProgress?: boolean;
+  /** Hoe lang een foto blijft staan als dat niet haar eigen duur is, bv. het venster van een cue. */
+  imageHoldSec?: number;
   /** Preview-balk over muurklok-tijdvenster (bijv. 5 min matchsponsor), niet media-duur. */
   previewProgressWallClock?: {
     windowStartMs: number;
@@ -2314,7 +2335,7 @@ function SingleMediaMode({
     media?.type === "IMAGE" &&
     showPreviewProgress &&
     !previewProgressWallClock
-      ? Math.max(1500, Math.max(1, media.durationSec) * 1000)
+      ? Math.max(1500, Math.max(1, imageHoldSec ?? media.durationSec) * 1000)
       : 0;
   const imageElapsed = useTimedSlideProgress(
     imageTotalMs,
@@ -2504,7 +2525,7 @@ function SingleMediaMode({
           }}
         />
       ) : (
-        <img src={mediaUrl(media.path)} alt="" decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
+        <DisplayHeldImage src={mediaUrl(media.path)} style={DISPLAY_COVER_MEDIA_STYLE} />
       )}
       </DisplayMediaStage>
       {wallClockBar}
