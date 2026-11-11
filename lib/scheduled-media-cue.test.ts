@@ -4,6 +4,8 @@ import {
   cueExpectedPlaySec,
   cueIsDueAtElapsed,
   cueLeftClockWindow,
+  cueResumesAfterInterruption,
+  cueClipSessionId,
   pickDueScheduledCue,
   cuePhaseMatches,
   cueUsesLiveWallClock,
@@ -264,6 +266,46 @@ describe("sponsorwissel in een rundown", () => {
     const started = new Set<string>();
     expect(pickAt(16, started)).toBe("b");
     expect(pickAt(17, started)).toBeNull();
+  });
+
+  /** Zoals het scherm het doet als een losse clip, goal of kaart de sponsor van het scherm haalt. */
+  function interrupt(cue: (typeof rundown)[number], elapsedSec: number, started: Set<string>) {
+    if (cueResumesAfterInterruption(cue)) {
+      started.delete(`${cue.id}:${rundownCycleIndex(elapsedSec, cycleSec, true)}`);
+    }
+  }
+
+  it("brengt een onderbroken sponsor terug zolang zijn venster loopt", () => {
+    const started = new Set<string>();
+    expect(pickAt(16, started)).toBe("b");
+    interrupt(rundown[0]!, 18, started);
+    // De losse clip is na 5 s klaar: het venster van b loopt nog tot 30 s.
+    expect(pickAt(23, started)).toBe("b");
+  });
+
+  it("gaat na een lange onderbreking verder met de sponsor die dan aan de beurt is", () => {
+    const started = new Set<string>();
+    expect(pickAt(16, started)).toBe("b");
+    interrupt(rundown[0]!, 18, started);
+    expect(pickAt(31, started)).toBe("c");
+  });
+
+  it("herhaalt na een onderbreking geen cue zonder venster", () => {
+    const los = photo("los", 20, { endSec: null });
+    const started = new Set<string>();
+    expect(pickAt(21, started, [los])).toBe("los");
+    interrupt(los, 21.5, started);
+    expect(pickAt(21.8, started, [los])).toBeNull();
+  });
+
+  it("telt de schermtijd na een onderbreking als een apart stuk voor de sponsor", () => {
+    const eerste = cueClipSessionId({ cueId: "b", cycle: 2, mediaId: "m1" });
+    // Zelfde naam als vóór deze wijziging: lopende rapportage blijft aansluiten.
+    expect(eerste).toBe("cue:b:2:m1");
+    expect(cueClipSessionId({ cueId: "b", cycle: 2, mediaId: "m1", stint: 0 })).toBe(eerste);
+    const terug = cueClipSessionId({ cueId: "b", cycle: 2, mediaId: "m1", stint: 1 });
+    expect(terug).not.toBe(eerste);
+    expect(cueClipSessionId({ cueId: "b", cycle: 2, mediaId: "m1", stint: 2 })).not.toBe(terug);
   });
 
   it("slaat cues over die uit staan, zonder actieve media of van een andere fase", () => {

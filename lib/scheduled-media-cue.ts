@@ -412,6 +412,31 @@ export function pickDueScheduledCue<
   return due.find((cue) => !opts.alreadyStarted(cue)) ?? null;
 }
 
+/**
+ * Komt een cue terug nadat iets anders hem van het scherm haalde (losse clip, goal, kaart)?
+ * Met een klokvenster wel: het venster zegt tot wanneer hij hoort te staan. Zonder venster speelt
+ * een cue één keer op zijn moment, en dat moment is dan voorbij.
+ */
+export function cueResumesAfterInterruption(cue: { triggerSec: number; endSec?: number | null }): boolean {
+  return cueHasClockWindow(cue);
+}
+
+/**
+ * Naam waaronder één keer in beeld van een cue geteld wordt voor de sponsorrapportage.
+ * Komt een cue na een onderbreking terug (`stint` 1, 2, …), dan telt dat als een nieuw stuk
+ * schermtijd. Onder dezelfde naam bleef alleen het langste stuk over en kreeg de sponsor te
+ * weinig seconden op zijn naam.
+ */
+export function cueClipSessionId(opts: {
+  cueId: string;
+  cycle: number;
+  mediaId: string;
+  stint?: number;
+}): string {
+  const base = `cue:${opts.cueId}:${opts.cycle}:${opts.mediaId}`;
+  return opts.stint && opts.stint > 0 ? `${base}:r${opts.stint}` : base;
+}
+
 /** Actieve cue met klokvenster is niet meer aan de beurt (ook na wrap naar 0). */
 export function cueLeftClockWindow(
   cue: { triggerSec: number; endSec?: number | null },

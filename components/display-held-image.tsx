@@ -1,9 +1,13 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { heldImageToContinue, type HeldImageMemory } from "@/lib/display-handover";
 
 /** Langer dan dit blijft het vorige beeld niet staan, ook als het volgende zich niet klaar meldt. */
 const MAX_HOLD_MS = 1000;
+
+/** Wat elk vak nu toont of net toonde, en welk element dat meldde. */
+const slotMemory = new Map<string, HeldImageMemory & { owner: object }>();
 
 /**
  * Beeld dat pas wisselt als het volgende klaar is om te tonen.
@@ -11,10 +15,36 @@ const MAX_HOLD_MS = 1000;
  * Krijgt dit element een ander beeld, dan blijft het vorige staan tot het nieuwe geladen en
  * gedecodeerd is. Zonder dat staat het vak een moment leeg bij elke wissel. De eerste keer
  * gedraagt het zich als een gewone `<img>`.
+ *
+ * Met `slot` geldt hetzelfde tussen elementen die om beurten hetzelfde vak vullen: een nieuw
+ * element begint met het beeld dat daar stond en wisselt zodra het zijne klaar is.
  */
-export function DisplayHeldImage({ src, style }: { src: string; style?: CSSProperties }) {
-  const [shown, setShown] = useState(src);
-  const [swapped, setSwapped] = useState(false);
+export function DisplayHeldImage({
+  src,
+  style,
+  slot,
+}: {
+  src: string;
+  style?: CSSProperties;
+  /** Naam van het vak op het scherm, gedeeld door alle elementen die het om beurten vullen. */
+  slot?: string;
+}) {
+  const [continued] = useState(() =>
+    slot ? heldImageToContinue(slotMemory.get(slot), performance.now()) : null,
+  );
+  const [shown, setShown] = useState(continued ?? src);
+  // Een overgenomen beeld stond er al en is dus gedecodeerd.
+  const [swapped, setSwapped] = useState(continued != null);
+  const owner = useRef({}).current;
+
+  useEffect(() => {
+    if (!slot) return;
+    slotMemory.set(slot, { src: shown, leftAtMs: null, owner });
+    return () => {
+      const memory = slotMemory.get(slot);
+      if (memory?.owner === owner) memory.leftAtMs = performance.now();
+    };
+  }, [slot, shown, owner]);
 
   useEffect(() => {
     if (src === shown) return;

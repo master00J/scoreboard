@@ -24,6 +24,7 @@ export function MatchScoreboardFull({
   addedTime = 0,
   shotClock = 0,
   theme: themeProp,
+  instant = false,
 }: {
   match: Match;
   elapsed: number;
@@ -32,6 +33,11 @@ export function MatchScoreboardFull({
   addedTime?: number;
   shotClock?: number;
   theme?: ResolvedScoreboardTheme;
+  /**
+   * Meteen op volle sterkte verschijnen in plaats van in te faden. Voor wie een scorebord met
+   * mediavak opvolgt: dat vak verdwijnt in één keer, en een infade liet dan eerst zwart zien.
+   */
+  instant?: boolean;
 }) {
   const theme = themeProp ?? mergeScoreboardTheme(null);
   const shotOff = useShotClockOff();
@@ -40,7 +46,7 @@ export function MatchScoreboardFull({
 
   return (
     <motion.div
-      initial={{ opacity: 0 }}
+      initial={instant ? false : { opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.35 }}

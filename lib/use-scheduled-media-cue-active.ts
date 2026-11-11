@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { DisplayStatePayload } from "@/lib/desktop-bridge";
 import type { Match, ScheduledMediaCue } from "@/lib/types";
 import {
@@ -9,6 +9,7 @@ import {
   cueHasClockWindow,
   cueLeftClockWindow,
   cuePhaseMatches,
+  cueResumesAfterInterruption,
   cueUsesLiveWallClock,
   pickDueScheduledCue,
   liveWallCueClockFromPersisted,
@@ -38,6 +39,8 @@ type UseScheduledMediaCueActiveResult = {
   activeScheduledCue: ScheduledMediaCue | null;
   /** Doorloop van een loopende rundown; verandert de React-key zodat dezelfde clip opnieuw start. */
   scheduledCueCycle: number;
+  /** 0 bij de eerste keer in beeld; 1, 2, … als de cue na een onderbreking terugkomt. */
+  scheduledCueStint: number;
   /** Speelkop binnen de rundown, in seconden: zegt hoeveel van het venster van de cue al voorbij is. */
   scheduledCuePlayheadSec: number;
   /** Sluit de cue-overlay (na video `ended` of handmatig). */
@@ -58,6 +61,8 @@ export function useScheduledMediaCueActive({
   const [scheduledCues, setScheduledCues] = useState<ScheduledMediaCue[]>([]);
   const [activeScheduledCue, setActiveScheduledCue] = useState<ScheduledMediaCue | null>(null);
   const firedScheduledCueKeysRef = useRef<Set<string>>(new Set());
+  /** Hoe vaak een cue in deze doorloop al onderbroken is; een terugkeer telt als nieuw stuk schermtijd. */
+  const interruptedCountRef = useRef<Map<string, number>>(new Map());
   const lastScheduledCueClockRef = useRef<{
     matchId: string | null;
     status: string | null;
@@ -193,10 +198,13 @@ export function useScheduledMediaCueActive({
     };
   }, [skip, state?.updatedAt]);
 
-  useEffect(() => {
+  // Deze twee lopen vóór het scherm tekent, in deze volgorde. Zo staat er na een onderbreking nooit
+  // één beeld lang "geen clip" op het scherm voordat de sponsor terugkomt.
+  useLayoutEffect(() => {
     if (skip) {
       setActiveScheduledCue(null);
       firedScheduledCueKeysRef.current.clear();
+      interruptedCountRef.current.clear();
       return;
     }
     const prev = lastScheduledCueClockRef.current;
@@ -206,18 +214,22 @@ export function useScheduledMediaCueActive({
     );
     if (prev.matchId !== matchId || prev.status !== status || cueElapsed < prev.elapsed - 1) {
       firedScheduledCueKeysRef.current.clear();
+      interruptedCountRef.current.clear();
       setActiveScheduledCue(null);
     }
     lastScheduledCueClockRef.current = { matchId, status, elapsed: cueElapsed };
   }, [skip, match?.id, match?.status, cueElapsed, holdLiveWallOnBreak, persistedLiveWallClock.block]);
+
+  /** Onthoudt per doorloop welke cue al gestart is. */
+  const startedKeyOf = (cue: ScheduledMediaCue, matchId: string, matchStatus: string) =>
+    `${matchId}:${cueClockPhaseKey(matchStatus) ?? matchStatus}:${cue.id}:${scheduledCueCycle}`;
 
   /** De cue die nu hoort te starten, of null. Telt meteen als gestart in deze doorloop. */
   const takeDueCue = (): ScheduledMediaCue | null => {
     if (!state || !match || mode === "BLACKOUT") return null;
     if (!scheduledCueLiveProgramActive(mode, holdLiveWallOnBreak)) return null;
     if (holdLiveWallOnBreak || prematchBlocked) return null;
-    const phaseKey = cueClockPhaseKey(match.status) ?? match.status;
-    const keyOf = (cue: ScheduledMediaCue) => `${match.id}:${phaseKey}:${cue.id}:${scheduledCueCycle}`;
+    const keyOf = (cue: ScheduledMediaCue) => startedKeyOf(cue, match.id, match.status);
     const cue = pickDueScheduledCue(scheduledCues, {
       matchStatus: match.status,
       playheadSec: playhead,
@@ -228,14 +240,23 @@ export function useScheduledMediaCueActive({
     return cue;
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (skip) return;
     if (!state || !match || mode === "BLACKOUT") return;
     // "Alleen scorebord" is een harde opt-out, ook voor Volleybal zonder wedstrijdklok.
     // Een lopende cue verdwijnt hieronder bij de wissel naar MATCH.
     const liveProgramMode = scheduledCueLiveProgramActive(mode, holdLiveWallOnBreak);
     if (!liveProgramMode) {
-      if (activeScheduledCue) setActiveScheduledCue(null);
+      if (activeScheduledCue) {
+        // Een losse clip, goal of kaart haalt de sponsor even weg. Loopt zijn venster daarna nog,
+        // dan komt hij terug; anders bleef het scherm tot de volgende sponsor op het scorebord staan.
+        if (cueResumesAfterInterruption(activeScheduledCue)) {
+          const key = startedKeyOf(activeScheduledCue, match.id, match.status);
+          firedScheduledCueKeysRef.current.delete(key);
+          interruptedCountRef.current.set(key, (interruptedCountRef.current.get(key) ?? 0) + 1);
+        }
+        setActiveScheduledCue(null);
+      }
       return;
     }
     if (activeScheduledCue) return;
@@ -286,7 +307,24 @@ export function useScheduledMediaCueActive({
     return () => window.clearTimeout(id);
   }, [skip, activeScheduledCue]);
 
+  const scheduledCueStint =
+    activeScheduledCue && match
+      ? (interruptedCountRef.current.get(startedKeyOf(activeScheduledCue, match.id, match.status)) ?? 0)
+      : 0;
+
   return skip
-    ? { activeScheduledCue: null, scheduledCueCycle: 0, scheduledCuePlayheadSec: 0, dismissActiveScheduledCue: () => {} }
-    : { activeScheduledCue, scheduledCueCycle, scheduledCuePlayheadSec: playhead, dismissActiveScheduledCue };
+    ? {
+        activeScheduledCue: null,
+        scheduledCueCycle: 0,
+        scheduledCueStint: 0,
+        scheduledCuePlayheadSec: 0,
+        dismissActiveScheduledCue: () => {},
+      }
+    : {
+        activeScheduledCue,
+        scheduledCueCycle,
+        scheduledCueStint,
+        scheduledCuePlayheadSec: playhead,
+        dismissActiveScheduledCue,
+      };
 }
