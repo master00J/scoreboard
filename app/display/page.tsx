@@ -8,6 +8,7 @@ import {
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
+import { overlayEpisodeKey } from "@/lib/display-guards";
 import { AnimatePresence, motion } from "framer-motion";
 import { ScaleContainer } from "@/components/scale-container";
 import { useSocketSync, sendCommand, onDisplayHorn } from "@/lib/use-socket";
@@ -544,6 +545,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     );
   }, [match, prematchClock]);
 
+  const overlayEpisode = overlayEpisodeKey(state, { home: match?.homeScore, away: match?.awayScore });
   useEffect(() => {
     if (!state) return;
     /** GOAL_PLAYER_VIDEO: gebruik de echte clipduur (+klein eindbufferke) i.p.v. lange default. */
@@ -572,14 +574,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       }
     }, t.ms);
     return () => clearTimeout(id);
-  }, [
-    state?.mode,
-    state?.updatedAt,
-    state?.activeSubInId,
-    state?.activeSubOutId,
-    activeMedia?.durationSec,
-    match?.sport,
-  ]);
+    // `state` zelf hoort hier niet bij: elke klokstart of shotclock-reset geeft een nieuwe stand,
+    // en dan begon de timer opnieuw en bleef de overlay staan. `overlayEpisode` verandert alleen
+    // als er een nieuwe vertoning begint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayEpisode, activeMedia?.durationSec, match?.sport]);
 
   const finishOneOffMedia = useCallback((endedMediaId?: string) => {
     if (embedInControl) return;

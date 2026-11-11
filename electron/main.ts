@@ -19,6 +19,8 @@ import { MUSIC_EXTENSIONS, type MusicLibraryUpdate } from "../lib/music";
 import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
 import { normalizeFeatureRequestInput, type FeatureRequestResult } from "../lib/feature-request";
 import * as licenseSvc from "./license-service";
+import { licenseServerUnavailable } from "../lib/license-check-outcome";
+import { nextGpuCrashStep } from "../lib/gpu-crash-recovery";
 import { backupDatabaseBeforeUpgrade } from "../server/db-backup";
 import {
   BACKUP_ROOT_DIR,
@@ -229,8 +231,12 @@ if (process.platform === "win32" && process.env.STADIUM_ENABLE_WIN_OCCLUSION !==
 
 /**
  * Alleen op verzoek of na GPU-crash-vlag: software-decode (zwaarder op CPU).
+ *
+ * Vastgelegd bij de start: de vlag op schijf zegt alleen iets over de vólgende start. Wie later
+ * opnieuw naar de vlag kijkt, denkt na de eerste GPU-crash dat software-decode al aanstaat.
  */
-if (videoDecodeFallbackEnabled()) {
+const videoDecodeFallbackThisSession = videoDecodeFallbackEnabled();
+if (videoDecodeFallbackThisSession) {
   app.commandLine.appendSwitch("disable-accelerated-video-decode");
   console.log("[electron] disable-accelerated-video-decode actief");
 }
@@ -611,16 +617,23 @@ async function loadRuntime() {
   });
   await finishRestoreAfterStart();
   await buildMenu();
-  mobileBridge = await startMobileBridge({
-    runtime: {
-      apiRequest: (req) => runtime!.apiRequest(req),
-      getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
-      getSponsorLedgerSnapshot: () => runtime!.getSponsorLedgerSnapshot(),
-      runCommand: (command) => runtime!.runCommand(command as any),
-    },
-    log: bootLog,
-    credentialsPath: path.join(app.getPath("userData"), "mobile-bridge-credentials.json"),
-  });
+  // De telefoonbediening is een extra. Is haar poort bezet (een tweede ArenaCue, een ander
+  // programma), dan start het scorebord toch; alleen de telefoon werkt dan niet.
+  try {
+    mobileBridge = await startMobileBridge({
+      runtime: {
+        apiRequest: (req) => runtime!.apiRequest(req),
+        getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
+        getSponsorLedgerSnapshot: () => runtime!.getSponsorLedgerSnapshot(),
+        runCommand: (command) => runtime!.runCommand(command as any),
+      },
+      log: bootLog,
+      credentialsPath: path.join(app.getPath("userData"), "mobile-bridge-credentials.json"),
+    });
+  } catch (e) {
+    mobileBridge = null;
+    bootLog(`[mobile-bridge] niet gestart, telefoonbediening is niet beschikbaar: ${String(e)}`);
+  }
   cloudAgent = startCloudControlAgent({
     runtime: {
       apiRequest: (req) => runtime!.apiRequest(req),
@@ -2497,7 +2510,8 @@ function registerIpc() {
       return { gate: true, machinePreview: preview, prefillLicenseKey: null };
     }
     const r = await licenseSvc.remoteLicenseCheck(base, prev.licenseKey, mid);
-    if (r.kind === "network") {
+    // Geen verbinding, of de licentieserver is zelf in storing: dat zegt niets over deze licentie.
+    if (r.kind !== "ok" && licenseServerUnavailable(r)) {
       if (licenseSvc.withinGrace(prev.lastVerifiedAt)) {
         allowStadiumDisplay("license-offline-grace");
         return {
@@ -2514,15 +2528,18 @@ function registerIpc() {
         gate: true,
         machinePreview: preview,
         message:
-          "Geen verbinding met de licentie-server. Controleer internet of probeer later. (Offline: max. 7 dagen na laatste geslaagde online check.)",
+          r.kind === "error"
+            ? r.message
+            : "Geen verbinding met de licentie-server. Controleer internet of probeer later. (Offline: max. 7 dagen na laatste geslaagde online check.)",
         prefillLicenseKey: prev.licenseKey,
       };
     }
-    if (r.kind === "error") {
+    if (r.kind !== "ok") {
+      // Echte weigering van de licentie (onbekend, ingetrokken, verlopen).
       return {
         gate: true,
         machinePreview: preview,
-        message: r.message,
+        message: r.kind === "error" ? r.message : "Licentie kon niet gecontroleerd worden.",
         prefillLicenseKey: prev.licenseKey,
       };
     }
@@ -2726,13 +2743,19 @@ if (!gotLock) {
         const sponsorVideoContext =
           lastDisplayPlaybackSummary.includes("src=sponsor") ||
           lastDisplayPlaybackSummary.includes("mode=sponsor");
-        if (sponsorVideoContext && !videoDecodeFallbackEnabled()) {
+        const step = nextGpuCrashStep({
+          sponsorVideoContext,
+          softwareDecodeThisSession: videoDecodeFallbackThisSession,
+          nowMs: Date.now(),
+          lastCrashAtMs: lastGpuCrashAt,
+          streak: gpuCrashStreak,
+        });
+        gpuCrashStreak = step.streak;
+        lastGpuCrashAt = step.lastCrashAtMs;
+        if (step.action !== "reload") {
           const reason = `GPU ${details.reason} ${details.exitCode ?? ""}`.trim();
           enableVideoDecodeFallbackFlag(reason);
-          const now = Date.now();
-          gpuCrashStreak = now - lastGpuCrashAt < 120_000 ? gpuCrashStreak + 1 : 1;
-          lastGpuCrashAt = now;
-          if (gpuCrashStreak >= 2) {
+          if (step.action === "relaunch") {
             bootLog(
               `[app] GPU-crash tijdens sponsorvideo (herhaald) — herstart met software-decode${bootPlaybackContextSuffix()}`,
             );
@@ -2764,7 +2787,7 @@ if (!gotLock) {
       if (process.platform === "win32") {
         bootLog("[gpu] Direct Composition video-overlays uit (scorebord + video)");
       }
-      if (videoDecodeFallbackEnabled()) {
+      if (videoDecodeFallbackThisSession) {
         bootLog("[gpu-fallback] hardware video decode uitgeschakeld voor deze sessie");
       }
       startDisplayPowerSaveBlocker();

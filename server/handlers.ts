@@ -67,6 +67,7 @@ import {
   type VolleyballLive,
 } from "../lib/volleyball";
 import { CommandUserError } from "../lib/command-user-error";
+import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import type { SubPair } from "./match-lineup";
 import {
   applySubToFieldRoster,
@@ -117,7 +118,12 @@ async function updateState(db: Db, data: StateUpdate): Promise<DisplayState> {
     typeof data.shotClockDisabled === "boolean" ? data.shotClockDisabled : current.shotClockDisabled;
   return db.displayState.update({
     where: { id: 1 },
-    data: { ...data, ...(shotClockDisabled ? suppressShotClock() : {}) },
+    data: {
+      ...data,
+      ...(shotClockDisabled ? suppressShotClock() : {}),
+      // Nooit lager dan de vorige stempel, ook niet als de systeemklok terugspringt.
+      updatedAt: nextStateUpdatedAt(current.updatedAt),
+    },
   });
 }
 
@@ -367,7 +373,11 @@ function liveModeAfterPeriodChange(preferSponsorRotation: boolean | number | nul
 }
 
 /** Klokstand (verstreken s) bij het begin van een periode. */
-function periodStartElapsedSec(profile: SportProfile, match: Match, period: number): number {
+function periodStartElapsedSec(
+  profile: SportProfile,
+  match: Pick<Match, "sport" | "periodDurationSec">,
+  period: number,
+): number {
   if (profile.timerMode !== "COUNT_UP") return 0;
   const regular = periodDurationSecFor(match.sport, 1, match.periodDurationSec);
   if (period <= profile.periodCount) return Math.max(0, (period - 1) * regular);
@@ -916,21 +926,37 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const s = await getState(db);
       let shotClockBaseSec = 0;
       let liveMatch: { id: string; status: string; sport: string } | null = null;
+      // De wedstrijdklok hoort bij één wedstrijd. Een andere wedstrijd begint stil op de beginstand
+      // van haar periode en neemt niet de (misschien nog lopende) klok van de vorige over.
+      // Dezelfde wedstrijd opnieuw kiezen laat de klok staan.
+      let clockPatch: ReturnType<typeof stopAt> | null = cmd.matchId === s.matchId ? null : stopAt(0);
       if (cmd.matchId != null) {
         const m = await db.match.findUnique({
           where: { id: cmd.matchId },
-          select: { id: true, closedAt: true, sport: true, status: true },
+          select: {
+            id: true,
+            closedAt: true,
+            sport: true,
+            status: true,
+            currentPeriod: true,
+            periodDurationSec: true,
+          },
         });
         if (m?.closedAt) {
           cmdErr("matchClosed");
         }
-        shotClockBaseSec = getSportProfile(m?.sport).shotClockPresets[0] ?? 0;
-        if (m) liveMatch = { id: m.id, status: m.status, sport: m.sport };
+        const profile = getSportProfile(m?.sport);
+        shotClockBaseSec = profile.shotClockPresets[0] ?? 0;
+        if (m) {
+          liveMatch = { id: m.id, status: m.status, sport: m.sport };
+          if (clockPatch) clockPatch = stopAt(periodStartElapsedSec(profile, m, m.currentPeriod));
+        }
       }
       const phaseClockSource =
         cmd.matchId === s.matchId ? s : { ...s, preMatchStartedAt: null, postMatchStartedAt: null };
       await updateState(db, {
         matchId: cmd.matchId,
+        ...(clockPatch ?? {}),
         addedTimeMinutes: 0,
         shotClockRunning: false,
         shotClockStartedAt: null,
@@ -1008,6 +1034,15 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
     case "sport:setPeriod": {
       const s = await getState(db);
       const match = await requireActiveMatch(db, s);
+      if (
+        cmd.period === match.currentPeriod &&
+        match.status === lifecycleStatusForPeriod(match.sport, cmd.period)
+      ) {
+        // Deze periode loopt al. Een tweede klik (of dubbelklik) mag de klok, de shotclock en een
+        // lopende time-out niet terugzetten; het scorebord komt wel weer in beeld, zoals altijd.
+        await updateState(db, { mode: liveModeAfterPeriodChange(s.preferSponsorRotation) });
+        return { ok: true, result: { unchanged: true } };
+      }
       await applyPeriodChange(db, s, match, cmd.period);
       return { ok: true };
     }

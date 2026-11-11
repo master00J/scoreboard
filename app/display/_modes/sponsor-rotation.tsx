@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
+import { safeRotationIndex } from "@/lib/display-guards";
 import type { Playlist, PlaylistItemFull } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
 import { reportDisplayPlaybackToMain } from "@/lib/report-display-playback";
@@ -233,7 +234,17 @@ export function SponsorRotation({
     if (idx >= 0) setIndex(idx);
   }, [preferredItemId, items]);
 
-  const currentForTimer = items[index];
+  /**
+   * De lijst kan korter worden terwijl de rotatie loopt (item verwijderd of uitgezet in de
+   * bediening). Stond de rotatie op het laatste item, dan wees `index` naar niets en crashte de
+   * render: de wand toonde het crashscherm tot iemand het display herlaadde.
+   */
+  const safeIndex = safeRotationIndex(index, items.length);
+  useEffect(() => {
+    if (index !== safeIndex) setIndex(safeIndex);
+  }, [index, safeIndex]);
+
+  const currentForTimer = items[safeIndex];
 
   useEffect(() => {
     if (items.length === 0 || !currentForTimer) return;
@@ -249,13 +260,13 @@ export function SponsorRotation({
     return () => clearTimeout(id);
   }, [
     items.length,
-    index,
+    safeIndex,
     currentForTimer?.id,
     currentForTimer?.durationOverrideSec,
     currentForTimer?.media.durationSec,
   ]);
 
-  const current = items[index];
+  const current = items[safeIndex];
   const slideMs =
     current != null
       ? Math.max(
@@ -265,7 +276,7 @@ export function SponsorRotation({
       : 0;
   const slideElapsed = useTimedSlideProgress(
     showPreviewProgress ? slideMs : 0,
-    current ? `${current.id}-${index}` : "none",
+    current ? `${current.id}-${safeIndex}` : "none",
   );
 
   useEffect(() => {
@@ -283,7 +294,7 @@ export function SponsorRotation({
     });
   }, [current, playlist?.id, showPreviewProgress]);
 
-  if (items.length === 0) {
+  if (items.length === 0 || !current) {
     if (idleEmptyFallback && (idleEmptyFallback.media || idleEmptyFallback.logoUrl)) {
       return (
         <div className="absolute inset-0 overflow-hidden bg-black">
@@ -304,7 +315,7 @@ export function SponsorRotation({
     <div className="absolute inset-0 overflow-hidden bg-black">
       <AnimatePresence mode="wait">
         <motion.div
-          key={current.id + "-" + index}
+          key={current.id + "-" + safeIndex}
           initial={false}
           animate={{ opacity: 1 }}
           exit={{ opacity: 1 }}
