@@ -22,6 +22,7 @@ export function deckMatch(patch: Partial<DeckMatch> = {}): DeckMatch {
 export function deckState(patch: Partial<DeckState> = {}): DeckState {
   return {
     mode: "MATCH",
+    activeMediaId: null,
     timerRunning: false,
     timerStartedAt: null,
     timerBaseSec: 0,

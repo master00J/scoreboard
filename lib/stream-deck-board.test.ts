@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseStreamDeckPath } from "./stream-deck";
 import {
   BOARD_DECK_PATHS,
+  DECK_QUICK_SLOTS,
   boardDeckPlan,
   nextDeckPeriod,
   parseBoardDeckPath,
@@ -41,6 +42,15 @@ describe("parseBoardDeckPath", () => {
     expect(parseBoardDeckPath("/score/home/plus4")).toBeNull();
     expect(parseBoardDeckPath("/shotclock/reset/0")).toBeNull();
     expect(parseBoardDeckPath("/timeout/both")).toBeNull();
+  });
+
+  it("kent de snelle mediaknoppen 1 tot en met het aantal toetsen dat ervoor is", () => {
+    expect(parseBoardDeckPath("/quick/1")).toEqual({ id: "quick", index: 1 });
+    expect(parseBoardDeckPath(`/quick/${DECK_QUICK_SLOTS}`)).toEqual({ id: "quick", index: DECK_QUICK_SLOTS });
+    expect(parseBoardDeckPath("/quick/0")).toBeNull();
+    expect(parseBoardDeckPath(`/quick/${DECK_QUICK_SLOTS + 1}`)).toBeNull();
+    expect(parseBoardDeckPath("/quick/12")).toBeNull();
+    expect(BOARD_DECK_PATHS.filter((path) => path.startsWith("/quick/"))).toHaveLength(DECK_QUICK_SLOTS);
   });
 });
 
@@ -110,6 +120,30 @@ describe("boardDeckPlan", () => {
     });
     const board = plan("/display/board", live());
     expect(board.ok && board.commands[0]).toMatchObject({ type: "display:setMode", mode: "MATCH" });
+  });
+
+  it("start de snelle mediaknop van de regie die op die plaats staat, ook zonder wedstrijd", () => {
+    const quick = [
+      { id: "m-hymne", label: "Clublied" },
+      { id: "m-brand", label: "Evacuatie" },
+    ];
+    expect(plan("/quick/2", { ...live(null), quick })).toEqual({
+      ok: true,
+      commands: [{ type: "display:setMode", mode: "SPONSOR", meta: { activeMediaId: "m-brand" } }],
+    });
+    // Nog eens drukken terwijl de clip loopt start hem opnieuw, net als in de regie.
+    expect(plan("/quick/1", { ...live({}, { mode: "SPONSOR", activeMediaId: "m-hymne" }), quick })).toEqual({
+      ok: true,
+      commands: [{ type: "display:setMode", mode: "SPONSOR", meta: { activeMediaId: "m-hymne" } }],
+    });
+  });
+
+  it("weigert een snelle knop waar de regie er geen heeft", () => {
+    expect(plan("/quick/3", { ...live(), quick: [{ id: "m-hymne", label: "Clublied" }] })).toEqual({
+      ok: false,
+      issue: "noQuickButton",
+    });
+    expect(plan("/quick/1", live())).toEqual({ ok: false, issue: "noQuickButton" });
   });
 
   it("geeft +2 en +3 alleen waar de sport zo telt", () => {

@@ -10,6 +10,7 @@ import {
   deckFaceSvg,
   deckPathName,
   normalizeDeckLocale,
+  quickKeyLabel,
   type DeckFaceContext,
   type DeckStream,
 } from "./stream-deck-faces";
@@ -134,6 +135,47 @@ describe("scherm", () => {
     expect(deckFace("/display/sponsors", ctx({}, { mode: "MATCH" })).tone).toBe("idle");
     expect(deckFace("/display/sponsors", ctx({}, { mode: "SPONSOR_ROTATION" })).tone).toBe("go");
     expect(deckFace("/blackout", ctx({}, { mode: "BLACKOUT" }))).toEqual({ label: "ZWART", value: "", tone: "stop" });
+  });
+});
+
+describe("snelle mediaknoppen", () => {
+  const quick = [
+    { id: "m-hymne", label: "Clublied" },
+    { id: "m-lang", label: "nf impianti LOGO LEDWALL.png" },
+  ];
+  const withQuick = (state: Partial<DeckState> = {}): DeckFaceContext => {
+    const base = ctx(null, state);
+    return { ...base, live: { ...base.live, quick } };
+  };
+
+  it("toont het label van de knop uit de regie, ook zonder wedstrijd", () => {
+    expect(deckFace("/quick/1", withQuick())).toEqual({ label: "CLUBLIED", value: "", tone: "idle" });
+  });
+
+  it("is groen zolang zijn clip op het scherm staat", () => {
+    const playing = withQuick({ mode: "SPONSOR", activeMediaId: "m-hymne" });
+    expect(deckFace("/quick/1", playing).tone).toBe("go");
+    expect(deckFace("/quick/2", playing).tone).toBe("idle");
+    // Hetzelfde media-item dat niet als eenmalige clip loopt, kleurt de toets niet.
+    expect(deckFace("/quick/1", withQuick({ mode: "MATCH", activeMediaId: "m-hymne" })).tone).toBe("idle");
+  });
+
+  it("is dood met zijn nummer waar de regie geen knop heeft", () => {
+    expect(deckFace("/quick/3", withQuick())).toEqual({ label: "SNEL 3", value: "", tone: "off" });
+    expect(deckFace("/quick/1", ctx())).toEqual({ label: "SNEL 1", value: "", tone: "off" });
+  });
+
+  it("houdt een lang label binnen de toets: twee regels, afgekapt waar het niet past", () => {
+    expect(quickKeyLabel("nf impianti LOGO LEDWALL.png")).toBe("NF IMPIANTI LOGO LEDWALL.PNG");
+    expect(quickKeyLabel("Waarschuwing   onweer")).toBe("WAARSCHUWING ONWEER");
+    expect(quickKeyLabel("Evacuatieboodschapstadion")).toBe("EVACUATIEBOODSC…");
+    expect(quickKeyLabel("Sponsor van de maand december uitgebreid")).toBe("SPONSOR VAN DE… DECEMBER UITGEB…");
+    for (const label of [quick[1]!.label, "Evacuatieboodschapstadion", "Sponsor van de maand december uitgebreid"]) {
+      const svg = deckFaceSvg({ label: quickKeyLabel(label), value: "", tone: "idle" });
+      const lines = [...svg.matchAll(/<text [^>]*>([^<]*)<\/text>/g)].map((m) => m[1]!);
+      expect(lines.length, label).toBeLessThanOrEqual(2);
+      for (const line of lines) expect(line.length, `${label}: ${line}`).toBeLessThanOrEqual(16);
+    }
   });
 });
 

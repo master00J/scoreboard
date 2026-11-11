@@ -4,6 +4,8 @@
  */
 import {
   boardDeckPlan,
+  deckQuickButton,
+  deckQuickPlaying,
   nextDeckPeriod,
   parseBoardDeckPath,
   type BoardDeckAction,
@@ -54,6 +56,7 @@ export type DeckTexts = {
   fulltime: string;
   board: string;
   sponsors: string;
+  quick: string;
   blackout: string;
   shot: string;
   timeout: string;
@@ -81,6 +84,7 @@ export type DeckTexts = {
   piFulltime: string;
   piBoard: string;
   piSponsors: string;
+  piQuick: string;
   piBlackout: string;
   piShotToggle: string;
   piShotReset: string;
@@ -101,6 +105,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     fulltime: "EINDE",
     board: "SCOREBORD",
     sponsors: "SPONSORS",
+    quick: "SNEL {n}",
     blackout: "ZWART",
     shot: "SHOT",
     timeout: "T-O",
@@ -128,6 +133,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     piFulltime: "Einde wedstrijd",
     piBoard: "Alleen scorebord",
     piSponsors: "Scorebord + sponsors",
+    piQuick: "Snelle knop {n}",
     piBlackout: "Scherm zwart aan / uit",
     piShotToggle: "Shotclock start / pauze",
     piShotReset: "Shotclock naar {n}",
@@ -146,6 +152,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     fulltime: "FULL TIME",
     board: "SCOREBOARD",
     sponsors: "SPONSORS",
+    quick: "QUICK {n}",
     blackout: "BLACK",
     shot: "SHOT",
     timeout: "T-O",
@@ -173,6 +180,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     piFulltime: "End of match",
     piBoard: "Scoreboard only",
     piSponsors: "Scoreboard + sponsors",
+    piQuick: "Quick button {n}",
     piBlackout: "Screen black on / off",
     piShotToggle: "Shot clock start / pause",
     piShotReset: "Shot clock to {n}",
@@ -191,6 +199,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     fulltime: "FIN",
     board: "TABLEAU",
     sponsors: "SPONSORS",
+    quick: "RAPIDE {n}",
     blackout: "NOIR",
     shot: "SHOT",
     timeout: "T-M",
@@ -218,6 +227,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     piFulltime: "Fin du match",
     piBoard: "Tableau de score seul",
     piSponsors: "Tableau de score + sponsors",
+    piQuick: "Bouton rapide {n}",
     piBlackout: "Écran noir oui / non",
     piShotToggle: "Chrono des tirs démarrer / pause",
     piShotReset: "Chrono des tirs à {n}",
@@ -236,6 +246,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     fulltime: "FINE",
     board: "TABELLONE",
     sponsors: "SPONSOR",
+    quick: "RAPIDO {n}",
     blackout: "NERO",
     shot: "SHOT",
     timeout: "T-O",
@@ -263,6 +274,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     piFulltime: "Fine partita",
     piBoard: "Solo tabellone",
     piSponsors: "Tabellone + sponsor",
+    piQuick: "Tasto rapido {n}",
     piBlackout: "Schermo nero sì / no",
     piShotToggle: "Cronometro di tiro avvia / pausa",
     piShotReset: "Cronometro di tiro a {n}",
@@ -281,6 +293,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     fulltime: "ENDE",
     board: "SCOREBOARD",
     sponsors: "SPONSOREN",
+    quick: "SCHNELL {n}",
     blackout: "SCHWARZ",
     shot: "SHOT",
     timeout: "AUSZEIT",
@@ -308,6 +321,7 @@ export const DECK_TEXTS: Record<DeckLocale, DeckTexts> = {
     piFulltime: "Spielende",
     piBoard: "Nur Scoreboard",
     piSponsors: "Scoreboard + Sponsoren",
+    piQuick: "Schnellbutton {n}",
     piBlackout: "Bildschirm schwarz an / aus",
     piShotToggle: "Shotclock Start / Pause",
     piShotReset: "Shotclock auf {n}",
@@ -442,6 +456,11 @@ function boardFace(action: BoardDeckAction, ctx: DeckFaceContext): DeckFace {
       tone: mode === wanted ? "go" : "idle",
     };
   }
+  if (action.id === "quick") {
+    const button = deckQuickButton(live, action.index);
+    if (!button) return { label: withNumber(texts.quick, action.index), value: "", tone: "off" };
+    return { label: quickKeyLabel(button.label), value: "", tone: deckQuickPlaying(state, button) ? "go" : "idle" };
+  }
   if (action.id === "points") return scoreFace(action.side, `+${action.points}`, action.side, ctx, usable);
   if (action.id === "period") {
     const next = match ? nextDeckPeriod(match) : null;
@@ -517,6 +536,7 @@ export function deckPathName(path: string, texts: DeckTexts): string {
   if (board.id === "break") return texts.piBreak;
   if (board.id === "fulltime") return texts.piFulltime;
   if (board.id === "display") return board.mode === "sponsors" ? texts.piSponsors : texts.piBoard;
+  if (board.id === "quick") return withNumber(texts.piQuick, board.index);
   if (board.id === "shotclock") {
     return board.mode === "reset" ? withNumber(texts.piShotReset, board.seconds) : texts.piShotToggle;
   }
@@ -555,6 +575,24 @@ function splitLabel(label: string): string[] {
     if (label[i] === " " && (cut < 0 || Math.abs(i - middle) < Math.abs(cut - middle))) cut = i;
   }
   return [label.slice(0, cut), label.slice(cut + 1)];
+}
+
+/** Zoveel tekens passen op één regel van een toets bij de kleinste letter. */
+const KEY_LINE_MAX = 16;
+
+function clip(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Het label van een snelle mediaknop zoals het op de toets komt: hoofdletters, over hooguit twee
+ * regels. Een regel die niet past wordt afgekapt met "…" in plaats van buiten de toets te vallen.
+ */
+export function quickKeyLabel(label: string): string {
+  const text = label.trim().replace(/\s+/g, " ").toUpperCase();
+  return splitLabel(text)
+    .map((line) => clip(line, KEY_LINE_MAX))
+    .join(" ");
 }
 
 /** De knop als SVG van 144×144, het formaat van een Stream Deck-toets. */

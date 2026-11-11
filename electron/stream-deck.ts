@@ -18,6 +18,7 @@ import {
   type BoardDeckAction,
   type DeckLive,
   type DeckMatch,
+  type DeckQuickButton,
   type DeckState,
 } from "../lib/stream-deck-board";
 import {
@@ -43,6 +44,8 @@ const FACES_HOLD_MS = 20_000;
 const FACES_CHECK_MS = 250;
 /** Wedstrijdgegevens (stand, periode) opnieuw lezen, ook als het scherm geen wijziging meldde. */
 const MATCH_MAX_AGE_MS = 5_000;
+/** Snelle mediaknoppen opnieuw lezen: een nieuw label of een nieuwe knop staat zo binnen twee tellen op de toets. */
+const QUICK_MAX_AGE_MS = 2_000;
 const LOCALE_MAX_AGE_MS = 10_000;
 
 export type StreamDeckHandle = {
@@ -58,6 +61,8 @@ export function startStreamDeck(options: {
   /** Schermtoestand die hooguit een seconde oud is: voor wat er op de knoppen staat. */
   getState: () => Promise<unknown>;
   getMatch: (matchId: string) => Promise<DeckMatch | null>;
+  /** De snelle mediaknoppen van de regie, in haar volgorde. */
+  getQuickButtons: () => Promise<DeckQuickButton[]>;
   getLocale: () => Promise<string>;
   log: (line: string) => void;
 }): StreamDeckHandle {
@@ -87,18 +92,37 @@ export function startStreamDeck(options: {
       pluginInstalled = installStreamDeckPlugin(normalizeDeckLocale(locale), options.log);
     });
 
+  let quickCache: { at: number; buttons: DeckQuickButton[] } | null = null;
+  let quickError = "";
+  const readQuick = async (fresh: boolean): Promise<DeckQuickButton[]> => {
+    if (fresh || !quickCache || Date.now() - quickCache.at > QUICK_MAX_AGE_MS) {
+      try {
+        quickCache = { at: Date.now(), buttons: await options.getQuickButtons() };
+        quickError = "";
+      } catch (error) {
+        // De andere toetsen blijven werken; de snelle knoppen houden wat ze hadden.
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== quickError) options.log(`[stream-deck] snelle knoppen: ${message}`);
+        quickError = message;
+        quickCache = { at: Date.now(), buttons: quickCache?.buttons ?? [] };
+      }
+    }
+    return quickCache.buttons;
+  };
+
   let matchCache: { key: string; at: number; match: DeckMatch | null } | null = null;
   const readLive = async (fresh = false): Promise<DeckLive> => {
     const state = (await (fresh ? options.getSnapshot() : options.getState())) as Snapshot | null;
+    const quick = await readQuick(fresh);
     if (fresh) matchCache = null;
-    if (!state) return { state: null, match: null };
-    if (!state.matchId) return { state, match: null };
+    if (!state) return { state: null, match: null, quick };
+    if (!state.matchId) return { state, match: null, quick };
     // Elke wijziging aan de wedstrijd tikt ook de schermtoestand aan; dat is het sein om opnieuw te lezen.
     const key = `${state.matchId}|${state.updatedAt ?? ""}`;
     if (!matchCache || matchCache.key !== key || Date.now() - matchCache.at > MATCH_MAX_AGE_MS) {
       matchCache = { key, at: Date.now(), match: await options.getMatch(state.matchId) };
     }
-    return { state, match: matchCache.match };
+    return { state, match: matchCache.match, quick };
   };
 
   const readStream = (): DeckStream => {

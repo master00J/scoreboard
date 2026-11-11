@@ -46,6 +46,7 @@ import {
 } from "../lib/stadium-screen";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
 import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
+import { createQuickMediaButtonStore } from "./quick-media-buttons";
 import { startOfficialClock, type OfficialClockHandle } from "./official-clock";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
 import { getAppResourceMetrics, getMemoryBreakdownForBootLog } from "./resource-metrics";
@@ -2121,6 +2122,12 @@ function registerIpc() {
   ipcMain.handle("livestream:startRecord", () => livestream!.startRecord());
   ipcMain.handle("livestream:stopRecord", () => livestream!.stopRecord());
   ipcMain.handle("livestream:openBrowserInteract", (_e, url: string) => openBrowserSourceInteract(url));
+  const quickMediaButtons = createQuickMediaButtonStore(app.getPath("userData"), bootLog);
+  ipcMain.on("control:setQuickMediaButtons", (event, raw: unknown) => {
+    // Alleen de regie beheert deze lijst.
+    if (!controlWindow || event.sender !== controlWindow.webContents) return;
+    quickMediaButtons.set(raw);
+  });
   if (!streamDeck && livestream && runtime) {
     streamDeck = startStreamDeck({
       livestream,
@@ -2128,6 +2135,7 @@ function registerIpc() {
       getSnapshot: () => runtime!.getDisplaySnapshot(),
       getState: () => runtime!.getDeckState(),
       getMatch: (matchId) => runtime!.getMatchForDeck(matchId),
+      getQuickButtons: () => runtime!.getQuickButtonsForDeck(quickMediaButtons.get()),
       getLocale: () => runtime!.getUiLocale(),
       log: bootLog,
     });

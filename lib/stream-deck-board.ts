@@ -1,6 +1,7 @@
 /**
- * Scorebordknoppen voor Stream Deck: periode, rust, schermkeuze, shotclock, time-outs, fouten en
- * extra tijd. Staat naast de studio-knoppen in `stream-deck.ts`; die blijven zoals ze waren.
+ * Scorebordknoppen voor Stream Deck: periode, rust, schermkeuze, snelle mediaknoppen, shotclock,
+ * time-outs, fouten en extra tijd. Staat naast de studio-knoppen in `stream-deck.ts`; die blijven
+ * zoals ze waren.
  *
  * Elke knop is één localhost-pad. Wat de knop doet hangt af van de wedstrijd die loopt, dus de
  * vertaling naar commando's gebeurt hier, met de live toestand erbij, en is zo te testen.
@@ -11,12 +12,19 @@ import type { Command } from "./validation/commands";
 
 export type DeckSide = "home" | "away";
 
+/** Zoveel snelle mediaknoppen uit de regie kun je op de Stream Deck zetten. */
+export const DECK_QUICK_SLOTS = 8;
+
+/** Een snelle mediaknop uit de regie: welk media-item hij start en wat erop staat. */
+export type DeckQuickButton = { id: string; label: string };
+
 export type BoardDeckAction =
   | { id: "points"; side: DeckSide; points: 2 | 3 }
   | { id: "period"; step: "next" }
   | { id: "break" }
   | { id: "fulltime" }
   | { id: "display"; mode: "board" | "sponsors" }
+  | { id: "quick"; index: number }
   | { id: "shotclock"; mode: "toggle" }
   | { id: "shotclock"; mode: "reset"; seconds: number }
   | { id: "timeout"; side: DeckSide | "clear" }
@@ -27,6 +35,7 @@ export type BoardDeckAction =
 export type DeckState = Pick<
   SerializedDisplayState,
   | "mode"
+  | "activeMediaId"
   | "timerRunning"
   | "timerStartedAt"
   | "timerBaseSec"
@@ -67,10 +76,12 @@ export type DeckMatch = {
 export type DeckLive = {
   state: DeckState | null;
   match: DeckMatch | null;
+  /** De snelle mediaknoppen van de regie, in haar volgorde. Zonder lijst zijn er geen. */
+  quick?: DeckQuickButton[];
 };
 
 /** Waarom een knop nu niets kan doen. */
-export type DeckIssue = "noMatch" | "notForSport" | "noNextPeriod";
+export type DeckIssue = "noMatch" | "notForSport" | "noNextPeriod" | "noQuickButton";
 
 export type BoardDeckPlan = { ok: true; commands: Command[] } | { ok: false; issue: DeckIssue };
 
@@ -85,6 +96,8 @@ export function parseBoardDeckPath(pathname: string): BoardDeckAction | null {
   if (p === "/fulltime") return { id: "fulltime" };
   if (p === "/display/board") return { id: "display", mode: "board" };
   if (p === "/display/sponsors") return { id: "display", mode: "sponsors" };
+  const quick = /^\/quick\/([1-9])$/.exec(p);
+  if (quick && Number(quick[1]) <= DECK_QUICK_SLOTS) return { id: "quick", index: Number(quick[1]) };
   if (p === "/shotclock/toggle") return { id: "shotclock", mode: "toggle" };
   const reset = /^\/shotclock\/reset\/([1-9][0-9]?)$/.exec(p);
   if (reset) return { id: "shotclock", mode: "reset", seconds: Number(reset[1]) };
@@ -129,7 +142,18 @@ export const BOARD_DECK_PATHS = [
   "/foul/away/down",
   "/addedtime/up",
   "/addedtime/down",
+  ...Array.from({ length: DECK_QUICK_SLOTS }, (_, i) => `/quick/${i + 1}`),
 ] as const;
+
+/** De snelle mediaknop op plaats `index` (vanaf 1), of null als de regie er daar geen heeft. */
+export function deckQuickButton(live: DeckLive, index: number): DeckQuickButton | null {
+  return live.quick?.[index - 1] ?? null;
+}
+
+/** Staat het media-item van deze snelle knop nu als eenmalige clip op het scherm? */
+export function deckQuickPlaying(state: DeckState | null, button: DeckQuickButton): boolean {
+  return state?.mode === "SPONSOR" && state.activeMediaId === button.id;
+}
 
 function matchIsOver(match: DeckMatch): boolean {
   return match.status === "FULL_TIME" || match.status === "POST_MATCH";
@@ -160,6 +184,16 @@ export function boardDeckPlan(action: BoardDeckAction, live: DeckLive): BoardDec
           meta: { persistSponsorPreference: true, activeMediaId: null },
         },
       ],
+    };
+  }
+  if (action.id === "quick") {
+    // Zelfde commando als de snelle knop in de regie. Het scherm keert na de clip zelf terug naar
+    // wat er stond; nog eens drukken start de clip opnieuw.
+    const button = deckQuickButton(live, action.index);
+    if (!button) return { ok: false, issue: "noQuickButton" };
+    return {
+      ok: true,
+      commands: [{ type: "display:setMode", mode: "SPONSOR", meta: { activeMediaId: button.id } }],
     };
   }
   if (action.id === "timeout" && action.side === "clear" && !match) {

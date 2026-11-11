@@ -69,6 +69,7 @@ import { startupDisplayStatePatch } from "../lib/display-startup";
 import { isDisplayPlaybackRisk } from "../lib/media-playback-compat";
 import { inspectVideoForDisplay, prepareVideoForDisplay } from "./media-transcode";
 import { cueEndSec } from "../lib/scheduled-media-cue";
+import { quickMediaButtons } from "../lib/quick-media-button";
 import {
   gameSyncHasWork,
   planGameClockSync,
@@ -1126,6 +1127,19 @@ export async function getMatchForDeck(matchId: string) {
   if (!match) return null;
   const { homeTeam, awayTeam, ...rest } = match;
   return { ...rest, homeName: homeTeam?.shortName ?? "", awayName: awayTeam?.shortName ?? "" };
+}
+
+/**
+ * De snelle mediaknoppen voor de Stream Deck: de vastgepinde media uit de regie, in haar volgorde.
+ * Zelfde selectie als het regiepaneel: alleen media die aan staan en in de bibliotheek zichtbaar zijn.
+ */
+export async function getQuickButtonsForDeck(pinnedMediaIds: string[]) {
+  if (pinnedMediaIds.length === 0) return [];
+  const media = await prisma.mediaItem.findMany({
+    where: { id: { in: pinnedMediaIds }, active: true, hideFromLibrary: false },
+    select: { id: true, title: true, quickButtonLabel: true },
+  });
+  return quickMediaButtons(pinnedMediaIds, media);
 }
 
 export async function broadcastDisplayState() {

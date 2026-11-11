@@ -114,6 +114,8 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
   const [pickingLocalMedia, setPickingLocalMedia] = useState(false);
   const [quickImageDurationSec, setQuickImageDurationSec] = useState(10);
 
+  const [favoritesLoaded, setFavoritesLoaded] = useState(false);
+
   useEffect(() => {
     try {
       const parsed = JSON.parse(window.localStorage.getItem(QUICK_MEDIA_FAVORITES_KEY) ?? "[]");
@@ -123,7 +125,15 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
     } catch {
       setFavoriteMediaIds([]);
     }
+    setFavoritesLoaded(true);
   }, []);
+
+  // De Stream Deck toont dezelfde snelle knoppen, in dezelfde volgorde. Pas melden als de bewaarde
+  // lijst gelezen is: anders zou de lege beginlijst de knoppen even van de toetsen halen.
+  useEffect(() => {
+    if (!favoritesLoaded) return;
+    window.electronAPI?.setQuickMediaButtons?.(favoriteMediaIds);
+  }, [favoritesLoaded, favoriteMediaIds]);
 
   const filteredMediaList = useMemo(() => {
     const q = mediaSearch.trim().toLowerCase();
