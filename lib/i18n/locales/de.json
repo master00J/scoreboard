@@ -793,7 +793,8 @@
       "segmentHalftime": "Halbzeit",
       "segmentFirstHalf": "1. Hälfte",
       "segmentSecondHalf": "2. Hälfte",
-      "segmentExtraTime": "Verlängerung"
+      "segmentExtraTime": "Verlängerung",
+      "segmentPostmatch": "Nach dem Spiel"
     }
   },
   "setup": {

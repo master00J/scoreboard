@@ -793,7 +793,8 @@
       "segmentHalftime": "Intervallo",
       "segmentFirstHalf": "Primo tempo",
       "segmentSecondHalf": "Secondo tempo",
-      "segmentExtraTime": "Supplementari"
+      "segmentExtraTime": "Supplementari",
+      "segmentPostmatch": "Post-partita"
     }
   },
   "setup": {

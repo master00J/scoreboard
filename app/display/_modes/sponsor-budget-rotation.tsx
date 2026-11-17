@@ -39,6 +39,7 @@ import {
   useTimedSlideProgress,
 } from "../_components/preview-slide-progress";
 import { sponsorTelemetryActiveClipElapsedSec } from "@/lib/sponsor-telemetry";
+import { evaluateDroppedFrames, type FrameQualityReading } from "@/lib/dropped-frames-watchdog";
 
 type Plan = {
   sponsorId: string;
@@ -1734,6 +1735,7 @@ function MediaRenderer({
     if (item.type !== "VIDEO") return;
     if (syncPlaybackMs != null) return;
     if (!onVideoPlaybackFault) return;
+    let frameBaseline: FrameQualityReading | null = null;
     const id = window.setInterval(() => {
       if (endedRef.current || paused) return;
       if (Date.now() < resumeGraceUntilRef.current) return;
@@ -1764,19 +1766,24 @@ function MediaRenderer({
       if (sincePlay < 5500 || v.currentTime < 1.75) return;
       const q = typeof v.getVideoPlaybackQuality === "function" ? v.getVideoPlaybackQuality() : null;
       if (!q) return;
-      const rendered = q.totalVideoFrames;
-      const dropped = q.droppedVideoFrames;
-      const denom = rendered + dropped;
-      if (denom < 140 || dropped / denom < 0.9) return;
+      // totalVideoFrames bevat de gedropte frames al; meet per venster (verschil tussen metingen).
+      const check = evaluateDroppedFrames(frameBaseline, {
+        totalVideoFrames: q.totalVideoFrames,
+        droppedVideoFrames: q.droppedVideoFrames,
+      });
+      frameBaseline = check.baseline;
+      if (!check.fault) return;
+      const total = check.windowFrames;
+      const dropped = check.windowDropped;
       endedRef.current = true;
       logMediaDiag("watchdog_dropped_frames", v, {
         droppedFrames: dropped,
-        totalVideoFrames: rendered,
+        totalVideoFrames: total,
       });
       console.warn(
         "[sponsor] video extreem veel gedropte frames — clip overgeslagen:",
         item.title,
-        { rendered, dropped, currentTime: v.currentTime },
+        { total, dropped, currentTime: v.currentTime },
       );
       onVideoPlaybackFault("watchdog_dropped_frames");
     }, 900);

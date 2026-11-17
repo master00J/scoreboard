@@ -793,7 +793,8 @@
       "segmentHalftime": "Half-time",
       "segmentFirstHalf": "1st half",
       "segmentSecondHalf": "2nd half",
-      "segmentExtraTime": "Extra time"
+      "segmentExtraTime": "Extra time",
+      "segmentPostmatch": "Post-match"
     }
   },
   "setup": {

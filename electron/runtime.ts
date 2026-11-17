@@ -65,6 +65,13 @@ import { listExternalFileReferences, remapStoredFilePaths } from "../server/venu
 import { isCommandUserError } from "../lib/command-user-error";
 import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import { handleCommand } from "../server/handlers";
+import {
+  buildSponsorPlayWhere,
+  listSponsorPlays,
+  parseSponsorPlayFilters,
+  sponsorPlayListLimit,
+  summarizeSponsorPlays,
+} from "../server/sponsor-plays";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
 import { startupDisplayStatePatch } from "../lib/display-startup";
@@ -1604,64 +1611,11 @@ export function disposeDesktopRuntime() {
   tickMatchCache = null;
 }
 
-type SponsorPlayFilters = {
-  matchId?: string;
-  sponsorId?: string;
-  segmentKey?: string;
-  fromIso?: string;
-  toIso?: string;
-};
-
-function parseSponsorPlayFilters(params: URLSearchParams): SponsorPlayFilters {
-  return {
-    matchId: params.get("matchId") ?? undefined,
-    sponsorId: params.get("sponsorId") ?? undefined,
-    segmentKey: params.get("segmentKey") ?? undefined,
-    fromIso: params.get("from") ?? undefined,
-    toIso: params.get("to") ?? undefined,
-  };
-}
-
-function buildSponsorPlayWhere(f: SponsorPlayFilters) {
-  const where: Record<string, unknown> = {};
-  if (f.matchId) where.matchId = f.matchId;
-  if (f.sponsorId) where.sponsorId = f.sponsorId;
-  if (f.segmentKey) where.segmentKey = { startsWith: f.segmentKey };
-  if (f.fromIso || f.toIso) {
-    const range: Record<string, Date> = {};
-    if (f.fromIso) {
-      const d = new Date(f.fromIso);
-      if (!Number.isNaN(d.valueOf())) range.gte = d;
-    }
-    if (f.toIso) {
-      const d = new Date(f.toIso);
-      if (!Number.isNaN(d.valueOf())) range.lte = d;
-    }
-    if (Object.keys(range).length > 0) where.endedAt = range;
-  }
-  return where;
-}
-
 async function handleSponsorPlaysList(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const limit = Math.min(2000, Math.max(1, Number(params.get("limit") ?? 500)));
-  const rows = await prisma.sponsorPlayLog.findMany({
-    where: buildSponsorPlayWhere(filters),
-    orderBy: { endedAt: "desc" },
-    take: limit,
-    include: {
-      match: {
-        select: {
-          id: true,
-          kickoffAt: true,
-          homeTeam: { select: { name: true, shortName: true } },
-          awayTeam: { select: { name: true, shortName: true } },
-        },
-      },
-    },
-  });
+  const rows = await listSponsorPlays(prisma, filters, sponsorPlayListLimit(params));
   return json(200, { rows });
 }
 
@@ -1669,21 +1623,7 @@ async function handleSponsorPlaysSummary(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const grouped = await prisma.sponsorPlayLog.groupBy({
-    by: ["sponsorId", "sponsorName"],
-    where: buildSponsorPlayWhere(filters),
-    _count: { _all: true },
-    _sum: { actualSec: true, expectedSec: true },
-  });
-  const rows = grouped
-    .map((g) => ({
-      sponsorId: g.sponsorId,
-      sponsorName: g.sponsorName,
-      plays: g._count._all,
-      actualSec: g._sum.actualSec ?? 0,
-      expectedSec: g._sum.expectedSec ?? 0,
-    }))
-    .sort((a, b) => b.actualSec - a.actualSec);
+  const rows = await summarizeSponsorPlays(prisma, filters);
   return json(200, { rows });
 }
 

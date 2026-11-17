@@ -793,7 +793,8 @@
       "segmentHalftime": "Mi-temps",
       "segmentFirstHalf": "1re mi-temps",
       "segmentSecondHalf": "2e mi-temps",
-      "segmentExtraTime": "Prolongation"
+      "segmentExtraTime": "Prolongation",
+      "segmentPostmatch": "Après-match"
     }
   },
   "setup": {

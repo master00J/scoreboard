@@ -793,7 +793,8 @@
       "segmentHalftime": "Rust",
       "segmentFirstHalf": "1e helft",
       "segmentSecondHalf": "2e helft",
-      "segmentExtraTime": "Verlenging"
+      "segmentExtraTime": "Verlenging",
+      "segmentPostmatch": "Na wedstrijd"
     }
   },
   "setup": {

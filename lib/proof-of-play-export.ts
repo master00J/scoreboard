@@ -86,6 +86,7 @@ export type ProofOfPlayExportLabels = {
   segmentFirstHalf: string;
   segmentSecondHalf: string;
   segmentExtraTime: string;
+  segmentPostmatch: string;
 };
 
 export type ProofOfPlayPdfStyle = {
@@ -203,6 +204,7 @@ export function formatSegmentKey(key: string, labels: ProofOfPlayExportLabels): 
   if (key.includes(":FIRST_HALF")) return labels.segmentFirstHalf;
   if (key.includes(":SECOND_HALF")) return labels.segmentSecondHalf;
   if (key.includes(":EXTRA_TIME")) return labels.segmentExtraTime;
+  if (key.includes(":postmatch")) return labels.segmentPostmatch;
   return key;
 }
 
@@ -245,6 +247,7 @@ export function formatSegmentNl(key: string): string {
     segmentFirstHalf: "1e helft",
     segmentSecondHalf: "2e helft",
     segmentExtraTime: "Verlenging",
+    segmentPostmatch: "Na wedstrijd",
   });
 }
 
@@ -588,5 +591,6 @@ export function proofOfPlayLabelsFromT(t: (key: string) => string): ProofOfPlayE
     segmentFirstHalf: k("segmentFirstHalf"),
     segmentSecondHalf: k("segmentSecondHalf"),
     segmentExtraTime: k("segmentExtraTime"),
+    segmentPostmatch: k("segmentPostmatch"),
   };
 }
