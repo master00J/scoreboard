@@ -231,6 +231,8 @@ model Sponsor {
   sponsorPlaybackRepeatsJson String?
   /// JSON: sport → venster-id → seconden. Voetbal gebruikt dit nooit.
   sportBudgetsJson  String?
+  /// Vrije notitie uit het seizoensplan ("direct na sponsor X", "vanaf 20/09"); de operator ziet ze live.
+  notes             String?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
   playLogs          SponsorPlayLog[]

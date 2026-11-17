@@ -70,6 +70,11 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
               {clipLabel}
             </p>
           ) : null}
+          {model.phase === "sponsor" && model.sponsorNotes ? (
+            <p className="mt-1 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-xs text-foreground/90">
+              {model.sponsorNotes}
+            </p>
+          ) : null}
         </div>
         <span
           className={`text-xs font-mono shrink-0 ${
