@@ -133,6 +133,7 @@ export function clubMediaToRotationSponsor(media: MediaItem): Sponsor | null {
     imageDefaultSec: Math.max(1, media.durationSec || 15),
     createdAt: createdAtIso(media.createdAt),
     media: [clip],
+    notes: media.notes ?? null,
     rotationKind: "club",
   };
 }

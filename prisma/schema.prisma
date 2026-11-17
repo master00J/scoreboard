@@ -169,6 +169,8 @@ model MediaItem {
   quickLaunch Boolean @default(false)
   /// JSON: totale zendtijd in seconden per fase voor losse clubmedia. Null = niet in de rotatie.
   clubPhaseBudgetJson String?
+  /// Vrije notitie uit het seizoensplan (clubmedia); de operator ziet ze live.
+  notes       String?
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")

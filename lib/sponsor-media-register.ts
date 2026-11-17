@@ -58,3 +58,19 @@ export async function registerSponsorFile(
   };
 }
 
+
+/** Type en duur van een gekozen bestand, voor een clubmedia-rij die nog niet opgeslagen is. Null als de videoduur onleesbaar is. */
+export async function readMediaFileInfo(
+  filePath: string,
+  imageDefaultSec = 10,
+): Promise<{ path: string; type: "VIDEO" | "IMAGE"; durationSec: number } | null> {
+  if (!isVideoFile(filePath)) {
+    return { path: filePath, type: "IMAGE", durationSec: clampMediaDurationSec(imageDefaultSec) };
+  }
+  try {
+    const sec = await readVideoDuration(mediaUrl(filePath));
+    return { path: filePath, type: "VIDEO", durationSec: Math.round(sec) };
+  } catch {
+    return null;
+  }
+}

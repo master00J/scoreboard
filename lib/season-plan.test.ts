@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { Sponsor } from "./types";
+import type { MediaItem, Sponsor } from "./types";
+import { mergeSponsorsWithClubMedia } from "./club-media-rotation";
+import { activeSponsorsForSection, buildSponsorAppearancePlan } from "./sponsor-distribution";
 import {
   applyPlanImport,
   buildPlanImport,
+  clubMediaPatchFromPlanRow,
+  planCapacity,
+  planEffectiveSeconds,
+  planRowsFromDatabase,
+  sectionKindFromHeader,
   formatMinutes,
   guessColumnKinds,
   looksLikeHeader,
@@ -190,8 +197,8 @@ describe("applyPlanImport", () => {
 
   it("meldt namen die twee keer in de plak staan", () => {
     const { summary } = applyPlanImport(existing, [
-      { name: "Zeta", seconds: { halftime: 120 }, notes: null },
-      { name: "ZETA", seconds: { halftime: 180 }, notes: null },
+      { name: "Zeta", kind: "sponsor", seconds: { halftime: 120 }, notes: null },
+      { name: "ZETA", kind: "sponsor", seconds: { halftime: 180 }, notes: null },
     ]);
     expect(summary.duplicates).toEqual(["ZETA"]);
   });
@@ -269,5 +276,200 @@ describe("normalizeName", () => {
   it("negeert hoofdletters, accenten en leestekens", () => {
     expect(normalizeName("  Café  Épsilon! ")).toBe("cafe epsilon");
     expect(normalizeName("Main Partner – Alpha")).toBe(normalizeName("MAIN PARTNER - ALPHA"));
+  });
+});
+
+function media(partial: Partial<MediaItem> & { id: string }): MediaItem {
+  return {
+    type: "VIDEO",
+    path: `C:/media/${partial.id}.mp4`,
+    title: partial.id,
+    durationSec: 30,
+    active: true,
+    sponsorId: null,
+    sponsorName: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    ...partial,
+  } as MediaItem;
+}
+
+describe("sponsors en clubmedia uit de sheet", () => {
+  it("rijen onder een kop als communicatie of marcom worden clubmedia, onder partners sponsors", () => {
+    const sheet = [
+      ["Naam", "binnen de 90", "Info"],
+      ["PARTNERS", "", ""],
+      ["Alpha", "6", ""],
+      ["CLUB COMMUNICATIE LED", "", ""],
+      ["Free Your Seat", "2", ""],
+      ["EXTRA MARCOM", "", ""],
+      ["Opstelling", "1", "tonen als de omroeper ze afleest"],
+      ["MATCHSPONSOR", "", ""],
+      ["Beta (extra)", "4", ""],
+    ];
+    const rows = parseClipboardTable(sheet.map((r) => r.join("\t")).join("\n"));
+    const built = buildPlanImport(rows.slice(1), guessColumnKinds(rows[0], 3), { outsideSplit: [] });
+    expect(built.rows.map((r) => [r.name, r.kind])).toEqual([
+      ["Alpha", "sponsor"],
+      ["Free Your Seat", "club"],
+      ["Opstelling", "club"],
+      ["Beta (extra)", "sponsor"],
+    ]);
+    const { rows: table } = applyPlanImport([], built.rows);
+    expect(table.map((r) => r.kind)).toEqual(["sponsor", "club", "club", "sponsor"]);
+    expect(table.every((r) => r.file === null)).toBe(true);
+  });
+
+  it("herkent sectiekoppen", () => {
+    expect(sectionKindFromHeader("RAFC COMMUNICATIE LED")).toBe("club");
+    expect(sectionKindFromHeader("EXTRA MARCOM")).toBe("club");
+    expect(sectionKindFromHeader("PARTNERS")).toBe("sponsor");
+    expect(sectionKindFromHeader("Reds Forever")).toBeNull();
+  });
+});
+
+describe("clubmedia in het plan", () => {
+  const clubItem = media({
+    id: "pop",
+    title: "Pop-up",
+    clubPhaseBudgetJson: JSON.stringify({ prematch: 120, firstHalf: 0, halftime: 60, secondHalf: 0, postmatch: 0 }),
+    notes: "drie keer zoveel voor de match",
+  });
+  const loose = media({ id: "los", title: "Losse clip" });
+  const linked = media({ id: "s1", sponsorId: "a", clubPhaseBudgetJson: JSON.stringify({ prematch: 60 }) });
+
+  it("toont alleen losse media met zendtijd als clubmedia", () => {
+    const rows = planRowsFromDatabase([sponsor({ id: "a", name: "Alpha" })], [clubItem, loose, linked]);
+    expect(rows.map((r) => [r.key, r.kind])).toEqual([
+      ["a", "sponsor"],
+      ["club:pop", "club"],
+    ]);
+    const club = rows[1];
+    expect(club.seconds).toEqual({ prematch: 120, firstHalf: 0, halftime: 60, secondHalf: 0, postmatch: 0 });
+    expect(club.notes).toBe("drie keer zoveel voor de match");
+    expect(club.file).toEqual({ path: "C:/media/pop.mp4", type: "VIDEO", durationSec: 30 });
+  });
+
+  it("schrijft de zendtijd als budget op het media-item; alles op 0 haalt het uit de rotatie", () => {
+    const [club] = planRowsFromDatabase([], [clubItem]);
+    expect(JSON.parse(clubMediaPatchFromPlanRow(club).clubPhaseBudgetJson as string)).toEqual({
+      prematch: 120,
+      firstHalf: 0,
+      secondHalf: 0,
+      halftime: 60,
+      postmatch: 0,
+    });
+    const off = { ...club, seconds: { prematch: 0, firstHalf: 0, halftime: 0, secondHalf: 0, postmatch: 0 } };
+    expect(clubMediaPatchFromPlanRow(off).clubPhaseBudgetJson).toBeNull();
+  });
+
+  it("ziet een nieuw of ander bestand als wijziging", () => {
+    const [club] = planRowsFromDatabase([], [clubItem]);
+    expect(planRowChanged({ ...club }, club)).toBe(false);
+    expect(planRowChanged({ ...club, file: { path: "C:/ander.mp4", type: "VIDEO", durationSec: 30 } }, club)).toBe(true);
+  });
+});
+
+describe("echte schermtijd", () => {
+  const PHASES = [
+    ["prematch", "prematch", "PREMATCH"],
+    ["firstHalf", "match", "FIRST_HALF"],
+    ["halftime", "halftime", "HALF_TIME"],
+    ["secondHalf", "match", "SECOND_HALF"],
+    ["postmatch", "postmatch", "POST_MATCH"],
+  ] as const;
+
+  const sponsors = [
+    sponsor({
+      id: "a",
+      name: "Alpha",
+      matchFirstHalfSeconds: 60,
+      matchSecondHalfSeconds: 60,
+      matchSeconds: 120,
+      media: [media({ id: "a1", sponsorId: "a", durationSec: 45 })],
+    }),
+    sponsor({
+      id: "b",
+      name: "Beta",
+      halftimeSeconds: 90,
+      prematchSeconds: 60,
+      media: [
+        media({ id: "b1", sponsorId: "b", durationSec: 20 }),
+        media({ id: "b2", sponsorId: "b", durationSec: 20, sponsorPhaseTagsJson: JSON.stringify(["halftime"]) }),
+      ],
+    }),
+    sponsor({ id: "c", name: "Zonder bestand", halftimeSeconds: 120 }),
+    sponsor({
+      id: "d",
+      name: "Uit",
+      active: false,
+      halftimeSeconds: 120,
+      media: [media({ id: "d1", sponsorId: "d" })],
+    }),
+  ];
+  const library = [
+    media({
+      id: "club1",
+      title: "Free Your Seat",
+      durationSec: 25,
+      clubPhaseBudgetJson: JSON.stringify({ firstHalf: 60, halftime: 30 }),
+    }),
+  ];
+  const ctx = {
+    sponsorsById: new Map(sponsors.map((s) => [s.id, s])),
+    mediaById: new Map(library.map((m) => [m.id, m])),
+  };
+
+  it("rondt af op hele clips, telt rijen zonder bestand of inactief niet mee, en volgt fase-tags", () => {
+    const rows = planRowsFromDatabase(sponsors, library);
+    const eff = planEffectiveSeconds(rows, ctx);
+    expect(eff.byRow.get("a")!.firstHalf).toBe(90);
+    expect(eff.byRow.get("b")!.halftime).toBe(100);
+    expect(eff.byRow.get("b")!.prematch).toBe(60);
+    expect(eff.byRow.get("c")!.halftime).toBe(0);
+    expect(eff.byRow.get("d")!.halftime).toBe(0);
+    expect(eff.byRow.get("club:club1")!.firstHalf).toBe(75);
+    expect(eff.byRow.get("club:club1")!.halftime).toBe(50);
+    expect(eff.totals.halftime).toBe(150);
+    expect(eff.totals.firstHalf).toBe(165);
+  });
+
+  it("rekent precies wat de rotatie van het scherm rekent voor dezelfde sponsors en clubmedia", () => {
+    const rows = planRowsFromDatabase(sponsors, library);
+    const eff = planEffectiveSeconds(rows, ctx);
+    const merged = mergeSponsorsWithClubMedia(sponsors, library);
+    for (const [phase, section, status] of PHASES) {
+      const engine = buildSponsorAppearancePlan(activeSponsorsForSection(merged, section, status), section, status);
+      const engineTotal = engine.reduce((sum, p) => sum + p.appearanceSecs.reduce((a, b) => a + b, 0), 0);
+      expect(eff.totals[phase]).toBe(engineTotal);
+    }
+  });
+
+  it("gebruikt de minuten uit de tabel, ook voor een nieuwe clubrij met een gekozen bestand", () => {
+    const rows = planRowsFromDatabase(sponsors, library);
+    rows[0] = { ...rows[0], seconds: { ...rows[0].seconds, firstHalf: 150 } };
+    rows.push({
+      key: "new-1",
+      kind: "club",
+      id: null,
+      name: "Pop-up",
+      active: true,
+      seconds: { prematch: 0, firstHalf: 0, halftime: 40, secondHalf: 0, postmatch: 0 },
+      notes: "",
+      mediaCount: 1,
+      file: { path: "C:/pop.jpg", type: "IMAGE", durationSec: 10 },
+    });
+    const eff = planEffectiveSeconds(rows, ctx);
+    expect(eff.byRow.get("a")!.firstHalf).toBe(180);
+    expect(eff.byRow.get("new-1")!.halftime).toBe(40);
+  });
+
+  it("de capaciteit volgt de wedstrijd; voor de match alleen met een vast venster", () => {
+    expect(planCapacity(null)).toEqual({ firstHalf: 2700, secondHalf: 2700, halftime: 900 });
+    expect(planCapacity({ halfDurationSec: 2400, halfBreakSec: 600, prematchSpreadWindowSec: 1800 })).toEqual({
+      firstHalf: 2400,
+      secondHalf: 2400,
+      halftime: 600,
+      prematch: 1800,
+    });
   });
 });

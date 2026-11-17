@@ -187,6 +187,8 @@ export type MediaItem = {
    * Null/leeg = niet in de sponsorrotatie. Alleen gebruikt zonder sponsorId.
    */
   clubPhaseBudgetJson?: string | null;
+  /** Vrije notitie uit het seizoensplan voor clubmedia; de operator ziet ze live. */
+  notes?: string | null;
   createdAt: string;
 };
 

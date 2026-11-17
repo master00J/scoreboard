@@ -1,9 +1,21 @@
 /**
- * Seizoensplan: alle sponsors in één tabel met minuten per fase, zoals clubs het in Excel bijhouden.
- * Pure logica (geen React, geen database), zodat plakken uit Excel en het koppelen van bestanden getest kunnen worden.
+ * Seizoensplan: alle sponsors en clubmedia in één tabel met minuten per fase, zoals clubs het in Excel bijhouden.
+ * Pure logica (geen React, geen database), zodat plakken uit Excel, het koppelen van bestanden en de
+ * berekening van de echte schermtijd getest kunnen worden.
+ *
+ * Sponsors en clubmedia delen op het scherm dezelfde rotatie (`mergeSponsorsWithClubMedia`): per fase
+ * krijgen ze samen hoogstens de lengte van die fase, de rest is scorebord. Een clip wordt nooit afgekapt,
+ * dus de echte tijd is het budget naar boven afgerond op hele clips (`buildSponsorAppearancePlan`).
  */
 
-import type { Sponsor } from "./types";
+import type { Match, MediaItem, Sponsor, SponsorSection } from "./types";
+import {
+  clubMediaToRotationSponsor,
+  clubPhaseBudgetTotalSeconds,
+  parseClubPhaseBudgetJson,
+  serializeClubPhaseBudgetJson,
+} from "./club-media-rotation";
+import { activeSponsorsForSection, buildSponsorAppearancePlan } from "./sponsor-distribution";
 
 /** De vijf fases van de voetbalrotatie, in de volgorde van een wedstrijd. */
 export const PLAN_PHASES = ["prematch", "firstHalf", "halftime", "secondHalf", "postmatch"] as const;
@@ -13,18 +25,31 @@ export type PlanPhase = (typeof PLAN_PHASES)[number];
 export const OUTSIDE_PHASES = ["prematch", "halftime", "postmatch"] as const;
 export type OutsidePhase = (typeof OUTSIDE_PHASES)[number];
 
+/** Sponsor (eigen rij met bestanden) of clubmedia (één bestand van de club, zonder sponsor). */
+export type PlanRowKind = "sponsor" | "club";
+
+/** Het ene bestand van een clubmedia-rij: al in de database, of net gekozen en nog niet opgeslagen. */
+export type PlanFile = { path: string; type: "VIDEO" | "IMAGE"; durationSec: number };
+
 /** Eén rij van het plan zoals de tabel hem toont en bewerkt. Tijden in seconden. */
 export type PlanRow = {
-  /** Vaste sleutel voor React; bestaande sponsors gebruiken hun id. */
+  /** Vaste sleutel: sponsor-id, `club:<media-id>`, of `new-…` voor een rij die nog niet bestaat. */
   key: string;
-  /** Leeg voor een sponsor die nog aangemaakt moet worden. */
+  kind: PlanRowKind;
+  /** Sponsor-id of media-id; leeg voor een rij die nog aangemaakt moet worden. */
   id: string | null;
   name: string;
   active: boolean;
   seconds: Record<PlanPhase, number>;
   notes: string;
   mediaCount: number;
+  /** Alleen clubmedia: het bestand. Een nieuwe clubrij zonder bestand kan nog niet opgeslagen worden. */
+  file: PlanFile | null;
 };
+
+export function planRowKey(kind: PlanRowKind, id: string): string {
+  return kind === "club" ? `club:${id}` : id;
+}
 
 export function emptySeconds(): Record<PlanPhase, number> {
   return { prematch: 0, firstHalf: 0, halftime: 0, secondHalf: 0, postmatch: 0 };
@@ -36,7 +61,8 @@ export function planRowFromSponsor(s: Sponsor): PlanRow {
   const m2 = s.matchSecondHalfSeconds ?? 0;
   const split = m1 > 0 || m2 > 0;
   return {
-    key: s.id,
+    key: planRowKey("sponsor", s.id),
+    kind: "sponsor",
     id: s.id,
     name: s.name,
     active: s.active,
@@ -49,6 +75,59 @@ export function planRowFromSponsor(s: Sponsor): PlanRow {
     },
     notes: s.notes ?? "",
     mediaCount: (s.media ?? []).filter((m) => m.active !== false).length,
+    file: null,
+  };
+}
+
+/** Losse clubmedia met zendtijd: zo draait ze mee in de rotatie en hoort ze in het plan. */
+export function isPlanClubMedia(m: MediaItem): boolean {
+  return (
+    !m.sponsorId &&
+    !m.hideFromLibrary &&
+    clubPhaseBudgetTotalSeconds(parseClubPhaseBudgetJson(m.clubPhaseBudgetJson)) > 0
+  );
+}
+
+export function planRowFromClubMedia(m: MediaItem): PlanRow {
+  const b = parseClubPhaseBudgetJson(m.clubPhaseBudgetJson);
+  return {
+    key: planRowKey("club", m.id),
+    kind: "club",
+    id: m.id,
+    name: m.title,
+    active: m.active,
+    seconds: {
+      prematch: b.prematch,
+      firstHalf: b.firstHalf,
+      halftime: b.halftime,
+      secondHalf: b.secondHalf,
+      postmatch: b.postmatch,
+    },
+    notes: m.notes ?? "",
+    mediaCount: 1,
+    file: { path: m.path, type: m.type === "VIDEO" ? "VIDEO" : "IMAGE", durationSec: m.durationSec },
+  };
+}
+
+/** Alle rijen uit de database: eerst de sponsors, dan de clubmedia, elk in hun eigen volgorde. */
+export function planRowsFromDatabase(sponsors: Sponsor[], media: MediaItem[]): PlanRow[] {
+  return [...sponsors.map(planRowFromSponsor), ...media.filter(isPlanClubMedia).map(planRowFromClubMedia)];
+}
+
+/** De velden die een clubmedia-rij op het media-item schrijft. Alles op 0 haalt ze uit de rotatie. */
+export function clubMediaPatchFromPlanRow(row: PlanRow): Record<string, unknown> {
+  const s = row.seconds;
+  return {
+    title: row.name.trim(),
+    active: row.active,
+    clubPhaseBudgetJson: serializeClubPhaseBudgetJson({
+      prematch: s.prematch,
+      firstHalf: s.firstHalf,
+      halftime: s.halftime,
+      secondHalf: s.secondHalf,
+      postmatch: s.postmatch,
+    }),
+    notes: row.notes.trim() || null,
   };
 }
 
@@ -71,6 +150,8 @@ export function sponsorPatchFromPlanRow(row: PlanRow): Record<string, unknown> {
 /** Is er iets aan deze rij veranderd tegenover wat in de database staat? */
 export function planRowChanged(row: PlanRow, original: PlanRow | undefined): boolean {
   if (!original) return true;
+  if (row.kind !== original.kind) return true;
+  if ((row.file?.path ?? null) !== (original.file?.path ?? null)) return true;
   if (row.name.trim() !== original.name.trim()) return true;
   if (row.active !== original.active) return true;
   if (row.notes.trim() !== original.notes.trim()) return true;
@@ -227,6 +308,8 @@ export function headerSignature(header: string[]): string {
 /** Een geplakte rij, klaar om in de tabel te zetten. Alleen gedekte fases hebben een waarde. */
 export type PlanImportRow = {
   name: string;
+  /** Uit de sectiekop erboven ("RAFC COMMUNICATIE" → clubmedia, "PARTNERS" → sponsor). */
+  kind: PlanRowKind;
   seconds: Partial<Record<PlanPhase, number>>;
   notes: string | null;
 };
@@ -259,7 +342,18 @@ function splitEvenly(total: number, parts: number): number[] {
   return Array.from({ length: parts }, (_, i) => base + (i < rest ? 1 : 0));
 }
 
-/** Zet geplakte rijen om naar planrijen. Kopregels, totalen en rijen zonder tijden worden overgeslagen. */
+/** Sectiekop in een sheet: een rij zonder minuten die zegt wat eronder staat. */
+export function sectionKindFromHeader(name: string): PlanRowKind | null {
+  const n = normalizeName(name);
+  if (/\b(communicatie|communication|marcom|marketing|club|clubmedia|eigen|intern|internal)\b/.test(n)) return "club";
+  if (/\b(partner|partners|sponsor|sponsors|sponsoring|matchsponsor)\b/.test(n)) return "sponsor";
+  return null;
+}
+
+/**
+ * Zet geplakte rijen om naar planrijen. Kopregels, totalen en rijen zonder tijden worden overgeslagen.
+ * Een sectiekop zonder minuten bepaalt of de rijen eronder sponsors of clubmedia zijn.
+ */
 export function buildPlanImport(
   rows: string[][],
   kinds: PlanColumnKind[],
@@ -272,6 +366,7 @@ export function buildPlanImport(
   const skipped: PlanImportSkip[] = [];
   if (nameCol < 0) return { rows: out, skipped };
 
+  let sectionKind: PlanRowKind = "sponsor";
   for (const row of rows) {
     const name = (row[nameCol] ?? "").trim();
     if (!name) continue;
@@ -302,11 +397,12 @@ export function buildPlanImport(
       }
     });
     if (!anyTime) {
+      sectionKind = sectionKindFromHeader(name) ?? sectionKind;
       skipped.push({ name, reason: "no_times" });
       continue;
     }
     const notes = notesCol >= 0 ? (row[notesCol] ?? "").trim() : "";
-    out.push({ name, seconds, notes: notes || null });
+    out.push({ name, kind: sectionKind, seconds, notes: notes || null });
   }
   return { rows: out, skipped };
 }
@@ -343,12 +439,14 @@ export function applyPlanImport(
       newRowCounter += 1;
       rows.push({
         key: `new-${Date.now()}-${newRowCounter}`,
+        kind: imp.kind,
         id: null,
         name: imp.name,
         active: true,
         seconds: { ...emptySeconds(), ...imp.seconds },
         notes: imp.notes ?? "",
         mediaCount: 0,
+        file: null,
       });
       byName.set(key, rows.length - 1);
       summary.created.push(imp.name);
@@ -469,4 +567,108 @@ export function suggestSponsorForFile(
     }
   }
   return best && !tie ? best.id : null;
+}
+
+/** Hoe de motor een fase van het plan aanspreekt. */
+const PHASE_ENGINE: Record<PlanPhase, { section: SponsorSection; status: string }> = {
+  prematch: { section: "prematch", status: "PREMATCH" },
+  firstHalf: { section: "match", status: "FIRST_HALF" },
+  halftime: { section: "halftime", status: "HALF_TIME" },
+  secondHalf: { section: "match", status: "SECOND_HALF" },
+  postmatch: { section: "postmatch", status: "POST_MATCH" },
+};
+
+/**
+ * Een planrij als deelnemer aan de rotatie, precies zoals het scherm hem zou krijgen:
+ * een sponsor met zijn bestanden, volgorde en herhalingen, of clubmedia via `clubMediaToRotationSponsor`.
+ */
+export function rotationParticipantFromRow(
+  row: PlanRow,
+  ctx: { sponsorsById: Map<string, Sponsor>; mediaById: Map<string, MediaItem> },
+): Sponsor | null {
+  const s = row.seconds;
+  if (row.kind === "sponsor") {
+    const base = row.id ? ctx.sponsorsById.get(row.id) : undefined;
+    return {
+      ...(base ?? {
+        id: row.key,
+        imageDefaultSec: 10,
+        createdAt: new Date(0).toISOString(),
+        media: [],
+      }),
+      id: row.key,
+      name: row.name,
+      active: row.active,
+      prematchSeconds: s.prematch,
+      matchFirstHalfSeconds: s.firstHalf,
+      matchSecondHalfSeconds: s.secondHalf,
+      matchSeconds: s.firstHalf + s.secondHalf,
+      halftimeSeconds: s.halftime,
+      postmatchSeconds: s.postmatch,
+    } as Sponsor;
+  }
+  if (!row.file) return null;
+  const base = row.id ? ctx.mediaById.get(row.id) : undefined;
+  const media: MediaItem = {
+    ...(base ?? ({ id: row.key, createdAt: new Date(0).toISOString() } as MediaItem)),
+    type: row.file.type,
+    path: row.file.path,
+    title: row.name,
+    durationSec: row.file.durationSec,
+    active: row.active,
+    sponsorId: null,
+    hideFromLibrary: false,
+    clubPhaseBudgetJson: clubMediaPatchFromPlanRow(row).clubPhaseBudgetJson as string | null,
+  };
+  const participant = clubMediaToRotationSponsor(media);
+  return participant ? { ...participant, id: row.key } : null;
+}
+
+export type PlanEffective = {
+  /** Per rij (sleutel) de tijd die de rotatie echt toont: hele clips, en 0 zonder bestand voor die fase. */
+  byRow: Map<string, Record<PlanPhase, number>>;
+  /** Som over alle rijen: wat sponsors en clubmedia samen van de fase vragen. */
+  totals: Record<PlanPhase, number>;
+};
+
+/**
+ * De schermtijd die elke rij echt krijgt als de fase lang genoeg is. Rekent met dezelfde functies als het
+ * scherm: alleen actieve deelnemers met een bestand voor die fase, en een gestarte clip speelt helemaal uit.
+ */
+export function planEffectiveSeconds(
+  rows: PlanRow[],
+  ctx: { sponsorsById: Map<string, Sponsor>; mediaById: Map<string, MediaItem> },
+): PlanEffective {
+  const participants = rows
+    .map((row) => rotationParticipantFromRow(row, ctx))
+    .filter((p): p is Sponsor => p != null);
+  const byRow = new Map<string, Record<PlanPhase, number>>(rows.map((r) => [r.key, emptySeconds()]));
+  const totals = emptySeconds();
+  for (const phase of PLAN_PHASES) {
+    const { section, status } = PHASE_ENGINE[phase];
+    const active = activeSponsorsForSection(participants, section, status);
+    for (const plan of buildSponsorAppearancePlan(active, section, status)) {
+      const sec = plan.appearanceSecs.reduce((sum, x) => sum + x, 0);
+      const row = byRow.get(plan.id);
+      if (row) row[phase] = sec;
+      totals[phase] += sec;
+    }
+  }
+  return { byRow, totals };
+}
+
+/**
+ * Hoeveel tijd een fase heeft voor sponsors en clubmedia samen. De helften en de rust hebben een vaste lengte;
+ * voor de match alleen als de wedstrijd een venster heeft, anders duurt dat rooster zo lang als nodig.
+ * Na de match is er geen eindpunt.
+ */
+export function planCapacity(
+  match: Pick<Match, "halfDurationSec" | "halfBreakSec" | "prematchSpreadWindowSec"> | null,
+): Partial<Record<PlanPhase, number>> {
+  const half = match?.halfDurationSec && match.halfDurationSec > 0 ? match.halfDurationSec : 45 * 60;
+  const pause = match?.halfBreakSec && match.halfBreakSec > 0 ? match.halfBreakSec : 15 * 60;
+  const out: Partial<Record<PlanPhase, number>> = { firstHalf: half, secondHalf: half, halftime: pause };
+  const pre = match?.prematchSpreadWindowSec;
+  if (pre != null && pre > 0) out.prematch = pre;
+  return out;
 }

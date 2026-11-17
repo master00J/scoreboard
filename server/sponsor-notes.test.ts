@@ -80,4 +80,29 @@ describe("sponsornotitie", () => {
     expect(oud.halftimeSeconds).toBe(60);
     expect(oud.notes).toBeNull();
   });
+
+  it("clubmedia uit het seizoensplan draait mee in de rotatie, met haar notitie voor de HUD", async () => {
+    const created = await api("POST", "/api/media", {
+      type: "IMAGE",
+      path: "C:/club/free-your-seat.png",
+      title: "Free Your Seat",
+      durationSec: 15,
+      clubPhaseBudgetJson: JSON.stringify({ prematch: 0, firstHalf: 0, halftime: 120, secondHalf: 0, postmatch: 0 }),
+      notes: "na de opstelling",
+    });
+    expect(created.status).toBe(200);
+
+    const rotation = await api("GET", "/api/sponsors?rotation=1");
+    const club = rotation.body.find((s: { id: string }) => s.id === `club:${created.body.id}`);
+    expect(club.rotationKind).toBe("club");
+    expect(club.halftimeSeconds).toBe(120);
+    expect(club.notes).toBe("na de opstelling");
+
+    const plain = await api("GET", "/api/sponsors");
+    expect(plain.body.some((s: { id: string }) => s.id === `club:${created.body.id}`)).toBe(false);
+
+    await api("PATCH", `/api/media/${created.body.id}`, { clubPhaseBudgetJson: null });
+    const after = await api("GET", "/api/sponsors?rotation=1");
+    expect(after.body.some((s: { id: string }) => s.id === `club:${created.body.id}`)).toBe(false);
+  });
 });
