@@ -398,3 +398,20 @@ model SponsorPlayLog {
   @@index([sponsorId])
   @@index([endedAt])
 }
+
+/// Commando's die via de cloud-relay (telefoon over internet) binnenkwamen en hier al uitgevoerd zijn.
+/// Een commando waarvan de bevestiging naar de cloud mislukte, komt bij de volgende poll terug; met
+/// deze rij wordt het dan niet nog eens uitgevoerd (geen tweede goal), alleen opnieuw bevestigd.
+/// De rij wordt in dezelfde transactie geschreven als de wijziging die het commando maakt.
+model AppliedCloudCommand {
+  /// Id van het commando in de cloud-wachtrij.
+  id        String    @id
+  /// Uitkomst die naar de cloud bevestigd wordt, ook bij een herhaalde levering.
+  ok        Boolean
+  error     String?
+  appliedAt DateTime  @default(now())
+  /// Wanneer de cloud de bevestiging aanvaardde; daarna levert ze dit commando niet meer.
+  ackedAt   DateTime?
+
+  @@index([appliedAt])
+}

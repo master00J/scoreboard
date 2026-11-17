@@ -65,6 +65,12 @@ import { listExternalFileReferences, remapStoredFilePaths } from "../server/venu
 import { isCommandUserError } from "../lib/command-user-error";
 import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import { handleCommand } from "../server/handlers";
+import type { Prisma } from "@prisma/client";
+import {
+  markCloudCommandAcked as markLedgerAcked,
+  pruneAppliedCloudCommands,
+  runCloudCommandOnce,
+} from "../server/cloud-command-ledger";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
 import { startupDisplayStatePatch } from "../lib/display-startup";
@@ -3172,14 +3178,62 @@ function commandLeftStateUnchanged(result: CommandAck): boolean {
 }
 
 export async function runCommand(input: Command): Promise<CommandAck> {
+  return executeCommand(input, null);
+}
+
+/**
+ * Commando uit de cloud-relay (telefoon over internet). Wordt per cloud-id hoogstens één keer
+ * uitgevoerd: een herhaalde levering, omdat de bevestiging naar de cloud mislukte, wijzigt niets en
+ * geeft de oorspronkelijke uitkomst terug (`server/cloud-command-ledger.ts`).
+ */
+export async function runCloudCommand(
+  cloudCommandId: string,
+  input: unknown,
+): Promise<{ ack: CommandAck; duplicate: boolean }> {
+  let duplicate = false;
+  const ack = await executeCommand(input as Command, cloudCommandId, () => {
+    duplicate = true;
+  });
+  return { ack, duplicate };
+}
+
+export async function markCloudCommandAcked(cloudCommandId: string): Promise<void> {
+  await markLedgerAcked(prisma, cloudCommandId);
+}
+
+export async function pruneCloudCommandLedger(): Promise<number> {
+  return pruneAppliedCloudCommands(prisma);
+}
+
+async function executeCommand(
+  input: Command,
+  cloudCommandId: string | null,
+  onDuplicate?: () => void,
+): Promise<CommandAck> {
   const run = async (): Promise<CommandAck> => {
     try {
-      const cmd = CommandSchema.parse(input);
-      const result = await prisma.$transaction((tx) => handleCommand(cmd, tx), {
-        maxWait: 10_000,
-        timeout: 20_000,
-      });
-      if (result.ok && commandResetsSponsorTelemetry(cmd) && !commandLeftStateUnchanged(result)) {
+      const parsed = CommandSchema.safeParse(input);
+      const execute = (tx: Prisma.TransactionClient) => {
+        if (!parsed.success) throw parsed.error;
+        return handleCommand(parsed.data, tx);
+      };
+      let result: CommandAck;
+      if (cloudCommandId !== null) {
+        const outcome = await runCloudCommandOnce(prisma, cloudCommandId, execute);
+        if (outcome.duplicate) {
+          requireOpts().log(`[cloud-control] commando ${cloudCommandId} was al uitgevoerd; niet opnieuw`);
+          onDuplicate?.();
+          return outcome.ack;
+        }
+        result = outcome.ack;
+      } else {
+        result = await prisma.$transaction(execute, {
+          maxWait: 10_000,
+          timeout: 20_000,
+        });
+      }
+      const cmd = parsed.success ? parsed.data : null;
+      if (cmd && result.ok && commandResetsSponsorTelemetry(cmd) && !commandLeftStateUnchanged(result)) {
         resetSponsorLedger();
       }
       await broadcastDisplayState();
