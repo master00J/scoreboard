@@ -2086,10 +2086,10 @@
     "pasteButton": "Plakken uit Excel…",
     "linkFilesButton": "Bestanden koppelen…",
     "addRow": "Sponsor toevoegen",
-    "unsaved": "Niet opgeslagen wijzigingen: {{count}} rijen.",
+    "unsaved": "Wijzigingen nog niet opgeslagen ({{count}})",
     "discard": "Wijzigingen wissen",
     "save": "Opslaan ({{count}})",
-    "saved": "Seizoensplan opgeslagen ({{count}} rijen)",
+    "saved": "Seizoensplan opgeslagen ({{count}})",
     "saveFailed": "Opslaan mislukt bij {{name}}. De rest staat nog in de tabel.",
     "nameRequired": "Elke sponsor heeft een naam nodig.",
     "nameDuplicate": "Er zijn twee sponsors met de naam {{name}}.",
@@ -2160,6 +2160,18 @@
     "previewKindHint": "Rijen onder een kop als \"communicatie\" of \"marcom\" worden clubmedia. In de tabel kun je dat per nieuwe rij omdraaien.",
     "filesGroupClub": "Clubmedia zonder bestand",
     "clubFilesAssigned": "{{count}} clubmedia hebben een bestand. Sla de tabel op.",
-    "filesClubConflict": "Een clubmedia-rij kan maar één bestand hebben."
+    "filesClubConflict": "Een clubmedia-rij kan maar één bestand hebben.",
+    "phaseShort_prematch": "Voor",
+    "phaseShort_firstHalf": "1e",
+    "phaseShort_halftime": "Rust",
+    "phaseShort_secondHalf": "2e",
+    "phaseShort_postmatch": "Na",
+    "showFiles": "Bestanden en hun fases tonen",
+    "clipPhasesHint": "Per bestand: in welke fases mag het spelen? Klik een fase aan of uit. Grijs = deze sponsor heeft daar geen minuten.",
+    "clipNeedsPhase": "Een bestand moet in minstens één fase spelen. Zet het anders uit onder Sponsors.",
+    "clipPhaseNoMinutes": "Deze sponsor heeft geen minuten in deze fase.",
+    "clipAllPhases": "alle fases",
+    "clipInactive": "uit",
+    "clipImage": "beeld {{sec}}s"
   }
 }

@@ -16,6 +16,11 @@ import {
   serializeClubPhaseBudgetJson,
 } from "./club-media-rotation";
 import { activeSponsorsForSection, buildSponsorAppearancePlan } from "./sponsor-distribution";
+import {
+  parseSponsorMediaPhaseTags,
+  serializeSponsorMediaPhaseTags,
+  type SponsorMediaPhase,
+} from "./sponsor-media-phases";
 
 /** De vijf fases van de voetbalrotatie, in de volgorde van een wedstrijd. */
 export const PLAN_PHASES = ["prematch", "firstHalf", "halftime", "secondHalf", "postmatch"] as const;
@@ -31,6 +36,21 @@ export type PlanRowKind = "sponsor" | "club";
 /** Het ene bestand van een clubmedia-rij: al in de database, of net gekozen en nog niet opgeslagen. */
 export type PlanFile = { path: string; type: "VIDEO" | "IMAGE"; durationSec: number };
 
+/**
+ * Eén bestand van een sponsor, met de fases waarin het mag spelen. `phases: null` = in alle fases,
+ * zoals een bestand zonder fase-tags. De rotatie slaat een bestand over in een fase die niet in de lijst staat.
+ */
+export type PlanClip = {
+  id: string;
+  title: string;
+  type: "VIDEO" | "IMAGE";
+  durationSec: number;
+  active: boolean;
+  phases: PlanPhase[] | null;
+  /** De fase-tags zoals ze in de database staan; nodig om "Verlenging" te bewaren. */
+  originalTagsJson: string | null;
+};
+
 /** Eén rij van het plan zoals de tabel hem toont en bewerkt. Tijden in seconden. */
 export type PlanRow = {
   /** Vaste sleutel: sponsor-id, `club:<media-id>`, of `new-…` voor een rij die nog niet bestaat. */
@@ -45,7 +65,74 @@ export type PlanRow = {
   mediaCount: number;
   /** Alleen clubmedia: het bestand. Een nieuwe clubrij zonder bestand kan nog niet opgeslagen worden. */
   file: PlanFile | null;
+  /** Alleen sponsors: hun bestanden met de fases waarin ze spelen. Clubmedia volgen hun minuten per fase. */
+  clips: PlanClip[];
 };
+
+/** Fase-tags uit de database als planfases. Geen tags (of alle vijf) = null: speelt overal. */
+export function planPhasesFromTags(raw: string | null | undefined): PlanPhase[] | null {
+  const tags = parseSponsorMediaPhaseTags(raw);
+  if (tags.length === 0) return null;
+  const phases = PLAN_PHASES.filter((p) =>
+    p === "secondHalf" ? tags.includes("secondHalf") : tags.includes(p as SponsorMediaPhase),
+  );
+  return phases.length === PLAN_PHASES.length ? null : phases;
+}
+
+/**
+ * Planfases terug naar fase-tags. "Verlenging" volgt de 2e helft, tenzij de tags in de database
+ * verlenging los van de 2e helft hadden; dan blijft dat zoals het was.
+ */
+export function tagsJsonFromPlanPhases(phases: PlanPhase[] | null, originalTagsJson: string | null): string | null {
+  if (phases == null || phases.length === PLAN_PHASES.length) return null;
+  const original = parseSponsorMediaPhaseTags(originalTagsJson);
+  const extraOnItsOwn = original.includes("extraTime") && !original.includes("secondHalf");
+  const tags: SponsorMediaPhase[] = [...phases];
+  if (phases.includes("secondHalf") || extraOnItsOwn) tags.push("extraTime");
+  /** Geen enkele fase: de motor leest een lege lijst als "overal". De tabel laat dat niet toe; hier blijft het oude staan. */
+  if (phases.length === 0) return originalTagsJson;
+  return serializeSponsorMediaPhaseTags(tags);
+}
+
+function sameClipPhases(a: PlanPhase[] | null, b: PlanPhase[] | null): boolean {
+  if (a == null || b == null) return a == null && b == null;
+  return a.length === b.length && a.every((p) => b.includes(p));
+}
+
+function clipFromMedia(m: MediaItem): PlanClip {
+  return {
+    id: m.id,
+    title: m.title,
+    type: m.type === "VIDEO" ? "VIDEO" : "IMAGE",
+    durationSec: m.durationSec,
+    active: m.active,
+    phases: planPhasesFromTags(m.sponsorPhaseTagsJson),
+    originalTagsJson: m.sponsorPhaseTagsJson ?? null,
+  };
+}
+
+/** Bestanden van een sponsorrij waarvan de fases veranderd zijn (voor PATCH /api/media/:id). */
+export function changedClipTags(row: PlanRow, original: PlanRow | undefined): { id: string; sponsorPhaseTagsJson: string | null }[] {
+  const before = new Map((original?.clips ?? []).map((c) => [c.id, c]));
+  return row.clips
+    .filter((c) => {
+      const o = before.get(c.id);
+      return o != null && !sameClipPhases(c.phases, o.phases);
+    })
+    .map((c) => ({ id: c.id, sponsorPhaseTagsJson: tagsJsonFromPlanPhases(c.phases, c.originalTagsJson) }));
+}
+
+/**
+ * Nieuwe bestanden uit de database in een rij met open wijzigingen: gewijzigde fases blijven staan,
+ * nieuwe bestanden komen erbij, verwijderde verdwijnen.
+ */
+export function mergeFreshClips(current: PlanClip[], fresh: PlanClip[]): PlanClip[] {
+  const edited = new Map(current.map((c) => [c.id, c]));
+  return fresh.map((c) => {
+    const e = edited.get(c.id);
+    return e ? { ...c, phases: e.phases } : c;
+  });
+}
 
 export function planRowKey(kind: PlanRowKind, id: string): string {
   return kind === "club" ? `club:${id}` : id;
@@ -76,6 +163,7 @@ export function planRowFromSponsor(s: Sponsor): PlanRow {
     notes: s.notes ?? "",
     mediaCount: (s.media ?? []).filter((m) => m.active !== false).length,
     file: null,
+    clips: (s.media ?? []).filter((m) => !m.hideFromLibrary).map(clipFromMedia),
   };
 }
 
@@ -106,6 +194,7 @@ export function planRowFromClubMedia(m: MediaItem): PlanRow {
     notes: m.notes ?? "",
     mediaCount: 1,
     file: { path: m.path, type: m.type === "VIDEO" ? "VIDEO" : "IMAGE", durationSec: m.durationSec },
+    clips: [],
   };
 }
 
@@ -155,6 +244,7 @@ export function planRowChanged(row: PlanRow, original: PlanRow | undefined): boo
   if (row.name.trim() !== original.name.trim()) return true;
   if (row.active !== original.active) return true;
   if (row.notes.trim() !== original.notes.trim()) return true;
+  if (changedClipTags(row, original).length > 0) return true;
   return PLAN_PHASES.some((p) => row.seconds[p] !== original.seconds[p]);
 }
 
@@ -447,6 +537,7 @@ export function applyPlanImport(
         notes: imp.notes ?? "",
         mediaCount: 0,
         file: null,
+        clips: [],
       });
       byName.set(key, rows.length - 1);
       summary.created.push(imp.name);
@@ -589,13 +680,18 @@ export function rotationParticipantFromRow(
   const s = row.seconds;
   if (row.kind === "sponsor") {
     const base = row.id ? ctx.sponsorsById.get(row.id) : undefined;
+    const phasesById = new Map(row.clips.map((c) => [c.id, c]));
+    const media = (base?.media ?? []).map((m) => {
+      const clip = phasesById.get(m.id);
+      return clip ? { ...m, sponsorPhaseTagsJson: tagsJsonFromPlanPhases(clip.phases, clip.originalTagsJson) } : m;
+    });
     return {
       ...(base ?? {
         id: row.key,
         imageDefaultSec: 10,
         createdAt: new Date(0).toISOString(),
-        media: [],
       }),
+      media,
       id: row.key,
       name: row.name,
       active: row.active,

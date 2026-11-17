@@ -2086,10 +2086,10 @@
     "pasteButton": "Incolla da Excel…",
     "linkFilesButton": "Collega file…",
     "addRow": "Aggiungi sponsor",
-    "unsaved": "Modifiche non salvate: {{count}} righe.",
+    "unsaved": "Modifiche non ancora salvate ({{count}})",
     "discard": "Annulla modifiche",
     "save": "Salva ({{count}})",
-    "saved": "Piano stagionale salvato ({{count}} righe)",
+    "saved": "Piano stagionale salvato ({{count}})",
     "saveFailed": "Impossibile salvare {{name}}. Il resto è ancora nella tabella.",
     "nameRequired": "Ogni sponsor deve avere un nome.",
     "nameDuplicate": "Ci sono due sponsor chiamati {{name}}.",
@@ -2160,6 +2160,18 @@
     "previewKindHint": "Le righe sotto un titolo come \"comunicazione\" o \"marcom\" diventano media del club. Nella tabella puoi cambiarlo per ogni nuova riga.",
     "filesGroupClub": "Media del club senza file",
     "clubFilesAssigned": "{{count}} media del club hanno ora un file. Salva la tabella.",
-    "filesClubConflict": "Una riga di media del club può avere un solo file."
+    "filesClubConflict": "Una riga di media del club può avere un solo file.",
+    "phaseShort_prematch": "Pre",
+    "phaseShort_firstHalf": "1°",
+    "phaseShort_halftime": "Int.",
+    "phaseShort_secondHalf": "2°",
+    "phaseShort_postmatch": "Post",
+    "showFiles": "Mostra i file e le loro fasi",
+    "clipPhasesHint": "Per file: in quali fasi può essere riprodotto? Clicca una fase per attivarla o disattivarla. Grigio = questo sponsor non ha minuti in quella fase.",
+    "clipNeedsPhase": "Un file deve essere riprodotto in almeno una fase. Altrimenti disattivalo in Sponsor.",
+    "clipPhaseNoMinutes": "Questo sponsor non ha minuti in questa fase.",
+    "clipAllPhases": "tutte le fasi",
+    "clipInactive": "disattivato",
+    "clipImage": "immagine {{sec}} s"
   }
 }

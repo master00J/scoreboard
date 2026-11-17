@@ -10,6 +10,10 @@ import {
   planEffectiveSeconds,
   planRowsFromDatabase,
   sectionKindFromHeader,
+  changedClipTags,
+  mergeFreshClips,
+  planPhasesFromTags,
+  tagsJsonFromPlanPhases,
   formatMinutes,
   guessColumnKinds,
   looksLikeHeader,
@@ -457,6 +461,7 @@ describe("echte schermtijd", () => {
       notes: "",
       mediaCount: 1,
       file: { path: "C:/pop.jpg", type: "IMAGE", durationSec: 10 },
+      clips: [],
     });
     const eff = planEffectiveSeconds(rows, ctx);
     expect(eff.byRow.get("a")!.firstHalf).toBe(180);
@@ -471,5 +476,87 @@ describe("echte schermtijd", () => {
       halftime: 600,
       prematch: 1800,
     });
+  });
+});
+
+describe("fases per bestand", () => {
+  it("leest fase-tags als planfases; geen tags of alle fases = overal", () => {
+    expect(planPhasesFromTags(null)).toBeNull();
+    expect(planPhasesFromTags(JSON.stringify(["firstHalf"]))).toEqual(["firstHalf"]);
+    expect(planPhasesFromTags(JSON.stringify(["secondHalf", "extraTime", "halftime"]))).toEqual(["halftime", "secondHalf"]);
+    expect(
+      planPhasesFromTags(JSON.stringify(["prematch", "firstHalf", "halftime", "secondHalf", "extraTime", "postmatch"])),
+    ).toBeNull();
+  });
+
+  it("schrijft de 2e helft samen met de verlenging, en bewaart een losse verlenging", () => {
+    expect(tagsJsonFromPlanPhases(null, null)).toBeNull();
+    expect(JSON.parse(tagsJsonFromPlanPhases(["firstHalf"], null)!)).toEqual(["firstHalf"]);
+    expect(JSON.parse(tagsJsonFromPlanPhases(["secondHalf"], null)!)).toEqual(["secondHalf", "extraTime"]);
+    expect(JSON.parse(tagsJsonFromPlanPhases(["halftime"], JSON.stringify(["extraTime"]))!)).toEqual([
+      "halftime",
+      "extraTime",
+    ]);
+    expect(tagsJsonFromPlanPhases(["prematch", "firstHalf", "halftime", "secondHalf", "postmatch"], null)).toBeNull();
+  });
+
+  it("geen enkele fase laat de tags zoals ze waren, want een lege lijst speelt overal", () => {
+    const original = JSON.stringify(["firstHalf"]);
+    expect(tagsJsonFromPlanPhases([], original)).toBe(original);
+  });
+
+  const alpha = sponsor({
+    id: "a",
+    name: "Alpha",
+    matchFirstHalfSeconds: 60,
+    matchSecondHalfSeconds: 60,
+    matchSeconds: 120,
+    media: [
+      media({ id: "first", sponsorId: "a", durationSec: 30 }),
+      media({ id: "second", sponsorId: "a", durationSec: 20, sponsorPhaseTagsJson: JSON.stringify(["secondHalf", "extraTime"]) }),
+    ],
+  });
+
+  it("toont de bestanden van een sponsor met hun fases en ziet een wijziging", () => {
+    const [row] = planRowsFromDatabase([alpha], []);
+    expect(row.clips.map((c) => [c.id, c.phases])).toEqual([
+      ["first", null],
+      ["second", ["secondHalf"]],
+    ]);
+    const edited = { ...row, clips: row.clips.map((c) => (c.id === "first" ? { ...c, phases: ["firstHalf" as const] } : c)) };
+    expect(planRowChanged(edited, row)).toBe(true);
+    expect(changedClipTags(edited, row)).toEqual([{ id: "first", sponsorPhaseTagsJson: JSON.stringify(["firstHalf"]) }]);
+    expect(changedClipTags(row, row)).toEqual([]);
+  });
+
+  it("de echte schermtijd volgt de fases uit de tabel", () => {
+    const ctx = { sponsorsById: new Map([["a", alpha]]), mediaById: new Map<string, MediaItem>() };
+    const [row] = planRowsFromDatabase([alpha], []);
+    const before = planEffectiveSeconds([row], ctx).byRow.get("a")!;
+    expect(before.firstHalf).toBe(60);
+    /** 30 + 20 = 50 < 60, dus nog één clip van 30: een gestarte clip speelt uit. */
+    expect(before.secondHalf).toBe(80);
+
+    const onlySecond = {
+      ...row,
+      clips: row.clips.map((c) => (c.id === "first" ? { ...c, phases: ["halftime" as const] } : c)),
+    };
+    const after = planEffectiveSeconds([onlySecond], ctx).byRow.get("a")!;
+    expect(after.firstHalf).toBe(0);
+    expect(after.secondHalf).toBe(60);
+  });
+
+  it("nieuwe bestanden uit de database komen erbij zonder de gewijzigde fases te verliezen", () => {
+    const [row] = planRowsFromDatabase([alpha], []);
+    const edited = row.clips.map((c) => (c.id === "first" ? { ...c, phases: ["firstHalf" as const] } : c));
+    const withNew = planRowsFromDatabase(
+      [{ ...alpha, media: [...alpha.media!, media({ id: "third", sponsorId: "a" })] }],
+      [],
+    )[0].clips;
+    expect(mergeFreshClips(edited, withNew).map((c) => [c.id, c.phases])).toEqual([
+      ["first", ["firstHalf"]],
+      ["second", ["secondHalf"]],
+      ["third", null],
+    ]);
   });
 });

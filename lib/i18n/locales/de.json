@@ -2086,10 +2086,10 @@
     "pasteButton": "Aus Excel einfügen…",
     "linkFilesButton": "Dateien zuordnen…",
     "addRow": "Sponsor hinzufügen",
-    "unsaved": "Nicht gespeicherte Änderungen: {{count}} Zeilen.",
+    "unsaved": "Änderungen noch nicht gespeichert ({{count}})",
     "discard": "Änderungen verwerfen",
     "save": "Speichern ({{count}})",
-    "saved": "Saisonplan gespeichert ({{count}} Zeilen)",
+    "saved": "Saisonplan gespeichert ({{count}})",
     "saveFailed": "{{name}} konnte nicht gespeichert werden. Der Rest steht noch in der Tabelle.",
     "nameRequired": "Jeder Sponsor braucht einen Namen.",
     "nameDuplicate": "Es gibt zwei Sponsoren mit dem Namen {{name}}.",
@@ -2160,6 +2160,18 @@
     "previewKindHint": "Zeilen unter einer Überschrift wie „Kommunikation“ oder „Marcom“ werden zu Vereinsmedien. In der Tabelle können Sie das pro neuer Zeile umstellen.",
     "filesGroupClub": "Vereinsmedien ohne Datei",
     "clubFilesAssigned": "{{count}} Vereinsmedien haben jetzt eine Datei. Speichern Sie die Tabelle.",
-    "filesClubConflict": "Eine Vereinsmedien-Zeile kann nur eine Datei haben."
+    "filesClubConflict": "Eine Vereinsmedien-Zeile kann nur eine Datei haben.",
+    "phaseShort_prematch": "Vor",
+    "phaseShort_firstHalf": "1.",
+    "phaseShort_halftime": "HZ",
+    "phaseShort_secondHalf": "2.",
+    "phaseShort_postmatch": "Nach",
+    "showFiles": "Dateien und ihre Phasen zeigen",
+    "clipPhasesHint": "Pro Datei: In welchen Phasen darf sie laufen? Klicken Sie eine Phase an oder aus. Grau = dieser Sponsor hat dort keine Minuten.",
+    "clipNeedsPhase": "Eine Datei muss in mindestens einer Phase laufen. Schalten Sie sie sonst unter Sponsoren aus.",
+    "clipPhaseNoMinutes": "Dieser Sponsor hat in dieser Phase keine Minuten.",
+    "clipAllPhases": "alle Phasen",
+    "clipInactive": "aus",
+    "clipImage": "Bild {{sec}} s"
   }
 }

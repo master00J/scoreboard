@@ -2086,10 +2086,10 @@
     "pasteButton": "Paste from Excel…",
     "linkFilesButton": "Link files…",
     "addRow": "Add sponsor",
-    "unsaved": "Unsaved changes: {{count}} rows.",
+    "unsaved": "Changes not saved yet ({{count}})",
     "discard": "Discard changes",
     "save": "Save ({{count}})",
-    "saved": "Season plan saved ({{count}} rows)",
+    "saved": "Season plan saved ({{count}})",
     "saveFailed": "Could not save {{name}}. The rest is still in the table.",
     "nameRequired": "Every sponsor needs a name.",
     "nameDuplicate": "There are two sponsors called {{name}}.",
@@ -2160,6 +2160,18 @@
     "previewKindHint": "Rows under a heading such as \"communication\" or \"marcom\" become club media. You can switch that per new row in the table.",
     "filesGroupClub": "Club media without a file",
     "clubFilesAssigned": "{{count}} club media now have a file. Save the table.",
-    "filesClubConflict": "A club media row can only have one file."
+    "filesClubConflict": "A club media row can only have one file.",
+    "phaseShort_prematch": "Pre",
+    "phaseShort_firstHalf": "1st",
+    "phaseShort_halftime": "HT",
+    "phaseShort_secondHalf": "2nd",
+    "phaseShort_postmatch": "Post",
+    "showFiles": "Show files and their phases",
+    "clipPhasesHint": "Per file: in which phases may it play? Click a phase on or off. Grey = this sponsor has no minutes there.",
+    "clipNeedsPhase": "A file must play in at least one phase. Otherwise turn it off under Sponsors.",
+    "clipPhaseNoMinutes": "This sponsor has no minutes in this phase.",
+    "clipAllPhases": "all phases",
+    "clipInactive": "off",
+    "clipImage": "image {{sec}}s"
   }
 }

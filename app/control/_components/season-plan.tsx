@@ -3,7 +3,19 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { AlertTriangle, ClipboardPaste, FileVideo, FolderOpen, Plus, Repeat, Save, Undo2, X } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  ClipboardPaste,
+  FileVideo,
+  FolderOpen,
+  Plus,
+  Repeat,
+  Save,
+  Undo2,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/form";
@@ -19,12 +31,14 @@ import {
   PLAN_PHASES,
   applyPlanImport,
   buildPlanImport,
+  changedClipTags,
   clubMediaPatchFromPlanRow,
   emptySeconds,
   formatMinutes,
   guessColumnKinds,
   headerSignature,
   looksLikeHeader,
+  mergeFreshClips,
   normalizeName,
   parseClipboardTable,
   parseMinutes,
@@ -36,6 +50,7 @@ import {
   sponsorPatchFromPlanRow,
   suggestSponsorForFile,
   type OutsidePhase,
+  type PlanClip,
   type PlanColumnKind,
   type PlanFile,
   type PlanPhase,
@@ -103,7 +118,24 @@ function newRow(kind: PlanRowKind): PlanRow {
     notes: "",
     mediaCount: 0,
     file: null,
+    clips: [],
   };
+}
+
+/** Een fase aan- of uitzetten voor één bestand. Alle vijf aan = overal (null); nooit nul fases. */
+function togglePhase(phases: PlanPhase[] | null, phase: PlanPhase): PlanPhase[] | null | "empty" {
+  const current = phases ?? [...PLAN_PHASES];
+  const next = current.includes(phase) ? current.filter((p) => p !== phase) : [...current, phase];
+  if (next.length === 0) return "empty";
+  if (next.length === PLAN_PHASES.length) return null;
+  return PLAN_PHASES.filter((p) => next.includes(p));
+}
+
+function clipDurationLabel(t: TFunction, clip: PlanClip): string {
+  if (clip.type === "IMAGE") return t("seasonPlan.clipImage", { sec: clip.durationSec });
+  const m = Math.floor(clip.durationSec / 60);
+  const sec = clip.durationSec % 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
 /** Sponsors eerst, clubmedia daarna: zo staan ze in de tabel en zo loopt Enter van rij naar rij. */
@@ -129,6 +161,8 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
   const [pasteOpen, setPasteOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [busyRow, setBusyRow] = useState<string | null>(null);
+  /** Sponsorrijen waarvan de bestanden met hun fases opengeklapt zijn. */
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const tableRef = useRef<HTMLTableElement | null>(null);
 
   function reload() {
@@ -161,8 +195,11 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
       if (keep) return [...fresh, ...keep];
       const hasChanges = current.some((r) => planRowChanged(r, previous.get(r.key)));
       if (!hasChanges) return fresh;
-      const counts = new Map(fresh.map((r) => [r.key, r.mediaCount]));
-      return current.map((r) => (counts.has(r.key) ? { ...r, mediaCount: counts.get(r.key)! } : r));
+      const freshByKey = new Map(fresh.map((r) => [r.key, r]));
+      return current.map((r) => {
+        const f = freshByKey.get(r.key);
+        return f ? { ...r, mediaCount: f.mediaCount, clips: mergeFreshClips(r.clips, f.clips) } : r;
+      });
     });
   }, [sponsorsRaw, mediaRaw]);
 
@@ -294,7 +331,14 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
       fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (row.kind === "sponsor") {
       const body = sponsorPatchFromPlanRow(row);
-      return row.id ? json("PATCH", `/api/sponsors/${row.id}`, body) : json("POST", "/api/sponsors", body);
+      const res = row.id ? await json("PATCH", `/api/sponsors/${row.id}`, body) : await json("POST", "/api/sponsors", body);
+      if (res.ok && row.id) {
+        for (const clip of changedClipTags(row, originals.get(row.key))) {
+          const r = await json("PATCH", `/api/media/${clip.id}`, { sponsorPhaseTagsJson: clip.sponsorPhaseTagsJson });
+          if (!r.ok) return r;
+        }
+      }
+      return res;
     }
     const body: Record<string, unknown> = clubMediaPatchFromPlanRow(row);
     const original = originals.get(row.key);
@@ -332,13 +376,90 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
   const clubRows = ordered.filter((r) => r.kind === "club");
   const pendingClubRows = rows.filter((r) => r.kind === "club" && !r.file);
 
+  function setClipPhase(row: PlanRow, clipId: string, phase: PlanPhase) {
+    const clip = row.clips.find((c) => c.id === clipId);
+    if (!clip) return;
+    const next = togglePhase(clip.phases, phase);
+    if (next === "empty") {
+      toast({ title: t("seasonPlan.clipNeedsPhase"), variant: "warning" });
+      return;
+    }
+    updateRow(row.key, (r) => ({ ...r, clips: r.clips.map((c) => (c.id === clipId ? { ...c, phases: next } : c)) }));
+  }
+
+  function renderClips(row: PlanRow) {
+    const original = originals.get(row.key);
+    const before = new Map((original?.clips ?? []).map((c) => [c.id, c]));
+    return (
+      <tr className="border-b border-border/60 bg-muted/20">
+        <td colSpan={9} className="px-3 py-2">
+          <p className="mb-2 text-xs text-muted-foreground">{t("seasonPlan.clipPhasesHint")}</p>
+          {row.clips.length === 0 ? (
+            <p className="text-xs text-muted-foreground">{t("seasonPlan.noFiles")}</p>
+          ) : (
+            <div className="space-y-1.5">
+              {row.clips.map((clip) => {
+                const changed = before.has(clip.id) && JSON.stringify(before.get(clip.id)!.phases) !== JSON.stringify(clip.phases);
+                return (
+                  <div key={clip.id} className={`flex flex-wrap items-center gap-2 ${clip.active ? "" : "opacity-50"}`}>
+                    <span className="w-64 truncate text-sm" title={clip.title}>
+                      {clip.title}
+                    </span>
+                    <span className="w-16 text-xs tabular-nums text-muted-foreground">{clipDurationLabel(t, clip)}</span>
+                    <div className={`flex gap-1 rounded-md p-0.5 ${changed ? "ring-1 ring-primary/60" : ""}`}>
+                      {PLAN_PHASES.map((phase) => {
+                        const on = clip.phases == null || clip.phases.includes(phase);
+                        const noMinutes = row.seconds[phase] === 0;
+                        return (
+                          <button
+                            key={phase}
+                            type="button"
+                            onClick={() => setClipPhase(row, clip.id, phase)}
+                            title={noMinutes ? t("seasonPlan.clipPhaseNoMinutes") : phaseLabel(t, phase)}
+                            className={`h-7 min-w-11 rounded px-2 text-xs font-semibold transition-colors ${
+                              on
+                                ? noMinutes
+                                  ? "bg-secondary text-muted-foreground"
+                                  : "bg-primary text-primary-foreground"
+                                : "border border-border bg-background text-muted-foreground line-through"
+                            }`}
+                          >
+                            {t(`seasonPlan.phaseShort_${phase}`)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {clip.phases == null ? (
+                      <span className="text-xs text-muted-foreground">{t("seasonPlan.clipAllPhases")}</span>
+                    ) : null}
+                    {!clip.active ? <span className="text-xs text-muted-foreground">{t("seasonPlan.clipInactive")}</span> : null}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </td>
+      </tr>
+    );
+  }
+
   function renderRow(row: PlanRow, rowIndex: number) {
+    return (
+      <Fragment key={row.key}>
+        {renderMainRow(row, rowIndex)}
+        {row.kind === "sponsor" && expanded.has(row.key) ? renderClips(row) : null}
+      </Fragment>
+    );
+  }
+
+  function renderMainRow(row: PlanRow, rowIndex: number) {
     const original = originals.get(row.key);
     const isNew = !original;
     const eff = effective.byRow.get(row.key) ?? emptySeconds();
     const changedClass = (changed: boolean) => (changed && !isNew ? "border-primary/60 bg-primary/5" : "border-input");
+    const clipsChanged = row.kind === "sponsor" && changedClipTags(row, original).length > 0;
     return (
-      <tr key={row.key} className={`border-b border-border/60 ${row.active ? "" : "opacity-60"}`}>
+      <tr className={`border-b border-border/60 ${row.active ? "" : "opacity-60"}`}>
         <td className="py-1 pr-2 align-top">
           <div className="flex items-center gap-1">
             <Input
@@ -443,7 +564,22 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
                   <AlertTriangle className="size-4 text-amber-500" />
                 </span>
               ) : null}
-              <span className="tabular-nums">{row.mediaCount}</span>
+              <button
+                type="button"
+                className={`inline-flex items-center gap-0.5 rounded px-1 tabular-nums hover:bg-accent ${clipsChanged ? "text-primary" : ""}`}
+                title={t("seasonPlan.showFiles")}
+                onClick={() =>
+                  setExpanded((cur) => {
+                    const next = new Set(cur);
+                    if (next.has(row.key)) next.delete(row.key);
+                    else next.add(row.key);
+                    return next;
+                  })
+                }
+              >
+                {expanded.has(row.key) ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                {row.mediaCount}
+              </button>
               {isElectron ? (
                 <button
                   type="button"
@@ -548,9 +684,7 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
               {clubRows.length > 0 ? (
                 <GroupHeader title={t("seasonPlan.groupClub")} hint={t("seasonPlan.groupClubHint")} />
               ) : null}
-              {clubRows.map((row, i) => (
-                <Fragment key={row.key}>{renderRow(row, sponsorRows.length + i)}</Fragment>
-              ))}
+              {clubRows.map((row, i) => renderRow(row, sponsorRows.length + i))}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-border font-semibold">

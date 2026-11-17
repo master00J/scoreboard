@@ -2086,10 +2086,10 @@
     "pasteButton": "Coller depuis Excel…",
     "linkFilesButton": "Associer des fichiers…",
     "addRow": "Ajouter un sponsor",
-    "unsaved": "Modifications non enregistrées : {{count}} lignes.",
+    "unsaved": "Modifications pas encore enregistrées ({{count}})",
     "discard": "Annuler les modifications",
     "save": "Enregistrer ({{count}})",
-    "saved": "Plan de saison enregistré ({{count}} lignes)",
+    "saved": "Plan de saison enregistré ({{count}})",
     "saveFailed": "Impossible d’enregistrer {{name}}. Le reste est toujours dans le tableau.",
     "nameRequired": "Chaque sponsor doit avoir un nom.",
     "nameDuplicate": "Deux sponsors s’appellent {{name}}.",
@@ -2160,6 +2160,18 @@
     "previewKindHint": "Les lignes sous un titre comme « communication » ou « marcom » deviennent des médias du club. Vous pouvez inverser cela par nouvelle ligne dans le tableau.",
     "filesGroupClub": "Médias du club sans fichier",
     "clubFilesAssigned": "{{count}} médias du club ont maintenant un fichier. Enregistrez le tableau.",
-    "filesClubConflict": "Une ligne de média du club ne peut avoir qu’un seul fichier."
+    "filesClubConflict": "Une ligne de média du club ne peut avoir qu’un seul fichier.",
+    "phaseShort_prematch": "Avant",
+    "phaseShort_firstHalf": "1re",
+    "phaseShort_halftime": "Mi-t.",
+    "phaseShort_secondHalf": "2e",
+    "phaseShort_postmatch": "Après",
+    "showFiles": "Afficher les fichiers et leurs phases",
+    "clipPhasesHint": "Par fichier : dans quelles phases peut-il passer ? Cliquez sur une phase pour l’activer ou la désactiver. Gris = ce sponsor n’a pas de minutes dans cette phase.",
+    "clipNeedsPhase": "Un fichier doit passer dans au moins une phase. Sinon, désactivez-le sous Sponsors.",
+    "clipPhaseNoMinutes": "Ce sponsor n’a pas de minutes dans cette phase.",
+    "clipAllPhases": "toutes les phases",
+    "clipInactive": "désactivé",
+    "clipImage": "image {{sec}} s"
   }
 }
