@@ -1,3 +1,5 @@
+import { resolveStoredMediaPath } from "./media-file-path";
+
 /**
  * Convert a stored media/photo/logo path to a URL usable in <img> / <video>.
  *
@@ -12,10 +14,9 @@ export function mediaUrl(storedPath: string | null | undefined): string {
   if (!storedPath) return "";
   if (typeof window !== "undefined" && window.electronAPI) {
     if (storedPath.startsWith("/uploads/")) {
-      const uploadsDir = window.electronAPI.context.uploadsDir;
-      if (!uploadsDir) return storedPath;
-      const fileName = storedPath.replace(/^\/uploads\//, "");
-      return toFileUrl(`${uploadsDir}\\${fileName}`);
+      // Zelfde vertaling als de controle en de omzetting in het hoofdproces.
+      const file = resolveStoredMediaPath(storedPath, window.electronAPI.context.uploadsDir);
+      return file ? toFileUrl(file) : storedPath;
     }
     return toFileUrl(storedPath);
   }

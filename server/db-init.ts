@@ -250,6 +250,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("MediaItem", "playbackWarning", "TEXT");
   await addColumnIfMissing("MediaItem", "quickLaunch", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("MediaItem", "clubPhaseBudgetJson", "TEXT");
+  await addColumnIfMissing("MediaItem", "mediaCheckJson", "TEXT");
   await addColumnIfMissing("ScheduledMediaCue", "endSec", "INTEGER");
   await addColumnIfMissing("ScheduledMediaCue", "loop", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("AppSettings", "sponsorLayoutsJson", "TEXT");

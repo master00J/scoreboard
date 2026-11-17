@@ -1,8 +1,20 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { resolveStoredMediaPath } from "../lib/media-file-path";
+import {
+  classifyDecodeRun,
+  decodeTimeoutMs,
+  isAnimatedWebp,
+  isValidTranscodeOutput,
+  mediaFileVersionKey,
+  type DecodeRun,
+  type MediaCheckRecord,
+  type MediaKind,
+} from "../lib/media-health";
 import {
   isCurrentStadiumCompatPath,
   isDisplayPlaybackRisk,
@@ -25,7 +37,19 @@ export type MediaInspectResult = {
 export type MediaPrepareResult = MediaInspectResult & {
   path: string;
   transcoded: boolean;
+  /** Volledige decode van de omgezette kopie; alleen als `transcoded`. */
+  check?: MediaCheckRecord;
+  /** De omzetting liep, maar de kopie decodeerde niet volledig: het origineel blijft staan. */
+  validationFailed?: string;
 };
+
+/**
+ * Het bestand achter een opgeslagen pad, zoals het scherm het afspeelt: "/uploads/…" ligt in de
+ * uploads-map (ook na het terugzetten van een back-up), al het andere is een volledig pad.
+ */
+export function resolveMediaFile(stored: string | null | undefined): string | null {
+  return resolveStoredMediaPath(stored, process.env.STADIUM_UPLOADS_DIR ?? null);
+}
 
 function resolveFfmpegPath(): string | null {
   const exe = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
@@ -80,7 +104,8 @@ async function probeWithFfmpeg(ffmpeg: string, src: string) {
 }
 
 export async function inspectVideoForDisplay(src: string): Promise<MediaInspectResult> {
-  if (!src || !fs.existsSync(src)) {
+  const file = resolveMediaFile(src);
+  if (!file || !fs.existsSync(file)) {
     return { reason: "probe_failed" };
   }
   if (isCurrentStadiumCompatPath(src)) {
@@ -92,7 +117,7 @@ export async function inspectVideoForDisplay(src: string): Promise<MediaInspectR
   }
   const ffmpeg = resolveFfmpegPath();
   if (!ffmpeg) return { reason: "ffmpeg_missing" };
-  const info = await probeWithFfmpeg(ffmpeg, src);
+  const info = await probeWithFfmpeg(ffmpeg, file);
   if (!info) return { reason: "probe_failed" };
   return {
     reason: stadiumTranscodeReason(info),
@@ -127,11 +152,22 @@ export async function prepareVideoForDisplay(
   const ffmpeg = resolveFfmpegPath();
   if (!ffmpeg) return { ...inspected, path: src, transcoded: false, reason: "ffmpeg_missing" };
 
-  const dest = destPathFor(src);
-  if (fs.existsSync(dest) && fs.statSync(dest).size > 1024) {
-    return { ...inspected, path: dest, transcoded: true };
+  const file = resolveMediaFile(src);
+  if (!file) return { ...inspected, path: src, transcoded: false, reason: "probe_failed" };
+  const dest = destPathFor(file);
+  const expectedSec = inspected.durationSec ?? null;
+
+  // Een kopie van een eerdere omzetting telt alleen als ze volledig decodeert: een afgebroken
+  // omzetting of een half gekopieerd bestand mag nooit als "klaar" op het scherm komen.
+  if (fs.existsSync(dest)) {
+    const check = await decodeCheckFile(dest, "VIDEO", expectedSec);
+    if (check && isValidTranscodeOutput(check)) {
+      return { ...inspected, path: dest, transcoded: true, check: checkRecordFor(dest, check) };
+    }
+    removeQuietly(dest);
   }
 
+  const tmp = `${dest.replace(/\.mp4$/i, "")}.partial`;
   /**
    * Zelfde resolutie en fps. Baseline + geen B-frames + GOP 1s: Chromium blijft
    * anders `waiting` geven midden in een ogenschijnlijk “gewone” libx264-Main-clip.
@@ -140,7 +176,7 @@ export async function prepareVideoForDisplay(
     "-y",
     "-hide_banner",
     "-i",
-    src,
+    file,
     "-map_metadata",
     "-1",
     "-map",
@@ -183,21 +219,214 @@ export async function prepareVideoForDisplay(
     "2",
     "-movflags",
     "+faststart",
-    dest,
+    "-f",
+    "mp4",
+    tmp,
   ];
 
+  // FFmpeg schrijft naar een tijdelijk bestand. Pas na een volledige, foutloze decode krijgt het
+  // de echte naam; een omzetting die halverwege stopt, laat zo nooit een bruikbaar ogende kopie na.
+  removeQuietly(tmp);
   try {
     await execFileAsync(ffmpeg, args, { timeout: 180_000, windowsHide: true });
   } catch {
+    removeQuietly(tmp);
+    return { ...inspected, path: src, transcoded: false };
+  }
+  const check = fs.existsSync(tmp) ? await decodeCheckFile(tmp, "VIDEO", expectedSec) : null;
+  if (!check || !isValidTranscodeOutput(check)) {
+    removeQuietly(tmp);
+    return {
+      ...inspected,
+      path: src,
+      transcoded: false,
+      validationFailed: check?.reason ?? "unreadable",
+    };
+  }
+  try {
+    fs.renameSync(tmp, dest);
+  } catch {
+    removeQuietly(tmp);
+    return { ...inspected, path: src, transcoded: false };
+  }
+  return { ...inspected, path: dest, transcoded: true, check: checkRecordFor(dest, check) };
+}
+
+function removeQuietly(file: string) {
+  try {
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  } catch {
+    /* ignore */
+  }
+}
+
+type DecodeResult = Omit<MediaCheckRecord, "v" | "key" | "checkedAt">;
+
+function checkRecordFor(file: string, result: DecodeResult): MediaCheckRecord | undefined {
+  try {
+    const st = fs.statSync(file);
+    return {
+      v: 1,
+      key: mediaFileVersionKey(file, st.size, st.mtimeMs),
+      ...result,
+      checkedAt: new Date().toISOString(),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Eén decode tegelijk: de controle mag het stadionscherm op dezelfde pc niet laten haperen. */
+let decodeChain: Promise<unknown> = Promise.resolve();
+
+function runSerialized<T>(task: () => Promise<T>): Promise<T> {
+  const next = decodeChain.then(task, task);
+  decodeChain = next.catch(() => undefined);
+  return next;
+}
+
+/** Bewaar niet meer stderr dan nodig: een kapot bestand kan duizenden foutregels geven. */
+const MAX_STDERR = 64 * 1024;
+
+function runFfmpegDecode(ffmpeg: string, file: string, timeoutMs: number): Promise<DecodeRun> {
+  return new Promise((resolve) => {
+    const args = [
+      "-hide_banner",
+      "-nostdin",
+      "-nostats",
+      "-v",
+      "error",
+      "-threads",
+      "2",
+      "-i",
+      file,
+      "-map",
+      "0:v:0",
+      "-f",
+      "null",
+      "-progress",
+      "pipe:1",
+      "-",
+    ];
+    let progress = "";
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const child = spawn(ffmpeg, args, { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     try {
-      if (fs.existsSync(dest)) fs.unlinkSync(dest);
+      if (child.pid) os.setPriority(child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
     } catch {
-      /* ignore */
+      /* geen rechten: dan op normale prioriteit */
     }
-    return { ...inspected, path: src, transcoded: false };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, timeoutMs);
+    child.stdout.on("data", (chunk: Buffer) => {
+      // Alleen het einde is nodig: de laatste frame=- en out_time_us=-regels.
+      progress = (progress + chunk.toString("utf8")).slice(-8192);
+    });
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length < MAX_STDERR) stderr += chunk.toString("utf8");
+    });
+    const finish = (exitCode: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ exitCode, timedOut, progress, stderr });
+    };
+    child.on("error", () => finish(-1));
+    child.on("close", (code) => finish(code));
+  });
+}
+
+function readHead(file: string, bytes: number): Uint8Array {
+  const fd = fs.openSync(file, "r");
+  try {
+    const buf = Buffer.alloc(bytes);
+    const read = fs.readSync(fd, buf, 0, bytes, 0);
+    return buf.subarray(0, read);
+  } finally {
+    fs.closeSync(fd);
   }
-  if (!fs.existsSync(dest) || fs.statSync(dest).size < 1024) {
-    return { ...inspected, path: src, transcoded: false };
+}
+
+/**
+ * Decodeert elk beeld van het bestand met de meegeleverde FFmpeg. Null als FFmpeg ontbreekt.
+ * Een bewegende WebP slaat FFmpeg over: die kan hij niet lezen, Chromium wel.
+ */
+export async function decodeCheckFile(
+  file: string,
+  kind: MediaKind,
+  expectedSec: number | null,
+): Promise<DecodeResult | null> {
+  const ffmpeg = resolveFfmpegPath();
+  if (!ffmpeg) return null;
+  if (kind === "IMAGE" && /\.webp$/i.test(file)) {
+    try {
+      if (isAnimatedWebp(readHead(file, 32))) {
+        return { status: "ok", reason: "not_decodable_here", expectedSec: null, decodedSec: null, detail: null };
+      }
+    } catch {
+      /* lezen mislukt: de decode hieronder meldt het */
+    }
   }
-  return { ...inspected, path: dest, transcoded: true };
+  const run = await runSerialized(() => runFfmpegDecode(ffmpeg, file, decodeTimeoutMs(kind, expectedSec)));
+  return classifyDecodeRun({ kind, expectedSec, run });
+}
+
+export type MediaFileVersion = {
+  /** Het echte bestand, of null als het opgeslagen pad nergens naartoe wijst. */
+  file: string | null;
+  exists: boolean;
+  /** Sleutel van de huidige bestandsversie; null als het bestand ontbreekt. */
+  key: string | null;
+};
+
+/** Waar staat het bestand en welke versie is het: om te zien of een bewaarde controle nog geldt. */
+export function mediaFileVersion(stored: string | null | undefined): MediaFileVersion {
+  const file = resolveMediaFile(stored);
+  if (!file) return { file: null, exists: false, key: null };
+  try {
+    const st = fs.statSync(file);
+    if (!st.isFile()) return { file, exists: false, key: null };
+    return { file, exists: true, key: mediaFileVersionKey(file, st.size, st.mtimeMs) };
+  } catch {
+    return { file, exists: false, key: null };
+  }
+}
+
+/**
+ * Volledige controle van een mediabestand. Hergebruikt `previous` als die bij dezelfde
+ * bestandsversie hoort; dan wordt er niets gedecodeerd.
+ */
+export async function checkMediaFile(
+  stored: string,
+  kind: MediaKind,
+  opts: { fallbackDurationSec?: number | null; previous?: MediaCheckRecord | null } = {},
+): Promise<{ version: MediaFileVersion; record: MediaCheckRecord | null; ffmpegMissing: boolean }> {
+  const version = mediaFileVersion(stored);
+  if (!version.exists || !version.file || !version.key) {
+    return { version, record: null, ffmpegMissing: false };
+  }
+  if (opts.previous && opts.previous.key === version.key) {
+    return { version, record: opts.previous, ffmpegMissing: false };
+  }
+  const ffmpeg = resolveFfmpegPath();
+  if (!ffmpeg) return { version, record: null, ffmpegMissing: true };
+  let expectedSec: number | null = null;
+  if (kind === "VIDEO") {
+    const info = await probeWithFfmpeg(ffmpeg, version.file);
+    expectedSec = info?.durationSec ?? null;
+    if (expectedSec == null && opts.fallbackDurationSec && opts.fallbackDurationSec > 0) {
+      expectedSec = opts.fallbackDurationSec;
+    }
+  }
+  const result = await decodeCheckFile(version.file, kind, expectedSec);
+  if (!result) return { version, record: null, ffmpegMissing: true };
+  return {
+    version,
+    record: { v: 1, key: version.key, ...result, checkedAt: new Date().toISOString() },
+    ffmpegMissing: false,
+  };
 }
