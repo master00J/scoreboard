@@ -105,4 +105,34 @@ describe("sponsornotitie", () => {
     const after = await api("GET", "/api/sponsors?rotation=1");
     expect(after.body.some((s: { id: string }) => s.id === `club:${created.body.id}`)).toBe(false);
   });
+
+  it("clubmedia met meerdere bestanden is één ingang in de rotatie, met de fases per bestand", async () => {
+    const budget = JSON.stringify({ prematch: 0, firstHalf: 90, secondHalf: 90, halftime: 0, postmatch: 0 });
+    for (const [title, tags] of [
+      ["Reds Forever 1.mp4", null],
+      ["Reds Forever 2.mp4", JSON.stringify(["secondHalf", "extraTime"])],
+    ] as const) {
+      const res = await api("POST", "/api/media", {
+        type: "VIDEO",
+        path: `C:/club/${title}`,
+        title,
+        durationSec: 30,
+        clubPhaseBudgetJson: budget,
+        clubGroup: "Reds Forever",
+        sponsorPhaseTagsJson: tags,
+        notes: "tussen de namen",
+      });
+      expect(res.status).toBe(200);
+    }
+    const rotation = await api("GET", "/api/sponsors?rotation=1");
+    const group = rotation.body.filter((s: { name: string }) => s.name === "Reds Forever");
+    expect(group).toHaveLength(1);
+    expect(group[0].id).toBe("club:group:reds forever");
+    expect(group[0].matchFirstHalfSeconds).toBe(90);
+    expect(group[0].notes).toBe("tussen de namen");
+    expect(group[0].media.map((m: { title: string; sponsorPhaseTagsJson: string | null }) => [m.title, m.sponsorPhaseTagsJson])).toEqual([
+      ["Reds Forever 1.mp4", JSON.stringify(["firstHalf", "secondHalf", "extraTime"])],
+      ["Reds Forever 2.mp4", JSON.stringify(["secondHalf", "extraTime"])],
+    ]);
+  });
 });

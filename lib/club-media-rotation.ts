@@ -138,17 +138,91 @@ export function clubMediaToRotationSponsor(media: MediaItem): Sponsor | null {
   };
 }
 
+/** Sleutel van een groep clubmedia: dezelfde naam (hoofdletters, accenten en leestekens tellen niet). */
+export function clubGroupKey(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export function clubGroupRotationSponsorId(groupName: string): string {
+  return `${CLUB_ROTATION_ID_PREFIX}group:${clubGroupKey(groupName)}`;
+}
+
+/**
+ * Clubmedia met meerdere bestanden (zelfde `clubGroup`): één deelnemer in de rotatie, net als een sponsor
+ * met meerdere bestanden. Het budget komt van het eerste bestand (het seizoensplan schrijft het op alle
+ * bestanden gelijk). Een bestand met eigen fase-tags speelt alleen in die fases; zonder tags in alle fases
+ * waar de groep minuten heeft.
+ */
+export function clubGroupToRotationSponsor(groupName: string, items: MediaItem[]): Sponsor | null {
+  const eligible = items
+    .filter((m) => m.active && !m.sponsorId && !m.hideFromLibrary)
+    .sort((a, b) => createdAtIso(a.createdAt).localeCompare(createdAtIso(b.createdAt)));
+  if (eligible.length === 0) return null;
+  const budget = parseClubPhaseBudgetJson(eligible[0].clubPhaseBudgetJson);
+  if (clubPhaseBudgetTotalSeconds(budget) <= 0) return null;
+  const budgetTags = phaseTagsForBudget(budget);
+  const clips: MediaItem[] = eligible.map((m) => ({
+    ...m,
+    sponsorName: null,
+    sponsorId: null,
+    sponsorPhaseTagsJson: m.sponsorPhaseTagsJson || budgetTags,
+  }));
+  return {
+    id: clubGroupRotationSponsorId(groupName),
+    name: groupName,
+    active: true,
+    prematchSeconds: budget.prematch,
+    matchSeconds: budget.firstHalf + budget.secondHalf,
+    matchFirstHalfSeconds: budget.firstHalf,
+    matchSecondHalfSeconds: budget.secondHalf,
+    halftimeSeconds: budget.halftime,
+    postmatchSeconds: budget.postmatch,
+    imageDefaultSec: Math.max(1, eligible[0].durationSec || 15),
+    createdAt: createdAtIso(eligible[0].createdAt),
+    media: clips,
+    notes: eligible[0].notes ?? null,
+    rotationKind: "club",
+  };
+}
+
 export function mergeSponsorsWithClubMedia(
   sponsors: Sponsor[],
   media: MediaItem[] | null | undefined,
 ): Sponsor[] {
   const extra: Sponsor[] = [];
   const seen = new Set(sponsors.map((s) => s.id));
+  /** Groepen in de volgorde van hun eerste bestand, zodat de rotatievolgorde stabiel blijft. */
+  const groups = new Map<string, { name: string; items: MediaItem[] }>();
   for (const item of media ?? []) {
+    const group = item.clubGroup?.trim();
+    if (group) {
+      const key = clubGroupKey(group);
+      if (!groups.has(key)) {
+        groups.set(key, { name: group, items: [] });
+        extra.push({ id: `\u0000${key}` } as Sponsor);
+      }
+      groups.get(key)!.items.push(item);
+      continue;
+    }
     const club = clubMediaToRotationSponsor(item);
     if (!club || seen.has(club.id)) continue;
     seen.add(club.id);
     extra.push(club);
   }
-  return extra.length === 0 ? sponsors : [...sponsors, ...extra];
+  const resolved = extra
+    .map((entry) => {
+      if (!entry.id.startsWith("\u0000")) return entry;
+      const g = groups.get(entry.id.slice(1))!;
+      const club = clubGroupToRotationSponsor(g.name, g.items);
+      if (!club || seen.has(club.id)) return null;
+      seen.add(club.id);
+      return club;
+    })
+    .filter((s): s is Sponsor => s != null);
+  return resolved.length === 0 ? sponsors : [...sponsors, ...resolved];
 }

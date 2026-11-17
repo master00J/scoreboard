@@ -6,6 +6,13 @@ import {
   applyPlanImport,
   buildPlanImport,
   clubMediaPatchFromPlanRow,
+  clubMediaWrites,
+  cueStatusForPlanPhase,
+  formatClock,
+  parseClockText,
+  pendingClip,
+  pendingClipConflicts,
+  planCuesFromApi,
   planCapacity,
   planEffectiveSeconds,
   planRowsFromDatabase,
@@ -320,7 +327,7 @@ describe("sponsors en clubmedia uit de sheet", () => {
     ]);
     const { rows: table } = applyPlanImport([], built.rows);
     expect(table.map((r) => r.kind)).toEqual(["sponsor", "club", "club", "sponsor"]);
-    expect(table.every((r) => r.file === null)).toBe(true);
+    expect(table.every((r) => r.clips.length === 0)).toBe(true);
   });
 
   it("herkent sectiekoppen", () => {
@@ -350,7 +357,9 @@ describe("clubmedia in het plan", () => {
     const club = rows[1];
     expect(club.seconds).toEqual({ prematch: 120, firstHalf: 0, halftime: 60, secondHalf: 0, postmatch: 0 });
     expect(club.notes).toBe("drie keer zoveel voor de match");
-    expect(club.file).toEqual({ path: "C:/media/pop.mp4", type: "VIDEO", durationSec: 30 });
+    expect(club.clips.map((c) => [c.path, c.type, c.durationSec, c.phases])).toEqual([
+      ["C:/media/pop.mp4", "VIDEO", 30, null],
+    ]);
   });
 
   it("schrijft de zendtijd als budget op het media-item; alles op 0 haalt het uit de rotatie", () => {
@@ -369,7 +378,137 @@ describe("clubmedia in het plan", () => {
   it("ziet een nieuw of ander bestand als wijziging", () => {
     const [club] = planRowsFromDatabase([], [clubItem]);
     expect(planRowChanged({ ...club }, club)).toBe(false);
-    expect(planRowChanged({ ...club, file: { path: "C:/ander.mp4", type: "VIDEO", durationSec: 30 } }, club)).toBe(true);
+    const extra = pendingClip({ path: "C:/ander.mp4", type: "VIDEO", durationSec: 30 });
+    expect(planRowChanged({ ...club, clips: [...club.clips, extra] }, club)).toBe(true);
+    expect(planRowChanged({ ...club, clips: [] }, club)).toBe(true);
+  });
+});
+
+describe("clubmedia met meerdere bestanden in het plan", () => {
+  const budget = JSON.stringify({ prematch: 0, firstHalf: 120, secondHalf: 120, halftime: 0, postmatch: 0 });
+  const fys1 = media({ id: "fys1", title: "FYS 1.mp4", durationSec: 20, clubGroup: "Free Your Seat", clubPhaseBudgetJson: budget, createdAt: "2026-08-01T00:00:01.000Z" });
+  const fys2 = media({
+    id: "fys2",
+    title: "FYS 2.mp4",
+    durationSec: 30,
+    clubGroup: "Free Your Seat",
+    clubPhaseBudgetJson: budget,
+    sponsorPhaseTagsJson: JSON.stringify(["secondHalf", "extraTime"]),
+    createdAt: "2026-08-01T00:00:02.000Z",
+  });
+  const loose = media({ id: "pop", title: "Pop-up", clubPhaseBudgetJson: JSON.stringify({ halftime: 60 }) });
+
+  it("een groep wordt één clubrij met al zijn bestanden en hun fases", () => {
+    const rows = planRowsFromDatabase([], [fys1, loose, fys2]);
+    expect(rows.map((r) => [r.key, r.name, r.clips.map((c) => c.id)])).toEqual([
+      ["clubgroup:free your seat", "Free Your Seat", ["fys1", "fys2"]],
+      ["club:pop", "Pop-up", ["pop"]],
+    ]);
+    expect(rows[0].clips.map((c) => c.phases)).toEqual([null, ["secondHalf"]]);
+    expect(rows[0].seconds.firstHalf).toBe(120);
+  });
+
+  it("opslaan schrijft groepsnaam, budget en eigen fases op elk bestand, maakt nieuwe aan en geeft weggehaalde vrij", () => {
+    const [row] = planRowsFromDatabase([], [fys1, fys2]);
+    const added = pendingClip({ path: "C:/club/FYS 3.png", type: "IMAGE", durationSec: 10 });
+    const edited: PlanRow = {
+      ...row,
+      notes: "na de opstelling",
+      clips: [{ ...row.clips[0], phases: ["firstHalf"] }, { ...added, phases: ["secondHalf"] }],
+    };
+    const w = clubMediaWrites(edited, row);
+    expect(w.update).toEqual([
+      {
+        id: "fys1",
+        body: {
+          clubPhaseBudgetJson: JSON.stringify({ prematch: 0, firstHalf: 120, secondHalf: 120, halftime: 0, postmatch: 0 }),
+          notes: "na de opstelling",
+          clubGroup: "Free Your Seat",
+          active: true,
+          sponsorPhaseTagsJson: JSON.stringify(["firstHalf"]),
+        },
+      },
+    ]);
+    expect(w.create).toHaveLength(1);
+    expect(w.create[0]).toMatchObject({
+      path: "C:/club/FYS 3.png",
+      type: "IMAGE",
+      title: "FYS 3.png",
+      clubGroup: "Free Your Seat",
+      sponsorPhaseTagsJson: JSON.stringify(["secondHalf", "extraTime"]),
+    });
+    expect(w.release).toEqual([{ id: "fys2", body: { clubPhaseBudgetJson: null, clubGroup: null } }]);
+  });
+
+  it("de rotatie van het plan is dezelfde als die van het scherm na opslaan", () => {
+    const rows = planRowsFromDatabase([], [fys1, fys2, loose]);
+    const ctx = { sponsorsById: new Map<string, Sponsor>(), mediaById: new Map([fys1, fys2, loose].map((m) => [m.id, m])) };
+    const eff = planEffectiveSeconds(rows, ctx);
+    const merged = mergeSponsorsWithClubMedia([], [fys1, fys2, loose]);
+    for (const [phase, section, status] of [
+      ["firstHalf", "match", "FIRST_HALF"],
+      ["secondHalf", "match", "SECOND_HALF"],
+      ["halftime", "halftime", "HALF_TIME"],
+    ] as const) {
+      const engine = buildSponsorAppearancePlan(activeSponsorsForSection(merged, section, status), section, status);
+      expect(eff.totals[phase]).toBe(engine.reduce((sum, p) => sum + p.appearanceSecs.reduce((a, b) => a + b, 0), 0));
+    }
+    /** 1e helft: alleen FYS 1 (20s) → 6 × 20 = 120. 2e helft: 20 + 30 + 20 + 30 + 20 = 120. */
+    expect(eff.byRow.get("clubgroup:free your seat")!.firstHalf).toBe(120);
+  });
+});
+
+describe("vaste tijdstippen", () => {
+  const alpha = sponsor({
+    id: "a",
+    name: "Alpha",
+    matchFirstHalfSeconds: 60,
+    matchSeconds: 60,
+    media: [media({ id: "a1", sponsorId: "a", durationSec: 30 })],
+  });
+  const club = media({ id: "pop", title: "Pop-up", durationSec: 15, clubPhaseBudgetJson: JSON.stringify({ firstHalf: 30 }) });
+  const rows = planRowsFromDatabase([alpha], [club]);
+  const ctx = { sponsorsById: new Map([["a", alpha]]), mediaById: new Map([["pop", club]]) };
+  const cues = planCuesFromApi([
+    { id: "c1", mediaId: "a1", matchStatus: "FIRST_HALF", triggerSec: 660, endSec: null, enabled: true, media: { durationSec: 30 } },
+    { id: "c2", mediaId: "pop", matchStatus: "FIRST_HALF", triggerSec: 1200, endSec: 1260, enabled: true },
+    { id: "c3", mediaId: "loose", matchStatus: "SECOND_HALF", triggerSec: 3000, endSec: null, enabled: true, media: { durationSec: 45 } },
+    { id: "c4", mediaId: "a1", matchStatus: "EXTRA_TIME", triggerSec: 5500, endSec: null, enabled: true, media: { durationSec: 30 } },
+    { id: "c5", mediaId: "a1", matchStatus: "FIRST_HALF", triggerSec: 100, endSec: null, enabled: false, media: { durationSec: 30 } },
+  ]);
+
+  it("leest tijdscues als fase, start, einde en duur", () => {
+    expect(cues.map((c) => [c.id, c.phase, c.startSec, c.endSec, c.seconds])).toEqual([
+      ["c1", "firstHalf", 660, null, 30],
+      ["c2", "firstHalf", 1200, 1260, 60],
+      ["c3", "secondHalf", 3000, null, 45],
+      ["c5", "firstHalf", 100, null, 30],
+    ]);
+  });
+
+  it("een tijdstip van een sponsor zit in zijn minuten, van clubmedia of een los bestand komt het erbij", () => {
+    const eff = planEffectiveSeconds(rows, ctx, cues);
+    expect(eff.byRow.get("a")!.firstHalf).toBe(60);
+    expect(eff.cueByRow.get("a")!.firstHalf).toBe(30);
+    expect(eff.byRow.get("club:pop")!.firstHalf).toBe(30 + 60);
+    expect(eff.totals.firstHalf).toBe(60 + 90);
+    expect(eff.totals.secondHalf).toBe(45);
+  });
+
+  it("een tijdstip van een sponsor zonder minuten in die fase telt wel", () => {
+    const noMinutes = rows.map((r) => (r.key === "a" ? { ...r, seconds: { ...r.seconds, firstHalf: 0 } } : r));
+    const eff = planEffectiveSeconds(noMinutes, ctx, cues);
+    expect(eff.byRow.get("a")!.firstHalf).toBe(30);
+  });
+
+  it("leest klokwaarden", () => {
+    expect(parseClockText("11:00")).toBe(660);
+    expect(parseClockText("60")).toBe(3600);
+    expect(parseClockText("1,5")).toBe(90);
+    expect(parseClockText("12:75")).toBeNull();
+    expect(parseClockText("")).toBeNull();
+    expect(formatClock(3725)).toBe("62:05");
+    expect(cueStatusForPlanPhase("secondHalf")).toBe("SECOND_HALF");
   });
 });
 
@@ -460,8 +599,7 @@ describe("echte schermtijd", () => {
       seconds: { prematch: 0, firstHalf: 0, halftime: 40, secondHalf: 0, postmatch: 0 },
       notes: "",
       mediaCount: 1,
-      file: { path: "C:/pop.jpg", type: "IMAGE", durationSec: 10 },
-      clips: [],
+      clips: [pendingClip({ path: "C:/pop.jpg", type: "IMAGE", durationSec: 10 })],
     });
     const eff = planEffectiveSeconds(rows, ctx);
     expect(eff.byRow.get("a")!.firstHalf).toBe(180);
@@ -558,5 +696,22 @@ describe("fases per bestand", () => {
       ["second", ["secondHalf"]],
       ["third", null],
     ]);
+  });
+});
+
+describe("hetzelfde nieuwe bestand bij twee rijen", () => {
+  it("wordt gemeld, zodat opslaan het niet twee keer aanmaakt", () => {
+    const file = { path: "C:/club/Opstelling 2e helft.png", type: "IMAGE" as const, durationSec: 10 };
+    const a = { ...planRowsFromDatabase([], [media({ id: "op", title: "OPSTELLING", clubPhaseBudgetJson: JSON.stringify({ firstHalf: 60 }) })])[0] };
+    const b = { ...planRowsFromDatabase([], [media({ id: "pop", title: "Pop-up", clubPhaseBudgetJson: JSON.stringify({ halftime: 60 }) })])[0] };
+    const clip = pendingClip(file);
+    expect(pendingClipConflicts([{ ...a, clips: [...a.clips, clip] }, b])).toEqual([]);
+    expect(pendingClipConflicts([{ ...a, clips: [...a.clips, clip] }, { ...b, clips: [...b.clips, clip] }])).toEqual([
+      { file: "Opstelling 2e helft.png", rows: ["OPSTELLING", "Pop-up"] },
+    ]);
+    const sameFileOtherClip = pendingClip(file);
+    expect(
+      pendingClipConflicts([{ ...a, clips: [...a.clips, clip] }, { ...b, clips: [...b.clips, sameFileOtherClip] }]),
+    ).toHaveLength(1);
   });
 });

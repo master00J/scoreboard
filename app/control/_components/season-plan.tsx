@@ -8,11 +8,12 @@ import {
   ChevronDown,
   ChevronRight,
   ClipboardPaste,
-  FileVideo,
+  Clock,
   FolderOpen,
   Plus,
   Repeat,
   Save,
+  Trash2,
   Undo2,
   X,
 } from "lucide-react";
@@ -24,16 +25,19 @@ import { toast } from "@/components/ui/toast";
 import { useApi } from "@/lib/use-api";
 import { useDisplayStore } from "@/lib/store";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
-import type { Match, MediaItem, Sponsor } from "@/lib/types";
+import type { Match, MediaItem, ScheduledMediaCue, Sponsor } from "@/lib/types";
 import {
+  CUE_PLAN_PHASES,
   OUTSIDE_PHASES,
   PLAN_COLUMN_KINDS,
   PLAN_PHASES,
   applyPlanImport,
   buildPlanImport,
   changedClipTags,
-  clubMediaPatchFromPlanRow,
+  clubMediaWrites,
+  cueStatusForPlanPhase,
   emptySeconds,
+  formatClock,
   formatMinutes,
   guessColumnKinds,
   headerSignature,
@@ -41,17 +45,22 @@ import {
   mergeFreshClips,
   normalizeName,
   parseClipboardTable,
+  parseClockText,
   parseMinutes,
+  pendingClip,
+  pendingClipConflicts,
   planCapacity,
+  planCuesFromApi,
   planEffectiveSeconds,
   planRowChanged,
-  planRowKey,
   planRowsFromDatabase,
   sponsorPatchFromPlanRow,
   suggestSponsorForFile,
+  type CuePlanPhase,
   type OutsidePhase,
   type PlanClip,
   type PlanColumnKind,
+  type PlanCue,
   type PlanFile,
   type PlanPhase,
   type PlanRow,
@@ -117,7 +126,6 @@ function newRow(kind: PlanRowKind): PlanRow {
     seconds: emptySeconds(),
     notes: "",
     mediaCount: 0,
-    file: null,
     clips: [],
   };
 }
@@ -133,9 +141,7 @@ function togglePhase(phases: PlanPhase[] | null, phase: PlanPhase): PlanPhase[] 
 
 function clipDurationLabel(t: TFunction, clip: PlanClip): string {
   if (clip.type === "IMAGE") return t("seasonPlan.clipImage", { sec: clip.durationSec });
-  const m = Math.floor(clip.durationSec / 60);
-  const sec = clip.durationSec % 60;
-  return `${m}:${String(sec).padStart(2, "0")}`;
+  return formatClock(clip.durationSec);
 }
 
 /** Sponsors eerst, clubmedia daarna: zo staan ze in de tabel en zo loopt Enter van rij naar rij. */
@@ -143,9 +149,26 @@ function displayOrder(rows: PlanRow[]): PlanRow[] {
   return [...rows.filter((r) => r.kind === "sponsor"), ...rows.filter((r) => r.kind === "club")];
 }
 
+/** Kies bestanden en lees hun type en duur, voor bestanden die pas bij opslaan media-items worden. */
+async function pickPlanFiles(t: TFunction, title: string): Promise<PlanFile[]> {
+  const paths = await selectFilesViaDialog({
+    title,
+    filters: [{ name: t("media.filterMedia"), extensions: SPONSOR_MEDIA_EXTENSIONS }],
+    multiSelections: true,
+  });
+  const out: PlanFile[] = [];
+  for (const p of paths) {
+    const info = await readMediaFileInfo(p);
+    if (info) out.push(info);
+    else toast({ title: t("media.videoDurationUnread"), description: fileNameOf(p), variant: "error" });
+  }
+  return out;
+}
+
 /**
  * Seizoensplan: alle sponsors en clubmedia in één tabel met minuten per fase, zoals de club het in Excel bijhoudt.
  * Wijzigingen blijven in de tabel tot de operator opslaat. Elke cel toont ook wat de rotatie er echt van maakt.
+ * Tijdstippen (tijdscues) worden meteen ingepland; die hebben al een eigen lijst onder Automatisatie.
  */
 export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }) {
   const { t, i18n } = useTranslation();
@@ -154,6 +177,7 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
   const stateStamp = encodeURIComponent(useDisplayStore((s) => s.state?.updatedAt) ?? "");
   const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>(`/api/sponsors?_=${stateStamp}`);
   const { data: mediaRaw, reload: reloadMedia } = useApi<MediaItem[]>(`/api/media?_=${stateStamp}`);
+  const { data: cuesRaw, reload: reloadCues } = useApi<ScheduledMediaCue[]>(`/api/scheduled-media-cues?_=${stateStamp}`);
   const [rows, setRows] = useState<PlanRow[]>([]);
   const [originals, setOriginals] = useState<Map<string, PlanRow>>(new Map());
   const [cellText, setCellText] = useState<Record<string, string>>({});
@@ -161,13 +185,19 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
   const [pasteOpen, setPasteOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const [busyRow, setBusyRow] = useState<string | null>(null);
-  /** Sponsorrijen waarvan de bestanden met hun fases opengeklapt zijn. */
+  /** Rijen waarvan de bestanden met hun fases en tijdstippen opengeklapt zijn. */
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  /** Bestand waarvoor het formulier "op tijdstip" open staat. */
+  const [cueFormFor, setCueFormFor] = useState<string | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
+  /** Altijd de laatste rijen, voor handlers die na een dialoog verder lopen. */
+  const rowsRef = useRef<PlanRow[]>([]);
+  rowsRef.current = rows;
 
   function reload() {
     reloadSponsors();
     reloadMedia();
+    reloadCues();
   }
 
   const dirtyKeys = useMemo(
@@ -178,11 +208,11 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
 
   /**
    * Nieuwe gegevens uit de database. Zonder open wijzigingen volgt de tabel de database;
-   * met open wijzigingen blijven die staan en wordt alleen het aantal bestanden bijgewerkt.
+   * met open wijzigingen blijven die staan en worden alleen de bestanden bijgewerkt.
    */
   const originalsRef = useRef(originals);
   originalsRef.current = originals;
-  /** Na opslaan neemt de tabel de database over; deze rijen (clubmedia zonder bestand) blijven erbij staan. */
+  /** Na opslaan neemt de tabel de database over; deze rijen (nog niet opgeslagen) blijven erbij staan. */
   const replaceNextRef = useRef<PlanRow[] | null>(null);
   useEffect(() => {
     if (!sponsorsRaw || !mediaRaw) return;
@@ -211,7 +241,13 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     }),
     [sponsorsRaw, mediaRaw],
   );
-  const effective = useMemo(() => planEffectiveSeconds(rows, engineCtx), [rows, engineCtx]);
+  const planCues = useMemo(() => planCuesFromApi(cuesRaw ?? []), [cuesRaw]);
+  const cuesByMedia = useMemo(() => {
+    const map = new Map<string, PlanCue[]>();
+    for (const c of planCues) map.set(c.mediaId, [...(map.get(c.mediaId) ?? []), c]);
+    return map;
+  }, [planCues]);
+  const effective = useMemo(() => planEffectiveSeconds(rows, engineCtx, planCues), [rows, engineCtx, planCues]);
   const capacity = planCapacity(activeMatch);
 
   function updateRow(key: string, patch: (row: PlanRow) => PlanRow) {
@@ -233,6 +269,16 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     }
   }
 
+  function toggleExpanded(key: string, open?: boolean) {
+    setExpanded((cur) => {
+      const next = new Set(cur);
+      const shouldOpen = open ?? !next.has(key);
+      if (shouldOpen) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+  }
+
   function addRow(kind: PlanRowKind) {
     const row = newRow(kind);
     setRows((current) => [...current, row]);
@@ -248,26 +294,61 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     setCellText({});
   }
 
-  async function pickClubFile(row: PlanRow) {
+  /**
+   * Sponsor: bestanden meteen registreren (de sponsor bestaat al). Clubmedia: bestanden komen bij opslaan.
+   * De rij wordt op het moment van de klik opgezocht via haar sleutel, niet uit een oudere render, en de
+   * melding noemt de rij: zo is altijd zichtbaar waar de bestanden terechtkwamen.
+   */
+  async function addFilesToRow(rowKey: string) {
+    const row = rowsRef.current.find((r) => r.key === rowKey);
+    if (!row) return;
+    if (busyRow != null) return;
+    if (row.kind === "club") {
+      const picked = await pickPlanFiles(t, t("seasonPlan.chooseFileFor", { name: row.name || t("seasonPlan.groupClub") }));
+      const known = new Set(row.clips.map((c) => c.path.toLowerCase()));
+      const files = picked.filter((file) => !known.has(file.path.toLowerCase()));
+      if (files.length < picked.length) {
+        toast({ title: t("seasonPlan.clipAlreadyInRow", { count: picked.length - files.length }), variant: "warning" });
+      }
+      if (files.length === 0) return;
+      updateRow(row.key, (r) => {
+        const clips = [...r.clips, ...files.map(pendingClip)];
+        return {
+          ...r,
+          clips,
+          mediaCount: clips.length,
+          name: r.name.trim() ? r.name : fileNameOf(files[0].path).replace(/\.[a-z0-9]+$/i, ""),
+        };
+      });
+      toggleExpanded(row.key, true);
+      toast({ title: t("seasonPlan.filesAddedTo", { count: files.length, name: row.name || t("seasonPlan.groupClub") }) });
+      return;
+    }
+    if (!row.id) return;
+    const sponsorId = row.id;
     const paths = await selectFilesViaDialog({
-      title: t("seasonPlan.chooseFileFor", { name: row.name || t("seasonPlan.groupClub") }),
+      title: t("media.filesForSponsor", { name: row.name }),
       filters: [{ name: t("media.filterMedia"), extensions: SPONSOR_MEDIA_EXTENSIONS }],
-      multiSelections: false,
+      multiSelections: true,
     });
     if (paths.length === 0) return;
+    const known = new Set(row.clips.map((c) => c.path.toLowerCase()));
+    const fresh = paths.filter((p) => !known.has(p.toLowerCase()));
+    if (fresh.length < paths.length) {
+      toast({ title: t("seasonPlan.clipAlreadyInRow", { count: paths.length - fresh.length }), variant: "warning" });
+    }
+    if (fresh.length === 0) return;
     setBusyRow(row.key);
     try {
-      const info = await readMediaFileInfo(paths[0]);
-      if (!info) {
-        toast({ title: t("media.videoDurationUnread"), description: fileNameOf(paths[0]), variant: "error" });
-        return;
+      const result = await registerFiles(
+        fresh.map((p) => ({ path: p, sponsorId })),
+        sponsorsRaw ?? [],
+      );
+      if (result.linked > 0) {
+        toast({ title: t("seasonPlan.filesAddedTo", { count: result.linked, name: row.name }), variant: "success" });
       }
-      updateRow(row.key, (r) => ({
-        ...r,
-        file: info,
-        mediaCount: 1,
-        name: r.name.trim() ? r.name : fileNameOf(info.path).replace(/\.[a-z0-9]+$/i, ""),
-      }));
+      reportLinkResult(t, { ...result, linked: 0 });
+      reload();
     } finally {
       setBusyRow(null);
     }
@@ -290,28 +371,28 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
         names.add(n);
       }
     }
-    const waiting = changed.filter((r) => r.kind === "club" && !r.id && !r.file);
+    const conflicts = pendingClipConflicts(rows);
+    if (conflicts.length > 0) {
+      toast({
+        title: t("seasonPlan.clipConflict", { names: conflicts.map((c) => `${c.file} (${c.rows.join(", ")})`).join("; ") }),
+        variant: "error",
+      });
+      return;
+    }
+    /** Nieuwe clubmedia zonder bestand kunnen nog niet bestaan: die blijven in de tabel staan. */
+    const waiting = changed.filter((r) => r.kind === "club" && !r.id && r.clips.length === 0);
     const toSave = changed.filter((r) => !waiting.includes(r));
     setSaving(true);
-    /** Rijen die net aangemaakt zijn: bij een fout verderop houden ze hun id, zodat opnieuw opslaan geen dubbel maakt. */
-    const created = new Map<string, { id: string; key: string }>();
     try {
-      for (const row of toSave) {
-        const res = await saveRow(row);
-        if (!res.ok) {
+      for (let i = 0; i < toSave.length; i++) {
+        const row = toSave[i];
+        const ok = await saveRow(row);
+        if (!ok) {
           toast({ title: t("seasonPlan.saveFailed", { name: row.name.trim() }), variant: "error" });
-          setRows((current) =>
-            current.map((r) => {
-              const c = created.get(r.key);
-              return c ? { ...r, id: c.id, key: c.key } : r;
-            }),
-          );
+          /** Wat nog niet geprobeerd is, blijft staan; de rest volgt de database (zo ontstaat er geen dubbel). */
+          replaceNextRef.current = [...waiting, ...toSave.slice(i + 1).filter((r) => !r.id)];
           reload();
           return;
-        }
-        if (!row.id) {
-          const body = (await res.json()) as { id?: string };
-          if (body.id) created.set(row.key, { id: body.id, key: planRowKey(row.kind, body.id) });
         }
       }
       replaceNextRef.current = waiting;
@@ -326,55 +407,34 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     }
   }
 
-  async function saveRow(row: PlanRow): Promise<Response> {
+  async function saveRow(row: PlanRow): Promise<boolean> {
     const json = (method: string, url: string, body: unknown) =>
       fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const original = originals.get(row.key);
     if (row.kind === "sponsor") {
       const body = sponsorPatchFromPlanRow(row);
       const res = row.id ? await json("PATCH", `/api/sponsors/${row.id}`, body) : await json("POST", "/api/sponsors", body);
-      if (res.ok && row.id) {
-        for (const clip of changedClipTags(row, originals.get(row.key))) {
+      if (!res.ok) return false;
+      if (row.id) {
+        for (const clip of changedClipTags(row, original)) {
           const r = await json("PATCH", `/api/media/${clip.id}`, { sponsorPhaseTagsJson: clip.sponsorPhaseTagsJson });
-          if (!r.ok) return r;
+          if (!r.ok) return false;
         }
       }
-      return res;
+      return true;
     }
-    const body: Record<string, unknown> = clubMediaPatchFromPlanRow(row);
-    const original = originals.get(row.key);
-    if (row.file && (!row.id || row.file.path !== original?.file?.path)) {
-      body.path = row.file.path;
-      body.type = row.file.type;
-      body.durationSec = row.file.durationSec;
+    const writes = clubMediaWrites(row, original);
+    for (const u of writes.update) {
+      if (!(await json("PATCH", `/api/media/${u.id}`, u.body)).ok) return false;
     }
-    return row.id ? json("PATCH", `/api/media/${row.id}`, body) : json("POST", "/api/media", body);
+    for (const body of writes.create) {
+      if (!(await json("POST", "/api/media", body)).ok) return false;
+    }
+    for (const r of writes.release) {
+      if (!(await json("PATCH", `/api/media/${r.id}`, r.body)).ok) return false;
+    }
+    return true;
   }
-
-  async function addFilesToSponsor(row: PlanRow) {
-    if (!row.id) return;
-    const paths = await selectFilesViaDialog({
-      title: t("media.filesForSponsor", { name: row.name }),
-      filters: [{ name: t("media.filterMedia"), extensions: SPONSOR_MEDIA_EXTENSIONS }],
-      multiSelections: true,
-    });
-    if (paths.length === 0) return;
-    setBusyRow(row.key);
-    try {
-      const result = await registerFiles(
-        paths.map((p) => ({ path: p, sponsorId: row.id! })),
-        sponsorsRaw ?? [],
-      );
-      reportLinkResult(t, result);
-      reload();
-    } finally {
-      setBusyRow(null);
-    }
-  }
-
-  const notesCol = 1 + PLAN_PHASES.length + 1;
-  const sponsorRows = ordered.filter((r) => r.kind === "sponsor");
-  const clubRows = ordered.filter((r) => r.kind === "club");
-  const pendingClubRows = rows.filter((r) => r.kind === "club" && !r.file);
 
   function setClipPhase(row: PlanRow, clipId: string, phase: PlanPhase) {
     const clip = row.clips.find((c) => c.id === clipId);
@@ -387,52 +447,154 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     updateRow(row.key, (r) => ({ ...r, clips: r.clips.map((c) => (c.id === clipId ? { ...c, phases: next } : c)) }));
   }
 
+  function removeClubClip(row: PlanRow, clipId: string) {
+    updateRow(row.key, (r) => {
+      const clips = r.clips.filter((c) => c.id !== clipId);
+      return { ...r, clips, mediaCount: clips.length };
+    });
+  }
+
+  async function deleteClip(clip: PlanClip) {
+    if (!window.confirm(t("seasonPlan.clipDeleteConfirm", { name: clip.title }))) return;
+    const res = await fetch(`/api/media/${clip.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      toast({ title: t("seasonPlan.clipDeleteFailed", { name: clip.title }), variant: "error" });
+      return;
+    }
+    toast({ title: t("seasonPlan.clipDeleted", { name: clip.title }), variant: "success" });
+    reload();
+  }
+
+  async function deleteCue(cue: PlanCue) {
+    if (!window.confirm(t("media.cueDeleteConfirm"))) return;
+    const res = await fetch(`/api/scheduled-media-cues/${cue.id}`, { method: "DELETE" });
+    if (!res.ok) toast({ title: t("media.cuePatchFailed"), variant: "error" });
+    reloadCues();
+  }
+
+  const notesCol = 1 + PLAN_PHASES.length + 1;
+  const sponsorRows = ordered.filter((r) => r.kind === "sponsor");
+  const clubRows = ordered.filter((r) => r.kind === "club");
+
   function renderClips(row: PlanRow) {
     const original = originals.get(row.key);
     const before = new Map((original?.clips ?? []).map((c) => [c.id, c]));
     return (
       <tr className="border-b border-border/60 bg-muted/20">
         <td colSpan={9} className="px-3 py-2">
-          <p className="mb-2 text-xs text-muted-foreground">{t("seasonPlan.clipPhasesHint")}</p>
+          <p className="mb-2 text-xs text-muted-foreground">
+            {t("seasonPlan.clipPhasesHint")} {t("seasonPlan.cueHint")}
+          </p>
           {row.clips.length === 0 ? (
             <p className="text-xs text-muted-foreground">{t("seasonPlan.noFiles")}</p>
           ) : (
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {row.clips.map((clip) => {
-                const changed = before.has(clip.id) && JSON.stringify(before.get(clip.id)!.phases) !== JSON.stringify(clip.phases);
+                const o = before.get(clip.id);
+                const changed = clip.pending || (o != null && JSON.stringify(o.phases) !== JSON.stringify(clip.phases));
+                const clipCues = clip.pending ? [] : (cuesByMedia.get(clip.id) ?? []);
                 return (
-                  <div key={clip.id} className={`flex flex-wrap items-center gap-2 ${clip.active ? "" : "opacity-50"}`}>
-                    <span className="w-64 truncate text-sm" title={clip.title}>
-                      {clip.title}
-                    </span>
-                    <span className="w-16 text-xs tabular-nums text-muted-foreground">{clipDurationLabel(t, clip)}</span>
-                    <div className={`flex gap-1 rounded-md p-0.5 ${changed ? "ring-1 ring-primary/60" : ""}`}>
-                      {PLAN_PHASES.map((phase) => {
-                        const on = clip.phases == null || clip.phases.includes(phase);
-                        const noMinutes = row.seconds[phase] === 0;
-                        return (
+                  <div key={clip.id} className={clip.active ? "" : "opacity-50"}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`w-64 truncate text-sm ${clip.pending ? "text-primary" : ""}`} title={clip.path}>
+                        {clip.title}
+                      </span>
+                      <span className="w-16 text-xs tabular-nums text-muted-foreground">{clipDurationLabel(t, clip)}</span>
+                      <div className={`flex gap-1 rounded-md p-0.5 ${changed ? "ring-1 ring-primary/60" : ""}`}>
+                        {PLAN_PHASES.map((phase) => {
+                          const on = clip.phases == null || clip.phases.includes(phase);
+                          const noMinutes = row.seconds[phase] === 0;
+                          return (
+                            <button
+                              key={phase}
+                              type="button"
+                              onClick={() => setClipPhase(row, clip.id, phase)}
+                              title={noMinutes ? t("seasonPlan.clipPhaseNoMinutes") : phaseLabel(t, phase)}
+                              className={`h-7 min-w-11 rounded px-2 text-xs font-semibold transition-colors ${
+                                on
+                                  ? noMinutes
+                                    ? "bg-secondary text-muted-foreground"
+                                    : "bg-primary text-primary-foreground"
+                                  : "border border-border bg-background text-muted-foreground line-through"
+                              }`}
+                            >
+                              {t(`seasonPlan.phaseShort_${phase}`)}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {clip.phases == null ? (
+                        <span className="text-xs text-muted-foreground">{t("seasonPlan.clipAllPhases")}</span>
+                      ) : null}
+                      {!clip.active ? <span className="text-xs text-muted-foreground">{t("seasonPlan.clipInactive")}</span> : null}
+                      {clip.pending ? (
+                        <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-primary">
+                          {t("seasonPlan.newBadge")}
+                        </span>
+                      ) : null}
+                      {clipCues.map((cue) => (
+                        <span
+                          key={cue.id}
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs ${
+                            cue.enabled ? "border-sky-500/50 bg-sky-500/10" : "border-border opacity-60"
+                          }`}
+                        >
+                          <Clock className="size-3" />
+                          {t(`seasonPlan.phaseShort_${cue.phase}`)} {formatClock(cue.startSec)}
+                          {cue.endSec != null ? `–${formatClock(cue.endSec)}` : ""}
                           <button
-                            key={phase}
                             type="button"
-                            onClick={() => setClipPhase(row, clip.id, phase)}
-                            title={noMinutes ? t("seasonPlan.clipPhaseNoMinutes") : phaseLabel(t, phase)}
-                            className={`h-7 min-w-11 rounded px-2 text-xs font-semibold transition-colors ${
-                              on
-                                ? noMinutes
-                                  ? "bg-secondary text-muted-foreground"
-                                  : "bg-primary text-primary-foreground"
-                                : "border border-border bg-background text-muted-foreground line-through"
-                            }`}
+                            className="rounded-full p-0.5 hover:bg-accent"
+                            title={t("seasonPlan.cueDelete")}
+                            onClick={() => void deleteCue(cue)}
                           >
-                            {t(`seasonPlan.phaseShort_${phase}`)}
+                            <X className="size-3" />
                           </button>
-                        );
-                      })}
+                        </span>
+                      ))}
+                      {!clip.pending ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1 px-2 text-xs"
+                          onClick={() => setCueFormFor((cur) => (cur === clip.id ? null : clip.id))}
+                        >
+                          <Clock className="size-3.5" />
+                          {t("seasonPlan.cueAdd")}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">{t("seasonPlan.cueAfterSave")}</span>
+                      )}
+                      {clip.pending ? (
+                        <button
+                          type="button"
+                          className="rounded p-1 text-muted-foreground hover:bg-accent"
+                          title={t("seasonPlan.clipRemovePending")}
+                          onClick={() => removeClubClip(row, clip.id)}
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="ml-auto rounded p-1 text-muted-foreground hover:bg-destructive/15 hover:text-destructive"
+                          title={t("seasonPlan.clipDelete")}
+                          onClick={() => void deleteClip(clip)}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      )}
                     </div>
-                    {clip.phases == null ? (
-                      <span className="text-xs text-muted-foreground">{t("seasonPlan.clipAllPhases")}</span>
+                    {cueFormFor === clip.id ? (
+                      <CueForm
+                        mediaId={clip.id}
+                        halfDurationSec={activeMatch?.halfDurationSec || 45 * 60}
+                        onDone={() => {
+                          setCueFormFor(null);
+                          reloadCues();
+                        }}
+                      />
                     ) : null}
-                    {!clip.active ? <span className="text-xs text-muted-foreground">{t("seasonPlan.clipInactive")}</span> : null}
                   </div>
                 );
               })}
@@ -447,7 +609,7 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     return (
       <Fragment key={row.key}>
         {renderMainRow(row, rowIndex)}
-        {row.kind === "sponsor" && expanded.has(row.key) ? renderClips(row) : null}
+        {expanded.has(row.key) ? renderClips(row) : null}
       </Fragment>
     );
   }
@@ -456,8 +618,14 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     const original = originals.get(row.key);
     const isNew = !original;
     const eff = effective.byRow.get(row.key) ?? emptySeconds();
+    const cueSec = effective.cueByRow.get(row.key) ?? emptySeconds();
     const changedClass = (changed: boolean) => (changed && !isNew ? "border-primary/60 bg-primary/5" : "border-input");
-    const clipsChanged = row.kind === "sponsor" && changedClipTags(row, original).length > 0;
+    const filesChanged =
+      !isNew &&
+      (row.clips.length !== original!.clips.length ||
+        row.clips.some((c) => c.pending) ||
+        changedClipTags(row, original).length > 0);
+    const canAdd = row.kind === "club" || row.id != null;
     return (
       <tr className={`border-b border-border/60 ${row.active ? "" : "opacity-60"}`}>
         <td className="py-1 pr-2 align-top">
@@ -483,7 +651,7 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
                     updateRow(row.key, (r) => ({
                       ...r,
                       kind: r.kind === "sponsor" ? "club" : "sponsor",
-                      file: null,
+                      clips: [],
                       mediaCount: 0,
                     }))
                   }
@@ -517,7 +685,7 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
           const text = cellText[cellKey] ?? formatMinutes(planned, decimal);
           const invalid = text.trim() !== "" && parseMinutes(text) == null;
           const shown = eff[phase];
-          const hasMedia = row.kind === "club" ? row.file != null : row.mediaCount > 0;
+          const hasMedia = row.clips.length > 0 || row.mediaCount > 0;
           const notShown = row.active && hasMedia && planned > 0 && shown === 0;
           const differs = row.active && hasMedia && shown > 0 && Math.abs(shown - planned) >= EFFECTIVE_HINT_SEC;
           return (
@@ -547,59 +715,50 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
                 </div>
               ) : differs ? (
                 <div
-                  className="mt-0.5 text-right text-[10px] text-muted-foreground"
-                  title={t("seasonPlan.effectiveHint", { time: formatMinutes(shown, decimal) })}
+                  className="mt-0.5 flex items-center justify-end gap-0.5 text-right text-[10px] text-muted-foreground"
+                  title={
+                    cueSec[phase] > 0
+                      ? t("seasonPlan.effectiveHintCue", {
+                          time: formatMinutes(shown, decimal),
+                          cue: formatMinutes(cueSec[phase], decimal),
+                        })
+                      : t("seasonPlan.effectiveHint", { time: formatMinutes(shown, decimal) })
+                  }
                 >
-                  ≈ {formatMinutes(shown, decimal)}
+                  {cueSec[phase] > 0 ? <Clock className="size-2.5" /> : null}≈ {formatMinutes(shown, decimal)}
                 </div>
               ) : null}
             </td>
           );
         })}
         <td className="px-2 py-1 text-center align-top">
-          {row.kind === "sponsor" ? (
-            <div className="mt-1 flex items-center justify-center gap-1">
-              {row.mediaCount === 0 && row.active ? (
-                <span title={t("seasonPlan.noFiles")}>
-                  <AlertTriangle className="size-4 text-amber-500" />
-                </span>
-              ) : null}
+          <div className="mt-1 flex items-center justify-center gap-1">
+            {row.active && row.clips.length === 0 && row.mediaCount === 0 ? (
+              <span title={row.kind === "club" ? t("seasonPlan.clubNeedsFile") : t("seasonPlan.noFiles")}>
+                <AlertTriangle className="size-4 text-amber-500" />
+              </span>
+            ) : null}
+            <button
+              type="button"
+              className={`inline-flex items-center gap-0.5 rounded px-1 tabular-nums hover:bg-accent ${filesChanged ? "text-primary" : ""}`}
+              title={t("seasonPlan.showFiles")}
+              onClick={() => toggleExpanded(row.key)}
+            >
+              {expanded.has(row.key) ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+              {row.clips.length || row.mediaCount}
+            </button>
+            {isElectron ? (
               <button
                 type="button"
-                className={`inline-flex items-center gap-0.5 rounded px-1 tabular-nums hover:bg-accent ${clipsChanged ? "text-primary" : ""}`}
-                title={t("seasonPlan.showFiles")}
-                onClick={() =>
-                  setExpanded((cur) => {
-                    const next = new Set(cur);
-                    if (next.has(row.key)) next.delete(row.key);
-                    else next.add(row.key);
-                    return next;
-                  })
-                }
+                className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-40"
+                disabled={!canAdd || busyRow != null}
+                title={canAdd ? t("seasonPlan.addFilesForRow") : t("seasonPlan.saveFirst")}
+                onClick={() => void addFilesToRow(row.key)}
               >
-                {expanded.has(row.key) ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                {row.mediaCount}
+                <Plus className="size-3.5" />
               </button>
-              {isElectron ? (
-                <button
-                  type="button"
-                  className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-40"
-                  disabled={!row.id || busyRow != null}
-                  title={row.id ? t("seasonPlan.addFilesForRow") : t("seasonPlan.saveFirst")}
-                  onClick={() => void addFilesToSponsor(row)}
-                >
-                  <Plus className="size-3.5" />
-                </button>
-              ) : null}
-            </div>
-          ) : (
-            <ClubFileCell
-              file={row.file}
-              changed={!!original && row.file?.path !== original.file?.path}
-              busy={busyRow === row.key}
-              onPick={() => void pickClubFile(row)}
-            />
-          )}
+            ) : null}
+          </div>
         </td>
         <td className="py-1 pl-2 align-top">
           <Input
@@ -741,15 +900,18 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
           onOpenChange={setFilesOpen}
           sponsors={sponsorsRaw ?? []}
           media={mediaRaw ?? []}
-          pendingClubRows={pendingClubRows}
-          onClubFiles={(assigned) =>
+          clubRows={clubRows}
+          onClubFiles={(assigned) => {
             setRows((current) =>
               current.map((r) => {
-                const file = assigned.get(r.key);
-                return file ? { ...r, file, mediaCount: 1 } : r;
+                const files = assigned.get(r.key);
+                if (!files) return r;
+                const clips = [...r.clips, ...files.map(pendingClip)];
+                return { ...r, clips, mediaCount: clips.length };
               }),
-            )
-          }
+            );
+            for (const key of assigned.keys()) toggleExpanded(key, true);
+          }}
           onDone={reload}
         />
       ) : null}
@@ -778,46 +940,75 @@ function GroupHeader({ title, hint }: { title: string; hint?: string }) {
   );
 }
 
-function ClubFileCell({
-  file,
-  changed,
-  busy,
-  onPick,
-}: {
-  file: PlanFile | null;
-  changed: boolean;
-  busy: boolean;
-  onPick: () => void;
-}) {
+/**
+ * Eén bestand op een vast tijdstip: een tijdscue zoals onder Automatisatie, meteen ingepland.
+ * Helften volgen de wedstrijdklok (2e helft vanaf 45:00); voor en na de match de tijd sinds de start van die fase.
+ */
+function CueForm({ mediaId, halfDurationSec, onDone }: { mediaId: string; halfDurationSec: number; onDone: () => void }) {
   const { t } = useTranslation();
-  if (!file) {
-    return isElectron ? (
-      <Button size="sm" variant="outline" className="mt-0.5 gap-1 border-amber-500/50" onClick={onPick} disabled={busy}>
-        <FileVideo className="size-3.5" />
-        {t("seasonPlan.chooseFile")}
-      </Button>
-    ) : (
-      <span title={t("seasonPlan.clubNeedsFile")}>
-        <AlertTriangle className="mx-auto mt-2 size-4 text-amber-500" />
-      </span>
-    );
+  const [phase, setPhase] = useState<CuePlanPhase>("firstHalf");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [busy, setBusy] = useState(false);
+  const placeholder = phase === "secondHalf" ? formatClock(halfDurationSec + 15 * 60) : phase === "firstHalf" ? "11:00" : "5:00";
+
+  async function add() {
+    const startSec = parseClockText(start);
+    const endSec = end.trim() ? parseClockText(end) : null;
+    if (startSec == null || (end.trim() && (endSec == null || endSec <= startSec))) {
+      toast({ title: t("media.cueInvalidInput"), variant: "error" });
+      return;
+    }
+    if (phase === "secondHalf" && startSec < halfDurationSec) {
+      toast({ title: t("seasonPlan.cueSecondHalfClock", { start: formatClock(halfDurationSec) }), variant: "warning" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/scheduled-media-cues", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mediaId, matchStatus: cueStatusForPlanPhase(phase), triggerSec: startSec, endSec }),
+      });
+      if (!res.ok) {
+        toast({ title: t("media.cueSaveFailed"), variant: "error" });
+        return;
+      }
+      toast({ title: t("media.cueAdded", { time: formatClock(startSec) }), variant: "success" });
+      onDone();
+    } finally {
+      setBusy(false);
+    }
   }
+
   return (
-    <div className="mt-1 flex max-w-48 items-center justify-center gap-1">
-      <span className={`truncate text-xs ${changed ? "text-primary" : "text-muted-foreground"}`} title={file.path}>
-        {fileNameOf(file.path)}
-      </span>
-      {isElectron ? (
-        <button
-          type="button"
-          className="rounded p-1 text-muted-foreground hover:bg-accent disabled:opacity-40"
-          title={t("seasonPlan.changeFile")}
-          disabled={busy}
-          onClick={onPick}
-        >
-          <Repeat className="size-3.5" />
-        </button>
-      ) : null}
+    <div className="ml-4 mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-sky-500/30 bg-sky-500/5 p-2">
+      <label className="text-xs">
+        <span className="mb-1 block text-muted-foreground">{t("media.cuePhase")}</span>
+        <Select value={phase} onChange={(e) => setPhase(e.target.value as CuePlanPhase)} className="h-8 w-40 text-xs">
+          {CUE_PLAN_PHASES.map((p) => (
+            <option key={p} value={p}>
+              {phaseLabel(t, p)}
+            </option>
+          ))}
+        </Select>
+      </label>
+      <label className="text-xs">
+        <span className="mb-1 block text-muted-foreground">{t("media.cueStart")}</span>
+        <Input value={start} onChange={(e) => setStart(e.target.value)} placeholder={placeholder} className="h-8 w-24" />
+      </label>
+      <label className="text-xs">
+        <span className="mb-1 block text-muted-foreground">{t("seasonPlan.cueEndOptional")}</span>
+        <Input value={end} onChange={(e) => setEnd(e.target.value)} placeholder="–" className="h-8 w-24" />
+      </label>
+      <Button size="sm" onClick={() => void add()} disabled={busy}>
+        {t("media.cueAddOnce")}
+      </Button>
+      <p className="w-full text-[11px] text-muted-foreground">
+        {phase === "firstHalf" || phase === "secondHalf"
+          ? t("seasonPlan.cueClockHint", { half: formatClock(halfDurationSec) })
+          : t("seasonPlan.cueWallHint")}
+      </p>
     </div>
   );
 }
@@ -1053,7 +1244,7 @@ function PasteDialog({
   );
 }
 
-/** Keuze per bestand: een opgeslagen sponsor (`sponsor:<id>`) of een clubmedia-rij die nog een bestand nodig heeft (`club:<key>`). */
+/** Keuze per bestand: een opgeslagen sponsor (`sponsor:<id>`) of een clubmedia-rij (`club:<sleutel>`). */
 type FileChoice = { path: string; target: string; suggested: boolean };
 
 function LinkFilesDialog({
@@ -1061,7 +1252,7 @@ function LinkFilesDialog({
   onOpenChange,
   sponsors,
   media,
-  pendingClubRows,
+  clubRows,
   onClubFiles,
   onDone,
 }: {
@@ -1069,8 +1260,8 @@ function LinkFilesDialog({
   onOpenChange: (open: boolean) => void;
   sponsors: Sponsor[];
   media: MediaItem[];
-  pendingClubRows: PlanRow[];
-  onClubFiles: (assigned: Map<string, PlanFile>) => void;
+  clubRows: PlanRow[];
+  onClubFiles: (assigned: Map<string, PlanFile[]>) => void;
   onDone: () => void;
 }) {
   const { t } = useTranslation();
@@ -1088,8 +1279,8 @@ function LinkFilesDialog({
 
   const sortedSponsors = useMemo(() => [...sponsors].sort((a, b) => a.name.localeCompare(b.name)), [sponsors]);
   const clubTargets = useMemo(
-    () => pendingClubRows.filter((r) => r.name.trim()).sort((a, b) => a.name.localeCompare(b.name)),
-    [pendingClubRows],
+    () => clubRows.filter((r) => r.name.trim()).sort((a, b) => a.name.localeCompare(b.name)),
+    [clubRows],
   );
 
   async function pick() {
@@ -1099,33 +1290,25 @@ function LinkFilesDialog({
       multiSelections: true,
     });
     if (paths.length === 0) return;
-    const known = new Set(media.map((m) => m.path.toLowerCase()));
+    const known = new Set([
+      ...media.map((m) => m.path.toLowerCase()),
+      ...clubRows.flatMap((r) => r.clips.map((c) => c.path.toLowerCase())),
+    ]);
     const fresh = paths.filter((p) => !known.has(p.toLowerCase()));
     setAlreadyLinked(paths.length - fresh.length);
     const candidates = [
       ...sponsors.map((s) => ({ id: `sponsor:${s.id}`, name: s.name })),
       ...clubTargets.map((r) => ({ id: `club:${r.key}`, name: r.name })),
     ];
-    const used = new Set<string>();
     setChoices(
       fresh.map((p) => {
-        let id = suggestSponsorForFile(fileNameOf(p), candidates);
-        /** Een clubmedia-rij heeft één bestand: een tweede voorstel voor dezelfde rij laten we open. */
-        if (id?.startsWith("club:")) {
-          if (used.has(id)) id = null;
-          else used.add(id);
-        }
+        const id = suggestSponsorForFile(fileNameOf(p), candidates);
         return { path: p, target: id ?? "", suggested: id != null };
       }),
     );
   }
 
   const toLink = choices.filter((c) => c.target);
-  const clubTargetCounts = new Map<string, number>();
-  for (const c of toLink) {
-    if (c.target.startsWith("club:")) clubTargetCounts.set(c.target, (clubTargetCounts.get(c.target) ?? 0) + 1);
-  }
-  const clubConflict = [...clubTargetCounts.values()].some((n) => n > 1);
 
   async function link() {
     setProgress(0);
@@ -1133,18 +1316,24 @@ function LinkFilesDialog({
       .filter((c) => c.target.startsWith("sponsor:"))
       .map((c) => ({ path: c.path, sponsorId: c.target.slice("sponsor:".length) }));
     const result = await registerFiles(sponsorItems, sponsors, setProgress);
-    const assigned = new Map<string, PlanFile>();
+    const assigned = new Map<string, PlanFile[]>();
     let done = sponsorItems.length;
+    let clubCount = 0;
     for (const c of toLink.filter((x) => x.target.startsWith("club:"))) {
       const info = await readMediaFileInfo(c.path);
-      if (info) assigned.set(c.target.slice("club:".length), info);
-      else result.failed.push(fileNameOf(c.path));
+      const key = c.target.slice("club:".length);
+      if (info) {
+        assigned.set(key, [...(assigned.get(key) ?? []), info]);
+        clubCount += 1;
+      } else {
+        result.failed.push(fileNameOf(c.path));
+      }
       done += 1;
       setProgress(done);
     }
     if (assigned.size > 0) {
       onClubFiles(assigned);
-      toast({ title: t("seasonPlan.clubFilesAssigned", { count: assigned.size }) });
+      toast({ title: t("seasonPlan.clubFilesAssigned", { count: clubCount }) });
     }
     reportLinkResult(t, result);
     onDone();
@@ -1187,7 +1376,7 @@ function LinkFilesDialog({
                               cur.map((x, j) => (j === i ? { ...x, target: e.target.value, suggested: false } : x)),
                             )
                           }
-                          className={`h-8 text-xs ${(clubTargetCounts.get(c.target) ?? 0) > 1 ? "border-destructive" : ""}`}
+                          className="h-8 text-xs"
                           disabled={progress != null}
                         >
                           <option value="">{t("seasonPlan.filesNone")}</option>
@@ -1201,7 +1390,7 @@ function LinkFilesDialog({
                             </optgroup>
                           ) : null}
                           {clubTargets.length > 0 ? (
-                            <optgroup label={t("seasonPlan.filesGroupClub")}>
+                            <optgroup label={t("seasonPlan.groupClub")}>
                               {clubTargets.map((r) => (
                                 <option key={r.key} value={`club:${r.key}`}>
                                   {r.name}
@@ -1220,13 +1409,12 @@ function LinkFilesDialog({
               </table>
             </div>
           ) : null}
-          {clubConflict ? <p className="text-sm text-destructive">{t("seasonPlan.filesClubConflict")}</p> : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={progress != null}>
             {t("common.cancel")}
           </Button>
-          <Button onClick={() => void link()} disabled={toLink.length === 0 || progress != null || clubConflict}>
+          <Button onClick={() => void link()} disabled={toLink.length === 0 || progress != null}>
             {progress != null
               ? t("seasonPlan.filesLinking", { done: progress, count: toLink.length })
               : t("seasonPlan.filesLink", { count: toLink.length })}

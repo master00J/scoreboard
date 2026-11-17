@@ -116,3 +116,49 @@ describe("mergeSponsorsWithClubMedia", () => {
     expect(isClubRotationSponsorId(merged[1]!.id)).toBe(true);
   });
 });
+
+describe("clubmedia met meerdere bestanden", () => {
+  const budget = JSON.stringify({ prematch: 0, firstHalf: 120, secondHalf: 120, halftime: 0, postmatch: 0 });
+  const a = clubClip({ id: "a", title: "Free Your Seat 1", clubGroup: "Free Your Seat", clubPhaseBudgetJson: budget, createdAt: "2026-11-11T00:00:01.000Z" });
+  const b = clubClip({
+    id: "b",
+    title: "Free Your Seat 2",
+    clubGroup: "free your seat",
+    clubPhaseBudgetJson: budget,
+    sponsorPhaseTagsJson: JSON.stringify(["secondHalf", "extraTime"]),
+    createdAt: "2026-11-11T00:00:02.000Z",
+  });
+  const off = clubClip({ id: "off", clubGroup: "Free Your Seat", clubPhaseBudgetJson: budget, active: false });
+  const single = clubClip({ id: "lawijt" });
+
+  it("maakt van een groep één deelnemer met al zijn actieve bestanden", () => {
+    const merged = mergeSponsorsWithClubMedia([], [a, single, b, off]);
+    expect(merged.map((s) => s.id)).toEqual(["club:group:free your seat", clubRotationSponsorId("lawijt")]);
+    const group = merged[0];
+    expect(group.rotationKind).toBe("club");
+    expect(group.name).toBe("Free Your Seat");
+    expect(group.matchFirstHalfSeconds).toBe(120);
+    expect(group.media!.map((m) => m.id)).toEqual(["a", "b"]);
+    expect(isClubRotationSponsorId(group.id)).toBe(true);
+  });
+
+  it("een bestand met eigen fases speelt alleen daar, de andere in alle fases met minuten", () => {
+    const [group] = mergeSponsorsWithClubMedia([], [a, b]);
+    expect(parseSponsorMediaPhaseTags(group.media![0].sponsorPhaseTagsJson)).toEqual([
+      "firstHalf",
+      "secondHalf",
+      "extraTime",
+    ]);
+    expect(parseSponsorMediaPhaseTags(group.media![1].sponsorPhaseTagsJson)).toEqual(["secondHalf", "extraTime"]);
+  });
+
+  it("losse clubmedia zonder groep blijven precies zoals voorheen", () => {
+    expect(mergeSponsorsWithClubMedia([], [single])).toEqual([clubMediaToRotationSponsor(single)]);
+  });
+
+  it("een groep zonder actieve bestanden of zonder minuten doet niet mee", () => {
+    expect(mergeSponsorsWithClubMedia([], [off])).toEqual([]);
+    const noBudget = clubClip({ id: "x", clubGroup: "Leeg", clubPhaseBudgetJson: null });
+    expect(mergeSponsorsWithClubMedia([], [noBudget])).toEqual([]);
+  });
+});

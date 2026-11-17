@@ -10,7 +10,8 @@
 
 import type { Match, MediaItem, Sponsor, SponsorSection } from "./types";
 import {
-  clubMediaToRotationSponsor,
+  clubGroupKey,
+  clubGroupToRotationSponsor,
   clubPhaseBudgetTotalSeconds,
   parseClubPhaseBudgetJson,
   serializeClubPhaseBudgetJson,
@@ -30,26 +31,47 @@ export type PlanPhase = (typeof PLAN_PHASES)[number];
 export const OUTSIDE_PHASES = ["prematch", "halftime", "postmatch"] as const;
 export type OutsidePhase = (typeof OUTSIDE_PHASES)[number];
 
-/** Sponsor (eigen rij met bestanden) of clubmedia (één bestand van de club, zonder sponsor). */
+/** Sponsor of clubmedia. Beide kunnen meerdere bestanden hebben; clubmedia worden nooit een sponsor. */
 export type PlanRowKind = "sponsor" | "club";
 
-/** Het ene bestand van een clubmedia-rij: al in de database, of net gekozen en nog niet opgeslagen. */
+/** Een gekozen bestand dat nog geen media-item is. */
 export type PlanFile = { path: string; type: "VIDEO" | "IMAGE"; durationSec: number };
 
 /**
- * Eén bestand van een sponsor, met de fases waarin het mag spelen. `phases: null` = in alle fases,
+ * Eén bestand van een rij, met de fases waarin het mag spelen. `phases: null` = in alle fases,
  * zoals een bestand zonder fase-tags. De rotatie slaat een bestand over in een fase die niet in de lijst staat.
  */
 export type PlanClip = {
+  /** Media-id, of `pending-…` voor een gekozen bestand dat bij opslaan een media-item wordt. */
   id: string;
   title: string;
+  path: string;
   type: "VIDEO" | "IMAGE";
   durationSec: number;
   active: boolean;
   phases: PlanPhase[] | null;
   /** De fase-tags zoals ze in de database staan; nodig om "Verlenging" te bewaren. */
   originalTagsJson: string | null;
+  pending: boolean;
 };
+
+let pendingCounter = 0;
+
+/** Een net gekozen bestand als bestand van een rij; het wordt pas bij opslaan aangemaakt. */
+export function pendingClip(file: PlanFile): PlanClip {
+  pendingCounter += 1;
+  return {
+    id: `pending-${Date.now()}-${pendingCounter}`,
+    title: file.path.replace(/^.*[/\\]/, ""),
+    path: file.path,
+    type: file.type,
+    durationSec: file.durationSec,
+    active: true,
+    phases: null,
+    originalTagsJson: null,
+    pending: true,
+  };
+}
 
 /** Eén rij van het plan zoals de tabel hem toont en bewerkt. Tijden in seconden. */
 export type PlanRow = {
@@ -63,9 +85,10 @@ export type PlanRow = {
   seconds: Record<PlanPhase, number>;
   notes: string;
   mediaCount: number;
-  /** Alleen clubmedia: het bestand. Een nieuwe clubrij zonder bestand kan nog niet opgeslagen worden. */
-  file: PlanFile | null;
-  /** Alleen sponsors: hun bestanden met de fases waarin ze spelen. Clubmedia volgen hun minuten per fase. */
+  /**
+   * De bestanden met de fases waarin ze spelen. Bij een sponsor komen nieuwe bestanden meteen via de API;
+   * bij clubmedia staan nieuwe bestanden hier als `pending` tot de tabel opgeslagen wordt.
+   */
   clips: PlanClip[];
 };
 
@@ -99,16 +122,29 @@ function sameClipPhases(a: PlanPhase[] | null, b: PlanPhase[] | null): boolean {
   return a.length === b.length && a.every((p) => b.includes(p));
 }
 
-function clipFromMedia(m: MediaItem): PlanClip {
+/** `ignoreTags`: losse clubmedia zonder groep spelen in alle fases met minuten; hun tags telt de rotatie niet. */
+function clipFromMedia(m: MediaItem, ignoreTags = false): PlanClip {
   return {
     id: m.id,
     title: m.title,
+    path: m.path,
     type: m.type === "VIDEO" ? "VIDEO" : "IMAGE",
     durationSec: m.durationSec,
     active: m.active,
-    phases: planPhasesFromTags(m.sponsorPhaseTagsJson),
-    originalTagsJson: m.sponsorPhaseTagsJson ?? null,
+    phases: ignoreTags ? null : planPhasesFromTags(m.sponsorPhaseTagsJson),
+    originalTagsJson: ignoreTags ? null : (m.sponsorPhaseTagsJson ?? null),
+    pending: false,
   };
+}
+
+/** Bestanden toegevoegd, weggehaald of in andere fases? */
+export function clipsChanged(row: PlanRow, original: PlanRow | undefined): boolean {
+  const before = original?.clips ?? [];
+  if (row.clips.length !== before.length) return true;
+  if (row.clips.some((c) => c.pending)) return true;
+  const ids = new Set(before.map((c) => c.id));
+  if (row.clips.some((c) => !ids.has(c.id))) return true;
+  return changedClipTags(row, original).length > 0;
 }
 
 /** Bestanden van een sponsorrij waarvan de fases veranderd zijn (voor PATCH /api/media/:id). */
@@ -128,14 +164,20 @@ export function changedClipTags(row: PlanRow, original: PlanRow | undefined): { 
  */
 export function mergeFreshClips(current: PlanClip[], fresh: PlanClip[]): PlanClip[] {
   const edited = new Map(current.map((c) => [c.id, c]));
-  return fresh.map((c) => {
+  const kept = fresh.map((c) => {
     const e = edited.get(c.id);
     return e ? { ...c, phases: e.phases } : c;
   });
+  return [...kept, ...current.filter((c) => c.pending)];
 }
 
 export function planRowKey(kind: PlanRowKind, id: string): string {
   return kind === "club" ? `club:${id}` : id;
+}
+
+/** Sleutel van een clubrij met een groepsnaam: blijft gelijk zolang de naam gelijk blijft. */
+export function clubGroupRowKey(groupName: string): string {
+  return `clubgroup:${clubGroupKey(groupName)}`;
 }
 
 export function emptySeconds(): Record<PlanPhase, number> {
@@ -162,8 +204,7 @@ export function planRowFromSponsor(s: Sponsor): PlanRow {
     },
     notes: s.notes ?? "",
     mediaCount: (s.media ?? []).filter((m) => m.active !== false).length,
-    file: null,
-    clips: (s.media ?? []).filter((m) => !m.hideFromLibrary).map(clipFromMedia),
+    clips: (s.media ?? []).filter((m) => !m.hideFromLibrary).map((m) => clipFromMedia(m)),
   };
 }
 
@@ -176,14 +217,20 @@ export function isPlanClubMedia(m: MediaItem): boolean {
   );
 }
 
-export function planRowFromClubMedia(m: MediaItem): PlanRow {
-  const b = parseClubPhaseBudgetJson(m.clubPhaseBudgetJson);
+/**
+ * Clubmedia als planrij: een groep (zelfde `clubGroup`) met al zijn bestanden, of één los bestand van vóór
+ * het seizoensplan. Minuten en notitie komen van het eerste bestand, zoals in de rotatie.
+ */
+export function planRowFromClubItems(items: MediaItem[], groupName: string | null): PlanRow {
+  const sorted = [...items].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+  const first = sorted[0];
+  const b = parseClubPhaseBudgetJson(first.clubPhaseBudgetJson);
   return {
-    key: planRowKey("club", m.id),
+    key: groupName ? clubGroupRowKey(groupName) : planRowKey("club", first.id),
     kind: "club",
-    id: m.id,
-    name: m.title,
-    active: m.active,
+    id: first.id,
+    name: groupName ?? first.title,
+    active: sorted.some((m) => m.active),
     seconds: {
       prematch: b.prematch,
       firstHalf: b.firstHalf,
@@ -191,32 +238,94 @@ export function planRowFromClubMedia(m: MediaItem): PlanRow {
       secondHalf: b.secondHalf,
       postmatch: b.postmatch,
     },
-    notes: m.notes ?? "",
-    mediaCount: 1,
-    file: { path: m.path, type: m.type === "VIDEO" ? "VIDEO" : "IMAGE", durationSec: m.durationSec },
-    clips: [],
+    notes: first.notes ?? "",
+    mediaCount: sorted.length,
+    clips: sorted.map((m) => clipFromMedia(m, groupName == null)),
   };
 }
 
-/** Alle rijen uit de database: eerst de sponsors, dan de clubmedia, elk in hun eigen volgorde. */
-export function planRowsFromDatabase(sponsors: Sponsor[], media: MediaItem[]): PlanRow[] {
-  return [...sponsors.map(planRowFromSponsor), ...media.filter(isPlanClubMedia).map(planRowFromClubMedia)];
+/** @deprecated Gebruik planRowFromClubItems; blijft voor één los bestand. */
+export function planRowFromClubMedia(m: MediaItem): PlanRow {
+  return planRowFromClubItems([m], m.clubGroup?.trim() || null);
 }
 
-/** De velden die een clubmedia-rij op het media-item schrijft. Alles op 0 haalt ze uit de rotatie. */
-export function clubMediaPatchFromPlanRow(row: PlanRow): Record<string, unknown> {
+/** Alle rijen uit de database: eerst de sponsors, dan de clubmedia (groepen in de volgorde van hun eerste bestand). */
+export function planRowsFromDatabase(sponsors: Sponsor[], media: MediaItem[]): PlanRow[] {
+  const clubRows: PlanRow[] = [];
+  const groups = new Map<string, { name: string; items: MediaItem[]; index: number }>();
+  for (const m of media.filter(isPlanClubMedia)) {
+    const group = m.clubGroup?.trim();
+    if (!group) {
+      clubRows.push(planRowFromClubItems([m], null));
+      continue;
+    }
+    const key = clubGroupKey(group);
+    const g = groups.get(key);
+    if (g) g.items.push(m);
+    else {
+      groups.set(key, { name: group, items: [m], index: clubRows.length });
+      clubRows.push(null as unknown as PlanRow);
+    }
+  }
+  for (const g of groups.values()) clubRows[g.index] = planRowFromClubItems(g.items, g.name);
+  return [...sponsors.map(planRowFromSponsor), ...clubRows];
+}
+
+/** De minuten van een clubrij als budget op elk van zijn bestanden. Alles op 0 = null: uit de rotatie. */
+export function clubBudgetJsonFromPlanRow(row: PlanRow): string | null {
   const s = row.seconds;
+  return serializeClubPhaseBudgetJson({
+    prematch: s.prematch,
+    firstHalf: s.firstHalf,
+    halftime: s.halftime,
+    secondHalf: s.secondHalf,
+    postmatch: s.postmatch,
+  });
+}
+
+/** @deprecated Een clubrij schrijft nu via clubMediaWrites; dit geeft de velden die op elk bestand gelijk zijn. */
+export function clubMediaPatchFromPlanRow(row: PlanRow): Record<string, unknown> {
   return {
-    title: row.name.trim(),
     active: row.active,
-    clubPhaseBudgetJson: serializeClubPhaseBudgetJson({
-      prematch: s.prematch,
-      firstHalf: s.firstHalf,
-      halftime: s.halftime,
-      secondHalf: s.secondHalf,
-      postmatch: s.postmatch,
-    }),
+    clubPhaseBudgetJson: clubBudgetJsonFromPlanRow(row),
     notes: row.notes.trim() || null,
+  };
+}
+
+export type ClubMediaWrites = {
+  /** Bestaande bestanden: zelfde budget, notitie en groepsnaam, eigen fases. */
+  update: { id: string; body: Record<string, unknown> }[];
+  /** Gekozen bestanden die een media-item worden. */
+  create: Record<string, unknown>[];
+  /** Weggehaalde bestanden: terug naar de bibliotheek, uit de rotatie. */
+  release: { id: string; body: Record<string, unknown> }[];
+};
+
+/**
+ * Wat opslaan van een clubrij in de database schrijft. Elk bestand krijgt de groepsnaam, zodat de rotatie de
+ * rij als één ingang ziet (`clubGroupToRotationSponsor`), en zijn eigen fases als fase-tags.
+ */
+export function clubMediaWrites(row: PlanRow, original: PlanRow | undefined): ClubMediaWrites {
+  const budget = clubBudgetJsonFromPlanRow(row);
+  const group = budget ? row.name.trim() : null;
+  const shared = { clubPhaseBudgetJson: budget, notes: row.notes.trim() || null, clubGroup: group, active: row.active };
+  const tags = (c: PlanClip) => (budget ? tagsJsonFromPlanPhases(c.phases, c.originalTagsJson) : c.originalTagsJson);
+  const kept = new Set(row.clips.map((c) => c.id));
+  return {
+    update: row.clips.filter((c) => !c.pending).map((c) => ({ id: c.id, body: { ...shared, sponsorPhaseTagsJson: tags(c) } })),
+    create: row.clips
+      .filter((c) => c.pending)
+      .map((c) => ({
+        ...shared,
+        type: c.type,
+        path: c.path,
+        title: c.title,
+        durationSec: Math.round(c.durationSec),
+        sponsorPhaseTagsJson: tags(c),
+      })),
+    release: (original?.clips ?? [])
+      .filter((c) => !kept.has(c.id))
+      .map((c) => ({ id: c.id, body: { clubPhaseBudgetJson: null, clubGroup: null } })),
   };
 }
 
@@ -240,11 +349,10 @@ export function sponsorPatchFromPlanRow(row: PlanRow): Record<string, unknown> {
 export function planRowChanged(row: PlanRow, original: PlanRow | undefined): boolean {
   if (!original) return true;
   if (row.kind !== original.kind) return true;
-  if ((row.file?.path ?? null) !== (original.file?.path ?? null)) return true;
   if (row.name.trim() !== original.name.trim()) return true;
   if (row.active !== original.active) return true;
   if (row.notes.trim() !== original.notes.trim()) return true;
-  if (changedClipTags(row, original).length > 0) return true;
+  if (clipsChanged(row, original)) return true;
   return PLAN_PHASES.some((p) => row.seconds[p] !== original.seconds[p]);
 }
 
@@ -536,7 +644,6 @@ export function applyPlanImport(
         seconds: { ...emptySeconds(), ...imp.seconds },
         notes: imp.notes ?? "",
         mediaCount: 0,
-        file: null,
         clips: [],
       });
       byName.set(key, rows.length - 1);
@@ -703,29 +810,104 @@ export function rotationParticipantFromRow(
       postmatchSeconds: s.postmatch,
     } as Sponsor;
   }
-  if (!row.file) return null;
-  const base = row.id ? ctx.mediaById.get(row.id) : undefined;
-  const media: MediaItem = {
-    ...(base ?? ({ id: row.key, createdAt: new Date(0).toISOString() } as MediaItem)),
-    type: row.file.type,
-    path: row.file.path,
-    title: row.name,
-    durationSec: row.file.durationSec,
-    active: row.active,
-    sponsorId: null,
-    hideFromLibrary: false,
-    clubPhaseBudgetJson: clubMediaPatchFromPlanRow(row).clubPhaseBudgetJson as string | null,
-  };
-  const participant = clubMediaToRotationSponsor(media);
+  if (row.clips.length === 0) return null;
+  const budget = clubBudgetJsonFromPlanRow(row);
+  /** Zoals na opslaan: elk bestand met de groepsnaam, het budget van de rij en zijn eigen fases. */
+  const items: MediaItem[] = row.clips.map((c, i) => {
+    const base = c.pending ? undefined : ctx.mediaById.get(c.id);
+    return {
+      ...(base ?? ({ id: c.id, createdAt: new Date(8.64e15 - 1000 + i).toISOString() } as MediaItem)),
+      type: c.type,
+      path: c.path,
+      title: c.title,
+      durationSec: c.durationSec,
+      active: row.active && c.active,
+      sponsorId: null,
+      hideFromLibrary: false,
+      clubPhaseBudgetJson: budget,
+      clubGroup: row.name || row.key,
+      sponsorPhaseTagsJson: tagsJsonFromPlanPhases(c.phases, c.originalTagsJson),
+    };
+  });
+  const participant = clubGroupToRotationSponsor(row.name || row.key, items);
   return participant ? { ...participant, id: row.key } : null;
 }
 
 export type PlanEffective = {
   /** Per rij (sleutel) de tijd die de rotatie echt toont: hele clips, en 0 zonder bestand voor die fase. */
   byRow: Map<string, Record<PlanPhase, number>>;
-  /** Som over alle rijen: wat sponsors en clubmedia samen van de fase vragen. */
+  /** Per rij: hoeveel daarvan op een vast tijdstip speelt. */
+  cueByRow: Map<string, Record<PlanPhase, number>>;
+  /** Som over alle rijen plus vaste tijdstippen van bestanden zonder rij: wat de fase samen vraagt. */
   totals: Record<PlanPhase, number>;
 };
+
+/** Een clip op een vast tijdstip (tijdscue), vertaald naar een fase van het plan. */
+export type PlanCue = {
+  id: string;
+  mediaId: string;
+  phase: PlanPhase;
+  /** Wedstrijdklok (helften) of tijd sinds de start van de fase (voor en na de match). */
+  startSec: number;
+  endSec: number | null;
+  /** Hoe lang hij op het scherm staat: tot de eindtijd, anders de duur van het bestand. */
+  seconds: number;
+  enabled: boolean;
+};
+
+/** Fases van de tijdscues in het plan. In de rust kan geen tijdscue (die volgt de rotatie). */
+export const CUE_PLAN_PHASES = ["prematch", "firstHalf", "secondHalf", "postmatch"] as const;
+export type CuePlanPhase = (typeof CUE_PLAN_PHASES)[number];
+
+const CUE_STATUS_BY_PHASE: Record<CuePlanPhase, string> = {
+  prematch: "PREMATCH",
+  firstHalf: "FIRST_HALF",
+  secondHalf: "SECOND_HALF",
+  postmatch: "POST_MATCH",
+};
+
+export function cueStatusForPlanPhase(phase: CuePlanPhase): string {
+  return CUE_STATUS_BY_PHASE[phase];
+}
+
+/** Matchstatus van een tijdscue naar een planfase; verlenging en onbekende fases tellen niet mee. */
+export function planPhaseForCueStatus(status: string): CuePlanPhase | null {
+  if (status === "PREMATCH" || status === "SETUP") return "prematch";
+  if (status === "FIRST_HALF") return "firstHalf";
+  if (status === "SECOND_HALF") return "secondHalf";
+  if (status === "POST_MATCH" || status === "FULL_TIME") return "postmatch";
+  return null;
+}
+
+/** Tijdscues zoals `/api/scheduled-media-cues` ze geeft, als plancues. */
+export function planCuesFromApi(
+  cues: {
+    id: string;
+    mediaId: string;
+    matchStatus: string;
+    triggerSec: number;
+    endSec?: number | null;
+    enabled: boolean;
+    media?: { durationSec?: number } | null;
+  }[],
+): PlanCue[] {
+  const out: PlanCue[] = [];
+  for (const c of cues) {
+    const phase = planPhaseForCueStatus(c.matchStatus);
+    if (!phase) continue;
+    const end = c.endSec != null && c.endSec > c.triggerSec ? c.endSec : null;
+    out.push({
+      id: c.id,
+      mediaId: c.mediaId,
+      phase,
+      startSec: c.triggerSec,
+      endSec: end,
+      seconds: Math.max(1, end != null ? end - c.triggerSec : Math.round(c.media?.durationSec ?? 0) || 1),
+      enabled: c.enabled,
+    });
+  }
+  return out;
+}
 
 /**
  * De schermtijd die elke rij echt krijgt als de fase lang genoeg is. Rekent met dezelfde functies als het
@@ -734,23 +916,46 @@ export type PlanEffective = {
 export function planEffectiveSeconds(
   rows: PlanRow[],
   ctx: { sponsorsById: Map<string, Sponsor>; mediaById: Map<string, MediaItem> },
+  cues: PlanCue[] = [],
 ): PlanEffective {
   const participants = rows
     .map((row) => rotationParticipantFromRow(row, ctx))
     .filter((p): p is Sponsor => p != null);
   const byRow = new Map<string, Record<PlanPhase, number>>(rows.map((r) => [r.key, emptySeconds()]));
-  const totals = emptySeconds();
+  const cueByRow = new Map<string, Record<PlanPhase, number>>(rows.map((r) => [r.key, emptySeconds()]));
   for (const phase of PLAN_PHASES) {
     const { section, status } = PHASE_ENGINE[phase];
     const active = activeSponsorsForSection(participants, section, status);
     for (const plan of buildSponsorAppearancePlan(active, section, status)) {
-      const sec = plan.appearanceSecs.reduce((sum, x) => sum + x, 0);
       const row = byRow.get(plan.id);
-      if (row) row[phase] = sec;
-      totals[phase] += sec;
+      if (row) row[phase] = plan.appearanceSecs.reduce((sum, x) => sum + x, 0);
     }
   }
-  return { byRow, totals };
+
+  /**
+   * Vaste tijdstippen. Een clip van een sponsor telt in het afspeellog onder die sponsor en verbruikt dus zijn
+   * minuten: de rotatie geeft hem daarna minder. Hij krijgt dan het meeste van de twee. Clubmedia en losse
+   * bestanden tellen op een tijdstip onder "tijdscue", dus die tijd komt erbij.
+   */
+  const rowByMedia = new Map<string, PlanRow>();
+  for (const row of rows) for (const c of row.clips) if (!c.pending) rowByMedia.set(c.id, row);
+  const totals = emptySeconds();
+  for (const cue of cues) {
+    if (!cue.enabled) continue;
+    const row = rowByMedia.get(cue.mediaId);
+    if (row && !row.active) continue;
+    if (row) cueByRow.get(row.key)![cue.phase] += cue.seconds;
+    else totals[cue.phase] += cue.seconds;
+  }
+  for (const row of rows) {
+    const rot = byRow.get(row.key)!;
+    const cue = cueByRow.get(row.key)!;
+    for (const phase of PLAN_PHASES) {
+      rot[phase] = row.kind === "sponsor" ? Math.max(rot[phase], cue[phase]) : rot[phase] + cue[phase];
+      totals[phase] += rot[phase];
+    }
+  }
+  return { byRow, cueByRow, totals };
 }
 
 /**
@@ -766,5 +971,51 @@ export function planCapacity(
   const out: Partial<Record<PlanPhase, number>> = { firstHalf: half, secondHalf: half, halftime: pause };
   const pre = match?.prematchSpreadWindowSec;
   if (pre != null && pre > 0) out.prematch = pre;
+  return out;
+}
+
+/** "12:30", "12" of "12,5" (minuten) naar seconden. Leeg of ongeldig = null. */
+export function parseClockText(value: string): number | null {
+  const v = value.trim();
+  if (!v) return null;
+  const mmss = v.match(/^(\d{1,3}):(\d{1,2})$/);
+  if (mmss) {
+    const sec = Number(mmss[2]);
+    if (sec > 59) return null;
+    return Number(mmss[1]) * 60 + sec;
+  }
+  const minutes = parseMinutes(v);
+  return minutes;
+}
+
+/** Seconden als wedstrijdklok: 660 → "11:00". */
+export function formatClock(sec: number): string {
+  const safe = Math.max(0, Math.round(sec));
+  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
+}
+
+/**
+ * Nieuwe bestanden die bij meer dan één rij staan (zelfde id of zelfde pad). Opslaan zou ze dan twee keer
+ * aanmaken, bij twee verschillende clubmedia; de tabel stopt in dat geval en zegt welke.
+ */
+export function pendingClipConflicts(rows: PlanRow[]): { file: string; rows: string[] }[] {
+  const byFile = new Map<string, { file: string; rows: Set<string> }>();
+  for (const row of rows) {
+    for (const clip of row.clips) {
+      if (!clip.pending) continue;
+      for (const key of [`id:${clip.id}`, `path:${clip.path.toLowerCase()}`]) {
+        const entry = byFile.get(key) ?? { file: clip.title, rows: new Set<string>() };
+        entry.rows.add(row.name.trim() || row.key);
+        byFile.set(key, entry);
+      }
+    }
+  }
+  const seen = new Set<string>();
+  const out: { file: string; rows: string[] }[] = [];
+  for (const entry of byFile.values()) {
+    if (entry.rows.size < 2 || seen.has(entry.file)) continue;
+    seen.add(entry.file);
+    out.push({ file: entry.file, rows: [...entry.rows] });
+  }
   return out;
 }

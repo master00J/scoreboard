@@ -171,6 +171,8 @@ model MediaItem {
   clubPhaseBudgetJson String?
   /// Vrije notitie uit het seizoensplan (clubmedia); de operator ziet ze live.
   notes       String?
+  /// Clubmedia met meerdere bestanden: zelfde naam = één ingang in de rotatie. Null = los bestand.
+  clubGroup   String?
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
