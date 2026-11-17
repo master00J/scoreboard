@@ -189,6 +189,65 @@ export type MobileBridgeInfo = {
   };
 };
 
+export type MatchPackageErrorCode =
+  | "busy"
+  | "not_found"
+  | "zip_failed"
+  | "unpack_failed"
+  | "not_a_match_package"
+  | "newer_version"
+  | "match_in_play"
+  | "failed";
+
+/** Wat inlezen van een wedstrijdpakket zou doen (zie server/match-package.ts). */
+export type MatchPackageImportPlan = {
+  matchId: string;
+  homeName: string;
+  awayName: string;
+  sport: string;
+  kickoffAt: string | null;
+  matchExists: boolean;
+  teams: Array<{ name: string; action: "create" | "update"; playersNew: number; playersUpdated: number }>;
+  mediaNew: number;
+  files: number;
+  packageCreatedAt: string;
+  packageVersion: string;
+};
+
+export type MatchPackageExportResult = {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  filePath?: string;
+  skipped?: Array<{ path: string; reason: "missing" | "too_large" }>;
+};
+
+export type MatchPackageOpenResult = {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  packageVersion?: string;
+  token?: string;
+  plan?: MatchPackageImportPlan;
+};
+
+export type MatchPackageApplyResult = {
+  ok: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  result?: {
+    matchId: string;
+    matchCreated: boolean;
+    teamsCreated: number;
+    teamsUpdated: number;
+    playersCreated: number;
+    playersUpdated: number;
+    mediaCreated: number;
+  };
+};
+
 export type VenueBackupResult = {
   ok: boolean;
   canceled?: boolean;
@@ -285,6 +344,13 @@ export type ElectronBridge = {
   exportVenueBackup: () => Promise<VenueBackupResult>;
   /** Leest een venue-back-up in; na bevestiging herstart de app met die gegevens. */
   restoreVenueBackup?: () => Promise<VenueBackupResult>;
+  /** ZIP met één wedstrijd, beide teams, spelers en hun media. */
+  exportMatchPackage?: (matchId: string) => Promise<MatchPackageExportResult>;
+  /** Kiest en opent een wedstrijdpakket; wijzigt nog niets. */
+  openMatchPackage?: () => Promise<MatchPackageOpenResult>;
+  /** Voegt een geopend wedstrijdpakket samen met de gegevens op deze pc. */
+  applyMatchPackage?: (token: string) => Promise<MatchPackageApplyResult>;
+  discardMatchPackage?: (token: string) => Promise<{ ok: boolean }>;
   /** Melding na een herstart waarbij een back-up is teruggezet (één keer op te halen). */
   takeRestoreNotice?: () => Promise<RestoreNotice | null>;
   /** Aangesloten monitoren en welke het stadionscherm toont. */

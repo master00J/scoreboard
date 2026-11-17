@@ -2070,5 +2070,32 @@
     "badgeFollowing": "Folgt der offiziellen Uhr",
     "badgeLost": "Offizielle Uhr: kein Signal",
     "badgeHold": "Offizielle Uhr nicht gefolgt"
+  },
+  "matchPackage": {
+    "help": "Bereiten Sie ein Spiel auf einem anderen PC vor? Exportieren Sie es dort als Spielpaket und importieren Sie es hier mit „Spiel importieren…“. Beide Mannschaften, die Spieler und ihre Fotos, Videos und Logos kommen mit. Alles andere auf diesem PC bleibt, wie es ist.",
+    "importButton": "Spiel importieren…",
+    "importHint": "Ein Spielpaket (ZIP) importieren, das auf einem anderen PC vorbereitet wurde.",
+    "exportButton": "Spielpaket",
+    "exportHint": "Dieses Spiel mit beiden Mannschaften, Spielern und Medien als ZIP speichern, um es auf einem anderen PC zu importieren.",
+    "confirmTitle": "Spiel {{home}} – {{away}} importieren?",
+    "confirmMatchNew": "Dieses Spiel wird hinzugefügt.",
+    "confirmMatchUpdate": "Dieses Spiel ist schon auf diesem PC und wird aktualisiert.",
+    "confirmTeamNew": "{{name}}: neue Mannschaft, Spieler: {{count}}",
+    "confirmTeamUpdate": "{{name}}: schon vorhanden, wird aktualisiert (neue Spieler: {{added}}, aktualisiert: {{updated}})",
+    "confirmFiles": "Dateien (Logos, Fotos, Videos): {{count}}",
+    "confirmKeep": "Spieler, Spiele und Sponsoren, die nur auf diesem PC sind, bleiben erhalten.",
+    "imported": "Spiel importiert",
+    "importedDetail": "{{home}} – {{away}}. Neue Spieler: {{added}}, aktualisiert: {{updated}}.",
+    "importFailed": "Spiel konnte nicht importiert werden",
+    "saved": "Spielpaket gespeichert",
+    "skipped": "{{count}} Dateien konnten nicht mitgenommen werden (gelöscht oder größer als 2 GB).",
+    "exportFailed": "Spielpaket konnte nicht gespeichert werden",
+    "errorBusy": "Es läuft bereits ein Backup, eine Wiederherstellung oder ein Import. Warten Sie, bis er fertig ist.",
+    "errorUnpack": "Die ZIP-Datei konnte nicht entpackt werden.",
+    "errorNotPackage": "Dies ist kein ArenaCue-Spielpaket.",
+    "errorNewerVersion": "Dieses Paket stammt aus einer neueren Version der App ({{version}}). Aktualisieren Sie zuerst die App.",
+    "errorInPlay": "Dieses Spiel läuft gerade. Importieren Sie das Paket vor oder nach dem Spiel.",
+    "errorNotFound": "Dieses Spiel gibt es nicht mehr.",
+    "errorFailed": "Etwas ist schiefgelaufen. Es wurde nichts geändert."
   }
 }

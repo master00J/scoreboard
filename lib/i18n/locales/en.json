@@ -2070,5 +2070,32 @@
     "badgeFollowing": "Following official clock",
     "badgeLost": "Official clock: no signal",
     "badgeHold": "Official clock not followed"
+  },
+  "matchPackage": {
+    "help": "Preparing a match on another PC? Export it there as a match package and import it here with “Import match…”. Both teams, the players and their photos, videos and logos come along. Everything else on this PC stays as it is.",
+    "importButton": "Import match…",
+    "importHint": "Import a match package (ZIP) prepared on another PC.",
+    "exportButton": "Match package",
+    "exportHint": "Save this match with both teams, players and media as a ZIP to import on another PC.",
+    "confirmTitle": "Import the match {{home}} – {{away}}?",
+    "confirmMatchNew": "This match will be added.",
+    "confirmMatchUpdate": "This match is already on this PC and will be updated.",
+    "confirmTeamNew": "{{name}}: new team, players: {{count}}",
+    "confirmTeamUpdate": "{{name}}: already here and will be updated (new players: {{added}}, updated: {{updated}})",
+    "confirmFiles": "Files (logos, photos, videos): {{count}}",
+    "confirmKeep": "Players, matches and sponsors that only exist on this PC stay.",
+    "imported": "Match imported",
+    "importedDetail": "{{home}} – {{away}}. New players: {{added}}, updated: {{updated}}.",
+    "importFailed": "Could not import the match",
+    "saved": "Match package saved",
+    "skipped": "{{count}} files could not be included (deleted or larger than 2 GB).",
+    "exportFailed": "Could not save the match package",
+    "errorBusy": "A backup, restore or import is already running. Wait until it has finished.",
+    "errorUnpack": "The ZIP could not be unpacked.",
+    "errorNotPackage": "This is not an ArenaCue match package.",
+    "errorNewerVersion": "This package comes from a newer version of the app ({{version}}). Update the app first.",
+    "errorInPlay": "This match is in progress. Import the package before or after the match.",
+    "errorNotFound": "This match no longer exists.",
+    "errorFailed": "Something went wrong. Nothing was changed."
   }
 }

@@ -2,7 +2,12 @@
  * Client-side helpers for the Electron wrapper.
  * Safe to import in browser context — all functions no-op when not in Electron.
  */
-import type { VenueBackupResult } from "./desktop-bridge";
+import type {
+  MatchPackageApplyResult,
+  MatchPackageExportResult,
+  MatchPackageOpenResult,
+  VenueBackupResult,
+} from "./desktop-bridge";
 
 export const isElectron =
   typeof window !== "undefined" && window.electronAPI?.context.isElectron === true;
@@ -101,4 +106,25 @@ export async function restoreVenueBackup(): Promise<VenueBackupResult> {
     return { ok: false, error: "Alleen beschikbaar in de desktop-app." };
   }
   return window.electronAPI.restoreVenueBackup();
+}
+
+/** ZIP met één wedstrijd: beide teams, spelers en hun media (desktop). */
+export async function exportMatchPackage(matchId: string): Promise<MatchPackageExportResult> {
+  if (!isElectron || !window.electronAPI?.exportMatchPackage) return { ok: false, errorCode: "failed" };
+  return window.electronAPI.exportMatchPackage(matchId);
+}
+
+/** Kiest en opent een wedstrijdpakket; er wijzigt nog niets tot `applyMatchPackage` (desktop). */
+export async function openMatchPackage(): Promise<MatchPackageOpenResult> {
+  if (!isElectron || !window.electronAPI?.openMatchPackage) return { ok: false, errorCode: "failed" };
+  return window.electronAPI.openMatchPackage();
+}
+
+export async function applyMatchPackage(token: string): Promise<MatchPackageApplyResult> {
+  if (!isElectron || !window.electronAPI?.applyMatchPackage) return { ok: false, errorCode: "failed" };
+  return window.electronAPI.applyMatchPackage(token);
+}
+
+export async function discardMatchPackage(token: string): Promise<void> {
+  await window.electronAPI?.discardMatchPackage?.(token);
 }

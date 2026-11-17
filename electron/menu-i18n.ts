@@ -40,6 +40,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreConfirmDetail: "Teams, spelers, wedstrijden, sponsors, media en instellingen worden vervangen door de back-up van {{date}}. Wat er nu staat blijft als veiligheidskopie bewaard. Daarna herstart de app.",
     restoreConfirmOk: "Terugzetten en herstarten",
     restoreFailed: "Terugzetten mislukt.",
+    matchPackageExportTitle: "Wedstrijdpakket opslaan",
+    matchPackageImportTitle: "Wedstrijdpakket inlezen",
     unknownError: "Onbekende fout",
   },
   en: {
@@ -79,6 +81,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreConfirmDetail: "Teams, players, matches, sponsors, media and settings are replaced by the backup of {{date}}. What is here now is kept as a safety copy. The app then restarts.",
     restoreConfirmOk: "Restore and restart",
     restoreFailed: "Restore failed.",
+    matchPackageExportTitle: "Save match package",
+    matchPackageImportTitle: "Import match package",
     unknownError: "Unknown error",
   },
   fr: {
@@ -118,6 +122,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreConfirmDetail: "Équipes, joueurs, matchs, sponsors, médias et réglages sont remplacés par la sauvegarde du {{date}}. Ce qui s’y trouve maintenant est conservé comme copie de sécurité. L’application redémarre ensuite.",
     restoreConfirmOk: "Restaurer et redémarrer",
     restoreFailed: "Échec de la restauration.",
+    matchPackageExportTitle: "Enregistrer le paquet du match",
+    matchPackageImportTitle: "Importer un paquet de match",
     unknownError: "Erreur inconnue",
   },
   it: {
@@ -157,6 +163,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreConfirmDetail: "Squadre, giocatori, partite, sponsor, media e impostazioni vengono sostituiti dal backup del {{date}}. Ciò che c’è ora viene conservato come copia di sicurezza. Poi l’app si riavvia.",
     restoreConfirmOk: "Ripristina e riavvia",
     restoreFailed: "Ripristino non riuscito.",
+    matchPackageExportTitle: "Salva pacchetto partita",
+    matchPackageImportTitle: "Importa pacchetto partita",
     unknownError: "Errore sconosciuto",
   },
   de: {
@@ -196,6 +204,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreConfirmDetail: "Mannschaften, Spieler, Spiele, Sponsoren, Medien und Einstellungen werden durch das Backup vom {{date}} ersetzt. Was jetzt vorhanden ist, bleibt als Sicherheitskopie erhalten. Danach startet die App neu.",
     restoreConfirmOk: "Wiederherstellen und neu starten",
     restoreFailed: "Wiederherstellung fehlgeschlagen.",
+    matchPackageExportTitle: "Spielpaket speichern",
+    matchPackageImportTitle: "Spielpaket importieren",
     unknownError: "Unbekannter Fehler",
   },
 };

@@ -407,7 +407,7 @@ function pruneSafetyCopies(safetyRoot: string, keepName: string): void {
   }
 }
 
-function uniqueUploadName(uploadsDir: string, wanted: string): string {
+export function uniqueUploadName(uploadsDir: string, wanted: string): string {
   if (!fs.existsSync(path.join(uploadsDir, wanted))) return wanted;
   const ext = path.extname(wanted);
   const stem = wanted.slice(0, wanted.length - ext.length);

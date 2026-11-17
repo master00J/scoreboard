@@ -2070,5 +2070,32 @@
     "badgeFollowing": "Segue il cronometro ufficiale",
     "badgeLost": "Cronometro ufficiale: nessun segnale",
     "badgeHold": "Cronometro ufficiale non seguito"
+  },
+  "matchPackage": {
+    "help": "Prepari una partita su un altro PC? Esportala lì come pacchetto partita e importala qui con «Importa partita…». Entrambe le squadre, i giocatori e le loro foto, video e loghi vengono inclusi. Il resto su questo PC resta com’è.",
+    "importButton": "Importa partita…",
+    "importHint": "Importa un pacchetto partita (ZIP) preparato su un altro PC.",
+    "exportButton": "Pacchetto partita",
+    "exportHint": "Salva questa partita con entrambe le squadre, i giocatori e i media in un ZIP da importare su un altro PC.",
+    "confirmTitle": "Importare la partita {{home}} – {{away}}?",
+    "confirmMatchNew": "Questa partita verrà aggiunta.",
+    "confirmMatchUpdate": "Questa partita è già su questo PC e verrà aggiornata.",
+    "confirmTeamNew": "{{name}}: nuova squadra, giocatori: {{count}}",
+    "confirmTeamUpdate": "{{name}}: esiste già e verrà aggiornata (nuovi giocatori: {{added}}, aggiornati: {{updated}})",
+    "confirmFiles": "File (loghi, foto, video): {{count}}",
+    "confirmKeep": "Giocatori, partite e sponsor presenti solo su questo PC restano.",
+    "imported": "Partita importata",
+    "importedDetail": "{{home}} – {{away}}. Nuovi giocatori: {{added}}, aggiornati: {{updated}}.",
+    "importFailed": "Impossibile importare la partita",
+    "saved": "Pacchetto partita salvato",
+    "skipped": "{{count}} file non sono stati inclusi (eliminati o più grandi di 2 GB).",
+    "exportFailed": "Impossibile salvare il pacchetto partita",
+    "errorBusy": "È già in corso un backup, un ripristino o un’importazione. Attendi che finisca.",
+    "errorUnpack": "Impossibile estrarre lo ZIP.",
+    "errorNotPackage": "Questo non è un pacchetto partita di ArenaCue.",
+    "errorNewerVersion": "Questo pacchetto proviene da una versione più recente dell’app ({{version}}). Aggiorna prima l’app.",
+    "errorInPlay": "Questa partita è in corso. Importa il pacchetto prima o dopo la partita.",
+    "errorNotFound": "Questa partita non esiste più.",
+    "errorFailed": "Qualcosa è andato storto. Non è stato modificato nulla."
   }
 }
