@@ -54,6 +54,7 @@ const bridge: ElectronBridge = {
   licenseActivate: (opts: { licenseKey: string }) => ipcRenderer.invoke("license:activate", opts),
   submitFeatureRequest: (input) => ipcRenderer.invoke("feature:submit", input),
   getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
+  setMobileBridgeNetwork: (choice) => ipcRenderer.invoke("mobile:setBridgeNetwork", choice),
   getStreamDeckInfo: () => ipcRenderer.invoke("streamdeck:getInfo"),
   setQuickMediaButtons: (mediaIds: string[]) => {
     ipcRenderer.send("control:setQuickMediaButtons", mediaIds);

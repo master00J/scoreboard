@@ -11,12 +11,13 @@ import {
   session,
   shell,
 } from "electron";
+import dgram from "dgram";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import { MusicLibraryStore } from "./music-library";
 import { MUSIC_EXTENSIONS, type MusicLibraryUpdate } from "../lib/music";
-import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
+import type { DesktopApiRequest, ElectronBridge, ExportFormat, MobileBridgeInfo } from "../lib/desktop-bridge";
 import { normalizeFeatureRequestInput, type FeatureRequestResult } from "../lib/feature-request";
 import * as licenseSvc from "./license-service";
 import { licenseServerUnavailable } from "../lib/license-check-outcome";
@@ -45,6 +46,18 @@ import {
   type StadiumScreensPayload,
 } from "../lib/stadium-screen";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
+import {
+  ALL_INTERFACES,
+  bridgeAddresses,
+  initialBridgeNetworkChoice,
+  listNetworkAdapters,
+  normalizeBridgeNetworkChoice,
+  resolveBridgeBind,
+  type BridgeBind,
+  type BridgeNetworkChoice,
+  type BridgeNetworkInfo,
+  type NetworkAdapter,
+} from "../lib/mobile-bridge-network";
 import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
 import { createQuickMediaButtonStore } from "./quick-media-buttons";
 import { startOfficialClock, type OfficialClockHandle } from "./official-clock";
@@ -643,7 +656,11 @@ async function loadRuntime() {
   // De telefoonbediening is een extra. Is haar poort bezet (een tweede ArenaCue, een ander
   // programma), dan start het scorebord toch; alleen de telefoon werkt dan niet.
   try {
+    const credentialsPath = mobileBridgeCredentialsFile();
+    const bridgeUsedBefore = fs.existsSync(credentialsPath);
+    const startBind = await currentBridgeBind(bridgeUsedBefore);
     mobileBridge = await startMobileBridge({
+      bindHost: startBind.host,
       runtime: {
         apiRequest: (req) => runtime!.apiRequest(req),
         getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
@@ -651,8 +668,9 @@ async function loadRuntime() {
         runCommand: (command) => runtime!.runCommand(command as any),
       },
       log: bootLog,
-      credentialsPath: path.join(app.getPath("userData"), "mobile-bridge-credentials.json"),
+      credentialsPath,
     });
+    watchBridgeNetwork();
   } catch (e) {
     mobileBridge = null;
     bootLog(`[mobile-bridge] niet gestart, telefoonbediening is niet beschikbaar: ${String(e)}`);
@@ -1157,28 +1175,142 @@ ${row.active ? '<div class="t">SCOREBOARD</div>' : ""}
   }, 4000);
 }
 
-function isLikelyVirtualAdapter(name: string): boolean {
-  return /bluetooth|docker|hyper-v|loopback|npcap|tap|virtual|vmware|vethernet|wsl/i.test(name);
+function mobileBridgeCredentialsFile(): string {
+  return path.join(app.getPath("userData"), "mobile-bridge-credentials.json");
 }
 
-function localNetworkUrls(port: number): string[] {
-  const primaryUrls: string[] = [];
-  const fallbackUrls: string[] = [];
-  const nets = os.networkInterfaces();
-  for (const [name, entries] of Object.entries(nets)) {
-    for (const net of entries ?? []) {
-      if (net.family !== "IPv4" || net.internal) continue;
-      const url = `http://${net.address}:${port}`;
-      if (isLikelyVirtualAdapter(name)) fallbackUrls.push(url);
-      else primaryUrls.push(url);
-    }
+/** Op welk netwerk de telefoonbediening luistert hoort bij deze pc, net als de monitorkeuze. */
+function bridgeNetworkFile(): string {
+  return path.join(app.getPath("userData"), "mobile-bridge-network.json");
+}
+
+function readBridgeNetworkChoice(): BridgeNetworkChoice | null {
+  try {
+    return normalizeBridgeNetworkChoice(JSON.parse(fs.readFileSync(bridgeNetworkFile(), "utf8")));
+  } catch {
+    return null;
   }
-  const urls = [...primaryUrls, ...fallbackUrls];
-  return urls.length > 0 ? urls : [`http://localhost:${port}`];
 }
 
-function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, operatorPinForQr: string): string[] {
-  return localNetworkUrls(handle.port).map((bridgeUrl) =>
+function writeBridgeNetworkChoice(choice: BridgeNetworkChoice) {
+  fs.writeFileSync(bridgeNetworkFile(), JSON.stringify(choice, null, 2), "utf8");
+}
+
+function currentNetworkAdapters(): NetworkAdapter[] {
+  return listNetworkAdapters(os.networkInterfaces());
+}
+
+/**
+ * Het lokale adres van de standaardroute: het netwerk waarlangs deze pc naar buiten gaat. Een
+ * UDP-socket die "verbindt" kiest alleen een route; er gaat geen pakket de deur uit. 192.0.2.1 is
+ * een documentatieadres (RFC 5737) dat nergens bestaat.
+ */
+function defaultRouteAddress(): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const socket = dgram.createSocket("udp4");
+    const finish = (address: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        socket.close();
+      } catch {
+        /* al dicht */
+      }
+      resolve(address);
+    };
+    const timer = setTimeout(() => finish(null), 1000);
+    socket.on("error", () => finish(null));
+    try {
+      socket.connect(9, "192.0.2.1", () => {
+        try {
+          const address = socket.address().address;
+          finish(address && address !== "0.0.0.0" ? address : null);
+        } catch {
+          finish(null);
+        }
+      });
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/** Laatst bekende keuze; blijft gelden als het bestand niet geschreven kon worden. */
+let knownBridgeNetworkChoice: BridgeNetworkChoice | null = null;
+
+/** Leest de keuze; bij de eerste start van deze versie legt hij de beginkeuze vast. */
+function bridgeNetworkChoice(adapters: NetworkAdapter[], route: string | null, bridgeUsedBefore: boolean): BridgeNetworkChoice {
+  const stored = knownBridgeNetworkChoice ?? readBridgeNetworkChoice();
+  knownBridgeNetworkChoice = stored;
+  if (stored) return stored;
+  const initial = initialBridgeNetworkChoice(adapters, route, bridgeUsedBefore);
+  knownBridgeNetworkChoice = initial;
+  try {
+    writeBridgeNetworkChoice(initial);
+  } catch (error) {
+    bootLog(`[mobile-bridge] kon netwerkkeuze niet bewaren: ${String(error)}`);
+  }
+  if (initial.mode === "all") {
+    bootLog("[mobile-bridge] bestaande koppeling en meerdere netwerken: blijft op alle netwerken tot de club er een kiest");
+  }
+  return initial;
+}
+
+async function currentBridgeBind(
+  bridgeUsedBefore = true,
+): Promise<BridgeBind & { adapters: NetworkAdapter[]; choice: BridgeNetworkChoice }> {
+  const adapters = currentNetworkAdapters();
+  const route = await defaultRouteAddress();
+  const choice = bridgeNetworkChoice(adapters, route, bridgeUsedBefore);
+  return { ...resolveBridgeBind(choice, adapters, route), adapters, choice };
+}
+
+async function bridgeNetworkInfo(): Promise<BridgeNetworkInfo & { addresses: string[] }> {
+  const { adapters, choice, ...resolved } = await currentBridgeBind();
+  // Toon waar de bridge echt luistert; dat kan tot tien seconden achterlopen op het netwerk.
+  const listening = mobileBridge?.bindHost;
+  const bind: BridgeBind =
+    listening && listening !== resolved.host
+      ? {
+          host: listening,
+          via: listening === ALL_INTERFACES ? "all" : resolved.via,
+          adapter: adapters.find((a) => a.address === listening) ?? null,
+        }
+      : { host: resolved.host, via: resolved.via, adapter: resolved.adapter };
+  return {
+    choice,
+    bind,
+    options: adapters.map((a) => ({ name: a.name, address: a.address, virtual: a.virtual })),
+    addresses: bridgeAddresses(bind, adapters),
+  };
+}
+
+let bridgeNetworkTimer: NodeJS.Timeout | null = null;
+
+/** Netwerk komt later op, DHCP geeft een ander adres, kabel eruit: de bridge volgt. */
+function watchBridgeNetwork() {
+  if (bridgeNetworkTimer || !mobileBridge || mobileBridge.bindFixedByEnv) return;
+  let busy = false;
+  bridgeNetworkTimer = setInterval(() => {
+    if (busy || !mobileBridge) return;
+    busy = true;
+    void (async () => {
+      try {
+        const bind = await currentBridgeBind();
+        if (mobileBridge && bind.host !== mobileBridge.bindHost) await mobileBridge.rebind(bind.host);
+      } catch (error) {
+        bootLog(`[mobile-bridge] netwerkwissel mislukt: ${String(error)}`);
+      } finally {
+        busy = false;
+      }
+    })();
+  }, 10_000);
+}
+
+function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, bridgeUrls: string[], operatorPinForQr: string): string[] {
+  return bridgeUrls.map((bridgeUrl) =>
     [
       "ACPAIR:local",
       encodeURIComponent(bridgeUrl),
@@ -1188,12 +1320,38 @@ function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, operatorPinForQ
   );
 }
 
-function mobileLocalPairCodesViewer(handle: MobileBridgeHandle): string[] {
-  return mobileLocalPairCodesWithPin(handle, "");
+function mobileLocalPairCodesViewer(handle: MobileBridgeHandle, bridgeUrls: string[]): string[] {
+  return mobileLocalPairCodesWithPin(handle, bridgeUrls, "");
 }
 
-function mobileLocalPairCodesOperator(handle: MobileBridgeHandle): string[] {
-  return mobileLocalPairCodesWithPin(handle, handle.operatorPin ?? "");
+function mobileLocalPairCodesOperator(handle: MobileBridgeHandle, bridgeUrls: string[]): string[] {
+  return mobileLocalPairCodesWithPin(handle, bridgeUrls, handle.operatorPin ?? "");
+}
+
+async function mobileBridgeInfo(): Promise<MobileBridgeInfo> {
+  const bridge = mobileBridge;
+  const network = bridge ? await bridgeNetworkInfo() : null;
+  const bridgeUrls = bridge && network ? network.addresses.map((address) => `http://${address}:${bridge.port}`) : [];
+  return {
+    enabled: bridge != null,
+    port: bridge?.port ?? null,
+    pairingCode: bridge?.pairingCode ?? null,
+    operatorPin: bridge?.operatorPin ?? null,
+    bridgeUrls,
+    pairCodes: bridge ? mobileLocalPairCodesViewer(bridge, bridgeUrls) : [],
+    pairCodesOperator: bridge ? mobileLocalPairCodesOperator(bridge, bridgeUrls) : [],
+    operatorPinConfigured: !!bridge?.operatorPin,
+    network:
+      bridge && network
+        ? { choice: network.choice, bind: network.bind, options: network.options, fixedByEnv: bridge.bindFixedByEnv }
+        : null,
+    cloud: {
+      enabled: cloudAgent != null,
+      baseUrl: cloudAgent?.baseUrl ?? null,
+      venueId: cloudAgent?.venueId ?? null,
+      pairCode: cloudAgent?.customerPairCode ?? null,
+    },
+  };
 }
 
 /**
@@ -2220,22 +2378,30 @@ function registerIpc() {
 
   ipcMain.handle("app:getResourceMetrics", () => getAppResourceMetrics());
 
-  ipcMain.handle("mobile:getBridgeInfo", () => ({
-    enabled: mobileBridge != null,
-    port: mobileBridge?.port ?? null,
-    pairingCode: mobileBridge?.pairingCode ?? null,
-    operatorPin: mobileBridge?.operatorPin ?? null,
-    bridgeUrls: mobileBridge ? localNetworkUrls(mobileBridge.port) : [],
-    pairCodes: mobileBridge ? mobileLocalPairCodesViewer(mobileBridge) : [],
-    pairCodesOperator: mobileBridge ? mobileLocalPairCodesOperator(mobileBridge) : [],
-    operatorPinConfigured: !!mobileBridge?.operatorPin,
-    cloud: {
-      enabled: cloudAgent != null,
-      baseUrl: cloudAgent?.baseUrl ?? null,
-      venueId: cloudAgent?.venueId ?? null,
-      pairCode: cloudAgent?.customerPairCode ?? null,
-    },
-  }));
+  ipcMain.handle("mobile:getBridgeInfo", () => mobileBridgeInfo());
+
+  ipcMain.handle("mobile:setBridgeNetwork", async (_, raw: unknown) => {
+    const choice = normalizeBridgeNetworkChoice(raw);
+    if (!choice || !mobileBridge) return { ok: false, info: await mobileBridgeInfo() };
+    // De club kiest zelf, dus ook "alle netwerken" is vanaf nu haar keuze en geen erfenis van de update.
+    const saved: BridgeNetworkChoice = choice.mode === "all" ? { mode: "all" } : choice;
+    knownBridgeNetworkChoice = saved;
+    try {
+      writeBridgeNetworkChoice(saved);
+    } catch (error) {
+      bootLog(`[mobile-bridge] kon netwerkkeuze niet bewaren: ${String(error)}`);
+    }
+    let ok = true;
+    try {
+      const bind = await currentBridgeBind();
+      await mobileBridge.rebind(bind.host);
+      bootLog(`[mobile-bridge] netwerk gekozen: ${choice.mode}${bind.adapter ? ` (${bind.adapter.name})` : ""}`);
+    } catch (error) {
+      ok = false;
+      bootLog(`[mobile-bridge] netwerkkeuze niet toegepast: ${String(error)}`);
+    }
+    return { ok, info: await mobileBridgeInfo() };
+  });
 
   ipcMain.handle("backup:exportVenue", async () => {
     return runVenueBackupExport(BrowserWindow.getFocusedWindow() ?? controlWindow);
@@ -2848,6 +3014,10 @@ app.on("before-quit", (e) => {
   }
   closeSplashWindow();
   stopDisplayPowerSaveBlocker();
+  if (bridgeNetworkTimer) {
+    clearInterval(bridgeNetworkTimer);
+    bridgeNetworkTimer = null;
+  }
   if (mobileBridge) {
     void mobileBridge.stop();
     mobileBridge = null;
