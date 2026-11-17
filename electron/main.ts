@@ -26,14 +26,17 @@ import {
   BACKUP_ROOT_DIR,
   RESTORE_PENDING_DIR,
   RESTORE_READY_MARKER,
+  acceptIncompleteRestore,
   applyPendingRestore,
+  canRollbackRestore,
   inspectBackupDir,
   stageConfigFiles,
   stageDirectory,
   stageExternalFiles,
-  takeRestoreFollowup,
+  stageRollbackFromSafety,
   writeManifest,
   type BackupManifest,
+  type RestoreFinishResult,
 } from "../server/venue-backup";
 import {
   choiceFromScreen,
@@ -1590,12 +1593,18 @@ type VenueBackupResult = {
   skipped?: BackupManifest["skipped"];
 };
 
-/** Melding voor het bedieningspaneel na een herstart waarbij een back-up is teruggezet. */
+/**
+ * Melding voor het bedieningspaneel na een herstart waarbij een back-up is teruggezet. "restored" komt
+ * pas als de paden in de database staan én alle media opent; een onvolledige terugzetting gaat via
+ * `askAboutIncompleteRestore`.
+ */
 type RestoreNotice =
-  | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
+  | { kind: "restored"; source: "backup" | "rollback"; backupCreatedAt: string | null; restoredFiles: number }
   | { kind: "failed"; error: string };
 
 let restoreNotice: RestoreNotice | null = null;
+/** Terugzetting die niet volledig lukte: de operator kiest zodra het bedieningspaneel er is. */
+let incompleteRestore: Extract<RestoreFinishResult, { kind: "incomplete" }> | null = null;
 /** Eén back-up of herstel tegelijk: beide lezen en schrijven dezelfde mappen. */
 let backupBusy = false;
 
@@ -1857,22 +1866,106 @@ async function runVenueBackupRestore(parent: BrowserWindow | null): Promise<Venu
   }
 }
 
-/** Na een herstart met teruggezette back-up: paden naar teruggezette media in de database zetten. */
+/**
+ * Na een herstart met teruggezette back-up: paden naar teruggezette media in de database zetten en
+ * nakijken of alle media opent. Pas als beide lukken, krijgt de operator "teruggezet" te zien.
+ */
 async function finishRestoreAfterStart() {
-  const followup = takeRestoreFollowup(app.getPath("userData"));
-  if (!followup) return;
+  const ctx = desktopContext;
+  if (!ctx || !runtime) return;
+  let result: RestoreFinishResult;
   try {
-    const changed = (await runtime?.remapRestoredFilePaths(followup.remap)) ?? 0;
-    bootLog(`[restore] ${Object.keys(followup.remap).length} mediabestanden uit de back-up, ${changed} verwijzingen bijgewerkt`);
+    result = await runtime.finishVenueRestore({ userDataDir: ctx.userDataDir, uploadsDir: ctx.uploadsDir });
   } catch (err) {
-    bootLog(`[restore] verwijzingen bijwerken mislukt: ${String(err)}`);
+    // Het vervolgbestand blijft staan: de volgende start probeert het opnieuw.
+    bootLog(`[restore] afronden mislukt: ${String(err)}`);
+    restoreNotice = { kind: "failed", error: err instanceof Error ? err.message : String(err) };
+    return;
   }
-  restoreNotice = {
-    kind: "restored",
-    backupCreatedAt: followup.backupCreatedAt,
-    restoredFiles: Object.keys(followup.remap).length,
-  };
+  if (result.kind === "none") return;
+  const restoredFiles = Object.keys(result.followup.remap).length;
+  if (result.kind === "restored") {
+    bootLog(`[restore] klaar: ${restoredFiles} mediabestanden uit de back-up, ${result.pathsChanged} verwijzingen bijgewerkt, alle media opent`);
+    restoreNotice = {
+      kind: "restored",
+      source: result.followup.source,
+      backupCreatedAt: result.followup.backupCreatedAt,
+      restoredFiles,
+    };
+    return;
+  }
+  if (result.pathRewriteError) bootLog(`[restore] verwijzingen bijwerken mislukt: ${result.pathRewriteError}`);
+  if (result.checkError) bootLog(`[restore] media nakijken mislukt: ${result.checkError}`);
+  for (const file of result.missingFiles) bootLog(`[restore] media opent niet: ${file.label} (${file.path})`);
+  incompleteRestore = result;
 }
+
+/** Regels met media die niet opent, voor het venster na een onvolledige terugzetting. */
+function missingMediaSummary(files: Array<{ label: string; path: string }>, intro: string): string {
+  const lines = files.slice(0, 12).map((file) => `• ${file.label} (${file.path})`);
+  if (files.length > lines.length) lines.push(`… +${files.length - lines.length}`);
+  return `${intro}\n${lines.join("\n")}`;
+}
+
+/**
+ * Terugzetting onvolledig: zeg wat er misliep en laat de operator kiezen tussen verdergaan en terug
+ * naar de toestand van vóór het terugzetten (de veiligheidskopie in `restore-safety/`).
+ */
+async function askAboutIncompleteRestore(result: Extract<RestoreFinishResult, { kind: "incomplete" }>) {
+  const ctx = desktopContext;
+  if (!ctx) return;
+  const m = await menuTexts();
+  const canRollback = canRollbackRestore(ctx.userDataDir, result.followup);
+  const parts: string[] = [];
+  if (result.pathRewriteError) parts.push(m("restoreIncompletePaths"));
+  if (result.checkError) parts.push(m("restoreIncompleteCheck"));
+  if (result.missingFiles.length > 0) parts.push(missingMediaSummary(result.missingFiles, m("restoreIncompleteMissing")));
+  parts.push(canRollback ? m("restoreIncompleteChoice") : m("restoreIncompleteNoRollback"));
+  const opts = {
+    type: "warning" as const,
+    title: m("restoreTitle"),
+    message: m("restoreIncompleteMessage"),
+    detail: parts.join("\n\n"),
+    buttons: canRollback ? [m("restoreKeep"), m("restoreRollback")] : [m("restoreKeep")],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  };
+  const win = controlWindow && !controlWindow.isDestroyed() ? controlWindow : null;
+  const answer = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+  if (!canRollback || answer.response !== 1) {
+    acceptIncompleteRestore(ctx.userDataDir, result);
+    bootLog("[restore] operator gaat verder met de onvolledige terugzetting");
+    return;
+  }
+  if (backupBusy) return;
+  backupBusy = true;
+  try {
+    stageRollbackFromSafety(ctx.userDataDir, result.followup);
+    try {
+      await runtime?.checkpointDatabaseForBackup();
+    } catch {
+      /* de -wal/-shm-bestanden gaan mee naar de nieuwe veiligheidskopie */
+    }
+    bootLog(`[restore] terug naar de veiligheidskopie ${result.followup.safetyDir}; app herstart`);
+    flushBootLogSync();
+    allowQuitWithoutConfirm = true;
+    if (app.isPackaged || process.env.ARENACUE_NO_RELAUNCH !== "1") app.relaunch();
+    setTimeout(() => app.exit(0), 150);
+  } catch (err) {
+    backupBusy = false;
+    bootLog(`[restore] terugkeren naar veiligheidskopie mislukt: ${String(err)}`);
+    const failOpts = {
+      type: "error" as const,
+      title: m("restoreTitle"),
+      message: m("restoreRollbackFailed"),
+      detail: err instanceof Error ? err.message : String(err),
+    };
+    if (win) await dialog.showMessageBox(win, failOpts);
+    else await dialog.showMessageBox(failOpts);
+  }
+}
+
 async function buildMenu() {
   const uploadsDir = desktopContext?.uploadsDir ?? path.join(app.getPath("userData"), "uploads");
   let locale = normalizeMenuLocale("nl");
@@ -2246,7 +2339,13 @@ function registerIpc() {
   });
 
   // Eén keer tonen na de herstart: daarna is de melding weg.
+  // Een onvolledige terugzetting vraagt de operator om een keuze, zodra het bedieningspaneel er staat.
   ipcMain.handle("backup:takeRestoreNotice", async () => {
+    if (incompleteRestore) {
+      const incomplete = incompleteRestore;
+      incompleteRestore = null;
+      void askAboutIncompleteRestore(incomplete).catch((err) => bootLog(`[restore] keuzevenster mislukt: ${String(err)}`));
+    }
     const notice = restoreNotice;
     restoreNotice = null;
     return notice;

@@ -2008,7 +2008,9 @@
     "restoreHint": "Il ripristino sostituisce tutti i dati di questo PC con quelli del backup e riavvia l’app. Ciò che c’era viene conservato come copia di sicurezza. Non è possibile durante una partita.",
     "restoreFailed": "Ripristino del backup non riuscito",
     "restored": "Backup ripristinato",
-    "restoredDetail": "Backup del {{date}}. {{count}} file multimediali provengono dal backup.",
+    "restoredDetail": "Backup del {{date}}. {{count}} file multimediali provengono dal backup. Tutti i media sono stati controllati e si aprono.",
+    "rolledBack": "Stato precedente ripristinato",
+    "rolledBackDetail": "I dati di prima del ripristino sono tornati. Tutti i media sono stati controllati e si aprono.",
     "skipped": "{{count}} file non sono nel backup (eliminati o più grandi di 2 GB)."
   },
   "officialClock": {

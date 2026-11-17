@@ -2008,7 +2008,9 @@
     "restoreHint": "Das Wiederherstellen ersetzt alle Daten auf diesem PC durch die Daten aus dem Backup und startet die App neu. Was hier war, bleibt als Sicherheitskopie. Während eines Spiels ist das nicht möglich.",
     "restoreFailed": "Wiederherstellen des Backups fehlgeschlagen",
     "restored": "Backup wiederhergestellt",
-    "restoredDetail": "Backup vom {{date}}. {{count}} Mediendateien stammen aus dem Backup.",
+    "restoredDetail": "Backup vom {{date}}. {{count}} Mediendateien stammen aus dem Backup. Alle Medien wurden geprüft und lassen sich öffnen.",
+    "rolledBack": "Vorheriger Zustand wiederhergestellt",
+    "rolledBackDetail": "Die Daten von vor der Wiederherstellung sind zurück. Alle Medien wurden geprüft und lassen sich öffnen.",
     "skipped": "{{count}} Dateien sind nicht im Backup (gelöscht oder größer als 2 GB)."
   },
   "officialClock": {

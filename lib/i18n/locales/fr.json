@@ -2008,7 +2008,9 @@
     "restoreHint": "La restauration remplace toutes les données de ce PC par celles de la sauvegarde et redémarre l’application. Ce qui s’y trouvait est conservé comme copie de sécurité. Impossible pendant un match.",
     "restoreFailed": "Échec de la restauration de la sauvegarde",
     "restored": "Sauvegarde restaurée",
-    "restoredDetail": "Sauvegarde du {{date}}. {{count}} fichiers média proviennent de la sauvegarde.",
+    "restoredDetail": "Sauvegarde du {{date}}. {{count}} fichiers médias proviennent de la sauvegarde. Tous les médias ont été vérifiés et s’ouvrent.",
+    "rolledBack": "État précédent rétabli",
+    "rolledBackDetail": "Les données d’avant la restauration sont de retour. Tous les médias ont été vérifiés et s’ouvrent.",
     "skipped": "{{count}} fichiers ne sont pas dans la sauvegarde (supprimés ou de plus de 2 Go)."
   },
   "officialClock": {
