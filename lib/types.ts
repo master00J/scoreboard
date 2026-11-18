@@ -189,6 +189,10 @@ export type MediaItem = {
    * Null/leeg = niet in de sponsorrotatie. Alleen gebruikt zonder sponsorId.
    */
   clubPhaseBudgetJson?: string | null;
+  /** Vrije notitie uit het seizoensplan voor clubmedia; de operator ziet ze live. */
+  notes?: string | null;
+  /** Clubmedia met meerdere bestanden: zelfde naam = één ingang in de rotatie. Null = los bestand. */
+  clubGroup?: string | null;
   createdAt: string;
 };
 
@@ -227,6 +231,8 @@ export type Sponsor = {
   sponsorPlaybackRepeatsJson?: string | null;
   /** Minuten per sport/venster. Voetbal gebruikt de kolommen hierboven, nooit deze JSON. */
   sportBudgetsJson?: string | null;
+  /** Vrije notitie uit het seizoensplan; de operator ziet ze tijdens de match. */
+  notes?: string | null;
   createdAt: string;
   media?: MediaItem[];
   /** Alleen in de rotatie-API: clubmedia die meedraait zonder sponsorrij. */

@@ -251,6 +251,8 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("MediaItem", "quickLaunch", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("MediaItem", "clubPhaseBudgetJson", "TEXT");
   await addColumnIfMissing("MediaItem", "mediaCheckJson", "TEXT");
+  await addColumnIfMissing("MediaItem", "notes", "TEXT");
+  await addColumnIfMissing("MediaItem", "clubGroup", "TEXT");
   await addColumnIfMissing("ScheduledMediaCue", "endSec", "INTEGER");
   await addColumnIfMissing("ScheduledMediaCue", "loop", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("AppSettings", "sponsorLayoutsJson", "TEXT");
@@ -321,6 +323,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("Sponsor", "sponsorPlaybackOrderJson", "TEXT");
   await addColumnIfMissing("Sponsor", "sponsorPlaybackRepeatsJson", "TEXT");
   await addColumnIfMissing("Sponsor", "sportBudgetsJson", "TEXT");
+  await addColumnIfMissing("Sponsor", "notes", "TEXT");
   await migrateSponsorMatchHalfFromLegacy();
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPlayLog" (

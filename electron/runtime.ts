@@ -2381,6 +2381,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         postmatchSeconds?: number;
         imageDefaultSec?: number;
         active?: boolean;
+        notes?: string | null;
       };
       const m1 = (body as { matchFirstHalfSeconds?: number }).matchFirstHalfSeconds ?? 0;
       const m2 = (body as { matchSecondHalfSeconds?: number }).matchSecondHalfSeconds ?? 0;
@@ -2398,6 +2399,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           postmatchSeconds: body.postmatchSeconds ?? 0,
           imageDefaultSec: body.imageDefaultSec ?? 10,
           active: body.active ?? true,
+          notes: typeof body.notes === "string" && body.notes.trim() ? body.notes.trim() : null,
         },
       });
       await touchState();
@@ -2421,6 +2423,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         sponsorPlaybackOrderJson: true,
         sponsorPlaybackRepeatsJson: true,
         sportBudgetsJson: true,
+        notes: true,
       };
       const data: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(body)) {

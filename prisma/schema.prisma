@@ -171,6 +171,10 @@ model MediaItem {
   quickLaunch Boolean @default(false)
   /// JSON: totale zendtijd in seconden per fase voor losse clubmedia. Null = niet in de rotatie.
   clubPhaseBudgetJson String?
+  /// Vrije notitie uit het seizoensplan (clubmedia); de operator ziet ze live.
+  notes       String?
+  /// Clubmedia met meerdere bestanden: zelfde naam = één ingang in de rotatie. Null = los bestand.
+  clubGroup   String?
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
@@ -233,6 +237,8 @@ model Sponsor {
   sponsorPlaybackRepeatsJson String?
   /// JSON: sport → venster-id → seconden. Voetbal gebruikt dit nooit.
   sportBudgetsJson  String?
+  /// Vrije notitie uit het seizoensplan ("direct na sponsor X", "vanaf 20/09"); de operator ziet ze live.
+  notes             String?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
   playLogs          SponsorPlayLog[]
