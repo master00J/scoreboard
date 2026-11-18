@@ -12,6 +12,7 @@ import {
   shell,
 } from "electron";
 import dgram from "dgram";
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
@@ -39,6 +40,16 @@ import {
   type BackupManifest,
   type RestoreFinishResult,
 } from "../server/venue-backup";
+import {
+  MATCH_PACKAGE_DIR,
+  placeMatchFiles,
+  readMatchPackageDir,
+  stageMatchFiles,
+  writeMatchPackage,
+  type MatchImportPlan,
+  type MatchImportResult,
+  type MatchPackage,
+} from "../server/match-package";
 import {
   choiceFromScreen,
   normalizeStadiumScreenChoice,
@@ -1927,6 +1938,191 @@ function skippedSummary(skipped: BackupManifest["skipped"] | undefined, intro: s
   return `\n\n${intro}\n${lines.join("\n")}`;
 }
 
+/* ————————————————————————— wedstrijdpakket ————————————————————————— */
+
+type MatchPackageErrorCode =
+  | "busy"
+  | "not_found"
+  | "zip_failed"
+  | "unpack_failed"
+  | "not_a_match_package"
+  | "newer_version"
+  | "match_in_play"
+  | "failed";
+
+type MatchPackageExportResult = {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  filePath?: string;
+  skipped?: MatchPackage["skipped"];
+};
+
+type MatchPackageOpenResult = {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  /** Versie van de app die het pakket maakte (bij `newer_version`). */
+  packageVersion?: string;
+  token?: string;
+  plan?: MatchImportPlan;
+};
+
+type MatchPackageApplyResult = {
+  ok: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  result?: MatchImportResult;
+};
+
+/** Uitgepakte pakketten die wachten op de bevestiging van de operator. */
+const pendingMatchPackages = new Map<string, { dir: string; root: string; pkg: MatchPackage }>();
+
+function discardMatchPackage(token: string): void {
+  const pending = pendingMatchPackages.get(token);
+  pendingMatchPackages.delete(token);
+  if (pending) fs.rmSync(pending.dir, { recursive: true, force: true });
+}
+
+/** Bestandsnaam zonder tekens die Windows niet toelaat. */
+function safeFilePart(value: string): string {
+  return value.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "").replace(/\s+/g, "-").slice(0, 40) || "team";
+}
+
+/** ZIP met één wedstrijd: beide teams, spelers, media en de bestanden waarnaar die verwijzen. */
+async function runMatchPackageExport(parent: BrowserWindow | null, matchId: string): Promise<MatchPackageExportResult> {
+  const ctx = desktopContext;
+  if (!ctx || !runtime) return { ok: false, errorCode: "failed", error: "Desktop context ontbreekt." };
+  const m = await menuTexts();
+  if (backupBusy) return { ok: false, errorCode: "busy", error: m("backupBusy") };
+
+  let collected: Awaited<ReturnType<typeof runtime.collectMatchPackageForExport>>;
+  try {
+    collected = await runtime.collectMatchPackageForExport(matchId, app.getVersion());
+  } catch (err) {
+    bootLog(`[match-package] export: ${String(err)}`);
+    return { ok: false, errorCode: "not_found", error: String(err) };
+  }
+  const { pkg, references } = collected;
+  const teamName = (id: unknown) => String(pkg.teams.find(({ team }) => team.id === id)?.team.name ?? "");
+  const day = typeof pkg.match.kickoffAt === "string" ? pkg.match.kickoffAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const win = parent ?? controlWindow;
+  const dialogOpts = {
+    title: m("matchPackageExportTitle"),
+    defaultPath: path.join(
+      app.getPath("documents"),
+      `ArenaCue-${safeFilePart(teamName(pkg.match.homeTeamId))}-${safeFilePart(teamName(pkg.match.awayTeamId))}-${day}.zip`,
+    ),
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+  };
+  const save = win ? await dialog.showSaveDialog(win, dialogOpts) : await dialog.showSaveDialog(dialogOpts);
+  if (save.canceled || !save.filePath) return { ok: false, canceled: true };
+
+  backupBusy = true;
+  win?.setProgressBar(2);
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "arenacue-match-out-"));
+  try {
+    const staging = path.join(tmpRoot, MATCH_PACKAGE_DIR);
+    stageMatchFiles(staging, pkg, references, ctx.uploadsDir);
+    writeMatchPackage(staging, pkg);
+    const zipTarget = save.filePath.toLowerCase().endsWith(".zip") ? save.filePath : `${save.filePath}.zip`;
+    const r = await zipFolder(tmpRoot, MATCH_PACKAGE_DIR, zipTarget);
+    if (r.status !== 0) {
+      bootLog(`[match-package] zip mislukt: ${r.output || "onbekend"}`);
+      return { ok: false, errorCode: "zip_failed", error: r.output.trim().split(/\r?\n/)[0] || "" };
+    }
+    bootLog(`[match-package] export OK: ${zipTarget} (${pkg.files.length} bestanden, ${pkg.skipped.length} overgeslagen)`);
+    return { ok: true, filePath: zipTarget, skipped: pkg.skipped };
+  } catch (err) {
+    bootLog(`[match-package] export mislukt: ${String(err)}`);
+    return { ok: false, errorCode: "failed", error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    backupBusy = false;
+    try {
+      if (win && !win.isDestroyed()) win.setProgressBar(-1);
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Kiest een wedstrijdpakket, pakt het uit en zegt wat inlezen zou doen. Er wijzigt nog niets. */
+async function openMatchPackage(parent: BrowserWindow | null): Promise<MatchPackageOpenResult> {
+  if (!desktopContext || !runtime) return { ok: false, errorCode: "failed", error: "Desktop context ontbreekt." };
+  const m = await menuTexts();
+  if (backupBusy) return { ok: false, errorCode: "busy", error: m("backupBusy") };
+  const win = parent ?? controlWindow;
+  const openOpts = {
+    title: m("matchPackageImportTitle"),
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+    properties: ["openFile" as const],
+  };
+  const open = win ? await dialog.showOpenDialog(win, openOpts) : await dialog.showOpenDialog(openOpts);
+  const zipFile = open.filePaths[0];
+  if (open.canceled || !zipFile) return { ok: false, canceled: true };
+
+  for (const token of [...pendingMatchPackages.keys()]) discardMatchPackage(token);
+  backupBusy = true;
+  win?.setProgressBar(2);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arenacue-match-in-"));
+  try {
+    const unzip = await unzipTo(zipFile, dir);
+    if (unzip.status !== 0) {
+      bootLog(`[match-package] uitpakken mislukt: ${unzip.output || "onbekend"}`);
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: false, errorCode: "unpack_failed" };
+    }
+    const read = readMatchPackageDir(dir, app.getVersion());
+    if (!read.ok) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: false, errorCode: read.reason, packageVersion: read.packageVersion };
+    }
+    const { plan, inPlay } = await runtime.planMatchPackageImport(read.pkg);
+    if (inPlay) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: false, errorCode: "match_in_play", plan };
+    }
+    const token = crypto.randomUUID();
+    pendingMatchPackages.set(token, { dir, root: read.root, pkg: read.pkg });
+    return { ok: true, token, plan };
+  } catch (err) {
+    bootLog(`[match-package] inlezen mislukt: ${String(err)}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { ok: false, errorCode: "failed", error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    backupBusy = false;
+    if (win && !win.isDestroyed()) win.setProgressBar(-1);
+  }
+}
+
+/** Voegt een eerder geopend pakket samen met de gegevens op deze pc, na bevestiging. */
+async function applyMatchPackage(token: string): Promise<MatchPackageApplyResult> {
+  const ctx = desktopContext;
+  const pending = pendingMatchPackages.get(token);
+  if (!ctx || !runtime || !pending) return { ok: false, errorCode: "failed" };
+  if (backupBusy) return { ok: false, errorCode: "busy" };
+  backupBusy = true;
+  try {
+    const remap = placeMatchFiles(pending.root, pending.pkg, ctx.uploadsDir);
+    const result = await runtime.applyMatchPackageImport(pending.pkg, remap);
+    bootLog(
+      `[match-package] ingelezen: wedstrijd ${result.matchId} (${result.matchCreated ? "nieuw" : "bijgewerkt"}), ` +
+        `${result.playersCreated} nieuwe en ${result.playersUpdated} bijgewerkte spelers, ${Object.keys(remap).length} bestanden`,
+    );
+    return { ok: true, result };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bootLog(`[match-package] samenvoegen mislukt: ${message}`);
+    return { ok: false, errorCode: message === "match_in_play" ? "match_in_play" : "failed", error: message };
+  } finally {
+    backupBusy = false;
+    discardMatchPackage(token);
+  }
+}
+
 /**
  * Leest een venue-back-up in. De ZIP wordt uitgepakt en nagekeken; pas na bevestiging herstart de app
  * en wisselt `applyPendingRestore` de gegevens om, vóór de database open gaat.
@@ -2504,6 +2700,25 @@ function registerIpc() {
 
   ipcMain.handle("backup:restoreVenue", async () => {
     return runVenueBackupRestore(BrowserWindow.getFocusedWindow() ?? controlWindow);
+  });
+
+  ipcMain.handle("matchPackage:export", async (_event, matchId: unknown) => {
+    if (typeof matchId !== "string" || !matchId) return { ok: false, errorCode: "not_found" };
+    return runMatchPackageExport(BrowserWindow.getFocusedWindow() ?? controlWindow, matchId);
+  });
+
+  ipcMain.handle("matchPackage:open", async () => {
+    return openMatchPackage(BrowserWindow.getFocusedWindow() ?? controlWindow);
+  });
+
+  ipcMain.handle("matchPackage:apply", async (_event, token: unknown) => {
+    if (typeof token !== "string") return { ok: false, errorCode: "failed" };
+    return applyMatchPackage(token);
+  });
+
+  ipcMain.handle("matchPackage:discard", async (_event, token: unknown) => {
+    if (typeof token === "string") discardMatchPackage(token);
+    return { ok: true };
   });
 
   // Eén keer tonen na de herstart: daarna is de melding weg.

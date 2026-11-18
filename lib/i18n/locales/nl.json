@@ -2227,5 +2227,32 @@
     "clipDeleted": "{{name}} verwijderd",
     "clipRemovePending": "Dit nieuwe bestand weghalen",
     "filesAddedTo": "{{count}} bestand(en) toegevoegd aan {{name}}"
+  },
+  "matchPackage": {
+    "help": "Een wedstrijd op een andere pc klaarzetten? Exporteer hem daar als wedstrijdpakket en lees hem hier in met «Wedstrijd inlezen…». Beide teams, de spelers en hun foto's, video's en logo's komen mee. De rest op deze pc blijft zoals hij is.",
+    "importButton": "Wedstrijd inlezen…",
+    "importHint": "Lees een wedstrijdpakket (ZIP) in dat op een andere pc is klaargezet.",
+    "exportButton": "Wedstrijdpakket",
+    "exportHint": "Bewaar deze wedstrijd met beide teams, spelers en media als ZIP om op een andere pc in te lezen.",
+    "confirmTitle": "Wedstrijd {{home}} – {{away}} inlezen?",
+    "confirmMatchNew": "Deze wedstrijd komt er nieuw bij.",
+    "confirmMatchUpdate": "Deze wedstrijd staat al op deze pc en wordt bijgewerkt.",
+    "confirmTeamNew": "{{name}}: nieuw team, spelers: {{count}}",
+    "confirmTeamUpdate": "{{name}}: bestaat al en wordt bijgewerkt (nieuwe spelers: {{added}}, bijgewerkt: {{updated}})",
+    "confirmFiles": "Bestanden (logo's, foto's, video's): {{count}}",
+    "confirmKeep": "Spelers, wedstrijden en sponsors die alleen op deze pc staan, blijven staan.",
+    "imported": "Wedstrijd ingelezen",
+    "importedDetail": "{{home}} – {{away}}. Nieuwe spelers: {{added}}, bijgewerkt: {{updated}}.",
+    "importFailed": "Wedstrijd inlezen mislukt",
+    "saved": "Wedstrijdpakket opgeslagen",
+    "skipped": "{{count}} bestanden konden niet mee (verwijderd of groter dan 2 GB).",
+    "exportFailed": "Wedstrijdpakket opslaan mislukt",
+    "errorBusy": "Er loopt al een back-up, herstel of import. Wacht tot die klaar is.",
+    "errorUnpack": "De ZIP kon niet uitgepakt worden.",
+    "errorNotPackage": "Dit is geen wedstrijdpakket van ArenaCue.",
+    "errorNewerVersion": "Dit pakket komt van een nieuwere versie van de app ({{version}}). Werk de app eerst bij.",
+    "errorInPlay": "Deze wedstrijd is nu bezig. Lees het pakket in vóór of na de wedstrijd.",
+    "errorNotFound": "Deze wedstrijd bestaat niet meer.",
+    "errorFailed": "Er ging iets mis. Er is niets gewijzigd."
   }
 }

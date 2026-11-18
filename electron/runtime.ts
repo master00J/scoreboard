@@ -62,6 +62,14 @@ import {
 import { displayExtrasFromJson, serializeDisplayExtras } from "../lib/display-extras";
 import { isMatchInPlay } from "../lib/match-in-play";
 import { finishPendingRestore, listExternalFileReferences, type RestoreFinishResult } from "../server/venue-backup";
+import {
+  applyMatchImport,
+  collectMatchPackage,
+  planMatchImport,
+  type MatchImportPlan,
+  type MatchImportResult,
+  type MatchPackage,
+} from "../server/match-package";
 import { isCommandUserError } from "../lib/command-user-error";
 import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import { handleCommand } from "../server/handlers";
@@ -1489,6 +1497,35 @@ export async function isMatchInPlayNow(): Promise<boolean> {
   return isMatchInPlay(
     match ? { status: match.status, closedAt: match.closedAt ? match.closedAt.toISOString() : null } : null,
   );
+}
+
+/** Gegevens van één wedstrijd voor een wedstrijdpakket, en de bestanden waarnaar ze verwijzen. */
+export async function collectMatchPackageForExport(matchId: string, appVersion: string) {
+  return collectMatchPackage(prisma, matchId, { appVersion });
+}
+
+/**
+ * Wat inlezen van een wedstrijdpakket zou doen. `inPlay`: dezelfde wedstrijd speelt nu op het
+ * scherm; die mag een pakket niet overschrijven.
+ */
+export async function planMatchPackageImport(pkg: MatchPackage): Promise<{ plan: MatchImportPlan; inPlay: boolean }> {
+  const plan = await planMatchImport(prisma, pkg);
+  const state = await getStateRow();
+  const inPlay = plan.matchExists && state.matchId === plan.matchId && (await isMatchInPlayNow());
+  return { plan, inPlay };
+}
+
+/** Voegt een wedstrijdpakket samen met de database, in één transactie. */
+export async function applyMatchPackageImport(pkg: MatchPackage, remap: Record<string, string>): Promise<MatchImportResult> {
+  const { inPlay } = await planMatchPackageImport(pkg);
+  if (inPlay) throw new Error("match_in_play");
+  const result = await prisma.$transaction((tx) => applyMatchImport(tx, pkg, remap), {
+    maxWait: 10_000,
+    timeout: 60_000,
+  });
+  await touchState();
+  await broadcastDisplayState();
+  return result;
 }
 
 export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {

@@ -2227,5 +2227,32 @@
     "clipDeleted": "{{name}} supprimé",
     "clipRemovePending": "Retirer ce nouveau fichier",
     "filesAddedTo": "{{count}} fichier(s) ajouté(s) à {{name}}"
+  },
+  "matchPackage": {
+    "help": "Vous préparez un match sur un autre PC ? Exportez-le là-bas comme paquet de match et importez-le ici avec « Importer un match… ». Les deux équipes, les joueurs et leurs photos, vidéos et logos sont inclus. Le reste de ce PC ne change pas.",
+    "importButton": "Importer un match…",
+    "importHint": "Importer un paquet de match (ZIP) préparé sur un autre PC.",
+    "exportButton": "Paquet de match",
+    "exportHint": "Enregistrer ce match avec les deux équipes, les joueurs et les médias dans un ZIP à importer sur un autre PC.",
+    "confirmTitle": "Importer le match {{home}} – {{away}} ?",
+    "confirmMatchNew": "Ce match sera ajouté.",
+    "confirmMatchUpdate": "Ce match existe déjà sur ce PC et sera mis à jour.",
+    "confirmTeamNew": "{{name}} : nouvelle équipe, joueurs : {{count}}",
+    "confirmTeamUpdate": "{{name}} : existe déjà et sera mise à jour (nouveaux joueurs : {{added}}, mis à jour : {{updated}})",
+    "confirmFiles": "Fichiers (logos, photos, vidéos) : {{count}}",
+    "confirmKeep": "Les joueurs, matchs et sponsors présents uniquement sur ce PC restent en place.",
+    "imported": "Match importé",
+    "importedDetail": "{{home}} – {{away}}. Nouveaux joueurs : {{added}}, mis à jour : {{updated}}.",
+    "importFailed": "Impossible d’importer le match",
+    "saved": "Paquet de match enregistré",
+    "skipped": "{{count}} fichiers n’ont pas pu être inclus (supprimés ou de plus de 2 Go).",
+    "exportFailed": "Impossible d’enregistrer le paquet de match",
+    "errorBusy": "Une sauvegarde, une restauration ou une importation est déjà en cours. Attendez qu’elle soit terminée.",
+    "errorUnpack": "Le ZIP n’a pas pu être décompressé.",
+    "errorNotPackage": "Ce n’est pas un paquet de match ArenaCue.",
+    "errorNewerVersion": "Ce paquet provient d’une version plus récente de l’application ({{version}}). Mettez d’abord l’application à jour.",
+    "errorInPlay": "Ce match est en cours. Importez le paquet avant ou après le match.",
+    "errorNotFound": "Ce match n’existe plus.",
+    "errorFailed": "Un problème est survenu. Rien n’a été modifié."
   }
 }

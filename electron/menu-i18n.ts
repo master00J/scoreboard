@@ -49,6 +49,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreKeep: "Verdergaan",
     restoreRollback: "Terug naar vorige toestand",
     restoreRollbackFailed: "Teruggaan naar de vorige toestand is mislukt. De teruggezette back-up blijft staan.",
+    matchPackageExportTitle: "Wedstrijdpakket opslaan",
+    matchPackageImportTitle: "Wedstrijdpakket inlezen",
     unknownError: "Onbekende fout",
   },
   en: {
@@ -97,6 +99,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreKeep: "Continue",
     restoreRollback: "Go back to previous state",
     restoreRollbackFailed: "Going back to the previous state failed. The restored backup stays in place.",
+    matchPackageExportTitle: "Save match package",
+    matchPackageImportTitle: "Import match package",
     unknownError: "Unknown error",
   },
   fr: {
@@ -145,6 +149,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreKeep: "Continuer",
     restoreRollback: "Revenir à l’état précédent",
     restoreRollbackFailed: "Le retour à l’état précédent a échoué. La sauvegarde restaurée reste en place.",
+    matchPackageExportTitle: "Enregistrer le paquet du match",
+    matchPackageImportTitle: "Importer un paquet de match",
     unknownError: "Erreur inconnue",
   },
   it: {
@@ -193,6 +199,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreKeep: "Continua",
     restoreRollback: "Torna allo stato precedente",
     restoreRollbackFailed: "Il ritorno allo stato precedente non è riuscito. Il backup ripristinato resta in uso.",
+    matchPackageExportTitle: "Salva pacchetto partita",
+    matchPackageImportTitle: "Importa pacchetto partita",
     unknownError: "Errore sconosciuto",
   },
   de: {
@@ -241,6 +249,8 @@ const MENUS: Record<MenuLocale, MenuDict> = {
     restoreKeep: "Weitermachen",
     restoreRollback: "Zum vorherigen Zustand zurück",
     restoreRollbackFailed: "Die Rückkehr zum vorherigen Zustand ist fehlgeschlagen. Das wiederhergestellte Backup bleibt bestehen.",
+    matchPackageExportTitle: "Spielpaket speichern",
+    matchPackageImportTitle: "Spielpaket importieren",
     unknownError: "Unbekannter Fehler",
   },
 };
