@@ -38,6 +38,11 @@ import {
   type SponsorMediaPhase,
 } from "@/lib/sponsor-media-phases";
 import {
+  parseClubPhaseBudgetJson,
+  serializeClubPhaseBudgetJson,
+  type ClubPhaseBudget,
+} from "@/lib/club-media-rotation";
+import {
   applySponsorPlaybackOrder,
   clampRepeat,
   parseSponsorPlaybackOrderJson,
@@ -48,6 +53,7 @@ import {
 import { ChevronDown, Film, Plus } from "lucide-react";
 import type { TFunction } from "i18next";
 import { isDisplayPlaybackRisk } from "@/lib/media-playback-compat";
+import { MediaHealthBadge } from "./media-health-badge";
 import {
   RUNDOWN_PHASES,
   cueRundownPhaseKey,
@@ -80,6 +86,9 @@ function playbackRiskDetail(t: TFunction, inspect: PlaybackInspect): string {
   }
   if (inspect.reason === "unsupported_codec") {
     return t("media.playbackWarnCodec", { codec: inspect.codec || "?" });
+  }
+  if (inspect.reason === "unsafe_encoder" || inspect.reason === "playback_fault") {
+    return t("media.playbackWarnEncoder");
   }
   return t("media.playbackWarnPixel");
 }
@@ -1029,6 +1038,7 @@ function MediaCard({
       </div>
       <div className="p-2 text-xs flex flex-col gap-1">
         <div className="truncate font-semibold">{item.title}</div>
+        <MediaHealthBadge item={item} />
         {isDisplayPlaybackRisk(item.playbackWarning) ? (
           <div className="flex flex-col gap-1">
             <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 leading-snug">
@@ -1120,7 +1130,11 @@ function MediaCard({
             <span className="block text-muted-foreground">{t("media.quickLaunchHint")}</span>
           </span>
         </label>
-        <SponsorMediaPhasePicker media={item} onChange={onChange} />
+        {item.sponsorId ? (
+          <SponsorMediaPhasePicker media={item} onChange={onChange} />
+        ) : (
+          <ClubPhaseBudgetPicker media={item} onChange={onChange} />
+        )}
         <div className="flex gap-1">
           {lockManualSponsorInterrupt ? (
             <div className="flex-1 text-[9px] text-muted-foreground leading-snug px-1 py-1.5 border border-dashed border-border rounded-md">
@@ -2068,6 +2082,7 @@ function SponsorCard({
               </div>
               <div className="p-2 text-xs flex flex-col gap-1">
                 <div className="truncate font-semibold">{m.title}</div>
+                <MediaHealthBadge item={m} />
                 {isDisplayPlaybackRisk(m.playbackWarning) ? (
                   <div className="flex flex-col gap-1">
                     <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 leading-snug">
@@ -2262,6 +2277,87 @@ function AttachExistingDropdown({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+const CLUB_BUDGET_FIELDS: { key: keyof ClubPhaseBudget; labelKey: string }[] = [
+  { key: "prematch", labelKey: "media.budgetPrematch" },
+  { key: "firstHalf", labelKey: "media.budgetFirstHalf" },
+  { key: "secondHalf", labelKey: "media.budgetSecondHalf" },
+  { key: "halftime", labelKey: "media.budgetHalftime" },
+  { key: "postmatch", labelKey: "media.budgetPostmatch" },
+];
+
+function ClubPhaseBudgetPicker({
+  media,
+  onChange,
+}: {
+  media: MediaItem;
+  onChange: () => void;
+}) {
+  const { t } = useTranslation();
+  const parsed = parseClubPhaseBudgetJson(media.clubPhaseBudgetJson);
+  const [draft, setDraft] = useState({
+    prematch: secondsToMinutesStr(parsed.prematch),
+    firstHalf: secondsToMinutesStr(parsed.firstHalf),
+    secondHalf: secondsToMinutesStr(parsed.secondHalf),
+    halftime: secondsToMinutesStr(parsed.halftime),
+    postmatch: secondsToMinutesStr(parsed.postmatch),
+  });
+
+  useEffect(() => {
+    const next = parseClubPhaseBudgetJson(media.clubPhaseBudgetJson);
+    setDraft({
+      prematch: secondsToMinutesStr(next.prematch),
+      firstHalf: secondsToMinutesStr(next.firstHalf),
+      secondHalf: secondsToMinutesStr(next.secondHalf),
+      halftime: secondsToMinutesStr(next.halftime),
+      postmatch: secondsToMinutesStr(next.postmatch),
+    });
+  }, [media.id, media.clubPhaseBudgetJson]);
+
+  async function commit() {
+    const budget: ClubPhaseBudget = {
+      prematch: minutesStrToSeconds(draft.prematch),
+      firstHalf: minutesStrToSeconds(draft.firstHalf),
+      secondHalf: minutesStrToSeconds(draft.secondHalf),
+      halftime: minutesStrToSeconds(draft.halftime),
+      postmatch: minutesStrToSeconds(draft.postmatch),
+    };
+    const ok = await patchMediaJson(media.id, {
+      clubPhaseBudgetJson: serializeClubPhaseBudgetJson(budget),
+    });
+    if (ok) onChange();
+    else toast({ title: t("media.clubAirtimeSaveFailed"), variant: "error" });
+  }
+
+  return (
+    <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+      <div className="text-[10px] font-medium text-foreground">{t("media.clubAirtime")}</div>
+      <div className="text-[9px] text-muted-foreground">{t("media.clubAirtimeHint")}</div>
+      <div className="mt-2 grid grid-cols-2 gap-1.5">
+        {CLUB_BUDGET_FIELDS.map((field) => (
+          <label key={field.key} className="space-y-0.5">
+            <span className="text-[9px] text-muted-foreground">{t(field.labelKey)}</span>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                min={0}
+                step="0.25"
+                className="h-7 px-1.5 text-[10px]"
+                value={draft[field.key]}
+                onChange={(e) => setDraft((cur) => ({ ...cur, [field.key]: e.target.value }))}
+                onBlur={() => void commit()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+              />
+              <span className="shrink-0 text-[9px] text-muted-foreground">{t("common.minutes")}</span>
+            </div>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }

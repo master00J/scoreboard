@@ -9,6 +9,7 @@ import type { Command } from "./validation/commands";
 import type { FeatureRequestDraft, FeatureRequestResult } from "./feature-request";
 import type { MusicLibrary, MusicLibraryUpdate, MusicImportResult } from "./music";
 import type { OfficialClockSettings, OfficialClockStatus } from "./official-clock/types";
+import type { BridgeNetworkChoice, MobileBridgeNetworkState } from "./mobile-bridge-network";
 import type { StadiumScreensPayload } from "./stadium-screen";
 import type { StreamDeckInfo } from "./stream-deck";
 import type { SerializedDisplayState } from "./timer";
@@ -181,6 +182,8 @@ export type MobileBridgeInfo = {
   /** Zelfde URLs als `pairCodes`, mét operator-PIN — alleen tonen in vertrouwde omgeving. */
   pairCodesOperator: string[];
   operatorPinConfigured: boolean;
+  /** Op welk netwerk de bridge luistert en welke netwerken deze pc heeft. `null` als de bridge niet draait. */
+  network?: MobileBridgeNetworkState | null;
   cloud: {
     enabled: boolean;
     baseUrl: string | null;
@@ -257,8 +260,9 @@ export type VenueBackupResult = {
   skipped?: Array<{ path: string; reason: "missing" | "too_large" }>;
 };
 
+/** "restored" komt pas als de paden in de database staan en alle media opent. */
 export type RestoreNotice =
-  | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
+  | { kind: "restored"; source?: "backup" | "rollback"; backupCreatedAt: string | null; restoredFiles: number }
   | { kind: "failed"; error: string };
 
 export type NetworkSourceResetInfo = { mode: "copy" | "h264" };
@@ -324,7 +328,14 @@ export type ElectronBridge = {
   /** Stuurt een feature-aanvraag naar arenacue.be met de licentie van deze pc. */
   submitFeatureRequest?: (input: FeatureRequestDraft) => Promise<FeatureRequestResult>;
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
+  /** Kiest het netwerk van de telefoonbediening op deze pc. */
+  setMobileBridgeNetwork?: (choice: BridgeNetworkChoice) => Promise<{ ok: boolean; info: MobileBridgeInfo }>;
   getStreamDeckInfo: () => Promise<StreamDeckInfo | null>;
+  /**
+   * Meldt welke media de regie als snelle knop heeft vastgepind, in haar volgorde, zodat de
+   * Stream Deck dezelfde knoppen kan tonen. Alleen in de desktop-app.
+   */
+  setQuickMediaButtons?: (mediaIds: string[]) => void;
   /** Officiële klok volgen (console van de jurytafel). Alleen in de desktop-app. */
   getOfficialClockSettings?: () => Promise<OfficialClockSettings | null>;
   saveOfficialClockSettings?: (

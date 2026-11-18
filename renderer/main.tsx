@@ -221,8 +221,25 @@ function Root() {
 
 installDesktopFetchShim();
 
+/**
+ * Vensters die het publiek ziet (stadionscherm, livestream-programma, mediabron) tonen nooit een
+ * foutmelding: ze blijven zwart en proberen het na enkele seconden opnieuw. De bediening houdt de
+ * melding wel, daar zit iemand die ze kan lezen.
+ */
+const AUDIENCE_VIEWS = new Set(["display", "stream", "media"]);
+const AUDIENCE_RECOVER_MS = 3000;
+
+function isAudienceView(): boolean {
+  try {
+    return AUDIENCE_VIEWS.has(new URLSearchParams(window.location.search).get("view") ?? "control");
+  } catch {
+    return false;
+  }
+}
+
 class RendererErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
   state: { error: Error | null } = { error: null };
+  private recoverTimer: number | null = null;
 
   static getDerivedStateFromError(error: Error) {
     return { error };
@@ -230,10 +247,26 @@ class RendererErrorBoundary extends Component<{ children: ReactNode }, { error: 
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[renderer] crash", error, info.componentStack);
+    if (isAudienceView() && this.recoverTimer == null) {
+      this.recoverTimer = window.setTimeout(() => {
+        this.recoverTimer = null;
+        this.setState({ error: null });
+      }, AUDIENCE_RECOVER_MS);
+    }
+  }
+
+  componentWillUnmount() {
+    if (this.recoverTimer != null) {
+      window.clearTimeout(this.recoverTimer);
+      this.recoverTimer = null;
+    }
   }
 
   render() {
     if (this.state.error) {
+      if (isAudienceView()) {
+        return <div style={{ position: "fixed", inset: 0, background: "#000" }} aria-hidden />;
+      }
       return (
         <div
           style={{

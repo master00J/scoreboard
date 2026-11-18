@@ -11,28 +11,34 @@ import {
   session,
   shell,
 } from "electron";
+import dgram from "dgram";
 import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import { MusicLibraryStore } from "./music-library";
 import { MUSIC_EXTENSIONS, type MusicLibraryUpdate } from "../lib/music";
-import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
+import type { DesktopApiRequest, ElectronBridge, ExportFormat, MobileBridgeInfo } from "../lib/desktop-bridge";
 import { normalizeFeatureRequestInput, type FeatureRequestResult } from "../lib/feature-request";
 import * as licenseSvc from "./license-service";
+import { licenseServerUnavailable } from "../lib/license-check-outcome";
+import { nextGpuCrashStep } from "../lib/gpu-crash-recovery";
 import { backupDatabaseBeforeUpgrade } from "../server/db-backup";
 import {
   BACKUP_ROOT_DIR,
   RESTORE_PENDING_DIR,
   RESTORE_READY_MARKER,
+  acceptIncompleteRestore,
   applyPendingRestore,
+  canRollbackRestore,
   inspectBackupDir,
   stageConfigFiles,
   stageDirectory,
   stageExternalFiles,
-  takeRestoreFollowup,
+  stageRollbackFromSafety,
   writeManifest,
   type BackupManifest,
+  type RestoreFinishResult,
 } from "../server/venue-backup";
 import {
   MATCH_PACKAGE_DIR,
@@ -54,7 +60,20 @@ import {
   type StadiumScreensPayload,
 } from "../lib/stadium-screen";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
+import {
+  ALL_INTERFACES,
+  bridgeAddresses,
+  initialBridgeNetworkChoice,
+  listNetworkAdapters,
+  normalizeBridgeNetworkChoice,
+  resolveBridgeBind,
+  type BridgeBind,
+  type BridgeNetworkChoice,
+  type BridgeNetworkInfo,
+  type NetworkAdapter,
+} from "../lib/mobile-bridge-network";
 import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
+import { createQuickMediaButtonStore } from "./quick-media-buttons";
 import { startOfficialClock, type OfficialClockHandle } from "./official-clock";
 import { startCloudControlAgent, type CloudAgentHandle } from "./cloud-control";
 import { getAppResourceMetrics, getMemoryBreakdownForBootLog } from "./resource-metrics";
@@ -240,8 +259,12 @@ if (process.platform === "win32" && process.env.STADIUM_ENABLE_WIN_OCCLUSION !==
 
 /**
  * Alleen op verzoek of na GPU-crash-vlag: software-decode (zwaarder op CPU).
+ *
+ * Vastgelegd bij de start: de vlag op schijf zegt alleen iets over de vólgende start. Wie later
+ * opnieuw naar de vlag kijkt, denkt na de eerste GPU-crash dat software-decode al aanstaat.
  */
-if (videoDecodeFallbackEnabled()) {
+const videoDecodeFallbackThisSession = videoDecodeFallbackEnabled();
+if (videoDecodeFallbackThisSession) {
   app.commandLine.appendSwitch("disable-accelerated-video-decode");
   console.log("[electron] disable-accelerated-video-decode actief");
 }
@@ -608,6 +631,28 @@ function configureDesktopContext() {
   };
 }
 
+/**
+ * Commando van een operator, vanuit het bedienpaneel of van een Stream Deck-knop.
+ * "Scorebord + sponsors" hoort bij de licentie; zonder die functie weigert de app het, waar de vraag
+ * ook vandaan komt.
+ */
+async function runOperatorCommand(cmd: any) {
+  if (!runtime) throw new Error("Runtime not initialized");
+  if (
+    desktopContext &&
+    cmd?.type === "display:setMode" &&
+    cmd?.mode === "SPONSOR_ROTATION" &&
+    licenseSvc.readStoredLicense(desktopContext.userDataDir)?.features?.automatic_sponsor_rotation === false
+  ) {
+    const payload = { message: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
+    if (controlWindow && !controlWindow.isDestroyed()) {
+      controlWindow.webContents.send("display:error", payload);
+    }
+    return { ok: false, error: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
+  }
+  return runtime.runCommand(cmd);
+}
+
 async function loadRuntime() {
   desktopContext = configureDesktopContext();
   runtime = await import("./runtime");
@@ -622,21 +667,35 @@ async function loadRuntime() {
   });
   await finishRestoreAfterStart();
   await buildMenu();
-  mobileBridge = await startMobileBridge({
-    runtime: {
-      apiRequest: (req) => runtime!.apiRequest(req),
-      getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
-      getSponsorLedgerSnapshot: () => runtime!.getSponsorLedgerSnapshot(),
-      runCommand: (command) => runtime!.runCommand(command as any),
-    },
-    log: bootLog,
-    credentialsPath: path.join(app.getPath("userData"), "mobile-bridge-credentials.json"),
-  });
+  // De telefoonbediening is een extra. Is haar poort bezet (een tweede ArenaCue, een ander
+  // programma), dan start het scorebord toch; alleen de telefoon werkt dan niet.
+  try {
+    const credentialsPath = mobileBridgeCredentialsFile();
+    const bridgeUsedBefore = fs.existsSync(credentialsPath);
+    const startBind = await currentBridgeBind(bridgeUsedBefore);
+    mobileBridge = await startMobileBridge({
+      bindHost: startBind.host,
+      runtime: {
+        apiRequest: (req) => runtime!.apiRequest(req),
+        getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
+        getSponsorLedgerSnapshot: () => runtime!.getSponsorLedgerSnapshot(),
+        runCommand: (command) => runtime!.runCommand(command as any),
+      },
+      log: bootLog,
+      credentialsPath,
+    });
+    watchBridgeNetwork();
+  } catch (e) {
+    mobileBridge = null;
+    bootLog(`[mobile-bridge] niet gestart, telefoonbediening is niet beschikbaar: ${String(e)}`);
+  }
   cloudAgent = startCloudControlAgent({
     runtime: {
       apiRequest: (req) => runtime!.apiRequest(req),
       getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
-      runCommand: (command) => runtime!.runCommand(command as any),
+      runCloudCommand: (commandId, command) => runtime!.runCloudCommand(commandId, command),
+      markCloudCommandAcked: (commandId) => runtime!.markCloudCommandAcked(commandId),
+      pruneCloudCommandLedger: () => runtime!.pruneCloudCommandLedger(),
     },
     log: bootLog,
   });
@@ -1132,28 +1191,142 @@ ${row.active ? '<div class="t">SCOREBOARD</div>' : ""}
   }, 4000);
 }
 
-function isLikelyVirtualAdapter(name: string): boolean {
-  return /bluetooth|docker|hyper-v|loopback|npcap|tap|virtual|vmware|vethernet|wsl/i.test(name);
+function mobileBridgeCredentialsFile(): string {
+  return path.join(app.getPath("userData"), "mobile-bridge-credentials.json");
 }
 
-function localNetworkUrls(port: number): string[] {
-  const primaryUrls: string[] = [];
-  const fallbackUrls: string[] = [];
-  const nets = os.networkInterfaces();
-  for (const [name, entries] of Object.entries(nets)) {
-    for (const net of entries ?? []) {
-      if (net.family !== "IPv4" || net.internal) continue;
-      const url = `http://${net.address}:${port}`;
-      if (isLikelyVirtualAdapter(name)) fallbackUrls.push(url);
-      else primaryUrls.push(url);
-    }
+/** Op welk netwerk de telefoonbediening luistert hoort bij deze pc, net als de monitorkeuze. */
+function bridgeNetworkFile(): string {
+  return path.join(app.getPath("userData"), "mobile-bridge-network.json");
+}
+
+function readBridgeNetworkChoice(): BridgeNetworkChoice | null {
+  try {
+    return normalizeBridgeNetworkChoice(JSON.parse(fs.readFileSync(bridgeNetworkFile(), "utf8")));
+  } catch {
+    return null;
   }
-  const urls = [...primaryUrls, ...fallbackUrls];
-  return urls.length > 0 ? urls : [`http://localhost:${port}`];
 }
 
-function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, operatorPinForQr: string): string[] {
-  return localNetworkUrls(handle.port).map((bridgeUrl) =>
+function writeBridgeNetworkChoice(choice: BridgeNetworkChoice) {
+  fs.writeFileSync(bridgeNetworkFile(), JSON.stringify(choice, null, 2), "utf8");
+}
+
+function currentNetworkAdapters(): NetworkAdapter[] {
+  return listNetworkAdapters(os.networkInterfaces());
+}
+
+/**
+ * Het lokale adres van de standaardroute: het netwerk waarlangs deze pc naar buiten gaat. Een
+ * UDP-socket die "verbindt" kiest alleen een route; er gaat geen pakket de deur uit. 192.0.2.1 is
+ * een documentatieadres (RFC 5737) dat nergens bestaat.
+ */
+function defaultRouteAddress(): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const socket = dgram.createSocket("udp4");
+    const finish = (address: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        socket.close();
+      } catch {
+        /* al dicht */
+      }
+      resolve(address);
+    };
+    const timer = setTimeout(() => finish(null), 1000);
+    socket.on("error", () => finish(null));
+    try {
+      socket.connect(9, "192.0.2.1", () => {
+        try {
+          const address = socket.address().address;
+          finish(address && address !== "0.0.0.0" ? address : null);
+        } catch {
+          finish(null);
+        }
+      });
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/** Laatst bekende keuze; blijft gelden als het bestand niet geschreven kon worden. */
+let knownBridgeNetworkChoice: BridgeNetworkChoice | null = null;
+
+/** Leest de keuze; bij de eerste start van deze versie legt hij de beginkeuze vast. */
+function bridgeNetworkChoice(adapters: NetworkAdapter[], route: string | null, bridgeUsedBefore: boolean): BridgeNetworkChoice {
+  const stored = knownBridgeNetworkChoice ?? readBridgeNetworkChoice();
+  knownBridgeNetworkChoice = stored;
+  if (stored) return stored;
+  const initial = initialBridgeNetworkChoice(adapters, route, bridgeUsedBefore);
+  knownBridgeNetworkChoice = initial;
+  try {
+    writeBridgeNetworkChoice(initial);
+  } catch (error) {
+    bootLog(`[mobile-bridge] kon netwerkkeuze niet bewaren: ${String(error)}`);
+  }
+  if (initial.mode === "all") {
+    bootLog("[mobile-bridge] bestaande koppeling en meerdere netwerken: blijft op alle netwerken tot de club er een kiest");
+  }
+  return initial;
+}
+
+async function currentBridgeBind(
+  bridgeUsedBefore = true,
+): Promise<BridgeBind & { adapters: NetworkAdapter[]; choice: BridgeNetworkChoice }> {
+  const adapters = currentNetworkAdapters();
+  const route = await defaultRouteAddress();
+  const choice = bridgeNetworkChoice(adapters, route, bridgeUsedBefore);
+  return { ...resolveBridgeBind(choice, adapters, route), adapters, choice };
+}
+
+async function bridgeNetworkInfo(): Promise<BridgeNetworkInfo & { addresses: string[] }> {
+  const { adapters, choice, ...resolved } = await currentBridgeBind();
+  // Toon waar de bridge echt luistert; dat kan tot tien seconden achterlopen op het netwerk.
+  const listening = mobileBridge?.bindHost;
+  const bind: BridgeBind =
+    listening && listening !== resolved.host
+      ? {
+          host: listening,
+          via: listening === ALL_INTERFACES ? "all" : resolved.via,
+          adapter: adapters.find((a) => a.address === listening) ?? null,
+        }
+      : { host: resolved.host, via: resolved.via, adapter: resolved.adapter };
+  return {
+    choice,
+    bind,
+    options: adapters.map((a) => ({ name: a.name, address: a.address, virtual: a.virtual })),
+    addresses: bridgeAddresses(bind, adapters),
+  };
+}
+
+let bridgeNetworkTimer: NodeJS.Timeout | null = null;
+
+/** Netwerk komt later op, DHCP geeft een ander adres, kabel eruit: de bridge volgt. */
+function watchBridgeNetwork() {
+  if (bridgeNetworkTimer || !mobileBridge || mobileBridge.bindFixedByEnv) return;
+  let busy = false;
+  bridgeNetworkTimer = setInterval(() => {
+    if (busy || !mobileBridge) return;
+    busy = true;
+    void (async () => {
+      try {
+        const bind = await currentBridgeBind();
+        if (mobileBridge && bind.host !== mobileBridge.bindHost) await mobileBridge.rebind(bind.host);
+      } catch (error) {
+        bootLog(`[mobile-bridge] netwerkwissel mislukt: ${String(error)}`);
+      } finally {
+        busy = false;
+      }
+    })();
+  }, 10_000);
+}
+
+function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, bridgeUrls: string[], operatorPinForQr: string): string[] {
+  return bridgeUrls.map((bridgeUrl) =>
     [
       "ACPAIR:local",
       encodeURIComponent(bridgeUrl),
@@ -1163,12 +1336,38 @@ function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, operatorPinForQ
   );
 }
 
-function mobileLocalPairCodesViewer(handle: MobileBridgeHandle): string[] {
-  return mobileLocalPairCodesWithPin(handle, "");
+function mobileLocalPairCodesViewer(handle: MobileBridgeHandle, bridgeUrls: string[]): string[] {
+  return mobileLocalPairCodesWithPin(handle, bridgeUrls, "");
 }
 
-function mobileLocalPairCodesOperator(handle: MobileBridgeHandle): string[] {
-  return mobileLocalPairCodesWithPin(handle, handle.operatorPin ?? "");
+function mobileLocalPairCodesOperator(handle: MobileBridgeHandle, bridgeUrls: string[]): string[] {
+  return mobileLocalPairCodesWithPin(handle, bridgeUrls, handle.operatorPin ?? "");
+}
+
+async function mobileBridgeInfo(): Promise<MobileBridgeInfo> {
+  const bridge = mobileBridge;
+  const network = bridge ? await bridgeNetworkInfo() : null;
+  const bridgeUrls = bridge && network ? network.addresses.map((address) => `http://${address}:${bridge.port}`) : [];
+  return {
+    enabled: bridge != null,
+    port: bridge?.port ?? null,
+    pairingCode: bridge?.pairingCode ?? null,
+    operatorPin: bridge?.operatorPin ?? null,
+    bridgeUrls,
+    pairCodes: bridge ? mobileLocalPairCodesViewer(bridge, bridgeUrls) : [],
+    pairCodesOperator: bridge ? mobileLocalPairCodesOperator(bridge, bridgeUrls) : [],
+    operatorPinConfigured: !!bridge?.operatorPin,
+    network:
+      bridge && network
+        ? { choice: network.choice, bind: network.bind, options: network.options, fixedByEnv: bridge.bindFixedByEnv }
+        : null,
+    cloud: {
+      enabled: cloudAgent != null,
+      baseUrl: cloudAgent?.baseUrl ?? null,
+      venueId: cloudAgent?.venueId ?? null,
+      pairCode: cloudAgent?.customerPairCode ?? null,
+    },
+  };
 }
 
 /**
@@ -1565,12 +1764,18 @@ type VenueBackupResult = {
   skipped?: BackupManifest["skipped"];
 };
 
-/** Melding voor het bedieningspaneel na een herstart waarbij een back-up is teruggezet. */
+/**
+ * Melding voor het bedieningspaneel na een herstart waarbij een back-up is teruggezet. "restored" komt
+ * pas als de paden in de database staan én alle media opent; een onvolledige terugzetting gaat via
+ * `askAboutIncompleteRestore`.
+ */
 type RestoreNotice =
-  | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
+  | { kind: "restored"; source: "backup" | "rollback"; backupCreatedAt: string | null; restoredFiles: number }
   | { kind: "failed"; error: string };
 
 let restoreNotice: RestoreNotice | null = null;
+/** Terugzetting die niet volledig lukte: de operator kiest zodra het bedieningspaneel er is. */
+let incompleteRestore: Extract<RestoreFinishResult, { kind: "incomplete" }> | null = null;
 /** Eén back-up of herstel tegelijk: beide lezen en schrijven dezelfde mappen. */
 let backupBusy = false;
 
@@ -2017,22 +2222,106 @@ async function runVenueBackupRestore(parent: BrowserWindow | null): Promise<Venu
   }
 }
 
-/** Na een herstart met teruggezette back-up: paden naar teruggezette media in de database zetten. */
+/**
+ * Na een herstart met teruggezette back-up: paden naar teruggezette media in de database zetten en
+ * nakijken of alle media opent. Pas als beide lukken, krijgt de operator "teruggezet" te zien.
+ */
 async function finishRestoreAfterStart() {
-  const followup = takeRestoreFollowup(app.getPath("userData"));
-  if (!followup) return;
+  const ctx = desktopContext;
+  if (!ctx || !runtime) return;
+  let result: RestoreFinishResult;
   try {
-    const changed = (await runtime?.remapRestoredFilePaths(followup.remap)) ?? 0;
-    bootLog(`[restore] ${Object.keys(followup.remap).length} mediabestanden uit de back-up, ${changed} verwijzingen bijgewerkt`);
+    result = await runtime.finishVenueRestore({ userDataDir: ctx.userDataDir, uploadsDir: ctx.uploadsDir });
   } catch (err) {
-    bootLog(`[restore] verwijzingen bijwerken mislukt: ${String(err)}`);
+    // Het vervolgbestand blijft staan: de volgende start probeert het opnieuw.
+    bootLog(`[restore] afronden mislukt: ${String(err)}`);
+    restoreNotice = { kind: "failed", error: err instanceof Error ? err.message : String(err) };
+    return;
   }
-  restoreNotice = {
-    kind: "restored",
-    backupCreatedAt: followup.backupCreatedAt,
-    restoredFiles: Object.keys(followup.remap).length,
-  };
+  if (result.kind === "none") return;
+  const restoredFiles = Object.keys(result.followup.remap).length;
+  if (result.kind === "restored") {
+    bootLog(`[restore] klaar: ${restoredFiles} mediabestanden uit de back-up, ${result.pathsChanged} verwijzingen bijgewerkt, alle media opent`);
+    restoreNotice = {
+      kind: "restored",
+      source: result.followup.source,
+      backupCreatedAt: result.followup.backupCreatedAt,
+      restoredFiles,
+    };
+    return;
+  }
+  if (result.pathRewriteError) bootLog(`[restore] verwijzingen bijwerken mislukt: ${result.pathRewriteError}`);
+  if (result.checkError) bootLog(`[restore] media nakijken mislukt: ${result.checkError}`);
+  for (const file of result.missingFiles) bootLog(`[restore] media opent niet: ${file.label} (${file.path})`);
+  incompleteRestore = result;
 }
+
+/** Regels met media die niet opent, voor het venster na een onvolledige terugzetting. */
+function missingMediaSummary(files: Array<{ label: string; path: string }>, intro: string): string {
+  const lines = files.slice(0, 12).map((file) => `• ${file.label} (${file.path})`);
+  if (files.length > lines.length) lines.push(`… +${files.length - lines.length}`);
+  return `${intro}\n${lines.join("\n")}`;
+}
+
+/**
+ * Terugzetting onvolledig: zeg wat er misliep en laat de operator kiezen tussen verdergaan en terug
+ * naar de toestand van vóór het terugzetten (de veiligheidskopie in `restore-safety/`).
+ */
+async function askAboutIncompleteRestore(result: Extract<RestoreFinishResult, { kind: "incomplete" }>) {
+  const ctx = desktopContext;
+  if (!ctx) return;
+  const m = await menuTexts();
+  const canRollback = canRollbackRestore(ctx.userDataDir, result.followup);
+  const parts: string[] = [];
+  if (result.pathRewriteError) parts.push(m("restoreIncompletePaths"));
+  if (result.checkError) parts.push(m("restoreIncompleteCheck"));
+  if (result.missingFiles.length > 0) parts.push(missingMediaSummary(result.missingFiles, m("restoreIncompleteMissing")));
+  parts.push(canRollback ? m("restoreIncompleteChoice") : m("restoreIncompleteNoRollback"));
+  const opts = {
+    type: "warning" as const,
+    title: m("restoreTitle"),
+    message: m("restoreIncompleteMessage"),
+    detail: parts.join("\n\n"),
+    buttons: canRollback ? [m("restoreKeep"), m("restoreRollback")] : [m("restoreKeep")],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  };
+  const win = controlWindow && !controlWindow.isDestroyed() ? controlWindow : null;
+  const answer = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+  if (!canRollback || answer.response !== 1) {
+    acceptIncompleteRestore(ctx.userDataDir, result);
+    bootLog("[restore] operator gaat verder met de onvolledige terugzetting");
+    return;
+  }
+  if (backupBusy) return;
+  backupBusy = true;
+  try {
+    stageRollbackFromSafety(ctx.userDataDir, result.followup);
+    try {
+      await runtime?.checkpointDatabaseForBackup();
+    } catch {
+      /* de -wal/-shm-bestanden gaan mee naar de nieuwe veiligheidskopie */
+    }
+    bootLog(`[restore] terug naar de veiligheidskopie ${result.followup.safetyDir}; app herstart`);
+    flushBootLogSync();
+    allowQuitWithoutConfirm = true;
+    if (app.isPackaged || process.env.ARENACUE_NO_RELAUNCH !== "1") app.relaunch();
+    setTimeout(() => app.exit(0), 150);
+  } catch (err) {
+    backupBusy = false;
+    bootLog(`[restore] terugkeren naar veiligheidskopie mislukt: ${String(err)}`);
+    const failOpts = {
+      type: "error" as const,
+      title: m("restoreTitle"),
+      message: m("restoreRollbackFailed"),
+      detail: err instanceof Error ? err.message : String(err),
+    };
+    if (win) await dialog.showMessageBox(win, failOpts);
+    else await dialog.showMessageBox(failOpts);
+  }
+}
+
 async function buildMenu() {
   const uploadsDir = desktopContext?.uploadsDir ?? path.join(app.getPath("userData"), "uploads");
   let locale = normalizeMenuLocale("nl");
@@ -2282,11 +2571,21 @@ function registerIpc() {
   ipcMain.handle("livestream:startRecord", () => livestream!.startRecord());
   ipcMain.handle("livestream:stopRecord", () => livestream!.stopRecord());
   ipcMain.handle("livestream:openBrowserInteract", (_e, url: string) => openBrowserSourceInteract(url));
+  const quickMediaButtons = createQuickMediaButtonStore(app.getPath("userData"), bootLog);
+  ipcMain.on("control:setQuickMediaButtons", (event, raw: unknown) => {
+    // Alleen de regie beheert deze lijst.
+    if (!controlWindow || event.sender !== controlWindow.webContents) return;
+    quickMediaButtons.set(raw);
+  });
   if (!streamDeck && livestream && runtime) {
     streamDeck = startStreamDeck({
       livestream,
-      runCommand: (command) => runtime!.runCommand(command as any),
+      runCommand: (command) => runOperatorCommand(command),
       getSnapshot: () => runtime!.getDisplaySnapshot(),
+      getState: () => runtime!.getDeckState(),
+      getMatch: (matchId) => runtime!.getMatchForDeck(matchId),
+      getQuickButtons: () => runtime!.getQuickButtonsForDeck(quickMediaButtons.get()),
+      getLocale: () => runtime!.getUiLocale(),
       log: bootLog,
     });
   }
@@ -2359,28 +2658,41 @@ function registerIpc() {
 
   ipcMain.on("display:mediaDiagnostic", (_event, raw: unknown) => {
     bootLog(`[display-media] ${sanitizeMediaDiagnostic(raw)}`);
+    if (!runtime || !raw || typeof raw !== "object") return;
+    const o = raw as Record<string, unknown>;
+    if (typeof o.event === "string" && typeof o.mediaId === "string") {
+      runtime.queuePrepareAfterPlaybackFault(o.mediaId, o.event);
+    }
   });
 
   ipcMain.handle("app:getVersion", () => app.getVersion());
 
   ipcMain.handle("app:getResourceMetrics", () => getAppResourceMetrics());
 
-  ipcMain.handle("mobile:getBridgeInfo", () => ({
-    enabled: mobileBridge != null,
-    port: mobileBridge?.port ?? null,
-    pairingCode: mobileBridge?.pairingCode ?? null,
-    operatorPin: mobileBridge?.operatorPin ?? null,
-    bridgeUrls: mobileBridge ? localNetworkUrls(mobileBridge.port) : [],
-    pairCodes: mobileBridge ? mobileLocalPairCodesViewer(mobileBridge) : [],
-    pairCodesOperator: mobileBridge ? mobileLocalPairCodesOperator(mobileBridge) : [],
-    operatorPinConfigured: !!mobileBridge?.operatorPin,
-    cloud: {
-      enabled: cloudAgent != null,
-      baseUrl: cloudAgent?.baseUrl ?? null,
-      venueId: cloudAgent?.venueId ?? null,
-      pairCode: cloudAgent?.customerPairCode ?? null,
-    },
-  }));
+  ipcMain.handle("mobile:getBridgeInfo", () => mobileBridgeInfo());
+
+  ipcMain.handle("mobile:setBridgeNetwork", async (_, raw: unknown) => {
+    const choice = normalizeBridgeNetworkChoice(raw);
+    if (!choice || !mobileBridge) return { ok: false, info: await mobileBridgeInfo() };
+    // De club kiest zelf, dus ook "alle netwerken" is vanaf nu haar keuze en geen erfenis van de update.
+    const saved: BridgeNetworkChoice = choice.mode === "all" ? { mode: "all" } : choice;
+    knownBridgeNetworkChoice = saved;
+    try {
+      writeBridgeNetworkChoice(saved);
+    } catch (error) {
+      bootLog(`[mobile-bridge] kon netwerkkeuze niet bewaren: ${String(error)}`);
+    }
+    let ok = true;
+    try {
+      const bind = await currentBridgeBind();
+      await mobileBridge.rebind(bind.host);
+      bootLog(`[mobile-bridge] netwerk gekozen: ${choice.mode}${bind.adapter ? ` (${bind.adapter.name})` : ""}`);
+    } catch (error) {
+      ok = false;
+      bootLog(`[mobile-bridge] netwerkkeuze niet toegepast: ${String(error)}`);
+    }
+    return { ok, info: await mobileBridgeInfo() };
+  });
 
   ipcMain.handle("backup:exportVenue", async () => {
     return runVenueBackupExport(BrowserWindow.getFocusedWindow() ?? controlWindow);
@@ -2410,7 +2722,13 @@ function registerIpc() {
   });
 
   // Eén keer tonen na de herstart: daarna is de melding weg.
+  // Een onvolledige terugzetting vraagt de operator om een keuze, zodra het bedieningspaneel er staat.
   ipcMain.handle("backup:takeRestoreNotice", async () => {
+    if (incompleteRestore) {
+      const incomplete = incompleteRestore;
+      incompleteRestore = null;
+      void askAboutIncompleteRestore(incomplete).catch((err) => bootLog(`[restore] keuzevenster mislukt: ${String(err)}`));
+    }
     const notice = restoreNotice;
     restoreNotice = null;
     return notice;
@@ -2515,22 +2833,7 @@ function registerIpc() {
     return response;
   });
 
-  ipcMain.handle("display:command", async (_, cmd) => {
-    if (!runtime) throw new Error("Runtime not initialized");
-    if (
-      desktopContext &&
-      cmd?.type === "display:setMode" &&
-      cmd?.mode === "SPONSOR_ROTATION" &&
-      licenseSvc.readStoredLicense(desktopContext.userDataDir)?.features?.automatic_sponsor_rotation === false
-    ) {
-      const payload = { message: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
-      if (controlWindow && !controlWindow.isDestroyed()) {
-        controlWindow.webContents.send("display:error", payload);
-      }
-      return { ok: false, error: "licenseNoAutoSponsors", code: "licenseNoAutoSponsors" };
-    }
-    return runtime.runCommand(cmd);
-  });
+  ipcMain.handle("display:command", async (_, cmd) => runOperatorCommand(cmd));
 
   ipcMain.on("control:setDisplayPreviewCapture", (event, enabled: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -2712,7 +3015,8 @@ function registerIpc() {
       return { gate: true, machinePreview: preview, prefillLicenseKey: null };
     }
     const r = await licenseSvc.remoteLicenseCheck(base, prev.licenseKey, mid);
-    if (r.kind === "network") {
+    // Geen verbinding, of de licentieserver is zelf in storing: dat zegt niets over deze licentie.
+    if (r.kind !== "ok" && licenseServerUnavailable(r)) {
       if (licenseSvc.withinGrace(prev.lastVerifiedAt)) {
         allowStadiumDisplay("license-offline-grace");
         return {
@@ -2729,15 +3033,18 @@ function registerIpc() {
         gate: true,
         machinePreview: preview,
         message:
-          "Geen verbinding met de licentie-server. Controleer internet of probeer later. (Offline: max. 7 dagen na laatste geslaagde online check.)",
+          r.kind === "error"
+            ? r.message
+            : "Geen verbinding met de licentie-server. Controleer internet of probeer later. (Offline: max. 7 dagen na laatste geslaagde online check.)",
         prefillLicenseKey: prev.licenseKey,
       };
     }
-    if (r.kind === "error") {
+    if (r.kind !== "ok") {
+      // Echte weigering van de licentie (onbekend, ingetrokken, verlopen).
       return {
         gate: true,
         machinePreview: preview,
-        message: r.message,
+        message: r.kind === "error" ? r.message : "Licentie kon niet gecontroleerd worden.",
         prefillLicenseKey: prev.licenseKey,
       };
     }
@@ -2941,13 +3248,19 @@ if (!gotLock) {
         const sponsorVideoContext =
           lastDisplayPlaybackSummary.includes("src=sponsor") ||
           lastDisplayPlaybackSummary.includes("mode=sponsor");
-        if (sponsorVideoContext && !videoDecodeFallbackEnabled()) {
+        const step = nextGpuCrashStep({
+          sponsorVideoContext,
+          softwareDecodeThisSession: videoDecodeFallbackThisSession,
+          nowMs: Date.now(),
+          lastCrashAtMs: lastGpuCrashAt,
+          streak: gpuCrashStreak,
+        });
+        gpuCrashStreak = step.streak;
+        lastGpuCrashAt = step.lastCrashAtMs;
+        if (step.action !== "reload") {
           const reason = `GPU ${details.reason} ${details.exitCode ?? ""}`.trim();
           enableVideoDecodeFallbackFlag(reason);
-          const now = Date.now();
-          gpuCrashStreak = now - lastGpuCrashAt < 120_000 ? gpuCrashStreak + 1 : 1;
-          lastGpuCrashAt = now;
-          if (gpuCrashStreak >= 2) {
+          if (step.action === "relaunch") {
             bootLog(
               `[app] GPU-crash tijdens sponsorvideo (herhaald) — herstart met software-decode${bootPlaybackContextSuffix()}`,
             );
@@ -2979,7 +3292,7 @@ if (!gotLock) {
       if (process.platform === "win32") {
         bootLog("[gpu] Direct Composition video-overlays uit (scorebord + video)");
       }
-      if (videoDecodeFallbackEnabled()) {
+      if (videoDecodeFallbackThisSession) {
         bootLog("[gpu-fallback] hardware video decode uitgeschakeld voor deze sessie");
       }
       startDisplayPowerSaveBlocker();
@@ -3017,6 +3330,10 @@ app.on("before-quit", (e) => {
   }
   closeSplashWindow();
   stopDisplayPowerSaveBlocker();
+  if (bridgeNetworkTimer) {
+    clearInterval(bridgeNetworkTimer);
+    bridgeNetworkTimer = null;
+  }
   if (mobileBridge) {
     void mobileBridge.stop();
     mobileBridge = null;

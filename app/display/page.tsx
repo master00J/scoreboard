@@ -5,10 +5,14 @@ import {
   PreviewSlideProgressBar,
   useTimedSlideProgress,
 } from "./_components/preview-slide-progress";
+import { DisplayHeldImage } from "@/components/display-held-image";
+import { DisplaySpreadLayers } from "@/components/display-spread-layers";
+import { displayModeToShow, spreadShowsMedia } from "@/lib/display-handover";
 import { DisplayMediaStage } from "@/components/display-media-stage";
 import { DisplayVideo } from "@/components/display-video";
 import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
-import { AnimatePresence, motion } from "framer-motion";
+import { overlayEpisodeKey } from "@/lib/display-guards";
+import { AnimatePresence } from "framer-motion";
 import { ScaleContainer } from "@/components/scale-container";
 import { useSocketSync, sendCommand, onDisplayHorn } from "@/lib/use-socket";
 import type { HornPayload } from "@/lib/desktop-bridge";
@@ -50,7 +54,9 @@ import {
 import {
   activeSponsorsForSection,
   buildSponsorSlotMap,
+  catchUpSponsorSchedule,
   halfWindowElapsed,
+  halfWindowElapsedOpenEnded,
   sectionSpreadClock,
   sectionPlayheadExhausted,
   lookupSponsorAtSecond,
@@ -69,9 +75,9 @@ import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import { automaticSponsorMediaAllowed } from "@/lib/live-cycle-settings";
 import { useScheduledCueTelemetry } from "@/lib/use-scheduled-cue-telemetry";
-import { cueHasClockWindow, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
+import { cueHasClockWindow, cueWindowLengthSec, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 import {
-  applySponsorBudgetCapToSpreadPhase,
+  finalizeSponsorDistPhase,
   idleMayPlayPrematchSponsors,
   pickSponsorPlaylist,
   sectionForStatus,
@@ -82,6 +88,8 @@ import {
   sponsorBesideShowsPanel,
   sponsorHalftimeShowsPanel,
   sponsorRotationBesideScoreboard,
+  spreadPhaseKeepingLiveClip,
+  type SponsorSpreadPhaseView,
 } from "@/lib/sponsor-display-helpers";
 import {
   resolveAutoLeftLayout,
@@ -126,6 +134,7 @@ import {
   externalCaptureCoversDisplay,
   isBesideInterruptOverlay,
   isSponsorPlaybackInterrupted,
+  sponsorRotationStaysActive,
   timeoutCoversDisplay,
 } from "@/lib/sponsor-playback-interruption";
 import { tMatchPeriod } from "@/lib/i18n/t-phase";
@@ -148,51 +157,17 @@ import { oneOffMediaHoldMs, periodStartHoldsFullScoreboard } from "@/lib/live-cy
 /** Modes die naast het scorebord in het content-vlak staan (niet fullscreen over het canvas). */
 const LEFT_PANEL_INTERRUPT_MODES = new Set(["GOAL", "CARD"]);
 
-/** Ledger wint van slot-rooster zolang er een lopende clip in dit segment is (cf. prematch-inline). */
-function ledgerAwareSponsorDistOverride(
-  match: Match,
-  section: SponsorSection,
-  sponsorLedger: SponsorLedgerPayload | null,
-  base: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null },
-): { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } {
-  if (!sponsorLedger) return base;
-  const ac = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, Date.now());
-  if (!ac) return base;
-  return { phase: "sponsor", sponsorFilterId: ac.sponsorId };
+function scheduledAppearanceKeyOf(
+  spread: { appearanceStartedAtMs?: number | null } | null | undefined,
+): string | null {
+  return spread?.appearanceStartedAtMs != null ? String(spread.appearanceStartedAtMs) : null;
 }
 
-function finalizeSponsorDistPhase(
-  match: Match,
-  section: SponsorSection,
-  matchStatus: string | undefined,
-  sponsorLedger: SponsorLedgerPayload | null,
-  base: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null },
-  hangRef: { current: unknown },
-  slotMap: (string | null)[],
-  slotT: number,
-  sponsors: Sponsor[],
-  cycleBudgetForever: boolean,
-  nowMs: number,
-  /** Quick button / goal / cue: hang niet wissen, anders hervat de clip niet. */
-  freezeBudgetCap: boolean,
-  budgetOf?: (sponsor: Sponsor) => number,
-): { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } {
-  const withLedger = ledgerAwareSponsorDistOverride(match, section, sponsorLedger, base);
-  if (freezeBudgetCap) return withLedger;
-  const capped = applySponsorBudgetCapToSpreadPhase(withLedger, {
-    cycleBudgetForever,
-    sponsors,
-    section,
-    matchStatus,
-    slotMap,
-    slotT,
-    sponsorLedger,
-    ledgerMatchesSegment: sponsorLedgerMatchesSegment(match, section, sponsorLedger),
-    nowMs,
-    budgetOf,
-  });
-  if (capped.phase === "scoreboard") hangRef.current = null;
-  return capped;
+/** De clip die het rooster voor deze vertoning inplande; null als het rooster geen sponsor aanwijst. */
+function scheduledMediaIndexOf(
+  spread: { phase: "scoreboard" | "sponsor"; appearanceIndex?: number | null } | null | undefined,
+): number | null {
+  return spread?.phase === "sponsor" && spread.appearanceIndex != null ? spread.appearanceIndex : null;
 }
 
 function isPreviewIframe(): boolean {
@@ -241,6 +216,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   });
   const [allPlayers, setAllPlayers] = useState<Record<string, Player>>({});
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
+  /** Media-id waarvoor het opzoeken klaar is. Tot dan is "geen media" nog geen antwoord. */
+  const [activeMediaSettledId, setActiveMediaSettledId] = useState<string | null>(null);
   const [sponsors, setSponsors] = useState<Sponsor[]>([]);
   /** Opgeslagen indeling uit `/api/settings`; alleen nog de terugval. */
   const [themeJsonFromSettings, setThemeJsonFromSettings] = useState<string | null>(null);
@@ -397,7 +374,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   useEffect(() => {
     if (previewIframe) return;
-    fetch("/api/sponsors")
+    fetch("/api/sponsors?rotation=1")
       .then((r) => r.json())
       .then((list: Sponsor[]) => setSponsors(Array.isArray(list) ? list : []))
       .catch(() => setSponsors([]));
@@ -429,21 +406,27 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
   useEffect(() => {
     if (previewIframe) return;
-    if (!state?.activeMediaId) {
+    const mediaId = state?.activeMediaId ?? null;
+    if (!mediaId) {
       setActiveMedia(null);
+      setActiveMediaSettledId(null);
       return;
     }
+    let cancelled = false;
+    const settle = (found: MediaItem | null) => {
+      if (cancelled) return;
+      setActiveMedia(found);
+      setActiveMediaSettledId(mediaId);
+    };
     fetch(`/api/media`)
       .then((r) => r.json())
       .then((list: MediaItem[]) => {
-        if (!Array.isArray(list)) {
-          setActiveMedia(null);
-          return;
-        }
-        const found = list.find((m) => m.id === state.activeMediaId);
-        setActiveMedia(found ?? null);
+        settle(Array.isArray(list) ? (list.find((m) => m.id === mediaId) ?? null) : null);
       })
-      .catch(() => setActiveMedia(null));
+      .catch(() => settle(null));
+    return () => {
+      cancelled = true;
+    };
   }, [state?.activeMediaId, previewIframe]);
 
   useEffect(() => {
@@ -467,7 +450,18 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       .catch(() => {});
   }, [state?.updatedAt, previewIframe]);
 
-  const mode = state?.mode ?? "IDLE";
+  // Een losse clip begint pas als zijn bestand bekend is; tot dan blijft het vorige beeld staan.
+  // Anders stond tussendoor het volledige scorebord of een leeg vak op het scherm.
+  const shownModeRef = useRef<string | null>(null);
+  const mode = displayModeToShow<string>({
+    mode: state?.mode ?? "IDLE",
+    activeMediaId: previewIframe ? null : state?.activeMediaId,
+    settledMediaId: activeMediaSettledId,
+    shownMode: shownModeRef.current,
+  });
+  useEffect(() => {
+    shownModeRef.current = state ? mode : null;
+  }, [state, mode]);
   const programResumeModeRef = useRef<DisplayModeT>("SPONSOR_ROTATION");
   useEffect(() => {
     if (mode === "MATCH" || mode === "SPONSOR_ROTATION" || mode === "IDLE") {
@@ -492,19 +486,40 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     return () => clearInterval(id);
   }, [previewIframe, embedInControl, mode, match?.id]);
 
-  const { activeScheduledCue, scheduledCueCycle, dismissActiveScheduledCue } = useScheduledMediaCueActive({
-    match,
-    state,
-    mode,
-    elapsed,
-    skip: previewIframe,
-  });
+  const {
+    activeScheduledCue,
+    scheduledCueCycle,
+    scheduledCueStint,
+    scheduledCuePlayheadSec,
+    dismissActiveScheduledCue,
+  } = useScheduledMediaCueActive({
+      match,
+      state,
+      mode,
+      elapsed,
+      skip: previewIframe,
+    });
   useScheduledCueTelemetry({
     cue: activeScheduledCue,
     cycle: scheduledCueCycle,
+    stint: scheduledCueStint,
     match: match ? { id: match.id, status: match.status } : null,
     enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT",
+    playheadSec: scheduledCuePlayheadSec,
   });
+  /**
+   * Foto's uit de rundown delen één element: bij een wissel verandert alleen het beeld en blijft
+   * de vorige sponsor staan tot de volgende klaar is. Een video start per cue en per doorloop opnieuw.
+   */
+  const scheduledCueMediaKey = (surface: "panel" | "fullscreen") =>
+    activeScheduledCue?.media.type === "IMAGE"
+      ? `scheduled-cue-${surface}-image`
+      : `scheduled-cue-${surface}-${activeScheduledCue?.id}-${scheduledCueCycle}`;
+  /** Een foto met klokvenster blijft staan tot het venster om is, niet haar eigen duur. */
+  const scheduledCueImageHoldSec =
+    activeScheduledCue && cueHasClockWindow(activeScheduledCue)
+      ? cueWindowLengthSec(activeScheduledCue)
+      : undefined;
 
   /** Alleen het echte display-venster meldt afgespeelde sponsorclips (niet de ingebouwde preview). */
   const sponsorPlaybackTelemetry = useMemo(
@@ -517,17 +532,6 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const section = sectionForStatus(match.status);
     return ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger);
   }, [embedInControl, elapsed, match, sponsorLedger]);
-  /**
-   * De preview volgt het stadionscherm zodra de Electron-brug er is: ook zónder actieve clip
-   * blijft ze in follow-mode, anders start ze een eigen rotatie en toont ze andere media dan
-   * het LED-scherm. Alleen de browserdemo (geen electronAPI) speelt zelf af i.p.v. zwart te blijven.
-   */
-  const previewCanFollowDisplay =
-    typeof window !== "undefined" && !!window.electronAPI;
-  const previewFollowsLiveDisplay = Boolean(
-    embedInControl && (previewCanFollowDisplay || previewFollowClip),
-  );
-
   const [prematchClock, setPrematchClock] = useState(0);
   useEffect(() => {
     if (!match?.kickoffAt || !match.matchSponsorMediaId) return;
@@ -544,6 +548,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     );
   }, [match, prematchClock]);
 
+  const overlayEpisode = overlayEpisodeKey(state, { home: match?.homeScore, away: match?.awayScore });
   useEffect(() => {
     if (!state) return;
     /** GOAL_PLAYER_VIDEO: gebruik de echte clipduur (+klein eindbufferke) i.p.v. lange default. */
@@ -572,14 +577,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       }
     }, t.ms);
     return () => clearTimeout(id);
-  }, [
-    state?.mode,
-    state?.updatedAt,
-    state?.activeSubInId,
-    state?.activeSubOutId,
-    activeMedia?.durationSec,
-    match?.sport,
-  ]);
+    // `state` zelf hoort hier niet bij: elke klokstart of shotclock-reset geeft een nieuwe stand,
+    // en dan begon de timer opnieuw en bleef de overlay staan. `overlayEpisode` verandert alleen
+    // als er een nieuwe vertoning begint.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlayEpisode, activeMedia?.durationSec, match?.sport]);
 
   const finishOneOffMedia = useCallback((endedMediaId?: string) => {
     if (embedInControl) return;
@@ -671,11 +673,6 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   }, [state, match, scoreboardClock, shotClock, period, addedTimeMinutes, liveTheme, playlists, embedInControl, idleEmptyFallback]);
   /** In het L-vak nooit het fullscreen-scorebord: dat geeft een bord-in-bord. */
   const sponsorBesideFallback = null;
-
-  const halftimeSponsorFallback = useMemo(() => {
-    if (!match) return null;
-    return <HalfTimeMode match={match} />;
-  }, [match]);
 
   const matchTimerRunning = state?.timerRunning ?? false;
   const periodBreakPending = !!state?.sponsorPeriodBreakPending;
@@ -895,9 +892,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const prematchOriginRef = useRef<number | null>(null);
   /** Was â€œscorebord + sponsorsâ€ vorige tick actief? (sync bij late inschakeling) */
   const matchSponsorRotationWasActiveRef = useRef(false);
-  const sponsorDistTickRef = useRef<{ key: string; value: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } } | null>(null);
-  const prematchDistTickRef = useRef<{ key: string; value: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } } | null>(null);
-  const postmatchDistTickRef = useRef<{ key: string; value: { phase: "scoreboard" | "sponsor"; sponsorFilterId: string | null } } | null>(null);
+  const sponsorDistTickRef = useRef<{ key: string; value: SponsorSpreadPhaseView } | null>(null);
+  const prematchDistTickRef = useRef<{ key: string; value: SponsorSpreadPhaseView } | null>(null);
+  const postmatchDistTickRef = useRef<{ key: string; value: SponsorSpreadPhaseView } | null>(null);
 
   useEffect(() => {
     sponsorPhaseHangRef.current = null;
@@ -987,19 +984,42 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           sponsorPhaseHangRef.current = null;
         }
       }
-      matchSponsorRotationWasActiveRef.current = rotationActive;
+      matchSponsorRotationWasActiveRef.current = sponsorRotationStaysActive(
+        matchSponsorRotationWasActiveRef.current,
+        rotationActive,
+        sponsorInterrupted,
+      );
+      /**
+       * Tijdens een goal of kaart is de modus niet SPONSOR_ROTATION, maar de klok moet de
+       * actuele tijd blijven zien. Anders ziet hij na een onderbreking van meer dan 15 s een
+       * sprong vooruit en begint het rooster opnieuw.
+       */
+      /** Zonder plafond op de helftduur: in de blessuretijd haalt het rooster achterstand nog in. */
+      const tLiveOpen = football
+        ? halfWindowElapsedOpenEnded(elapsed, match.status, match.halfDurationSec)
+        : tLive;
+      const scheduleRawT = rotationActive || sponsorInterrupted ? tLiveOpen : tInterruptFrozen.current;
 
       const matchH = football
         ? Math.max(60, match.halfDurationSec)
         : windowTimelineSeconds(sponsorWindow, match, sponsors);
       const section = football ? sectionForStatus(match.status) : sponsorWindow.section;
-      const t = sponsorScheduleTime(
+      sponsorScheduleTime(
         sponsorScheduleClockRef,
         football ? `${match.id}:${match.status}:match` : `${match.id}:${sponsorWindow.id}:match`,
-        rotationActive ? tLive : tInterruptFrozen.current,
+        scheduleRawT,
         scheduleFrozen,
         matchH,
       );
+      const t = catchUpSponsorSchedule({
+        clock: sponsorScheduleClockRef.current,
+        rawT: scheduleRawT,
+        frozen: scheduleFrozen,
+        hang: sponsorPhaseHangRef.current,
+        nowMs: now,
+        slotMap: sponsorSlotMapMatch,
+        maxT: matchH,
+      });
       if (sponsorScheduleClockRef.current.hardReset) {
         sponsorPhaseHangRef.current = null;
       }
@@ -1031,6 +1051,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         slotMap: sponsorSlotMapMatch,
         slotT: t,
         interrupted: hangFrozen,
+        restartsClip: sponsorInterrupted,
+        scheduleClock: sponsorScheduleClockRef.current,
+        liveClipSponsorId: match
+          ? (ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, now)?.sponsorId ?? null)
+          : null,
       });
       return finalizeSponsorDistPhase(
         match,
@@ -1052,13 +1077,22 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       const H = Math.max(60, match.halfBreakSec);
       const rawElapsed = (Date.now() - rustEpochRef.current) / 1000;
       const { t: loopT } = sectionSpreadClock(rawElapsed, H, true);
-      const t = sponsorScheduleTime(
+      sponsorScheduleTime(
         halftimeScheduleClockRef,
         `${match.id}:${match.status}:halftime`,
         sponsorRepeatBudgetCycles ? loopT : rawElapsed,
         sponsorInterrupted,
         H,
       );
+      const t = catchUpSponsorSchedule({
+        clock: halftimeScheduleClockRef.current,
+        rawT: sponsorRepeatBudgetCycles ? loopT : rawElapsed,
+        frozen: sponsorInterrupted,
+        hang: sponsorPhaseHangRef.current,
+        nowMs: now,
+        slotMap: sponsorSlotMapHalftime,
+        maxT: H,
+      });
       if (sectionPlayheadExhausted(t, H, sponsorRepeatBudgetCycles)) {
         sponsorPhaseHangRef.current = null;
         return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
@@ -1071,6 +1105,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         slotMap: sponsorSlotMapHalftime,
         slotT: t,
         interrupted: sponsorInterrupted,
+        restartsClip: sponsorInterrupted,
+        scheduleClock: halftimeScheduleClockRef.current,
+        liveClipSponsorId: match
+          ? (ledgerActiveClipStillLiveForMatchSegment(match, "halftime", sponsorLedger, now)?.sponsorId ?? null)
+          : null,
       });
       return finalizeSponsorDistPhase(
         match,
@@ -1137,13 +1176,22 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
     }
     const { t: rawT } = prematchSpreadClock(timing.elapsedSec, H);
-    const t = sponsorScheduleTime(
+    sponsorScheduleTime(
       prematchScheduleClockRef,
       "prematch",
       rawT,
       sponsorInterrupted,
       H,
     );
+    const t = catchUpSponsorSchedule({
+      clock: prematchScheduleClockRef.current,
+      rawT: rawT,
+      frozen: sponsorInterrupted,
+      hang: prematchPhaseHangRef.current,
+      nowMs: now,
+      slotMap: sponsorSlotMapPrematch,
+      maxT: H,
+    });
     if (prematchScheduleClockRef.current.hardReset) {
       prematchPhaseHangRef.current = null;
     }
@@ -1152,6 +1200,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       slotMap: sponsorSlotMapPrematch,
       slotT: t,
       interrupted: sponsorInterrupted,
+      restartsClip: sponsorInterrupted,
+      scheduleClock: prematchScheduleClockRef.current,
+      liveClipSponsorId: match
+        ? (ledgerActiveClipStillLiveForMatchSegment(match, "prematch", sponsorLedger, now)?.sponsorId ?? null)
+        : null,
     });
     /**
      * Zelfde ledger-regel als helft/rust: de telemetry mag een lopende clip **bevestigen**,
@@ -1199,13 +1252,22 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const H = postmatchSpreadTimelineSeconds(sponsors);
     const rawElapsed = (now - postmatchEpochRef.current) / 1000;
     const { t: loopT } = sectionSpreadClock(rawElapsed, H, true);
-    const t = sponsorScheduleTime(
+    sponsorScheduleTime(
       postmatchScheduleClockRef,
       `${match.id}:postmatch`,
       sponsorRepeatBudgetCycles ? loopT : rawElapsed,
       sponsorInterrupted,
       H,
     );
+    const t = catchUpSponsorSchedule({
+      clock: postmatchScheduleClockRef.current,
+      rawT: sponsorRepeatBudgetCycles ? loopT : rawElapsed,
+      frozen: sponsorInterrupted,
+      hang: postmatchPhaseHangRef.current,
+      nowMs: now,
+      slotMap: sponsorSlotMapPostmatch,
+      maxT: H,
+    });
     if (sectionPlayheadExhausted(t, H, sponsorRepeatBudgetCycles)) {
       postmatchPhaseHangRef.current = null;
       return { phase: "scoreboard" as const, sponsorFilterId: null as string | null };
@@ -1218,6 +1280,11 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       slotMap: sponsorSlotMapPostmatch,
       slotT: t,
       interrupted: sponsorInterrupted,
+      restartsClip: sponsorInterrupted,
+      scheduleClock: postmatchScheduleClockRef.current,
+      liveClipSponsorId: match
+        ? (ledgerActiveClipStillLiveForMatchSegment(match, "postmatch", sponsorLedger, now)?.sponsorId ?? null)
+        : null,
     });
     return finalizeSponsorDistPhase(
       match,
@@ -1351,6 +1418,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           section={section}
           matchStatus={match.status}
           sponsorIdFilter={sponsorBudgetSponsorFilter}
+          scheduledAppearanceKey={scheduledAppearanceKeyOf(sponsorDistView)}
+          scheduledMediaIndex={scheduledMediaIndexOf(sponsorDistView)}
           playbackTelemetry={sponsorPlaybackTelemetry}
           followPlayback={embedInControl}
           followClip={previewForcesSponsorBeside ? previewFollowClip : null}
@@ -1383,6 +1452,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     match,
     sponsorBesideConfigured,
     sponsorDistView.phase,
+    sponsorDistView.appearanceStartedAtMs,
     previewForcesSponsorBeside,
     sponsorBudgetSponsorFilter,
     sponsors,
@@ -1418,6 +1488,21 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     exclusiveFullscreen,
   });
 
+  /** Scorebord met mediavak voor goal, kaart of een losse clip (niet de sponsorrotatie zelf). */
+  const showFramedContent =
+    showScoreFrame &&
+    !layoutPreviewActive &&
+    !!match &&
+    (!keepLiveSponsorBesideMounted || !showLiveSponsorBeside);
+  /**
+   * Stond dat vak er bij de vorige tekenbeurt? Dan verschijnt het volledige scorebord erna in één
+   * keer. Het vak verdwijnt zelf ook in één keer; een infade liet het scherm dan eerst zwart zien.
+   */
+  const scoreFrameOnScreenRef = useRef(false);
+  useEffect(() => {
+    scoreFrameOnScreenRef.current = showFramedContent;
+  }, [showFramedContent]);
+
   // Content that goes in the right panel (when the left scoreboard is shown)
   // or fullscreen (when it isn't).
   const activeContent = useMemo(() => {
@@ -1438,6 +1523,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             section={section}
             matchStatus={match.status}
             sponsorIdFilter={sponsorBudgetSponsorFilter}
+            scheduledAppearanceKey={scheduledAppearanceKeyOf(sponsorDistView)}
+            scheduledMediaIndex={scheduledMediaIndexOf(sponsorDistView)}
             playbackTelemetry={sponsorPlaybackTelemetry}
             followPlayback={embedInControl}
             followClip={previewForcesSponsorBeside ? previewFollowClip : null}
@@ -1487,6 +1574,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           <SingleMediaMode
             key={`sm-panel-${activeMedia.id}`}
             media={activeMedia}
+            holdSlot="panel"
             showPreviewProgress={embedInControl}
             finishAfterMs={oneOffMediaHoldMs(activeMedia)}
             onVideoEnded={() => finishOneOffMedia(activeMedia.id)}
@@ -1556,38 +1644,43 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
         {state && mode === "IDLE" && !layoutPreviewActive && (() => {
           if (idleMayPlayPrematchSponsors(match) && hasSponsorsForSectionOrWindow(sponsors, "prematch", match.status, sponsorWindow, match.sport)) {
-            if (prematchDistView.phase === "sponsor") {
-              return (
-                <SponsorBudgetRotation
-                  key="idle-sbr-spread"
-                  sponsors={sponsors}
-                  section="prematch"
-                  sponsorIdFilter={prematchDistView.sponsorFilterId ?? undefined}
-                  playbackTelemetry={sponsorPlaybackTelemetry}
-                  followPlayback={embedInControl}
-                  followClip={previewFollowClip}
-                  showPreviewProgress={embedInControl}
-                  renderVideo
-                  fallback={sponsorBudgetFallbackScoreboard}
-                  cycleBudgetForever={sponsorRepeatBudgetCycles}
-                  paused={sponsorInterrupted}
-                  restartCurrentOnResume={sponsorInterrupted}
-                  matchSponsorMediaId={null}
-                  matchSponsorMedia={null}
-                  budgetSeconds={rotationBudgetSeconds}
-                />
-              );
-            }
             return (
-              <MatchScoreboardFull
-                key="idle-prematch-scoreboard"
-                match={match}
-                elapsed={scoreboardClock}
-                shotClock={shotClock}
-                running={state.timerRunning ?? false}
-                period={period}
-                addedTime={addedTimeMinutes}
-                theme={liveTheme}
+              <DisplaySpreadLayers
+                key="idle-prematch-spread"
+                scoreboard={
+                  <MatchScoreboardFull
+                    match={match}
+                    elapsed={scoreboardClock}
+                    shotClock={shotClock}
+                    running={state.timerRunning ?? false}
+                    period={period}
+                    addedTime={addedTimeMinutes}
+                    theme={liveTheme}
+                  />
+                }
+                showMedia={spreadShowsMedia(prematchDistView.phase)}
+                media={
+                  <SponsorBudgetRotation
+                    sponsors={sponsors}
+                    section="prematch"
+                    sponsorIdFilter={prematchDistView.sponsorFilterId ?? undefined}
+                    scheduledAppearanceKey={scheduledAppearanceKeyOf(prematchDistView)}
+                    scheduledMediaIndex={scheduledMediaIndexOf(prematchDistView)}
+                    playbackTelemetry={sponsorPlaybackTelemetry}
+                    followPlayback={embedInControl}
+                    followClip={previewFollowClip}
+                    showPreviewProgress={embedInControl}
+                    renderVideo
+                    chrome="clear"
+                    fallback={undefined}
+                    cycleBudgetForever={sponsorRepeatBudgetCycles}
+                    paused={sponsorInterrupted}
+                    restartCurrentOnResume={sponsorInterrupted}
+                    matchSponsorMediaId={null}
+                    matchSponsorMedia={null}
+                    budgetSeconds={rotationBudgetSeconds}
+                  />
+                }
               />
             );
           }
@@ -1644,15 +1737,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
         {state &&
           match &&
-          liveAutoHalftime &&
-          sponsorDistView.phase === "scoreboard" && (
-            <HalfTimeMode key="ht-live-cycle" match={match} />
-          )}
-
-        {state &&
-          match &&
           playFullscreenBoard &&
-          !(liveAutoHalftime && sponsorDistView.phase === "scoreboard") &&
+          !liveAutoHalftime &&
           !showScoreFrame &&
           !previewForcesSponsorBeside &&
           !showLiveSponsorBeside && (
@@ -1666,87 +1752,55 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               period={period}
               addedTime={addedTimeMinutes}
               theme={liveTheme}
+              instant={scoreFrameOnScreenRef.current}
             />
             </div>
           )}
 
-        {state && match && liveAutoHalftime && hasSponsorsForSectionOrWindow(sponsors, "halftime", match.status, sponsorWindow, match.sport) && (
-          <motion.div
-            key="ht-sponsor-cycle"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: sponsorDistView.phase === "sponsor" ? 1 : 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-            className={
-              sponsorDistView.phase === "sponsor"
-                ? "absolute inset-0 z-[5] bg-black"
-                : "pointer-events-none absolute inset-0 z-0 opacity-0"
+        {state && match && liveAutoHalftime && (
+          <DisplaySpreadLayers
+            scoreboard={<HalfTimeMode key="ht-live-cycle" match={match} />}
+            showMedia={spreadShowsMedia(sponsorDistView.phase)}
+            media={
+              hasSponsorsForSectionOrWindow(
+                sponsors,
+                "halftime",
+                match.status,
+                sponsorWindow,
+                match.sport,
+              ) ? (
+                <SponsorBudgetRotation
+                  key={`ht-sbr-${match.id}`}
+                  sponsors={sponsors}
+                  section="halftime"
+                  sponsorIdFilter={sponsorDistView.sponsorFilterId ?? undefined}
+                  scheduledAppearanceKey={scheduledAppearanceKeyOf(sponsorDistView)}
+                  scheduledMediaIndex={scheduledMediaIndexOf(sponsorDistView)}
+                  playbackTelemetry={sponsorPlaybackTelemetry}
+                  followPlayback={embedInControl}
+                  followClip={previewFollowClip}
+                  showPreviewProgress={embedInControl}
+                  renderVideo
+                  chrome="clear"
+                  fallback={undefined}
+                  cycleBudgetForever={sponsorRepeatBudgetCycles}
+                  paused={sponsorInterrupted}
+                  budgetSeconds={rotationBudgetSeconds}
+                  {...matchSponsorPinProps}
+                />
+              ) : (
+                <SponsorRotationLiveContent
+                  match={match}
+                  playlists={playlists}
+                  sponsors={sponsors}
+                  showPreviewProgress={embedInControl}
+                  idleEmptyFallback={idleEmptyFallback}
+                  budgetSeconds={rotationBudgetSeconds}
+                  sponsorWindow={sponsorWindow}
+                />
+              )
             }
-            aria-hidden={sponsorDistView.phase !== "sponsor"}
-          >
-            <SponsorBudgetRotation
-              key={`ht-sbr-${match.id}`}
-              sponsors={sponsors}
-              section="halftime"
-              sponsorIdFilter={
-                sponsorDistView.phase === "sponsor" ? sponsorDistView.sponsorFilterId : null
-              }
-              playbackTelemetry={sponsorPlaybackTelemetry}
-              followPlayback={embedInControl}
-              followClip={previewFollowClip}
-              showPreviewProgress={embedInControl}
-              renderVideo
-              fallback={halftimeSponsorFallback}
-              cycleBudgetForever={sponsorRepeatBudgetCycles}
-              paused={sponsorInterrupted || sponsorDistView.phase !== "sponsor"}
-              budgetSeconds={rotationBudgetSeconds}
-              {...matchSponsorPinProps}
-            />
-          </motion.div>
-        )}
-        {state &&
-          match &&
-          liveAutoHalftime &&
-          !hasSponsorsForSectionOrWindow(sponsors, "halftime", match.status, sponsorWindow, match.sport) &&
-          sponsorDistView.phase === "sponsor" && (
-          <motion.div
-            key="ht-playlist-cycle"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.25 }}
-            className="absolute inset-0 z-[5] bg-black"
-          >
-            {hasSponsorsForSectionOrWindow(sponsors, "halftime", match.status, sponsorWindow, match.sport) ? (
-              <SponsorBudgetRotation
-                key={`ht-sbr-${match.id}`}
-                sponsors={sponsors}
-                section="halftime"
-                sponsorIdFilter={sponsorDistView.sponsorFilterId}
-                playbackTelemetry={sponsorPlaybackTelemetry}
-                followPlayback={previewFollowsLiveDisplay}
-                followClip={previewFollowClip}
-                showPreviewProgress={embedInControl}
-                renderVideo
-                fallback={halftimeSponsorFallback}
-                cycleBudgetForever={sponsorRepeatBudgetCycles}
-                paused={sponsorInterrupted}
-                restartCurrentOnResume={sponsorInterrupted}
-                budgetSeconds={rotationBudgetSeconds}
-                {...matchSponsorPinProps}
-              />
-            ) : (
-              <SponsorRotationLiveContent
-                match={match}
-                playlists={playlists}
-                sponsors={sponsors}
-                showPreviewProgress={embedInControl}
-                idleEmptyFallback={idleEmptyFallback}
-                budgetSeconds={rotationBudgetSeconds}
-                sponsorWindow={sponsorWindow}
-              />
-            )}
-          </motion.div>
+          />
         )}
 
         {state && mode === "TEAM_INTRO" && match && (
@@ -1810,6 +1864,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             <SingleMediaMode
               key={`sm-${activeMedia.id}`}
               media={activeMedia}
+              holdSlot="fullscreen"
               showPreviewProgress={embedInControl}
               finishAfterMs={oneOffMediaHoldMs(activeMedia)}
               onVideoEnded={() => finishOneOffMedia(activeMedia.id)}
@@ -1907,8 +1962,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             theme={liveTheme}
           >
             <SingleMediaMode
-              key={`scheduled-cue-panel-${activeScheduledCue.id}-${scheduledCueCycle}`}
+              key={scheduledCueMediaKey("panel")}
               media={activeScheduledCue.media}
+              holdSlot="panel"
+              imageHoldSec={scheduledCueImageHoldSec}
               showPreviewProgress={embedInControl}
               loop={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -1936,8 +1993,10 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         !(match && sponsorRotationBesideScoreboard(match.status)) && (
         <div className="absolute inset-0 z-[88] bg-black">
             <SingleMediaMode
-              key={`scheduled-cue-fullscreen-${activeScheduledCue.id}-${scheduledCueCycle}`}
+              key={scheduledCueMediaKey("fullscreen")}
               media={activeScheduledCue.media}
+              holdSlot="fullscreen"
+              imageHoldSec={scheduledCueImageHoldSec}
               showPreviewProgress={embedInControl}
               loop={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -2020,19 +2079,23 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         </div>
       )}
 
-      {/* Active-match modes: wrap content in the left-scoreboard / strip layout */}
-      {showScoreFrame && !layoutPreviewActive && match && (!keepLiveSponsorBesideMounted || !showLiveSponsorBeside) && (
-        <ScoreFrame
-          match={match}
-          elapsed={scoreboardClock}
-          shotClock={shotClock}
-          running={state?.timerRunning ?? false}
-          period={period}
-          addedTime={addedTimeMinutes}
-          theme={liveTheme}
-        >
-          <AnimatePresence mode="wait">{activeContent}</AnimatePresence>
-        </ScoreFrame>
+      {/* Active-match modes: wrap content in the left-scoreboard / strip layout.
+          Boven het volledige scorebord: dat faadt nog uit als dit vak verschijnt en lag er
+          anders een moment overheen. */}
+      {showFramedContent && match && (
+        <div className="absolute inset-0 z-[12]">
+          <ScoreFrame
+            match={match}
+            elapsed={scoreboardClock}
+            shotClock={shotClock}
+            running={state?.timerRunning ?? false}
+            period={period}
+            addedTime={addedTimeMinutes}
+            theme={liveTheme}
+          >
+            <AnimatePresence mode="wait">{activeContent}</AnimatePresence>
+          </ScoreFrame>
+        </div>
       )}
 
       {state && layoutPreview && (
@@ -2116,15 +2179,9 @@ function SponsorRotationLiveContent({
     expectedPlaySec: number;
     clipSessionId: string;
   } | null;
-  prematchSpread?: {
-    phase: "scoreboard" | "sponsor";
-    sponsorFilterId: string | null;
-  } | null;
+  prematchSpread?: SponsorSpreadPhaseView | null;
   /** Na-wedstrijd-rooster, zelfde vorm als `prematchSpread`. */
-  postmatchSpread?: {
-    phase: "scoreboard" | "sponsor";
-    sponsorFilterId: string | null;
-  } | null;
+  postmatchSpread?: SponsorSpreadPhaseView | null;
   /** Tijdens prematch-rooster in Â«scoreboardÂ»-gap: echte scorebordweergave i.p.v. PREMATCH-playlist. */
   prematchScoreboardNode?: ReactNode | null;
   sponsorBudgetFallback?: ReactNode;
@@ -2150,42 +2207,40 @@ function SponsorRotationLiveContent({
     prematchSpread &&
     hasSponsorsForSectionOrWindow(sponsors, "prematch", match.status, sponsorWindow, match.sport)
   ) {
-    if (prematchSpread.phase === "sponsor") {
-      return (
-        <SponsorBudgetRotation
-          sponsors={sponsors}
-          section="prematch"
-          sponsorIdFilter={prematchSpread.sponsorFilterId ?? undefined}
-          playbackTelemetry={playbackTelemetry}
-          followPlayback={followPlayback}
-          followClip={followClip}
-          showPreviewProgress={showPreviewProgress}
-          renderVideo
-          fallback={sponsorBudgetFallback ?? undefined}
-          cycleBudgetForever={cycleBudgetForever}
-          paused={paused}
-          restartCurrentOnResume={restartCurrentOnResume}
-          /**
-           * Géén matchsponsor-pin op het rooster: `applyMatchSponsorMediaPin` vervangt dan
-           * de hele medialijst van de sponsor door die ene clip, waardoor een sponsor met
-           * meerdere bestanden er in «voor wedstrijd» maar één afspeelt. De fullscreen
-           * matchsponsor-overlay is hier al uitgezet ten gunste van het rooster
-           * (`prematchMatchSponsorOverlay`), dus het rooster bepaalt wat er speelt.
-           */
-          matchSponsorMediaId={null}
-          matchSponsorMedia={null}
-          budgetSeconds={budgetSeconds}
-        />
-      );
-    }
-    if (prematchScoreboardNode) {
-      return <>{prematchScoreboardNode}</>;
-    }
+    const showPrematchMedia = spreadShowsMedia(prematchSpread.phase);
     return (
-      <SponsorRotation
-        playlist={pickSponsorPlaylist(playlists, match.status) ?? playlists.IDLE}
-        showPreviewProgress={showPreviewProgress}
-        idleEmptyFallback={idleEmptyFallback}
+      <DisplaySpreadLayers
+        scoreboard={prematchScoreboardNode}
+        showMedia={showPrematchMedia}
+        media={
+          <SponsorBudgetRotation
+            sponsors={sponsors}
+            section="prematch"
+            sponsorIdFilter={prematchSpread.sponsorFilterId ?? undefined}
+            scheduledAppearanceKey={scheduledAppearanceKeyOf(prematchSpread)}
+            scheduledMediaIndex={scheduledMediaIndexOf(prematchSpread)}
+            playbackTelemetry={playbackTelemetry}
+            followPlayback={followPlayback}
+            followClip={followClip}
+            showPreviewProgress={showPreviewProgress}
+            renderVideo
+            chrome="clear"
+            fallback={undefined}
+            cycleBudgetForever={cycleBudgetForever}
+            paused={paused}
+            restartCurrentOnResume={restartCurrentOnResume}
+            /**
+             * Géén matchsponsor-pin op het rooster: `applyMatchSponsorMediaPin` vervangt dan
+             * de hele medialijst van de sponsor door die ene clip, waardoor een sponsor met
+             * meerdere bestanden er in «voor wedstrijd» maar één afspeelt. De fullscreen
+             * matchsponsor-overlay is hier al uitgezet ten gunste van het rooster
+             * (`prematchMatchSponsorOverlay`), dus het rooster bepaalt wat er speelt.
+             */
+            matchSponsorMediaId={null}
+            matchSponsorMedia={null}
+            budgetSeconds={budgetSeconds}
+          />
+        }
       />
     );
   }
@@ -2194,37 +2249,35 @@ function SponsorRotationLiveContent({
     postmatchSpread &&
     hasSponsorsForSectionOrWindow(sponsors, "postmatch", match.status, sponsorWindow, match.sport)
   ) {
-    if (postmatchSpread.phase === "sponsor") {
-      return (
-        <SponsorBudgetRotation
-          sponsors={sponsors}
-          section="postmatch"
-          matchStatus={match.status}
-          sponsorIdFilter={postmatchSpread.sponsorFilterId ?? undefined}
-          playbackTelemetry={playbackTelemetry}
-          followPlayback={followPlayback}
-          followClip={followClip}
-          showPreviewProgress={showPreviewProgress}
-          renderVideo
-          fallback={sponsorBudgetFallback ?? undefined}
-          cycleBudgetForever={cycleBudgetForever}
-          paused={paused}
-          restartCurrentOnResume={restartCurrentOnResume}
-          /** Zelfde reden als bij het prematch-rooster: geen pin over de rotatie heen. */
-          matchSponsorMediaId={null}
-          matchSponsorMedia={null}
-          budgetSeconds={budgetSeconds}
-        />
-      );
-    }
-    if (prematchScoreboardNode) {
-      return <>{prematchScoreboardNode}</>;
-    }
+    const showPostmatchMedia = spreadShowsMedia(postmatchSpread.phase);
     return (
-      <SponsorRotation
-        playlist={pickSponsorPlaylist(playlists, match.status) ?? playlists.IDLE}
-        showPreviewProgress={showPreviewProgress}
-        idleEmptyFallback={idleEmptyFallback}
+      <DisplaySpreadLayers
+        scoreboard={prematchScoreboardNode}
+        showMedia={showPostmatchMedia}
+        media={
+          <SponsorBudgetRotation
+            sponsors={sponsors}
+            section="postmatch"
+            matchStatus={match.status}
+            sponsorIdFilter={postmatchSpread.sponsorFilterId ?? undefined}
+            scheduledAppearanceKey={scheduledAppearanceKeyOf(postmatchSpread)}
+            scheduledMediaIndex={scheduledMediaIndexOf(postmatchSpread)}
+            playbackTelemetry={playbackTelemetry}
+            followPlayback={followPlayback}
+            followClip={followClip}
+            showPreviewProgress={showPreviewProgress}
+            renderVideo
+            chrome="clear"
+            fallback={undefined}
+            cycleBudgetForever={cycleBudgetForever}
+            paused={paused}
+            restartCurrentOnResume={restartCurrentOnResume}
+            /** Zelfde reden als bij het prematch-rooster: geen pin over de rotatie heen. */
+            matchSponsorMediaId={null}
+            matchSponsorMedia={null}
+            budgetSeconds={budgetSeconds}
+          />
+        }
       />
     );
   }
@@ -2238,6 +2291,8 @@ function SponsorRotationLiveContent({
         section={section}
         matchStatus={match.status}
         sponsorIdFilter={inSponsorSlot ? (spread?.sponsorFilterId ?? undefined) : null}
+        scheduledAppearanceKey={inSponsorSlot ? scheduledAppearanceKeyOf(spread) : null}
+        scheduledMediaIndex={inSponsorSlot ? scheduledMediaIndexOf(spread) : null}
         playbackTelemetry={playbackTelemetry}
         followPlayback={followPlayback}
         followClip={followClip}
@@ -2292,11 +2347,21 @@ function SingleMediaMode({
   previewProgressWallClock,
   onVideoEnded,
   finishAfterMs,
+  imageHoldSec,
+  holdSlot,
 }: {
   media: MediaItem | null;
   loop?: boolean;
   fallback?: React.ReactNode;
   showPreviewProgress?: boolean;
+  /**
+   * Het vak dat deze clip vult: het mediavak naast het scorebord, of het hele scherm. Een foto
+   * sluit aan op de foto die daar net stond, ook als die uit een andere laag kwam (sponsor uit het
+   * programma, losse clip), zodat het vak tussendoor niet zwart wordt.
+   */
+  holdSlot?: "panel" | "fullscreen";
+  /** Hoe lang een foto blijft staan als dat niet haar eigen duur is, bv. het venster van een cue. */
+  imageHoldSec?: number;
   /** Preview-balk over muurklok-tijdvenster (bijv. 5 min matchsponsor), niet media-duur. */
   previewProgressWallClock?: {
     windowStartMs: number;
@@ -2315,7 +2380,7 @@ function SingleMediaMode({
     media?.type === "IMAGE" &&
     showPreviewProgress &&
     !previewProgressWallClock
-      ? Math.max(1500, Math.max(1, media.durationSec) * 1000)
+      ? Math.max(1500, Math.max(1, imageHoldSec ?? media.durationSec) * 1000)
       : 0;
   const imageElapsed = useTimedSlideProgress(
     imageTotalMs,
@@ -2505,7 +2570,7 @@ function SingleMediaMode({
           }}
         />
       ) : (
-        <img src={mediaUrl(media.path)} alt="" decoding="async" style={DISPLAY_COVER_MEDIA_STYLE} />
+        <DisplayHeldImage src={mediaUrl(media.path)} style={DISPLAY_COVER_MEDIA_STYLE} slot={holdSlot} />
       )}
       </DisplayMediaStage>
       {wallClockBar}

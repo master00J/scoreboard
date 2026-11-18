@@ -178,10 +178,17 @@ export type MediaItem = {
   sponsorPhaseTagsJson?: string | null;
   /** Technisch item (bv. auto voor speler goalVideoPath); verborgen in Media-bibliotheek. */
   hideFromLibrary?: boolean;
-  /** VIDEO: high_fps / unsupported_codec / pixel_format — risico op het stadionscherm. */
+  /** VIDEO: high_fps / unsupported_codec / pixel_format / unsafe_encoder / playback_fault — risico op het stadionscherm; probe_failed = kop niet leesbaar. */
   playbackWarning?: string | null;
+  /** JSON `MediaCheckRecord` (lib/media-health.ts): volledige decode per bestandsversie. */
+  mediaCheckJson?: string | null;
   /** Knop op Display voor manuele fullscreen (waarschuwingen e.d.). */
   quickLaunch?: boolean;
+  /**
+   * Clubmedia: totale zendtijd per fase in seconden (JSON).
+   * Null/leeg = niet in de sponsorrotatie. Alleen gebruikt zonder sponsorId.
+   */
+  clubPhaseBudgetJson?: string | null;
   createdAt: string;
 };
 
@@ -222,6 +229,8 @@ export type Sponsor = {
   sportBudgetsJson?: string | null;
   createdAt: string;
   media?: MediaItem[];
+  /** Alleen in de rotatie-API: clubmedia die meedraait zonder sponsorrij. */
+  rotationKind?: "sponsor" | "club";
 };
 
 export type SponsorSection = "prematch" | "match" | "halftime" | "postmatch";

@@ -1,242 +1,185 @@
 import { describe, expect, it } from "vitest";
-import {
-  applySponsorBudgetCapToSpreadPhase,
-  scoreFrameAllowed,
-  shouldShowFullScreenMatchBoard,
-  liveSponsorBesideVisible,
-  isExclusiveFullscreenDisplayMode,
-} from "./sponsor-display-helpers";
+import type { Sponsor } from "./types";
 import type { SponsorLedgerPayload } from "./sponsor-telemetry";
-import type { Match, Playlist, PlaylistSlot, Sponsor } from "./types";
+import {
+  HUD_UNCONFIRMED_GRACE_MS,
+  applySponsorBudgetCapToSpreadPhase,
+  hudRosterPhase,
+  scheduledSlotRearms,
+  spreadPhaseKeepingLiveClip,
+} from "./sponsor-display-helpers";
 
-const emptyPlaylists = {} as Record<PlaylistSlot, Playlist | null>;
-const match = { status: "FIRST_HALF" } as Match;
-
-describe("shouldShowFullScreenMatchBoard", () => {
-  it("toont fullscreen bij de scorebord-modus", () => {
-    expect(shouldShowFullScreenMatchBoard(match, "MATCH", [], emptyPlaylists)).toBe(true);
+describe("hudRosterPhase", () => {
+  it("volgt de ledger als het scherm de clip meldt", () => {
+    expect(
+      hudRosterPhase({
+        predictedPhase: "scoreboard",
+        predictedStartedAtMs: null,
+        ledgerConfirmed: true,
+        interrupted: false,
+        nowMs: 10_000,
+      }),
+    ).toBe("sponsor");
   });
 
-  it("toont fullscreen in een speelhelft zonder sponsorclips", () => {
-    expect(shouldShowFullScreenMatchBoard(match, "SPONSOR_ROTATION", [], emptyPlaylists)).toBe(true);
+  it("houdt een verse hang aan tijdens de start-marge", () => {
+    expect(
+      hudRosterPhase({
+        predictedPhase: "sponsor",
+        predictedStartedAtMs: 8_000,
+        ledgerConfirmed: false,
+        interrupted: false,
+        nowMs: 8_000 + HUD_UNCONFIRMED_GRACE_MS - 1,
+      }),
+    ).toBe("sponsor");
   });
 
-  it("toont fullscreen in de scorebord-fase, L-frame alleen als er een clip speelt", () => {
+  it("toont het scorebord als de hang niet bevestigd wordt", () => {
     expect(
-      shouldShowFullScreenMatchBoard(match, "SPONSOR_ROTATION", [], emptyPlaylists, "scoreboard"),
-    ).toBe(true);
-    expect(
-      shouldShowFullScreenMatchBoard(match, "SPONSOR_ROTATION", [], emptyPlaylists, "sponsor"),
-    ).toBe(false);
-  });
-});
-
-describe("liveSponsorBesideVisible", () => {
-  it("verbergt het L-frame zonder lopende clip", () => {
-    expect(
-      liveSponsorBesideVisible({
-        mounted: true,
-        phase: "scoreboard",
-        interruptOverlay: false,
-        previewFollowClip: false,
-        scheduledCue: false,
+      hudRosterPhase({
+        predictedPhase: "sponsor",
+        predictedStartedAtMs: 1_000,
+        ledgerConfirmed: false,
+        interrupted: false,
+        nowMs: 1_000 + HUD_UNCONFIRMED_GRACE_MS,
       }),
-    ).toBe(false);
+    ).toBe("scoreboard");
   });
 
-  it("toont het L-frame tijdens een sponsorclip of overlay", () => {
+  it("laat een onderbreking de voorspelling staan", () => {
     expect(
-      liveSponsorBesideVisible({
-        mounted: true,
-        phase: "sponsor",
-        interruptOverlay: false,
-        previewFollowClip: false,
-        scheduledCue: false,
+      hudRosterPhase({
+        predictedPhase: "sponsor",
+        predictedStartedAtMs: 1_000,
+        ledgerConfirmed: false,
+        interrupted: true,
+        nowMs: 20_000,
       }),
-    ).toBe(true);
-    expect(
-      liveSponsorBesideVisible({
-        mounted: true,
-        phase: "scoreboard",
-        interruptOverlay: true,
-        previewFollowClip: false,
-        scheduledCue: false,
-      }),
-    ).toBe(true);
-  });
-
-  it("verbergt het L-frame tijdens team- of spelerintro", () => {
-    expect(
-      liveSponsorBesideVisible({
-        mounted: true,
-        phase: "sponsor",
-        interruptOverlay: false,
-        previewFollowClip: false,
-        scheduledCue: true,
-        exclusiveFullscreen: true,
-      }),
-    ).toBe(false);
-  });
-
-  it("blijft uit als de rotatie niet gemount is", () => {
-    expect(
-      liveSponsorBesideVisible({
-        mounted: false,
-        phase: "sponsor",
-        interruptOverlay: true,
-        previewFollowClip: true,
-        scheduledCue: true,
-      }),
-    ).toBe(false);
-  });
-});
-
-describe("scoreFrameAllowed", () => {
-  it("zet het L-frame uit in prematch zodat het full-logo niet dubbel door de balk piept", () => {
-    expect(
-      scoreFrameAllowed({
-        mode: "SPONSOR_ROTATION",
-        matchStatus: "PREMATCH",
-      }),
-    ).toBe(false);
-  });
-
-  it("houdt het L-frame tijdens de helft als er een paneel naast hoort", () => {
-    expect(
-      scoreFrameAllowed({
-        mode: "SPONSOR_ROTATION",
-        matchStatus: "FIRST_HALF",
-      }),
-    ).toBe(true);
-  });
-
-  it("zet het L-frame altijd uit bij goal-intro en spelervideo", () => {
-    expect(
-      scoreFrameAllowed({
-        mode: "GOAL_INTRO_VIDEO",
-        matchStatus: "PREMATCH",
-      }),
-    ).toBe(false);
-    expect(
-      scoreFrameAllowed({
-        mode: "GOAL_INTRO_VIDEO",
-        matchStatus: "FIRST_HALF",
-      }),
-    ).toBe(false);
-    expect(
-      scoreFrameAllowed({
-        mode: "GOAL_PLAYER_VIDEO",
-        matchStatus: "FIRST_HALF",
-      }),
-    ).toBe(false);
-  });
-
-  it("houdt team-intro fullscreen, ook tijdens een speelset", () => {
-    expect(isExclusiveFullscreenDisplayMode("TEAM_INTRO")).toBe(true);
-    expect(isExclusiveFullscreenDisplayMode("PLAYER_INTRO")).toBe(true);
-    expect(
-      scoreFrameAllowed({
-        mode: "TEAM_INTRO",
-        matchStatus: "FIRST_HALF",
-      }),
-    ).toBe(false);
+    ).toBe("sponsor");
   });
 });
 
 describe("applySponsorBudgetCapToSpreadPhase", () => {
-  const capOpts = {
-    sponsors: [],
+  const plenty = {
+    id: "plenty",
+    name: "Plenty",
+    active: true,
+    prematchSeconds: 0,
+    halftimeSeconds: 0,
+    matchSeconds: 180,
+    matchFirstHalfSeconds: 90,
+    matchSecondHalfSeconds: 90,
+    imageDefaultSec: 10,
+    media: [{ id: "clip", sponsorId: "plenty", type: "VIDEO", durationSec: 25, active: true }],
+  } as unknown as Sponsor;
+  const view = { phase: "sponsor" as const, sponsorFilterId: "plenty" };
+  const capOpts = (ledger: SponsorLedgerPayload, nowMs: number) => ({
+    cycleBudgetForever: false,
+    sponsors: [plenty],
     section: "match" as const,
-    matchStatus: "FIRST_HALF",
+    matchStatus: "SECOND_HALF",
     slotMap: [] as (string | null)[],
-    slotT: 10,
-    sponsorLedger: null,
-    ledgerMatchesSegment: false,
-    nowMs: 0,
-  };
-
-  it("stopt de sponsorfase als er geen budget meer is", () => {
-    expect(
-      applySponsorBudgetCapToSpreadPhase(
-        { phase: "sponsor", sponsorFilterId: "sp-1" },
-        { ...capOpts, cycleBudgetForever: false },
-      ),
-    ).toEqual({ phase: "scoreboard", sponsorFilterId: null });
+    slotT: 0,
+    sponsorLedger: ledger,
+    ledgerMatchesSegment: true,
+    nowMs,
+  });
+  const ledger = (bySec: number, clipStartedAtMs: number | null): SponsorLedgerPayload => ({
+    matchId: "m",
+    segmentKey: "m:SECOND_HALF",
+    bySponsorSec: { plenty: bySec },
+    activeClip:
+      clipStartedAtMs == null
+        ? null
+        : { sponsorId: "plenty", mediaId: "clip", startedAtMs: clipStartedAtMs, expectedPlaySec: 25, clipSessionId: "s" },
+    updatedAtMs: 0,
   });
 
-  it("blijft draaien als herhalen van het budget aan staat", () => {
-    expect(
-      applySponsorBudgetCapToSpreadPhase(
-        { phase: "sponsor", sponsorFilterId: "sp-1" },
-        { ...capOpts, cycleBudgetForever: true },
-      ),
-    ).toEqual({ phase: "sponsor", sponsorFilterId: "sp-1" });
+  it("laat de laatste clip uitspelen, ook als hij over het budget gaat", () => {
+    // 3 × 25 s gespeeld, budget 90: de vierde clip start en staat nu 15 s (= precies 90 s) en 24 s.
+    for (const elapsedMs of [15_000, 24_000]) {
+      expect(applySponsorBudgetCapToSpreadPhase(view, capOpts(ledger(75, 1_000), 1_000 + elapsedMs))).toBe(view);
+    }
   });
 
-  describe("laatste clip van een sponsor (budget 8 s, twee beelden van 4 s)", () => {
-    const sponsor = {
-      id: "sp",
-      name: "Sponsor",
-      active: true,
-      prematchSeconds: 0,
-      halftimeSeconds: 8,
-      matchSeconds: 0,
-      imageDefaultSec: 4,
-      media: [{ id: "sp-m1", type: "IMAGE", active: true, durationSec: 4, title: "sp", path: "/x/sp.png" }],
-    } as Sponsor;
-    const slotMap: (string | null)[] = Array(60).fill(null);
-    for (const t of [12, 13, 14, 36, 37, 38]) slotMap[t] = "sp";
-    const nowMs = 1_000_000;
-    const opts = {
-      cycleBudgetForever: false,
-      sponsors: [sponsor],
-      section: "halftime" as const,
-      matchStatus: undefined,
-      slotMap,
-      /** Rooster: 4 + 3,62 = 7,62 s, afgerond 8 ⇒ zonder lopende clip "op". */
-      slotT: 39.62,
-      ledgerMatchesSegment: true,
-      nowMs,
+  it("start geen nieuwe clip meer als het budget op is", () => {
+    expect(applySponsorBudgetCapToSpreadPhase(view, capOpts(ledger(100, null), 50_000))).toEqual({
+      phase: "scoreboard",
+      sponsorFilterId: null,
+    });
+  });
+});
+
+describe("spreadPhaseKeepingLiveClip", () => {
+  it("volgt het rooster zodra dat een sponsor aanwijst, ook als er nog een clip loopt", () => {
+    const roster = {
+      phase: "sponsor" as const,
+      sponsorFilterId: "blaklader",
+      appearanceStartedAtMs: 2_000,
+      appearanceIndex: 3,
     };
-    const ledger = (activeClip: SponsorLedgerPayload["activeClip"]): SponsorLedgerPayload => ({
-      matchId: "m1",
-      segmentKey: "m1:halftime",
-      bySponsorSec: { sp: 4 },
-      activeClip,
-      updatedAtMs: nowMs,
-    });
-    const phase = { phase: "sponsor" as const, sponsorFilterId: "sp" };
+    expect(spreadPhaseKeepingLiveClip(roster, "port")).toBe(roster);
+  });
 
-    it("laat een lopende clip uitspelen, ook als het rooster al op budget staat", () => {
-      const running = ledger({
-        sponsorId: "sp",
-        mediaId: "sp-m1",
-        startedAtMs: nowMs - 3_620,
-        expectedPlaySec: 4,
-        clipSessionId: "s2",
-      });
-      expect(applySponsorBudgetCapToSpreadPhase(phase, { ...opts, sponsorLedger: running })).toEqual(phase);
+  it("houdt de sponsorfase vast tot een lopende clip uit is als het rooster naar het scorebord wil", () => {
+    expect(
+      spreadPhaseKeepingLiveClip({ phase: "scoreboard", sponsorFilterId: null }, "popup"),
+    ).toEqual({
+      phase: "sponsor",
+      sponsorFilterId: "popup",
+      appearanceStartedAtMs: null,
+      appearanceIndex: null,
     });
+  });
 
-    it("start geen nieuwe clip meer als er niets loopt", () => {
-      expect(applySponsorBudgetCapToSpreadPhase(phase, { ...opts, sponsorLedger: ledger(null) })).toEqual({
-        phase: "scoreboard",
-        sponsorFilterId: null,
-      });
-    });
+  it("laat het scorebord staan als er niets loopt", () => {
+    const board = { phase: "scoreboard" as const, sponsorFilterId: null };
+    expect(spreadPhaseKeepingLiveClip(board, null)).toBe(board);
+  });
+});
 
-    it("stopt zodra de lopende clip zelf het budget haalt", () => {
-      const done = ledger({
-        sponsorId: "sp",
-        mediaId: "sp-m1",
-        startedAtMs: nowMs - 4_100,
-        expectedPlaySec: 4,
-        clipSessionId: "s2",
-      });
-      expect(applySponsorBudgetCapToSpreadPhase(phase, { ...opts, sponsorLedger: done })).toEqual({
-        phase: "scoreboard",
-        sponsorFilterId: null,
-      });
-    });
+describe("scheduledSlotRearms", () => {
+  const slot = (sponsorId: string | null, appearanceKey: string | null) => ({ sponsorId, appearanceKey });
+
+  it("start opnieuw bij een andere sponsor", () => {
+    expect(scheduledSlotRearms(slot("port", "1000"), slot("blaklader", "2000"))).toBe(true);
+  });
+
+  it("start opnieuw bij een nieuwe vertoning van dezelfde sponsor", () => {
+    expect(scheduledSlotRearms(slot("port", "1000"), slot("port", "2000"))).toBe(true);
+  });
+
+  it("start niet opnieuw zolang dezelfde vertoning loopt", () => {
+    expect(scheduledSlotRearms(slot("port", "1000"), slot("port", "1000"))).toBe(false);
+  });
+
+  it("ziet een vertoning die wegvalt niet als een nieuwe", () => {
+    expect(scheduledSlotRearms(slot("popup", "1000"), slot("popup", null))).toBe(false);
+  });
+
+  /**
+   * De clip van Port is klaar maar nog niet afgemeld in de ledger, en het rooster staat al op
+   * Blaklader. Voorheen kreeg de speler "Port, nieuwe vertoning" en speelde hij Port nog eens.
+   */
+  it("speelt een net afgelopen clip niet opnieuw in het slot van de volgende sponsor", () => {
+    const before = slot("port", "1000");
+    const roster = {
+      phase: "sponsor" as const,
+      sponsorFilterId: "blaklader",
+      appearanceStartedAtMs: 2_000,
+      appearanceIndex: 0,
+    };
+    const view = spreadPhaseKeepingLiveClip(roster, "port");
+    const after = slot(view.sponsorFilterId, String(view.appearanceStartedAtMs));
+    expect(after.sponsorId).toBe("blaklader");
+    expect(scheduledSlotRearms(before, after)).toBe(true);
+  });
+
+  it("speelt de laatste clip van een ronde niet opnieuw als het rooster naar het scorebord gaat", () => {
+    const before = slot("popup", "1000");
+    const view = spreadPhaseKeepingLiveClip({ phase: "scoreboard", sponsorFilterId: null }, "popup");
+    const after = slot(view.sponsorFilterId, view.appearanceStartedAtMs == null ? null : String(view.appearanceStartedAtMs));
+    expect(after).toEqual(slot("popup", null));
+    expect(scheduledSlotRearms(before, after)).toBe(false);
   });
 });

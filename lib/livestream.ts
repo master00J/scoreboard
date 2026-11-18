@@ -1379,6 +1379,20 @@ export function isRtmpDestination(destination: string): boolean {
   return /^rtmps?:\/\//i.test(destination);
 }
 
+/**
+ * Bestandsnaam van een deel van één opname. Elke keer dat ffmpeg tijdens een opname opnieuw start
+ * (stream erbij of eraf, ander geluidsapparaat, verbinding hersteld) krijgt de opname een nieuw
+ * deel: hetzelfde bestand opnieuw openen wist wat er al stond. Deel 1 houdt de gewone naam.
+ */
+export function recordSegmentPath(basePath: string, segment: number): string {
+  const n = Number.isFinite(segment) ? Math.floor(segment) : 1;
+  if (n <= 1) return basePath;
+  const slash = Math.max(basePath.lastIndexOf("/"), basePath.lastIndexOf("\\"));
+  const dot = basePath.lastIndexOf(".");
+  if (dot <= slash + 1) return `${basePath}-part${n}`;
+  return `${basePath.slice(0, dot)}-part${n}${basePath.slice(dot)}`;
+}
+
 export function ffmpegOutputArgs(destinations: string[]): string[] {
   if (destinations.length === 1 && isRtmpDestination(destinations[0])) {
     return ["-f", "flv", destinations[0]];

@@ -165,8 +165,12 @@ model MediaItem {
   hideFromLibrary Boolean @default(false)
   /// VIDEO: risico op het stadionscherm (high_fps, unsupported_codec, pixel_format). Null = ok of niet gecheckt.
   playbackWarning String?
+  /// JSON: uitkomst van de volledige decode-controle (status, reden, duur) per bestandsversie. Null = nog niet gecontroleerd.
+  mediaCheckJson String?
   /// Toon als sneltoets op Display (waarschuwingen, manuele clips).
   quickLaunch Boolean @default(false)
+  /// JSON: totale zendtijd in seconden per fase voor losse clubmedia. Null = niet in de rotatie.
+  clubPhaseBudgetJson String?
   createdAt   DateTime       @default(now())
   playlistItems PlaylistItem[]
   matchSponsorForMatches Match[] @relation("MatchSponsorMedia")
@@ -395,4 +399,21 @@ model SponsorPlayLog {
   @@index([matchId])
   @@index([sponsorId])
   @@index([endedAt])
+}
+
+/// Commando's die via de cloud-relay (telefoon over internet) binnenkwamen en hier al uitgevoerd zijn.
+/// Een commando waarvan de bevestiging naar de cloud mislukte, komt bij de volgende poll terug; met
+/// deze rij wordt het dan niet nog eens uitgevoerd (geen tweede goal), alleen opnieuw bevestigd.
+/// De rij wordt in dezelfde transactie geschreven als de wijziging die het commando maakt.
+model AppliedCloudCommand {
+  /// Id van het commando in de cloud-wachtrij.
+  id        String    @id
+  /// Uitkomst die naar de cloud bevestigd wordt, ook bij een herhaalde levering.
+  ok        Boolean
+  error     String?
+  appliedAt DateTime  @default(now())
+  /// Wanneer de cloud de bevestiging aanvaardde; daarna levert ze dit commando niet meer.
+  ackedAt   DateTime?
+
+  @@index([appliedAt])
 }

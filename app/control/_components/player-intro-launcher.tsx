@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { useDisplayStore } from "@/lib/store";
 import { sendCommand } from "@/lib/use-socket";
+import { playerIntroIntervalSec } from "@/lib/operator-guards";
 import type { Match, Player, Team } from "@/lib/types";
 
 export function PlayerIntroLauncher({ match }: { match: Match | null }) {
@@ -58,6 +59,8 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
   );
 
   const idx = players.findIndex((p) => p.id === currentId);
+  /** Het veld mag even leeg zijn tijdens het typen; de intro loopt dan op het standaardtempo. */
+  const advanceEverySec = playerIntroIntervalSec(intervalSec);
 
   useEffect(() => {
     if (!autoAdvance) return;
@@ -75,9 +78,9 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
         mode: "PLAYER_INTRO",
         meta: { activePlayerId: players[nextIdx]!.id },
       });
-    }, intervalSec * 1000);
+    }, advanceEverySec * 1000);
     return () => clearInterval(id);
-  }, [autoAdvance, intervalSec, players, idx, state?.mode]);
+  }, [autoAdvance, advanceEverySec, players, idx, state?.mode]);
 
   if (!match) return null;
   const currentMatch = match;

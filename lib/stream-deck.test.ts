@@ -75,6 +75,19 @@ describe("runScoreDeckAction", () => {
     expect(cmds).toEqual([{ type: "score:adjust", side: "away", delta: 1 }]);
   });
 
+  it("telt thuis +1 als punt bij een sport zonder goalvisual", async () => {
+    const cmds: unknown[] = [];
+    await runScoreDeckAction(
+      { id: "score", side: "home", delta: 1 },
+      async (cmd) => {
+        cmds.push(cmd);
+        return { ok: true, result: { visual: true } };
+      },
+      false,
+    );
+    expect(cmds).toEqual([{ type: "score:adjust", side: "home", delta: 1 }]);
+  });
+
   it("leest of prepare de intro startte", () => {
     expect(goalPrepareStartedVisual({ visual: true })).toBe(true);
     expect(goalPrepareStartedVisual({ visual: false })).toBe(false);

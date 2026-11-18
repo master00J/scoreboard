@@ -48,6 +48,7 @@ const labels: ProofOfPlayExportLabels = {
   segmentFirstHalf: "1e",
   segmentSecondHalf: "2e",
   segmentExtraTime: "Verlenging",
+  segmentPostmatch: "Na",
 };
 
 describe("proof-of-play brand", () => {

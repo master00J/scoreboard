@@ -1,4 +1,31 @@
 import type { SponsorSection } from "./types";
+import { isClubRotationSponsorId } from "./club-media-rotation";
+
+/** Sponsor-id waaronder een rundown-cue meldt als zijn media bij geen sponsor hoort. */
+export const SCHEDULED_CUE_SPONSOR_ID = "scheduled-cue";
+
+/**
+ * Onder welke sponsor een afgespeelde clip in het afspeellog komt. De kolom verwijst naar een
+ * echte sponsorrij: clubmedia (`club:…`), een cue zonder sponsor en een intussen verwijderde
+ * sponsor hebben er geen. Zo'n id toch wegschrijven liet de hele regel mislukken, en die
+ * schermtijd ontbrak dan in de rapportage.
+ */
+export function sponsorPlayLogIdentity(opts: {
+  sponsorId: string;
+  /** Naam van de sponsorrij met dit id, of null als die rij niet bestaat. */
+  sponsorRowName: string | null | undefined;
+  mediaTitle: string | null | undefined;
+}): { sponsorId: string | null; sponsorName: string } {
+  if (opts.sponsorRowName != null) {
+    return { sponsorId: opts.sponsorId, sponsorName: opts.sponsorRowName };
+  }
+  const ownMedia =
+    isClubRotationSponsorId(opts.sponsorId) || opts.sponsorId === SCHEDULED_CUE_SPONSOR_ID;
+  return {
+    sponsorId: null,
+    sponsorName: ownMedia ? (opts.mediaTitle ?? "Club") : "(verwijderd)",
+  };
+}
 
 /** Gelijk aan budget-segmenten in Sponsors live + roster. */
 export function sponsorTelemetrySegmentKey(

@@ -8,6 +8,7 @@ import {
   DEFAULT_LIVESTREAM_SETTINGS,
   buildRtmpDestinations,
   ffmpegOutputArgs,
+  recordSegmentPath,
   isRtmpDestination,
   maskRtmpDestination,
   wasapiHelperError,
@@ -580,7 +581,13 @@ export function createLivestreamController(deps: Deps): LivestreamController {
   let liveDestinations: string[] = [];
   let userWantsLive = false;
   let userWantsRecord = false;
+  /** Het bestand waarin ffmpeg nu opneemt (of gaat opnemen): één deel van de opname. */
   let recordFile: string | null = null;
+  /** Naam van deel 1; volgende delen heten daarnaar (`-part2`, …). */
+  let recordBaseFile: string | null = null;
+  let recordSegment = 0;
+  /** Heeft `recordFile` al beeld van een geslaagde ffmpeg-start? Dan mag het niet meer overschreven. */
+  let recordSegmentHasFootage = false;
   let sessionArmed = false;
   let lastSession: LiveSession | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -612,8 +619,54 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     return path.join(dir, `arenacue-${stamp}.mp4`);
   };
 
+  const forgetRecording = () => {
+    recordFile = null;
+    recordBaseFile = null;
+    recordSegment = 0;
+    recordSegmentHasFootage = false;
+  };
+
+  /**
+   * Kiest het bestand voor de volgende ffmpeg-start. Staat er in het huidige deel al beeld, dan
+   * komt er een nieuw deel: ffmpeg opent een bestaand bestand niet (alleen opname) of wist het
+   * (stream + opname). Een deel van een mislukte startpoging bevat geen wedstrijd en gaat weg.
+   */
+  const claimRecordSegment = () => {
+    if (!userWantsRecord || !recordBaseFile) return;
+    if (recordFile && !recordSegmentHasFootage) {
+      try {
+        fs.rmSync(recordFile, { force: true });
+      } catch {
+        /* nog in gebruik: dan een volgend deel */
+      }
+      if (!fs.existsSync(recordFile)) return;
+    }
+    const previous = recordFile;
+    let next: string;
+    do {
+      recordSegment += 1;
+      next = recordSegmentPath(recordBaseFile, recordSegment);
+    } while (fs.existsSync(next) && recordSegment < 999);
+    recordFile = next;
+    recordSegmentHasFootage = false;
+    if (previous) deps.log(`[livestream] opname gaat verder in ${next}`);
+  };
+
+  /** Naar het stream-venster (programma en overlay). */
   const emitSettings = () => {
     const win = deps.getStreamWindow();
+    if (win && !win.isDestroyed()) {
+      win.webContents.send("livestream:settings", settings);
+    }
+  };
+
+  /**
+   * Naar de bediening. Live-paneel, studio en Stream Deck bewaren elk hun eigen kopie en sturen bij
+   * een wijziging hun hele lijst terug; zonder deze melding zette de ene de wijziging van de andere
+   * terug (bv. een fader in de studio na een bronwissel op het Stream Deck).
+   */
+  const emitSettingsToControl = () => {
+    const win = deps.getControlWindow();
     if (win && !win.isDestroyed()) {
       win.webContents.send("livestream:settings", settings);
     }
@@ -1407,7 +1460,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
   const stopAfterAudioFailure = () => {
     userWantsLive = false;
     userWantsRecord = false;
-    recordFile = null;
+    forgetRecording();
     sessionArmed = false;
     lastSession = null;
     emit();
@@ -1859,11 +1912,28 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       emit();
       return "audio";
     }
-    spawnFfmpeg(session.ffmpegPath, session.dests, session.encoder, session.plan, session.audioPlan);
+    // Bestemmingen volgen wat de operator nú wil, niet wat er bij de vorige start gold: na "stream
+    // stoppen, opname laten lopen" mag een herstart de stream niet opnieuw uitzenden. De opname
+    // krijgt hier ook haar bestand voor deze start.
+    let dests: string[];
+    try {
+      claimRecordSegment();
+      dests = buildEncodeDests();
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+      deps.log(`[livestream] geen bestemming: ${error}`);
+      emit();
+      return "fail";
+    }
+    session.dests = dests;
+    const segment = recordFile && dests.includes(recordFile) ? recordFile : null;
+    spawnFfmpeg(session.ffmpegPath, dests, session.encoder, session.plan, session.audioPlan);
     const proc = child;
     if (!proc) return "fail" as const;
     attachPumpIfNeeded(session);
-    return waitForHealthyOrFail(proc, HEALTH_WAIT_MS);
+    const result = await waitForHealthyOrFail(proc, HEALTH_WAIT_MS);
+    if (result === "ok" && segment && segment === recordFile) recordSegmentHasFootage = true;
+    return result;
   };
 
   const scheduleReconnect = () => {
@@ -2106,6 +2176,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       ) {
         emitSettings();
       }
+      emitSettingsToControl();
       const devicesChanged = audioDeviceFingerprint(prev) !== audioDeviceFingerprint(settings);
       const gainsChanged =
         JSON.stringify(audioGainCommands(prev)) !== JSON.stringify(audioGainCommands(settings));
@@ -2171,7 +2242,9 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     start: async () => {
       if (userWantsLive && child) return getStatus();
       userWantsLive = true;
-      if (child) {
+      // Loopt er een opname, dan gaat de stream erbij via een herstart. Ook als ffmpeg net even weg
+      // is (opnieuw verbinden): een gewone start ernaast zou een tweede ffmpeg opleveren.
+      if (child || userWantsRecord) {
         await restartLiveCapture();
         return getStatus();
       }
@@ -2287,15 +2360,17 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     },
     startRecord: async () => {
       if (userWantsRecord && child) return getStatus();
-      recordFile = newRecordFile();
+      forgetRecording();
+      recordBaseFile = newRecordFile();
       userWantsRecord = true;
+      claimRecordSegment();
       error = null;
       deps.log(`[livestream] opname ${recordFile}`);
       emit();
       await restartLiveCapture();
       if (userWantsRecord && !child) {
         userWantsRecord = false;
-        recordFile = null;
+        forgetRecording();
         if (!userWantsLive) {
           sessionArmed = false;
           lastSession = null;
@@ -2309,7 +2384,7 @@ export function createLivestreamController(deps: Deps): LivestreamController {
       captureEpoch += 1;
       userWantsRecord = false;
       const finished = recordFile;
-      recordFile = null;
+      forgetRecording();
       error = null;
       emit();
       if (userWantsLive) {
@@ -2335,7 +2410,8 @@ export function createLivestreamController(deps: Deps): LivestreamController {
     },
     stop: async () => {
       userWantsLive = false;
-      if (userWantsRecord && child) {
+      // Ook als ffmpeg net weg is (opnieuw verbinden): de opname hoort door te lopen.
+      if (userWantsRecord) {
         await restartLiveCapture();
         deps.log("[livestream] stream gestopt, opname loopt door");
         return getStatus();

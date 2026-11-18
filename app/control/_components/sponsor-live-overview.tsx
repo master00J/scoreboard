@@ -61,7 +61,7 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
   const displayStateUpdatedAt = useDisplayStore((s) => s.state?.updatedAt);
   const timerRunning = !!useDisplayStore((s) => s.state?.timerRunning);
   const periodBreakPending = !!useDisplayStore((s) => s.state?.sponsorPeriodBreakPending);
-  const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors");
+  const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>("/api/sponsors?rotation=1");
   const sponsors = sponsorsRaw ?? [];
   const elapsedSec = useLiveTimerSeconds();
   const wallTelemetryMs = useWallClockMs(250);

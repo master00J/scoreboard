@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  SCHEDULED_CUE_SPONSOR_ID,
   resolveVideoExpectedPlaySec,
+  sponsorPlayLogIdentity,
   sponsorTelemetryActiveClipElapsedSec,
   sponsorTelemetrySegmentKey,
 } from "./sponsor-telemetry";
@@ -54,5 +56,39 @@ describe("sponsorTelemetrySegmentKey", () => {
     expect(sponsorTelemetrySegmentKey("m1", "FIRST_HALF", "match")).toBe("m1:FIRST_HALF");
     expect(sponsorTelemetrySegmentKey("m1", "SECOND_HALF", "match")).toBe("m1:SECOND_HALF");
     expect(sponsorTelemetrySegmentKey("m1", "POST_MATCH", "postmatch")).toBe("m1:postmatch");
+  });
+});
+
+describe("sponsorPlayLogIdentity", () => {
+  it("houdt een bestaande sponsor aan", () => {
+    expect(
+      sponsorPlayLogIdentity({ sponsorId: "s1", sponsorRowName: "Plenty", mediaTitle: "clip.mp4" }),
+    ).toEqual({ sponsorId: "s1", sponsorName: "Plenty" });
+  });
+
+  it("schrijft clubmedia uit de rotatie zonder sponsorrij weg, onder de titel", () => {
+    expect(
+      sponsorPlayLogIdentity({
+        sponsorId: "club:m1",
+        sponsorRowName: undefined,
+        mediaTitle: "Café Lawijt",
+      }),
+    ).toEqual({ sponsorId: null, sponsorName: "Café Lawijt" });
+  });
+
+  it("schrijft een rundown-cue zonder sponsor weg in plaats van te mislukken", () => {
+    expect(
+      sponsorPlayLogIdentity({
+        sponsorId: SCHEDULED_CUE_SPONSOR_ID,
+        sponsorRowName: null,
+        mediaTitle: "RAFC Pop-up",
+      }),
+    ).toEqual({ sponsorId: null, sponsorName: "RAFC Pop-up" });
+  });
+
+  it("bewaart de regel van een intussen verwijderde sponsor", () => {
+    expect(
+      sponsorPlayLogIdentity({ sponsorId: "weg", sponsorRowName: null, mediaTitle: "clip.mp4" }),
+    ).toEqual({ sponsorId: null, sponsorName: "(verwijderd)" });
   });
 });
