@@ -67,6 +67,7 @@ import {
   type PlanRow,
   type PlanRowKind,
 } from "@/lib/season-plan";
+import { SequenceRows, newMediaSequence, sequencePositions, useMediaSequences } from "./season-plan-sequences";
 import {
   SPONSOR_MEDIA_EXTENSIONS,
   fileNameOf,
@@ -180,6 +181,8 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
   const { data: sponsorsRaw, reload: reloadSponsors } = useApi<Sponsor[]>(`/api/sponsors?_=${stateStamp}`);
   const { data: mediaRaw, reload: reloadMedia } = useApi<MediaItem[]>(`/api/media?_=${stateStamp}`);
   const { data: cuesRaw, reload: reloadCues } = useApi<ScheduledMediaCue[]>(`/api/scheduled-media-cues?_=${stateStamp}`);
+  const { sequences, mutate: mutateSequences } = useMediaSequences(stateStamp);
+  const inSequence = useMemo(() => sequencePositions(sequences), [sequences]);
   const [rows, setRows] = useState<PlanRow[]>([]);
   const [originals, setOriginals] = useState<Map<string, PlanRow>>(new Map());
   const [cellText, setCellText] = useState<Record<string, string>>({});
@@ -255,7 +258,10 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
       c.phase === other.phase && c.startSec < other.startSec + other.seconds && other.startSec < c.startSec + c.seconds))
       .map(c => titles.get(c.id) + " (" + formatClock(c.startSec) + ")");
   }, [cuesRaw, planCues]);
-  const effective = useMemo(() => planEffectiveSeconds(rows, engineCtx, planCues), [rows, engineCtx, planCues]);
+  const effective = useMemo(
+    () => planEffectiveSeconds(rows, engineCtx, planCues, sequences),
+    [rows, engineCtx, planCues, sequences],
+  );
   const capacity = planCapacity(activeMatch);
 
   function updateRow(key: string, patch: (row: PlanRow) => PlanRow) {
@@ -597,6 +603,17 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
                         <span className="text-xs text-muted-foreground">{t("seasonPlan.clipAllPhases")}</span>
                       ) : null}
                       {!clip.active ? <span className="text-xs text-muted-foreground">{t("seasonPlan.clipInactive")}</span> : null}
+                      {inSequence.has(clip.id) ? (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full border border-violet-500/50 bg-violet-500/10 px-2 py-0.5 text-xs"
+                          title={t("seasonPlan.sequenceBadgeTitle")}
+                        >
+                          {t("seasonPlan.sequenceBadge", {
+                            name: inSequence.get(clip.id)!.name,
+                            position: inSequence.get(clip.id)!.position,
+                          })}
+                        </span>
+                      ) : null}
                       {clip.pending ? (
                         <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold uppercase text-primary">
                           {t("seasonPlan.newBadge")}
@@ -880,6 +897,15 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
             <Plus className="size-4" />
             {t("seasonPlan.addClubRow")}
           </Button>
+          <Button
+            variant="outline"
+            className="gap-2"
+            title={t("seasonPlan.groupSequencesHint")}
+            onClick={() => void mutateSequences((list) => [...list, newMediaSequence(list, t("seasonPlan.sequenceNewName"))])}
+          >
+            <Plus className="size-4" />
+            {t("seasonPlan.addSequence")}
+          </Button>
         </div>
       </div>
 
@@ -929,6 +955,17 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
                 <GroupHeader title={t("seasonPlan.groupClub")} hint={t("seasonPlan.groupClubHint")} />
               ) : null}
               {clubRows.map((row, i) => renderRow(row, sponsorRows.length + i))}
+              {sequences.length > 0 ? (
+                <GroupHeader title={t("seasonPlan.groupSequences")} hint={t("seasonPlan.groupSequencesHint")} />
+              ) : null}
+              <SequenceRows
+                sequences={sequences}
+                mutate={mutateSequences}
+                media={mediaRaw ?? []}
+                sponsorsById={engineCtx.sponsorsById}
+                effective={effective.bySequence}
+                decimal={decimal}
+              />
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-border font-semibold">

@@ -1,5 +1,6 @@
 import type { SponsorSection } from "./types";
 import { isClubRotationSponsorId } from "./club-media-rotation";
+import { isSequenceRotationSponsorId } from "./media-sequences";
 
 /** Sponsor-id waaronder een rundown-cue meldt als zijn media bij geen sponsor hoort. */
 export const SCHEDULED_CUE_SPONSOR_ID = "scheduled-cue";
@@ -20,7 +21,9 @@ export function sponsorPlayLogIdentity(opts: {
     return { sponsorId: opts.sponsorId, sponsorName: opts.sponsorRowName };
   }
   const ownMedia =
-    isClubRotationSponsorId(opts.sponsorId) || opts.sponsorId === SCHEDULED_CUE_SPONSOR_ID;
+    isClubRotationSponsorId(opts.sponsorId) ||
+    isSequenceRotationSponsorId(opts.sponsorId) ||
+    opts.sponsorId === SCHEDULED_CUE_SPONSOR_ID;
   return {
     sponsorId: null,
     sponsorName: ownMedia ? (opts.mediaTitle ?? "Club") : "(verwijderd)",

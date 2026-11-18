@@ -1,3 +1,4 @@
+import { sequencePassSeconds } from "./media-sequences";
 import type { Match, Playlist, PlaylistSlot, Sponsor, SponsorSection } from "./types";
 import {
   activeSponsorsForSection,
@@ -352,9 +353,19 @@ export function allActiveSponsorSectionBudgetsExhausted(
       ledgerMatchesSegment,
       nowMs,
     });
-    if (consumed < budget) return false;
+    if (consumed < budgetCapSeconds(sponsor, budget)) return false;
   }
   return true;
+}
+
+/**
+ * Vanaf hoeveel verbruikte seconden het plafond een deelnemer stopt. Een reeks krijgt een halve reeks
+ * speling: haar minuten zijn al op hele reeksen afgerond, en tussen twee bestanden van dezelfde reeks
+ * mag ze niet stoppen omdat de gemeten clips samen iets langer duurden dan de catalogus zegt.
+ */
+export function budgetCapSeconds(sponsor: Sponsor, budget: number): number {
+  if (sponsor.rotationKind !== "sequence" || budget <= 0) return budget;
+  return budget + sequencePassSeconds(sponsor) / 2;
 }
 
 /**
@@ -422,7 +433,7 @@ export function applySponsorBudgetCapToSpreadPhase(
   const budget = opts.budgetOf
     ? opts.budgetOf(sponsor)
     : sponsorSectionBudgetSeconds(sponsor, opts.section, opts.matchStatus);
-  if (budget > 0 && sponsorConsumedForBudgetCap(sponsor.id, opts) >= budget) {
+  if (budget > 0 && sponsorConsumedForBudgetCap(sponsor.id, opts) >= budgetCapSeconds(sponsor, budget)) {
     return { phase: "scoreboard", sponsorFilterId: null };
   }
   return base;

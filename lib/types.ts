@@ -241,8 +241,11 @@ export type Sponsor = {
   guaranteeJson?: string | null;
   createdAt: string;
   media?: MediaItem[];
-  /** Alleen in de rotatie-API: clubmedia die meedraait zonder sponsorrij. */
-  rotationKind?: "sponsor" | "club";
+  /**
+   * Alleen in de rotatie-API: clubmedia die meedraait zonder sponsorrij, of een reeks
+   * (`lib/media-sequences.ts`): bestanden die elke beurt helemaal na elkaar spelen.
+   */
+  rotationKind?: "sponsor" | "club" | "sequence";
 };
 
 export type SponsorSection = "prematch" | "match" | "halftime" | "postmatch";

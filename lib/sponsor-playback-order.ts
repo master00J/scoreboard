@@ -55,6 +55,18 @@ export function plannedSecondsForRepeats(
 }
 
 /**
+ * Uploadvolgorde. In het hoofdproces komt `createdAt` als Date uit de database, in het venster als tekst;
+ * beide vergelijken als ISO-tekst, zoals voorheen in het venster.
+ */
+function createdAtText(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value ?? "");
+}
+
+function byCreatedAt(a: Pick<MediaItem, "createdAt">, b: Pick<MediaItem, "createdAt">): number {
+  return createdAtText(a.createdAt).localeCompare(createdAtText(b.createdAt));
+}
+
+/**
  * Sorteert actieve sponsor-media volgens operator-volgorde; onbekende id's vallen achteraan (createdAt).
  */
 export function applySponsorPlaybackOrder(
@@ -64,7 +76,7 @@ export function applySponsorPlaybackOrder(
   const list = media.filter((m) => m.active);
   const ids = parseSponsorPlaybackOrderJson(orderJson);
   if (ids.length === 0) {
-    return [...list].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return [...list].sort(byCreatedAt);
   }
   const byId = new Map(list.map((m) => [m.id, m]));
   const seen = new Set<string>();
@@ -76,7 +88,7 @@ export function applySponsorPlaybackOrder(
       seen.add(id);
     }
   }
-  const rest = list.filter((m) => !seen.has(m.id)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const rest = list.filter((m) => !seen.has(m.id)).sort(byCreatedAt);
   return [...out, ...rest];
 }
 
