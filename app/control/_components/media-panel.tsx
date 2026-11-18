@@ -30,6 +30,8 @@ import { toast } from "@/components/ui/toast";
 import { sendCommand } from "@/lib/use-socket";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
 import { mediaUrl } from "@/lib/media-url";
+import { clampMediaDurationSec, readVideoDuration } from "@/lib/media-duration";
+import { SeasonPlanSection } from "./season-plan";
 import { buildRecurringCueTimes } from "@/lib/scheduled-media-recurrence";
 import {
   parseSponsorMediaPhaseTags,
@@ -347,8 +349,11 @@ export function MediaPanel() {
         </div>
       </section>
 
-      <Tabs defaultValue="sponsors" className="space-y-4">
+      <Tabs defaultValue="plan" className="space-y-4">
         <TabsList className="h-auto w-full flex-wrap justify-start">
+          <TabsTrigger value="plan" className="min-w-36">
+            {t("seasonPlan.tab")}
+          </TabsTrigger>
           <TabsTrigger value="sponsors" className="min-w-36">
             {t("media.tabSponsors")}
           </TabsTrigger>
@@ -359,6 +364,10 @@ export function MediaPanel() {
             {t("media.tabCues")}
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="plan" className="mt-0" forceMount>
+          <SeasonPlanSection activeMatch={activeMatch ?? null} />
+        </TabsContent>
 
         <TabsContent value="sponsors" className="mt-0">
           <SponsorsSection
@@ -2527,60 +2536,4 @@ function parseClockInput(value: string): number | null {
   const min = Number(trimmed.replace(",", "."));
   if (!Number.isFinite(min) || min < 0) return null;
   return Math.round(min * 60);
-}
-
-/** Afbeelding / afgeronde videoseconds voor opslag (1 … 600). */
-function clampMediaDurationSec(n: number): number {
-  if (!Number.isFinite(n)) return 10;
-  return Math.min(600, Math.max(1, Math.round(n)));
-}
-
-/**
- * Leest werkelijke mediaduur uit het videobestand (metadata). Geen fallback:
- * bij falen reject zodat we geen verkeerde duur opslaan.
- */
-function readVideoDuration(src: string): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const v = document.createElement("video");
-    v.preload = "metadata";
-    let settled = false;
-    const cleanup = () => {
-      try {
-        v.removeAttribute("src");
-        v.load();
-      } catch {
-        /* ignore */
-      }
-    };
-    const finishErr = (err: Error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(err);
-    };
-    const finishOk = (sec: number) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      resolve(sec);
-    };
-
-    const to = window.setTimeout(() => finishErr(new Error("timeout")), 15000);
-
-    v.onloadedmetadata = () => {
-      window.clearTimeout(to);
-      const d = v.duration;
-      if (Number.isFinite(d) && d > 0) {
-        finishOk(clampMediaDurationSec(d));
-      } else {
-        finishErr(new Error("invalid duration"));
-      }
-    };
-    v.onerror = () => {
-      window.clearTimeout(to);
-      finishErr(new Error("video error"));
-    };
-
-    v.src = src;
-  });
 }

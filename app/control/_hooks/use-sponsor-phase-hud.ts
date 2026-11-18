@@ -79,6 +79,8 @@ export type SponsorPhaseHudModel =
       contextLabel: string;
       phase: "scoreboard" | "sponsor";
       sponsorName: string | null;
+      /** Notitie uit het seizoensplan van de sponsor in beeld ("direct na sponsor X"). */
+      sponsorNotes?: string | null;
       mediaTitle: string | null;
       mediaFileName: string | null;
       mediaKind?: "IMAGE" | "VIDEO" | null;
@@ -821,6 +823,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         contextLabel: tMatchStatus(tUi, match.status, match.sport),
         phase: "sponsor" as const,
         sponsorName: cueSponsor,
+        sponsorNotes: cueMedia.sponsorId
+          ? (sponsors.find((s) => s.id === cueMedia.sponsorId)?.notes ?? null)
+          : null,
         mediaTitle: cueLabel.title,
         mediaFileName: cueLabel.fileName,
         mediaKind: cueMedia.type === "IMAGE" || cueMedia.type === "VIDEO" ? cueMedia.type : null,
@@ -1032,6 +1037,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         contextLabel,
         phase: effectivePhase,
         sponsorName: name,
+        sponsorNotes:
+          effectivePhase === "sponsor"
+            ? ((effectiveSponsorId != null
+                ? sponsors.find((s) => s.id === effectiveSponsorId)
+                : sponsors.find((s) => playingMediaId != null && (s.media ?? []).some((m) => m.id === playingMediaId))
+              )?.notes ?? null)
+            : null,
         mediaTitle: media?.title ?? null,
         mediaFileName: media?.fileName ?? null,
         mediaKind: media?.kind ?? null,
