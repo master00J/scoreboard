@@ -47,7 +47,7 @@ export function sponsorTelemetrySegmentKey(
 export type SponsorLedgerPayload = {
   matchId: string;
   segmentKey: string;
-  /** Afgeronde opgeslagen seconden per sponsor-id (after voltooide clips). */
+  /** Echt zichtbare seconden per sponsor-id van afgesloten clips, onafgerond (afronden bij tonen). */
   bySponsorSec: Record<string, number>;
   /** Huidige slide op het stadionscherm (display-venster). */
   activeClip: {
@@ -63,6 +63,18 @@ export type SponsorLedgerPayload = {
   updatedAtMs: number;
 };
 
+/**
+ * Welke laag een vertoning meldde: de sponsorrotatie, een cue uit de rundown, of een clip die
+ * de operator met de hand startte. Bepaalt mee welke vertoning telt als er twee tegelijk melden.
+ */
+export type SponsorPlaySource = "rotation" | "cue" | "manual";
+
+export const SPONSOR_PLAY_SOURCES: readonly SponsorPlaySource[] = ["rotation", "cue", "manual"];
+
+export function normalizeSponsorPlaySource(value: unknown): SponsorPlaySource {
+  return value === "cue" || value === "manual" ? value : "rotation";
+}
+
 export type SponsorTelemetryClipStart = {
   matchId: string;
   segmentKey: string;
@@ -73,6 +85,10 @@ export type SponsorTelemetryClipStart = {
   startedAtMs: number;
   playbackPositionMs?: number;
   paused?: boolean;
+  /** Laag die de vertoning meldt; ontbreekt bij oudere renderers (= rotatie). */
+  source?: SponsorPlaySource;
+  /** Echt zichtbare ms tot nu (0 bij de start). */
+  visibleMs?: number;
 };
 
 export type SponsorTelemetryClipEnd = {
@@ -80,6 +96,7 @@ export type SponsorTelemetryClipEnd = {
   segmentKey: string;
   sponsorId: string;
   mediaId: string;
+  /** Echt zichtbare seconden, onafgerond. */
   actualSec: number;
   clipSessionId: string;
   startedAtMs: number;
@@ -99,6 +116,8 @@ export type SponsorTelemetryClipProgress = {
   paused?: boolean;
   /** `Date.now() - playbackPositionMs` zodat elapsed = positie in de video. */
   startedAtMs?: number;
+  /** Echt zichtbare ms tot nu; wordt periodiek bewaard zodat een herstart niets verliest. */
+  visibleMs?: number;
 };
 
 /** Zelfde logica als display `MediaRenderer` / commit-timers. */

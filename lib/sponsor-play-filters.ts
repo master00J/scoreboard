@@ -58,6 +58,10 @@ export type ProofOfPlayTotals = {
   totalActualSec: number;
   totalExpectedSec: number;
   avgFulfillmentPercent: number;
+  /** Geboekte seconden (vastgelegd bij de start van elke fase). */
+  totalBookedSec: number;
+  /** Seconden die na de gekozen fases nog niet geleverd zijn. */
+  totalShortfallSec: number;
 };
 
 /**
@@ -65,17 +69,34 @@ export type ProofOfPlayTotals = {
  * matching play). Do not compute them from the detail list: that list is capped.
  */
 export function proofOfPlayTotals(
-  summary: ReadonlyArray<{ plays: number; actualSec: number; expectedSec: number }>,
+  summary: ReadonlyArray<{
+    plays: number;
+    actualSec: number;
+    expectedSec: number;
+    bookedSec?: number;
+    shortfallSec?: number;
+  }>,
 ): ProofOfPlayTotals {
   let totalPlays = 0;
   let totalActualSec = 0;
   let totalExpectedSec = 0;
+  let totalBookedSec = 0;
+  let totalShortfallSec = 0;
   for (const row of summary) {
+    totalBookedSec += row.bookedSec || 0;
+    totalShortfallSec += row.shortfallSec || 0;
     totalPlays += row.plays || 0;
     totalActualSec += row.actualSec || 0;
     totalExpectedSec += row.expectedSec || 0;
   }
   const avgFulfillmentPercent =
     totalExpectedSec > 0 ? Math.round((totalActualSec / totalExpectedSec) * 100) : 0;
-  return { totalPlays, totalActualSec, totalExpectedSec, avgFulfillmentPercent };
+  return {
+    totalPlays,
+    totalActualSec,
+    totalExpectedSec,
+    avgFulfillmentPercent,
+    totalBookedSec,
+    totalShortfallSec,
+  };
 }

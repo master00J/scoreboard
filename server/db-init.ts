@@ -202,6 +202,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("AppSettings", "uiLocale", `TEXT NOT NULL DEFAULT 'nl'`);
   await addColumnIfMissing("AppSettings", "interfaceProfilesJson", "TEXT");
   await addColumnIfMissing("AppSettings", "displayExtrasJson", "TEXT");
+  await addColumnIfMissing("AppSettings", "sponsorGuaranteeJson", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "externalCaptureAudio", "BOOLEAN NOT NULL DEFAULT 0");
@@ -255,6 +256,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("MediaItem", "clubGroup", "TEXT");
   await addColumnIfMissing("ScheduledMediaCue", "endSec", "INTEGER");
   await addColumnIfMissing("ScheduledMediaCue", "loop", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("ScheduledMediaCue", "guarantee", "TEXT");
   await addColumnIfMissing("AppSettings", "sponsorLayoutsJson", "TEXT");
   await addColumnIfMissing("Match", "homeFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "awayFieldPlayerIdsJson", "TEXT");
@@ -324,6 +326,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("Sponsor", "sponsorPlaybackRepeatsJson", "TEXT");
   await addColumnIfMissing("Sponsor", "sportBudgetsJson", "TEXT");
   await addColumnIfMissing("Sponsor", "notes", "TEXT");
+  await addColumnIfMissing("Sponsor", "guaranteeJson", "TEXT");
   await migrateSponsorMatchHalfFromLegacy();
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPlayLog" (
@@ -353,6 +356,16 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await prisma.$executeRawUnsafe(
     `CREATE UNIQUE INDEX IF NOT EXISTS "SponsorPlayLog_clipSessionId_key" ON "SponsorPlayLog" ("clipSessionId")`,
   );
+  // Echt zichtbare ms, onafgerond (oude rijen: 0 → lezers vallen terug op actualSec).
+  await addColumnIfMissing("SponsorPlayLog", "actualMs", "INTEGER NOT NULL DEFAULT 0");
+  // Bron, status en telling van een vertoning; zie prisma/schema.prisma.
+  await addColumnIfMissing("SponsorPlayLog", "source", "TEXT NOT NULL DEFAULT 'rotation'");
+  await addColumnIfMissing("SponsorPlayLog", "state", "TEXT NOT NULL DEFAULT 'done'");
+  await addColumnIfMissing("SponsorPlayLog", "counted", "BOOLEAN NOT NULL DEFAULT true");
+  await addColumnIfMissing("SponsorPlayLog", "ledgerSponsorId", "TEXT");
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_state_idx" ON "SponsorPlayLog" ("state")`,
+  );
   await prisma.$executeRawUnsafe(
     `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_matchId_idx" ON "SponsorPlayLog" ("matchId")`,
   );
@@ -361,6 +374,25 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   );
   await prisma.$executeRawUnsafe(
     `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_endedAt_idx" ON "SponsorPlayLog" ("endedAt")`,
+  );
+
+  // Geboekte sponsortijd per wedstrijdfase (prisma: SponsorPhaseBooking).
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPhaseBooking" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "matchId" TEXT NOT NULL,
+    "segmentKey" TEXT NOT NULL,
+    "sponsorId" TEXT NOT NULL,
+    "sponsorName" TEXT NOT NULL,
+    "bookedSec" INTEGER NOT NULL,
+    "carryInSec" INTEGER NOT NULL DEFAULT 0,
+    "guaranteeJson" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await prisma.$executeRawUnsafe(
+    `CREATE UNIQUE INDEX IF NOT EXISTS "SponsorPhaseBooking_matchId_segmentKey_sponsorId_key" ON "SponsorPhaseBooking" ("matchId", "segmentKey", "sponsorId")`,
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "SponsorPhaseBooking_sponsorId_idx" ON "SponsorPhaseBooking" ("sponsorId")`,
   );
 
   // Cloud-commando's die al uitgevoerd zijn (server/cloud-command-ledger.ts).

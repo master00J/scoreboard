@@ -1577,6 +1577,12 @@ function ensureDisplayWindow(): BrowserWindow | null {
   return displayWindow;
 }
 
+function sendDisplayWindowVisibility(win: BrowserWindow) {
+  if (win.isDestroyed()) return;
+  const visible = win.isVisible() && !win.isMinimized();
+  win.webContents.send("display:windowVisibility", { visible });
+}
+
 function wireDisplayWindow(win: BrowserWindow) {
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     bootLog(
@@ -1590,7 +1596,16 @@ function wireDisplayWindow(win: BrowserWindow) {
   });
   win.webContents.on("did-finish-load", () => {
     void runtime?.broadcastDisplayState();
+    sendDisplayWindowVisibility(win);
   });
+  /**
+   * Verborgen of geminimaliseerd stadionscherm = onderbreking voor proof-of-play. Met
+   * `backgroundThrottling: false` blijft de pagina zelf "visible" melden, dus zeggen we het
+   * expliciet; de renderer telt dan geen sponsorseconden meer tot het venster terug is.
+   */
+  for (const event of ["hide", "show", "minimize", "restore"] as const) {
+    win.on(event as "hide", () => sendDisplayWindowVisibility(win));
+  }
   win.webContents.on("render-process-gone", (_event, details) => {
     bootLog(
       `[display] render-process-gone reason=${details.reason} exitCode=${details.exitCode}${bootPlaybackContextSuffix()}`,

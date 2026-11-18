@@ -18,6 +18,15 @@ import {
 } from "./club-media-rotation";
 import { activeSponsorsForSection, buildSponsorAppearancePlan } from "./sponsor-distribution";
 import {
+  cueGuarantee,
+  defaultSponsorGuarantee,
+  parseSponsorGuarantee,
+  sameSponsorGuarantee,
+  serializeSponsorGuarantee,
+  type CueGuarantee,
+  type SponsorGuarantee,
+} from "./sponsor-guarantee";
+import {
   parseSponsorMediaPhaseTags,
   serializeSponsorMediaPhaseTags,
   type SponsorMediaPhase,
@@ -84,6 +93,8 @@ export type PlanRow = {
   active: boolean;
   seconds: Record<PlanPhase, number>;
   notes: string;
+  /** Soort garantie en inhaalfases van de boeking (alleen sponsors; clubmedia: standaard). */
+  guarantee: SponsorGuarantee;
   mediaCount: number;
   /**
    * De bestanden met de fases waarin ze spelen. Bij een sponsor komen nieuwe bestanden meteen via de API;
@@ -203,6 +214,7 @@ export function planRowFromSponsor(s: Sponsor): PlanRow {
       postmatch: Math.max(0, s.postmatchSeconds ?? 0),
     },
     notes: s.notes ?? "",
+    guarantee: parseSponsorGuarantee(s.guaranteeJson),
     mediaCount: (s.media ?? []).filter((m) => m.active !== false).length,
     clips: (s.media ?? []).filter((m) => !m.hideFromLibrary).map((m) => clipFromMedia(m)),
   };
@@ -238,6 +250,7 @@ export function planRowFromClubItems(items: MediaItem[], groupName: string | nul
       secondHalf: b.secondHalf,
       postmatch: b.postmatch,
     },
+    guarantee: defaultSponsorGuarantee(),
     notes: first.notes ?? "",
     mediaCount: sorted.length,
     clips: sorted.map((m) => clipFromMedia(m, groupName == null)),
@@ -342,6 +355,7 @@ export function sponsorPatchFromPlanRow(row: PlanRow): Record<string, unknown> {
     halftimeSeconds: s.halftime,
     postmatchSeconds: s.postmatch,
     notes: row.notes.trim() || null,
+    guaranteeJson: serializeSponsorGuarantee(row.guarantee),
   };
 }
 
@@ -352,6 +366,7 @@ export function planRowChanged(row: PlanRow, original: PlanRow | undefined): boo
   if (row.name.trim() !== original.name.trim()) return true;
   if (row.active !== original.active) return true;
   if (row.notes.trim() !== original.notes.trim()) return true;
+  if (!sameSponsorGuarantee(row.guarantee, original.guarantee)) return true;
   if (clipsChanged(row, original)) return true;
   return PLAN_PHASES.some((p) => row.seconds[p] !== original.seconds[p]);
 }
@@ -643,6 +658,7 @@ export function applyPlanImport(
         active: true,
         seconds: { ...emptySeconds(), ...imp.seconds },
         notes: imp.notes ?? "",
+        guarantee: defaultSponsorGuarantee(),
         mediaCount: 0,
         clips: [],
       });
@@ -853,6 +869,8 @@ export type PlanCue = {
   /** Hoe lang hij op het scherm staat: tot de eindtijd, anders de duur van het bestand. */
   seconds: number;
   enabled: boolean;
+  /** Soort boeking: tijdvenster, één volledige vertoning, of geen garantie. */
+  guarantee: CueGuarantee;
 };
 
 /** Fases van de tijdscues in het plan. In de rust kan geen tijdscue (die volgt de rotatie). */
@@ -888,6 +906,7 @@ export function planCuesFromApi(
     triggerSec: number;
     endSec?: number | null;
     enabled: boolean;
+    guarantee?: string | null;
     media?: { durationSec?: number } | null;
   }[],
 ): PlanCue[] {
@@ -904,6 +923,7 @@ export function planCuesFromApi(
       endSec: end,
       seconds: Math.max(1, end != null ? end - c.triggerSec : Math.round(c.media?.durationSec ?? 0) || 1),
       enabled: c.enabled,
+      guarantee: cueGuarantee(c),
     });
   }
   return out;

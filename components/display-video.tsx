@@ -22,9 +22,19 @@ function assignRef<T>(ref: Ref<T> | undefined, value: T | null) {
  * Video voor het stadionscherm: decodeert op volle grootte en kopieert frames naar canvas.
  * Native overlay naast het L-frame is op Windows zwart; canvas zit in dezelfde laag als de score.
  */
-export const DisplayVideo = forwardRef<HTMLVideoElement, VideoHTMLAttributes<HTMLVideoElement>>(
-  function DisplayVideo({ style, className, ...props }, ref) {
+export type DisplayVideoProps = VideoHTMLAttributes<HTMLVideoElement> & {
+  /**
+   * Eerste frame van deze bron staat op het canvas (het beeld dat het stadion ziet), met de
+   * speelkop van dat frame. Bewijs voor proof-of-play: pas vanaf hier telt een video mee.
+   */
+  onFirstFrame?: (mediaTimeSec: number) => void;
+};
+
+export const DisplayVideo = forwardRef<HTMLVideoElement, DisplayVideoProps>(
+  function DisplayVideo({ style, className, onFirstFrame, ...props }, ref) {
     const videoRef = useRef<HTMLVideoElement | null>(null);
+    const onFirstFrameRef = useRef(onFirstFrame);
+    onFirstFrameRef.current = onFirstFrame;
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const paintedRef = useRef(false);
     const [painted, setPainted] = useState(false);
@@ -74,6 +84,7 @@ export const DisplayVideo = forwardRef<HTMLVideoElement, VideoHTMLAttributes<HTM
         if (!paintedRef.current) {
           paintedRef.current = true;
           setPainted(true);
+          onFirstFrameRef.current?.(t);
         }
       };
 

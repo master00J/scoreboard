@@ -32,6 +32,8 @@ import {
   type ProofOfPlaySummaryRow,
 } from "@/lib/proof-of-play-export";
 import { proofOfPlayTotals } from "@/lib/sponsor-play-filters";
+import { playLogVisibleSec } from "@/lib/sponsor-play-ledger";
+import { SponsorGuaranteeSettingsCard } from "./sponsor-guarantee-settings-card";
 
 export function ProofOfPlayPanel() {
   const { t, i18n } = useTranslation();
@@ -286,6 +288,8 @@ export function ProofOfPlayPanel() {
           filterLabel,
           totalPlays: exportTotals.totalPlays,
           totalActualSec: exportTotals.totalActualSec,
+          totalBookedSec: exportTotals.totalBookedSec,
+          totalShortfallSec: exportTotals.totalShortfallSec,
           totalExpectedSec: exportTotals.totalExpectedSec,
           avgFulfillmentPercent: exportTotals.avgFulfillmentPercent,
         };
@@ -337,10 +341,16 @@ export function ProofOfPlayPanel() {
     totalActualSec,
     totalExpectedSec,
     avgFulfillmentPercent: avgFulfillment,
+    totalBookedSec,
+    totalShortfallSec,
   } = proofOfPlayTotals(summary);
 
   return (
     <div className="space-y-4">
+      <SponsorGuaranteeSettingsCard
+        sponsorGuaranteeJson={settings?.sponsorGuaranteeJson}
+        onSaved={reloadSettings}
+      />
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -585,6 +595,16 @@ export function ProofOfPlayPanel() {
             value={`${avgFulfillment}%`}
             hint={t("reports.statFulfillmentHint")}
           />
+          <Stat
+            label={t("reports.statBooked")}
+            value={formatSecForExport(totalBookedSec)}
+            hint={t("reports.statBookedHint")}
+          />
+          <Stat
+            label={t("reports.statShortfall")}
+            value={formatSecForExport(totalShortfallSec)}
+            hint={t("reports.statShortfallHint")}
+          />
         </div>
       </section>
 
@@ -604,6 +624,8 @@ export function ProofOfPlayPanel() {
                   <th className="py-2 pr-3 text-right">{t("reports.colActual")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colExpected")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colFulfillment")}</th>
+                  <th className="py-2 pr-3 text-right">{t("reports.colBooked")}</th>
+                  <th className="py-2 pr-3 text-right">{t("reports.colShortfall")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -621,6 +643,16 @@ export function ProofOfPlayPanel() {
                       {s.expectedSec > 0
                         ? `${Math.round((s.actualSec / s.expectedSec) * 100)}%`
                         : "—"}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {s.bookedSec ? formatSecForExport(s.bookedSec) : "—"}
+                    </td>
+                    <td
+                      className={`py-2 pr-3 text-right tabular-nums ${
+                        (s.shortfallSec ?? 0) >= 0.5 ? "font-semibold text-amber-600 dark:text-amber-400" : ""
+                      }`}
+                    >
+                      {s.bookedSec ? formatSecForExport(s.shortfallSec ?? 0) : "—"}
                     </td>
                   </tr>
                 ))}
@@ -648,6 +680,7 @@ export function ProofOfPlayPanel() {
                   <th className="py-2 pr-3">{t("reports.colMedia")}</th>
                   <th className="py-2 pr-3">{t("reports.colMatch")}</th>
                   <th className="py-2 pr-3">{t("reports.colPhase")}</th>
+                  <th className="py-2 pr-3">{t("reports.colSource")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colExpectedShort")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colActualShort")}</th>
                 </tr>
@@ -668,8 +701,22 @@ export function ProofOfPlayPanel() {
                     <td className="py-1.5 pr-3">
                       {formatSegmentKey(r.segmentKey, exportLabels)}
                     </td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">
+                      {t(`reports.source_${r.source ?? "rotation"}`)}
+                      {r.counted === false && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.notCounted")})</span>
+                      )}
+                      {r.state === "interrupted" && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.stateInterrupted")})</span>
+                      )}
+                      {r.state === "running" && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.stateRunning")})</span>
+                      )}
+                    </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{r.expectedSec}s</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">{r.actualSec}s</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">
+                      {formatSecForExport(playLogVisibleSec(r))}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -300,6 +300,8 @@ export type ElectronBridge = {
   onDisplayHorn?: (listener: (payload: HornPayload) => void) => () => void;
   onSponsorLedger: (listener: (ledger: SponsorLedgerPayload | null) => void) => () => void;
   onDisplayError: (listener: (payload: { message: string; code?: string; params?: Record<string, string | number> }) => void) => () => void;
+  /** Stadionscherm verborgen/geminimaliseerd of weer zichtbaar (alleen het display-venster krijgt dit). */
+  onDisplayWindowVisibility?: (listener: (payload: { visible: boolean }) => void) => () => void;
   focusDisplayWindow: () => Promise<void>;
   reloadDisplayWindow: () => Promise<{ ok: boolean }>;
   /** Proof-of-play: sla renderer-gegenereerde PDF of Excel op (save dialog). */

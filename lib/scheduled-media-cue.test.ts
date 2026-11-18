@@ -5,6 +5,7 @@ import {
   cueIsDueAtElapsed,
   cueLeftClockWindow,
   cueResumesAfterInterruption,
+  pickOwedScheduledCue,
   cueClipSessionId,
   pickDueScheduledCue,
   cuePhaseMatches,
@@ -375,5 +376,34 @@ describe("cueClipSessionId", () => {
     const a = cueClipSessionId({ ...base, matchId: "matchA" });
     expect(cueClipSessionId({ ...base, matchId: "matchA", cycle: 1 })).not.toBe(a);
     expect(cueClipSessionId({ ...base, matchId: "matchA", mediaId: "m2" })).not.toBe(a);
+  });
+});
+
+describe("one-off cue that owes one full play", () => {
+  const cue = (over: Record<string, unknown> = {}) => ({
+    id: "c1",
+    enabled: true,
+    matchStatus: "FIRST_HALF",
+    triggerSec: 600,
+    endSec: null as number | null,
+    guarantee: "fullPlay" as string | null,
+    media: { active: true },
+    ...over,
+  });
+
+  it("resumes after an interruption only when the booking says so", () => {
+    expect(cueResumesAfterInterruption(cue())).toBe(true);
+    expect(cueResumesAfterInterruption(cue({ guarantee: null }))).toBe(false);
+    expect(cueResumesAfterInterruption(cue({ guarantee: "none" }))).toBe(false);
+  });
+
+  it("gets its turn again in the same phase while the clock runs", () => {
+    const owed = new Set(["c1"]);
+    const opts = { matchStatus: "FIRST_HALF", clockRuns: true, owed: (c: { id: string }) => owed.has(c.id) };
+    expect(pickOwedScheduledCue([cue()], opts)?.id).toBe("c1");
+    expect(pickOwedScheduledCue([cue()], { ...opts, clockRuns: false })).toBeNull();
+    expect(pickOwedScheduledCue([cue()], { ...opts, matchStatus: "SECOND_HALF" })).toBeNull();
+    expect(pickOwedScheduledCue([cue({ guarantee: null })], opts)).toBeNull();
+    expect(pickOwedScheduledCue([cue()], { ...opts, owed: () => false })).toBeNull();
   });
 });

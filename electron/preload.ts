@@ -39,6 +39,8 @@ const bridge: ElectronBridge = {
   onSponsorLedger: (listener) =>
     subscribe<SponsorLedgerPayload | null>("display:sponsorLedger", listener),
   onDisplayError: (listener) => subscribe("display:error", listener),
+  onDisplayWindowVisibility: (listener) =>
+    subscribe<{ visible: boolean }>("display:windowVisibility", listener),
   focusDisplayWindow: () => ipcRenderer.invoke("window:focusDisplay"),
   reloadDisplayWindow: () => ipcRenderer.invoke("window:reloadDisplay"),
   saveProofOfPlayExport: (opts) => ipcRenderer.invoke("sponsorPlays:saveExport", opts),

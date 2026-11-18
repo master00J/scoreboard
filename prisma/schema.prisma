@@ -194,6 +194,8 @@ model ScheduledMediaCue {
   enabled     Boolean   @default(true)
   /// Rundown van deze fase herhaalt na de laatste clip.
   loop        Boolean   @default(false)
+  /// Soort boeking: window | fullPlay | none. Null = venster met eindtijd, anders één keer op zijn moment.
+  guarantee   String?
   createdAt   DateTime  @default(now())
 }
 
@@ -239,6 +241,8 @@ model Sponsor {
   sportBudgetsJson  String?
   /// Vrije notitie uit het seizoensplan ("direct na sponsor X", "vanaf 20/09"); de operator ziet ze live.
   notes             String?
+  /// Garantie van de boeking: {"kind":"seconds"|"plays","catchUpIn":[fases]} (lib/sponsor-guarantee.ts). Null = seconden, niet inhalen.
+  guaranteeJson     String?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
   playLogs          SponsorPlayLog[]
@@ -374,6 +378,8 @@ model AppSettings {
   interfaceProfilesJson String?
   /// JSON: aftelklok naar de start en de mededeling op het stadionscherm (lib/display-extras.ts).
   displayExtrasJson String?
+  /// Sponsorgaranties: {"countManualPlays":bool,"reserveSec":n} (lib/sponsor-guarantee-settings.ts).
+  sponsorGuaranteeJson String?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.
@@ -396,15 +402,46 @@ model SponsorPlayLog {
   expectedSec    Int
   /// Werkelijke afgespeelde tijd in seconden (afgekapt op werkelijke duur door interrupts).
   actualSec      Int
+  /// Echt zichtbare tijd in ms, onafgerond. Totalen tellen deze op; 0 bij rijen van voor deze kolom.
+  actualMs       Int      @default(0)
   /// Begin- en eindtijdstempel voor audit-trail.
   startedAt      DateTime
   endedAt        DateTime @default(now())
   /// Unieke sessie-id voor deduplicatie.
   clipSessionId  String   @unique
+  /// Welke laag de vertoning meldde: rotation | cue | manual.
+  source         String   @default("rotation")
+  /// running (loopt, voortgang periodiek bewaard) | done | interrupted (herstart/crash midden in de clip).
+  state          String   @default("done")
+  /// Telt mee voor de sponsor. Onwaar voor een handmatige clip als de operator dat zo instelde.
+  counted        Boolean  @default(true)
+  /// Sponsor-id zoals de telemetrie hem kent (ook club:… en scheduled-cue), voor de heropbouw na een herstart.
+  ledgerSponsorId String?
 
   @@index([matchId])
   @@index([sponsorId])
   @@index([endedAt])
+  @@index([state])
+}
+
+/// Geboekte sponsortijd per fase van een wedstrijd, vastgelegd bij de start van die fase.
+/// De rapportage zet de geleverde tijd hiertegenover (geboekt en open tekort), ook als de
+/// sponsor later in het seizoen andere minuten krijgt.
+model SponsorPhaseBooking {
+  id           String   @id @default(cuid())
+  matchId      String
+  segmentKey   String
+  sponsorId    String
+  sponsorName  String
+  /// Eigen geboekte seconden voor deze fase.
+  bookedSec    Int
+  /// Tekort uit eerdere fases dat hier ingehaald mag worden.
+  carryInSec   Int      @default(0)
+  guaranteeJson String?
+  createdAt    DateTime @default(now())
+
+  @@unique([matchId, segmentKey, sponsorId])
+  @@index([sponsorId])
 }
 
 /// Commando's die via de cloud-relay (telefoon over internet) binnenkwamen en hier al uitgevoerd zijn.

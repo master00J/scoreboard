@@ -63,6 +63,8 @@ export type AppSettings = {
   interfaceProfilesJson?: string | null;
   /** JSON: aftelklok naar de start en de mededeling op het stadionscherm (lib/display-extras.ts). */
   displayExtrasJson?: string | null;
+  /** Telling van sponsortijd (lib/sponsor-guarantee-settings.ts). */
+  sponsorGuaranteeJson?: string | null;
 };
 
 export type Player = {
@@ -209,6 +211,8 @@ export type ScheduledMediaCue = {
   enabled: boolean;
   /** Hele rundown van deze fase herhaalt na de laatste clip. */
   loop?: boolean;
+  /** Soort boeking: window | fullPlay | none (lib/sponsor-guarantee.ts `cueGuarantee`). */
+  guarantee?: string | null;
   createdAt: string;
 };
 
@@ -233,6 +237,8 @@ export type Sponsor = {
   sportBudgetsJson?: string | null;
   /** Vrije notitie uit het seizoensplan; de operator ziet ze tijdens de match. */
   notes?: string | null;
+  /** Garantie van de boeking (lib/sponsor-guarantee.ts). Null = seconden, niet inhalen. */
+  guaranteeJson?: string | null;
   createdAt: string;
   media?: MediaItem[];
   /** Alleen in de rotatie-API: clubmedia die meedraait zonder sponsorrij. */

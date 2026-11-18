@@ -235,6 +235,18 @@ describe("planrijen en database", () => {
       halftimeSeconds: 30,
       postmatchSeconds: 0,
       notes: "na Beta",
+      guaranteeJson: null,
+    });
+  });
+
+  it("schrijft en herkent een gewijzigde garantie", () => {
+    const original = planRowFromSponsor(sponsor({ id: "a", name: "Alpha" }));
+    expect(original.guarantee).toEqual({ kind: "seconds", catchUpIn: [] });
+    const changed = { ...original, guarantee: { kind: "plays" as const, catchUpIn: ["halftime" as const] } };
+    expect(planRowChanged(changed, original)).toBe(true);
+    expect(JSON.parse(sponsorPatchFromPlanRow(changed).guaranteeJson as string)).toEqual({
+      kind: "plays",
+      catchUpIn: ["halftime"],
     });
   });
 
@@ -598,6 +610,7 @@ describe("echte schermtijd", () => {
       active: true,
       seconds: { prematch: 0, firstHalf: 0, halftime: 40, secondHalf: 0, postmatch: 0 },
       notes: "",
+      guarantee: { kind: "seconds", catchUpIn: [] },
       mediaCount: 1,
       clips: [pendingClip({ path: "C:/pop.jpg", type: "IMAGE", durationSec: 10 })],
     });

@@ -24,6 +24,7 @@ import { prematchRosterClockSec } from "@/lib/prematch-spread-timing";
 import { tMatchStatus, tSponsorBlock } from "@/lib/i18n/t-phase";
 import { useSponsorPhaseHud } from "../_hooks/use-sponsor-phase-hud";
 import { useResolvedSponsorWindow } from "@/lib/use-resolved-sponsor-window";
+import { SponsorGuaranteeLive } from "./sponsor-guarantee-live";
 
 function formatClock(sec: number): string {
   const t = Math.max(0, Math.round(Number(sec) || 0));
@@ -332,6 +333,8 @@ export function SponsorLiveOverview({ activeMatch }: { activeMatch: Match | null
       <p className="text-[10px] text-muted-foreground leading-snug">
         {t("sponsors.nuHint")}
       </p>
+
+      <SponsorGuaranteeLive activeMatch={activeMatch} />
     </div>
   );
 }

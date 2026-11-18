@@ -7,6 +7,12 @@ import {
   pdfHeaderTitle,
   type ProofOfPlayBrand,
 } from "./proof-of-play-brand";
+import { playLogVisibleSec } from "./sponsor-play-ledger";
+
+/** Seconden van één vertoning zoals een export ze toont: afgerond op 0,1 s, pas hier. */
+export function presentPlaySec(row: { actualSec: number; actualMs?: number | null }): number {
+  return Math.round(playLogVisibleSec(row) * 10) / 10;
+}
 
 /** Rij uit GET /api/sponsor-plays — gelijk aan control panel. */
 export type ProofOfPlayRow = {
@@ -19,6 +25,14 @@ export type ProofOfPlayRow = {
   matchStatus: string | null;
   expectedSec: number;
   actualSec: number;
+  /** Echt zichtbare ms, onafgerond (0 bij rijen van vóór de kolom). */
+  actualMs?: number;
+  /** rotation | cue | manual */
+  source?: string;
+  /** running | done | interrupted */
+  state?: string;
+  /** Onwaar: handmatige clip die volgens de instelling niet meetelt. */
+  counted?: boolean;
   startedAt: string;
   endedAt: string;
   clipSessionId: string;
@@ -36,6 +50,10 @@ export type ProofOfPlaySummaryRow = {
   plays: number;
   actualSec: number;
   expectedSec: number;
+  /** Geboekt in de gekozen wedstrijden en fases (0 zonder vastgelegde boeking). */
+  bookedSec?: number;
+  /** Nog niet geleverd van wat geboekt was. */
+  shortfallSec?: number;
 };
 
 export type ProofOfPlayExportMeta = {
@@ -46,6 +64,8 @@ export type ProofOfPlayExportMeta = {
   totalActualSec: number;
   totalExpectedSec: number;
   avgFulfillmentPercent: number;
+  totalBookedSec?: number;
+  totalShortfallSec?: number;
 };
 
 /** Vertalingen voor export-headers / segmentlabels — doorgeven vanuit UI via t(). */
@@ -87,6 +107,10 @@ export type ProofOfPlayExportLabels = {
   segmentSecondHalf: string;
   segmentExtraTime: string;
   segmentPostmatch: string;
+  colBooked: string;
+  colShortfall: string;
+  totalBooked: string;
+  totalShortfall: string;
 };
 
 export type ProofOfPlayPdfStyle = {
@@ -177,8 +201,10 @@ function drawPdfFooters(
 
 export function formatSecForExport(total: number): string {
   if (!Number.isFinite(total) || total <= 0) return "0s";
-  const m = Math.floor(total / 60);
-  const s = Math.round(total % 60);
+  // Afronden gebeurt pas hier, bij tonen; vóór de deling zodat 119,6 s "2m 00s" wordt en geen "1m 60s".
+  const rounded = Math.round(total);
+  const m = Math.floor(rounded / 60);
+  const s = rounded % 60;
   if (m === 0) return `${s}s`;
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }
@@ -248,6 +274,10 @@ export function formatSegmentNl(key: string): string {
     segmentSecondHalf: "2e helft",
     segmentExtraTime: "Verlenging",
     segmentPostmatch: "Na wedstrijd",
+    colBooked: "Geboekt",
+    colShortfall: "Open tekort",
+    totalBooked: "Totaal geboekt",
+    totalShortfall: "Totaal open tekort",
   });
 }
 
@@ -287,6 +317,8 @@ export async function buildProofOfPlayXlsx(
     [labels.totalActual, formatSecForExport(meta.totalActualSec)],
     [labels.totalExpected, formatSecForExport(meta.totalExpectedSec)],
     [labels.fulfillment, `${meta.avgFulfillmentPercent}%`],
+    [labels.totalBooked, formatSecForExport(meta.totalBookedSec ?? 0)],
+    [labels.totalShortfall, formatSecForExport(meta.totalShortfallSec ?? 0)],
     [],
     [labels.perSponsor],
     [
@@ -295,6 +327,8 @@ export async function buildProofOfPlayXlsx(
       labels.colActualShort,
       labels.colExpectedShort,
       labels.fulfillment,
+      labels.colBooked,
+      labels.colShortfall,
     ],
   ];
   for (const s of summary) {
@@ -304,6 +338,8 @@ export async function buildProofOfPlayXlsx(
       formatSecForExport(s.actualSec),
       formatSecForExport(s.expectedSec),
       fulfillmentPct(s.actualSec, s.expectedSec),
+      formatSecForExport(s.bookedSec ?? 0),
+      formatSecForExport(s.shortfallSec ?? 0),
     ]);
   }
 
@@ -314,6 +350,8 @@ export async function buildProofOfPlayXlsx(
   wsRapport.getColumn(3).width = 18;
   wsRapport.getColumn(4).width = 14;
   wsRapport.getColumn(5).width = 12;
+  wsRapport.getColumn(6).width = 14;
+  wsRapport.getColumn(7).width = 14;
 
   const detailHead = [
     labels.colEnd,
@@ -336,7 +374,7 @@ export async function buildProofOfPlayXlsx(
     r.matchStatus ?? "—",
     formatSegmentKey(r.segmentKey, labels),
     r.expectedSec,
-    r.actualSec,
+    presentPlaySec(r),
     r.clipSessionId,
   ]);
 
@@ -415,6 +453,12 @@ export function buildProofOfPlayPdf(
     10,
     y,
   );
+  y += 4;
+  doc.text(
+    `${labels.totalBooked}: ${formatSecForExport(meta.totalBookedSec ?? 0)}  ·  ${labels.totalShortfall}: ${formatSecForExport(meta.totalShortfallSec ?? 0)}`,
+    10,
+    y,
+  );
   y += 6;
 
   autoTable(doc, {
@@ -426,6 +470,8 @@ export function buildProofOfPlayPdf(
         labels.colActualShort,
         labels.colExpectedShort,
         labels.fulfillment,
+        labels.colBooked,
+        labels.colShortfall,
       ],
     ],
     body: summary.map((s) => [
@@ -434,6 +480,8 @@ export function buildProofOfPlayPdf(
       formatSecForExport(s.actualSec),
       formatSecForExport(s.expectedSec),
       fulfillmentPct(s.actualSec, s.expectedSec),
+      formatSecForExport(s.bookedSec ?? 0),
+      formatSecForExport(s.shortfallSec ?? 0),
     ]),
     theme: "striped",
     headStyles: {
@@ -447,6 +495,8 @@ export function buildProofOfPlayPdf(
       2: { halign: "right" },
       3: { halign: "right" },
       4: { halign: "right" },
+      5: { halign: "right" },
+      6: { halign: "right" },
     },
     margin: { left: 10, right: 10, bottom: 12 },
   });
@@ -498,7 +548,7 @@ export function buildProofOfPlayPdf(
           matchLabel(r),
           formatSegmentKey(r.segmentKey, labels),
           String(r.expectedSec),
-          String(r.actualSec),
+          String(presentPlaySec(r)),
         ];
       }),
       theme: "grid",
@@ -592,5 +642,9 @@ export function proofOfPlayLabelsFromT(t: (key: string) => string): ProofOfPlayE
     segmentSecondHalf: k("segmentSecondHalf"),
     segmentExtraTime: k("segmentExtraTime"),
     segmentPostmatch: k("segmentPostmatch"),
+    colBooked: k("colBooked"),
+    colShortfall: k("colShortfall"),
+    totalBooked: k("totalBooked"),
+    totalShortfall: k("totalShortfall"),
   };
 }
