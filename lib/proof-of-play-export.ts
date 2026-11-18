@@ -177,8 +177,10 @@ function drawPdfFooters(
 
 export function formatSecForExport(total: number): string {
   if (!Number.isFinite(total) || total <= 0) return "0s";
-  const m = Math.floor(total / 60);
-  const s = Math.round(total % 60);
+  // Afronden gebeurt pas hier, bij tonen; vóór de deling zodat 119,6 s "2m 00s" wordt en geen "1m 60s".
+  const rounded = Math.round(total);
+  const m = Math.floor(rounded / 60);
+  const s = rounded % 60;
   if (m === 0) return `${s}s`;
   return `${m}m ${s.toString().padStart(2, "0")}s`;
 }

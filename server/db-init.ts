@@ -353,6 +353,8 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await prisma.$executeRawUnsafe(
     `CREATE UNIQUE INDEX IF NOT EXISTS "SponsorPlayLog_clipSessionId_key" ON "SponsorPlayLog" ("clipSessionId")`,
   );
+  // Echt zichtbare ms, onafgerond (oude rijen: 0 → lezers vallen terug op actualSec).
+  await addColumnIfMissing("SponsorPlayLog", "actualMs", "INTEGER NOT NULL DEFAULT 0");
   await prisma.$executeRawUnsafe(
     `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_matchId_idx" ON "SponsorPlayLog" ("matchId")`,
   );

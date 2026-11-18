@@ -162,10 +162,11 @@ function sendControl(channel: string, payload: unknown) {
 
 let sponsorLedgerSnapshot: SponsorLedgerPayload | null = null;
 /**
- * Per clipSessionId de hoogste gerapporteerde werkelijke duur (sec, afgerond).
+ * Per clipSessionId de hoogste gerapporteerde zichtbare duur (sec, onafgerond).
  * React Strict Mode kan een effect-cleanup direct na mount laten lopen met ~0s;
  * de echte clipEnd komt daarna met de juiste waarde — dan tellen we enkel het verschil
- * bij en overschrijven we proof-of-play niet meer met 0.
+ * bij en overschrijven we proof-of-play niet meer met 0. Niet afronden: elk fragment van
+ * 0,6 s telde vroeger als 1 s. Afronden gebeurt pas bij tonen.
  */
 const sponsorClipBestActualSec = new Map<string, number>();
 
@@ -232,9 +233,9 @@ export function sponsorTelemetryClipProgress(
 
 export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): SponsorLedgerPayload {
   const sessionId = payload.clipSessionId;
-  const rounded = Math.max(0, Math.round(payload.actualSec));
+  const reported = Number.isFinite(payload.actualSec) ? Math.max(0, payload.actualSec) : 0;
   const prevBest = sponsorClipBestActualSec.get(sessionId) ?? 0;
-  const bestActual = Math.max(prevBest, rounded);
+  const bestActual = Math.max(prevBest, reported);
   const delta = bestActual - prevBest;
   sponsorClipBestActualSec.set(sessionId, bestActual);
   if (sponsorClipBestActualSec.size > 4000) {
@@ -265,7 +266,7 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
     const startedMs = ac.startedAtMs;
     const allowStaleZeroClear =
       delta === 0 &&
-      rounded === 0 &&
+      reported === 0 &&
       prevBest === 0 &&
       Date.now() - startedMs >= 2000;
     if (delta > 0 || allowStaleZeroClear) {
@@ -314,11 +315,13 @@ async function persistSponsorPlayLog(
 
   const expected =
     expectedSec > 0 ? expectedSec : (media?.durationSec ?? 0);
-  const actual = Math.max(0, Math.round(bestActualSec));
+  const actualMs = Math.max(0, Math.round(bestActualSec * 1000));
+  /** Oude kolom in hele seconden voor oudere lezers; optellen gebeurt op `actualMs`. */
+  const actual = Math.round(actualMs / 1000);
 
   const existing = await prisma.sponsorPlayLog.findUnique({
     where: { clipSessionId: payload.clipSessionId },
-    select: { actualSec: true },
+    select: { actualSec: true, actualMs: true },
   });
 
   if (!existing) {
@@ -338,6 +341,7 @@ async function persistSponsorPlayLog(
         matchStatus: match?.status ?? null,
         expectedSec: expected,
         actualSec: actual,
+        actualMs,
         startedAt: new Date(payload.startedAtMs),
         endedAt: new Date(),
         clipSessionId: payload.clipSessionId,
@@ -350,6 +354,7 @@ async function persistSponsorPlayLog(
     where: { clipSessionId: payload.clipSessionId },
     data: {
       actualSec: Math.max(existing.actualSec, actual),
+      actualMs: Math.max(existing.actualMs, actualMs),
       endedAt: new Date(),
     },
   });

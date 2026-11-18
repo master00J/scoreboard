@@ -74,7 +74,8 @@ import {
 import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import { automaticSponsorMediaAllowed } from "@/lib/live-cycle-settings";
-import { useScheduledCueTelemetry } from "@/lib/use-scheduled-cue-telemetry";
+import { scheduledCueShownKey, useScheduledCueTelemetry } from "@/lib/use-scheduled-cue-telemetry";
+import { useDisplayWindowVisible } from "@/lib/use-display-window-visible";
 import { cueHasClockWindow, cueWindowLengthSec, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 import {
   finalizeSponsorDistPhase,
@@ -184,6 +185,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const previewIframe = isPreviewIframe();
   const skipSocket = previewIframe || embedInControl;
   useSocketSync(skipSocket);
+  /** Verborgen of geminimaliseerd stadionvenster: niemand ziet het beeld, dus telt er geen sponsortijd. */
+  const displayWindowVisible = useDisplayWindowVisible(!skipSocket);
   useEffect(() => {
     if (previewIframe || embedInControl) return;
     document.body.classList.add("display-page");
@@ -499,14 +502,6 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       elapsed,
       skip: previewIframe,
     });
-  useScheduledCueTelemetry({
-    cue: activeScheduledCue,
-    cycle: scheduledCueCycle,
-    stint: scheduledCueStint,
-    match: match ? { id: match.id, status: match.status } : null,
-    enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT",
-    playheadSec: scheduledCuePlayheadSec,
-  });
   /**
    * Foto's uit de rundown delen één element: bij een wissel verandert alleen het beeld en blijft
    * de vorige sponsor staan tot de volgende klaar is. Een video start per cue en per doorloop opnieuw.
@@ -1421,6 +1416,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           scheduledAppearanceKey={scheduledAppearanceKeyOf(sponsorDistView)}
           scheduledMediaIndex={scheduledMediaIndexOf(sponsorDistView)}
           playbackTelemetry={sponsorPlaybackTelemetry}
+          offScreen={!displayWindowVisible}
           followPlayback={embedInControl}
           followClip={previewForcesSponsorBeside ? previewFollowClip : null}
           showPreviewProgress={embedInControl}
@@ -1488,6 +1484,33 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     exclusiveFullscreen,
   });
 
+  /**
+   * Staat de cue echt op het scherm? Zelfde voorwaarden als de twee lagen die hem tekenen
+   * (mediavak naast het scorebord, of volledig scherm), en het venster moet zichtbaar zijn.
+   * Alleen dan telt zijn schermtijd.
+   */
+  const scheduledCueOnScreen =
+    activeScheduledCue != null &&
+    displayWindowVisible &&
+    ((!layoutPreviewActive &&
+      mode !== "MATCH" &&
+      mode !== "BLACKOUT" &&
+      !exclusiveFullscreen &&
+      !!match &&
+      sponsorRotationBesideScoreboard(match.status)) ||
+      (mode === "SPONSOR_ROTATION" && !(match && sponsorRotationBesideScoreboard(match.status))));
+  const cueTelemetry = useScheduledCueTelemetry({
+    cue: activeScheduledCue,
+    cycle: scheduledCueCycle,
+    stint: scheduledCueStint,
+    match: match ? { id: match.id, status: match.status } : null,
+    enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT",
+    playheadSec: scheduledCuePlayheadSec,
+    visible: scheduledCueOnScreen,
+  });
+  const cueShownKey = scheduledCueShownKey(activeScheduledCue, scheduledCueCycle, scheduledCueStint);
+  const onCueShown = (positionSec?: number) => cueTelemetry.onShown(cueShownKey, positionSec);
+
   /** Scorebord met mediavak voor goal, kaart of een losse clip (niet de sponsorrotatie zelf). */
   const showFramedContent =
     showScoreFrame &&
@@ -1526,6 +1549,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             scheduledAppearanceKey={scheduledAppearanceKeyOf(sponsorDistView)}
             scheduledMediaIndex={scheduledMediaIndexOf(sponsorDistView)}
             playbackTelemetry={sponsorPlaybackTelemetry}
+            offScreen={!displayWindowVisible}
             followPlayback={embedInControl}
             followClip={previewForcesSponsorBeside ? previewFollowClip : null}
             showPreviewProgress={embedInControl}
@@ -1667,6 +1691,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                     scheduledAppearanceKey={scheduledAppearanceKeyOf(prematchDistView)}
                     scheduledMediaIndex={scheduledMediaIndexOf(prematchDistView)}
                     playbackTelemetry={sponsorPlaybackTelemetry}
+                    offScreen={!displayWindowVisible}
                     followPlayback={embedInControl}
                     followClip={previewFollowClip}
                     showPreviewProgress={embedInControl}
@@ -1707,6 +1732,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               sponsors={sponsors}
               showPreviewProgress={embedInControl}
               playbackTelemetry={sponsorPlaybackTelemetry}
+              offScreen={!displayWindowVisible}
               followPlayback={embedInControl}
               followClip={previewFollowClip}
               prematchSpread={prematchSpreadActive ? prematchDistView : null}
@@ -1777,6 +1803,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                   scheduledAppearanceKey={scheduledAppearanceKeyOf(sponsorDistView)}
                   scheduledMediaIndex={scheduledMediaIndexOf(sponsorDistView)}
                   playbackTelemetry={sponsorPlaybackTelemetry}
+                  offScreen={!displayWindowVisible}
                   followPlayback={embedInControl}
                   followClip={previewFollowClip}
                   showPreviewProgress={embedInControl}
@@ -1966,6 +1993,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               media={activeScheduledCue.media}
               holdSlot="panel"
               imageHoldSec={scheduledCueImageHoldSec}
+              shownKey={cueShownKey}
+              onShown={onCueShown}
+              onPlayheadSec={cueTelemetry.onPlayheadSec}
               showPreviewProgress={embedInControl}
               loop={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -1997,6 +2027,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               media={activeScheduledCue.media}
               holdSlot="fullscreen"
               imageHoldSec={scheduledCueImageHoldSec}
+              shownKey={cueShownKey}
+              onShown={onCueShown}
+              onPlayheadSec={cueTelemetry.onPlayheadSec}
               showPreviewProgress={embedInControl}
               loop={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -2165,6 +2198,7 @@ function SponsorRotationLiveContent({
   restartCurrentOnResume = false,
   budgetSeconds = null,
   sponsorWindow = null,
+  offScreen = false,
 }: {
   match: Match | null;
   playlists: Record<PlaylistSlot, Playlist | null>;
@@ -2191,6 +2225,8 @@ function SponsorRotationLiveContent({
   restartCurrentOnResume?: boolean;
   budgetSeconds?: ((sponsor: Sponsor) => number) | null;
   sponsorWindow?: ResolvedSponsorWindow | null;
+  /** Stadionvenster verborgen: proof-of-play-klok stil, beeld speelt door. */
+  offScreen?: boolean;
 }) {
   if (!match) {
     return (
@@ -2220,6 +2256,7 @@ function SponsorRotationLiveContent({
             scheduledAppearanceKey={scheduledAppearanceKeyOf(prematchSpread)}
             scheduledMediaIndex={scheduledMediaIndexOf(prematchSpread)}
             playbackTelemetry={playbackTelemetry}
+            offScreen={offScreen}
             followPlayback={followPlayback}
             followClip={followClip}
             showPreviewProgress={showPreviewProgress}
@@ -2263,6 +2300,7 @@ function SponsorRotationLiveContent({
             scheduledAppearanceKey={scheduledAppearanceKeyOf(postmatchSpread)}
             scheduledMediaIndex={scheduledMediaIndexOf(postmatchSpread)}
             playbackTelemetry={playbackTelemetry}
+            offScreen={offScreen}
             followPlayback={followPlayback}
             followClip={followClip}
             showPreviewProgress={showPreviewProgress}
@@ -2294,6 +2332,7 @@ function SponsorRotationLiveContent({
         scheduledAppearanceKey={inSponsorSlot ? scheduledAppearanceKeyOf(spread) : null}
         scheduledMediaIndex={inSponsorSlot ? scheduledMediaIndexOf(spread) : null}
         playbackTelemetry={playbackTelemetry}
+        offScreen={offScreen}
         followPlayback={followPlayback}
         followClip={followClip}
         showPreviewProgress={showPreviewProgress}
@@ -2349,6 +2388,9 @@ function SingleMediaMode({
   finishAfterMs,
   imageHoldSec,
   holdSlot,
+  onShown,
+  onPlayheadSec,
+  shownKey,
 }: {
   media: MediaItem | null;
   loop?: boolean;
@@ -2372,6 +2414,15 @@ function SingleMediaMode({
   onVideoEnded?: () => void;
   /** Vangnet: beeldduur of vastgelopen video die nooit `ended` stuurt. */
   finishAfterMs?: number;
+  /**
+   * Het beeld staat echt op het scherm (foto gedecodeerd, eerste videoframe getekend), met de
+   * speelkop van dat frame. Bewijs voor proof-of-play.
+   */
+  onShown?: (positionSec?: number) => void;
+  /** Echte speelkop van de video, voor proof-of-play. */
+  onPlayheadSec?: (sec: number) => void;
+  /** Wisselt per vertoning; dezelfde foto in een volgende vertoning meldt zich dan opnieuw. */
+  shownKey?: string;
 }) {
   const [videoElapsed01, setVideoElapsed01] = useState(0);
   const [videoDurSec, setVideoDurSec] = useState(0);
@@ -2539,7 +2590,9 @@ function SingleMediaMode({
             if (d > 0 && Number.isFinite(d)) setVideoDurSec(d);
             logMediaDiag("loaded_metadata", e.currentTarget);
           }}
+          onFirstFrame={(t) => onShown?.(t)}
           onTimeUpdate={(e) => {
+            onPlayheadSec?.(e.currentTarget.currentTime);
             if (!showPreviewProgress || previewProgressWallClock) return;
             const v = e.currentTarget;
             const d = v.duration;
@@ -2547,7 +2600,8 @@ function SingleMediaMode({
               setVideoElapsed01(Math.min(1, v.currentTime / d));
             }
           }}
-          onEnded={() => {
+          onEnded={(e) => {
+            onPlayheadSec?.(e.currentTarget.currentTime);
             if (!everPlayedRef.current) return;
             finishOnce();
           }}
@@ -2570,7 +2624,13 @@ function SingleMediaMode({
           }}
         />
       ) : (
-        <DisplayHeldImage src={mediaUrl(media.path)} style={DISPLAY_COVER_MEDIA_STYLE} slot={holdSlot} />
+        <DisplayHeldImage
+          src={mediaUrl(media.path)}
+          style={DISPLAY_COVER_MEDIA_STYLE}
+          slot={holdSlot}
+          shownKey={shownKey}
+          onShown={onShown ? () => onShown() : undefined}
+        />
       )}
       </DisplayMediaStage>
       {wallClockBar}

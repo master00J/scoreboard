@@ -396,6 +396,8 @@ model SponsorPlayLog {
   expectedSec    Int
   /// Werkelijke afgespeelde tijd in seconden (afgekapt op werkelijke duur door interrupts).
   actualSec      Int
+  /// Echt zichtbare tijd in ms, onafgerond. Totalen tellen deze op; 0 bij rijen van voor deze kolom.
+  actualMs       Int      @default(0)
   /// Begin- en eindtijdstempel voor audit-trail.
   startedAt      DateTime
   endedAt        DateTime @default(now())

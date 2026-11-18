@@ -76,20 +76,44 @@ export async function listSponsorPlays(db: Db, filters: SponsorPlayFilters, limi
   });
 }
 
-/** Per-sponsor aggregate over every matching play (not capped). */
+/**
+ * Echt zichtbare seconden van een rij, onafgerond. Rijen van vóór `actualMs` hebben daar 0 en
+ * tellen met hun oude hele seconden.
+ */
+export function playLogVisibleSec(row: { actualSec: number; actualMs?: number | null }): number {
+  const ms = row.actualMs ?? 0;
+  return ms > 0 ? ms / 1000 : Math.max(0, row.actualSec);
+}
+
+/**
+ * Per-sponsor aggregate over every matching play (not capped). Seconds are summed unrounded
+ * (`actualMs`); rounding happens only when the report shows them.
+ */
 export async function summarizeSponsorPlays(db: Db, filters: SponsorPlayFilters) {
-  const grouped = await db.sponsorPlayLog.groupBy({
-    by: ["sponsorId", "sponsorName"],
-    where: buildSponsorPlayWhere(filters),
-    _count: { _all: true },
-    _sum: { actualSec: true, expectedSec: true },
-  });
+  const where = buildSponsorPlayWhere(filters);
+  const [grouped, legacy] = await Promise.all([
+    db.sponsorPlayLog.groupBy({
+      by: ["sponsorId", "sponsorName"],
+      where,
+      _count: { _all: true },
+      _sum: { actualMs: true, expectedSec: true },
+    }),
+    // Rijen zonder ms (van vóór de kolom) tellen met hun hele seconden.
+    db.sponsorPlayLog.groupBy({
+      by: ["sponsorId", "sponsorName"],
+      where: { AND: [where, { actualMs: 0 }] },
+      _sum: { actualSec: true },
+    }),
+  ]);
+  const legacySec = new Map<string, number>();
+  for (const g of legacy) legacySec.set(`${g.sponsorId ?? ""}|${g.sponsorName}`, g._sum.actualSec ?? 0);
   return grouped
     .map((g) => ({
       sponsorId: g.sponsorId,
       sponsorName: g.sponsorName,
       plays: g._count._all,
-      actualSec: g._sum.actualSec ?? 0,
+      actualSec:
+        (g._sum.actualMs ?? 0) / 1000 + (legacySec.get(`${g.sponsorId ?? ""}|${g.sponsorName}`) ?? 0),
       expectedSec: g._sum.expectedSec ?? 0,
     }))
     .sort((a, b) => b.actualSec - a.actualSec);
