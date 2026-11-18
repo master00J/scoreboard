@@ -175,6 +175,19 @@ export function parseStreamDeckPath(pathname: string): StreamDeckAction | null {
   return null;
 }
 
+/** Het localhost-pad van een actie; het omgekeerde van `parseStreamDeckPath`. */
+export function streamDeckActionPath(action: StreamDeckAction): string {
+  if (action.id === "key" || action.id === "input" || action.id === "preview") {
+    return `/${action.id}/${action.index}`;
+  }
+  if (action.id === "cut") return "/cut";
+  if (action.id === "stream" || action.id === "record" || action.id === "timer") {
+    return `/${action.id}/${action.mode}`;
+  }
+  if (action.id === "score") return `/score/${action.side}/${action.delta === -1 ? "down" : "up"}`;
+  return "/blackout";
+}
+
 export function streamDeckActionLabelKey(action: StreamDeckAction): string {
   if (action.id === "key") return "livestream.deckSlot";
   if (action.id === "input") return "livestream.deckInput";
@@ -233,12 +246,16 @@ type ScoreDeckCommand =
 /**
  * Thuis +1: start goal-intro (spelersvisual na schutter). Uit of −1: alleen score.
  * Als de thuis-visual uit staat, telt dit als gewone +1.
+ *
+ * `goalSport` is false voor sporten zonder goalvisual (basketbal, volleybal): daar is +1 altijd een
+ * punt. Anders kwam de goal-intro op het scherm en telde het punt niet.
  */
 export async function runScoreDeckAction(
   action: Extract<StreamDeckAction, { id: "score" }>,
   runCommand: (cmd: ScoreDeckCommand) => Promise<unknown>,
+  goalSport = true,
 ): Promise<void> {
-  if (action.delta === 1 && action.side === "home") {
+  if (goalSport && action.delta === 1 && action.side === "home") {
     const ack = await runCommand({ type: "goal:prepare", side: "home" });
     const result =
       ack && typeof ack === "object" && "result" in ack

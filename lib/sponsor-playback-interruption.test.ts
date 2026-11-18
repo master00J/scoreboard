@@ -3,6 +3,7 @@ import {
   externalCaptureCoversDisplay,
   isBesideInterruptOverlay,
   isSponsorPlaybackInterrupted,
+  sponsorRotationStaysActive,
   timeoutCoversDisplay,
 } from "./sponsor-playback-interruption";
 
@@ -17,6 +18,24 @@ describe("isBesideInterruptOverlay", () => {
     expect(isBesideInterruptOverlay("SPONSOR", false)).toBe(false);
     expect(isBesideInterruptOverlay("SPONSOR_ROTATION", true)).toBe(false);
     expect(isBesideInterruptOverlay("MATCH", true)).toBe(false);
+  });
+});
+
+describe("sponsorRotationStaysActive", () => {
+  it("blijft aan tijdens een goal die een lopende rotatie onderbreekt", () => {
+    // SPONSOR_ROTATION → GOAL → SPONSOR_ROTATION: het rooster mag niet opnieuw beginnen.
+    let active = sponsorRotationStaysActive(false, true, false);
+    active = sponsorRotationStaysActive(active, false, true);
+    expect(active).toBe(true);
+    expect(sponsorRotationStaysActive(active, true, false)).toBe(true);
+  });
+
+  it("gaat uit bij alleen scorebord, zodat het rooster daarna op de actuele tijd begint", () => {
+    expect(sponsorRotationStaysActive(true, false, false)).toBe(false);
+  });
+
+  it("gaat niet aan door een goal terwijl de rotatie uit stond", () => {
+    expect(sponsorRotationStaysActive(false, false, true)).toBe(false);
   });
 });
 

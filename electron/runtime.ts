@@ -46,12 +46,14 @@ import type {
   HornPayload,
   TickPayload,
 } from "../lib/desktop-bridge";
+import type { MediaItem, Sponsor } from "../lib/types";
 import type {
   SponsorLedgerPayload,
   SponsorTelemetryClipEnd,
   SponsorTelemetryClipProgress,
   SponsorTelemetryClipStart,
 } from "../lib/sponsor-telemetry";
+import { sponsorPlayLogIdentity } from "../lib/sponsor-telemetry";
 import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
@@ -61,13 +63,32 @@ import { displayExtrasFromJson, serializeDisplayExtras } from "../lib/display-ex
 import { isMatchInPlay } from "../lib/match-in-play";
 import { listExternalFileReferences, remapStoredFilePaths } from "../server/venue-backup";
 import { isCommandUserError } from "../lib/command-user-error";
+import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import { handleCommand } from "../server/handlers";
+import {
+  buildSponsorPlayWhere,
+  listSponsorPlays,
+  parseSponsorPlayFilters,
+  sponsorPlayListLimit,
+  summarizeSponsorPlays,
+} from "../server/sponsor-plays";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
 import { startupDisplayStatePatch } from "../lib/display-startup";
-import { isDisplayPlaybackRisk } from "../lib/media-playback-compat";
+import {
+  isCurrentStadiumCompatPath,
+  isDisplayPlaybackRisk,
+  isStadiumPlaybackHangEvent,
+} from "../lib/media-playback-compat";
 import { inspectVideoForDisplay, prepareVideoForDisplay } from "./media-transcode";
 import { cueEndSec } from "../lib/scheduled-media-cue";
+import {
+  isClubRotationSponsorId,
+  mergeSponsorsWithClubMedia,
+  parseClubPhaseBudgetJson,
+  serializeClubPhaseBudgetJson,
+} from "../lib/club-media-rotation";
+import { quickMediaButtons } from "../lib/quick-media-button";
 import {
   gameSyncHasWork,
   planGameClockSync,
@@ -251,11 +272,14 @@ async function persistSponsorPlayLog(
   expectedSec: number,
   bestActualSec: number,
 ): Promise<void> {
+  const clubClip = isClubRotationSponsorId(payload.sponsorId);
   const [sponsor, media, match] = await Promise.all([
-    prisma.sponsor.findUnique({
-      where: { id: payload.sponsorId },
-      select: { name: true },
-    }),
+    clubClip
+      ? Promise.resolve(null)
+      : prisma.sponsor.findUnique({
+          where: { id: payload.sponsorId },
+          select: { name: true },
+        }),
     prisma.mediaItem.findUnique({
       where: { id: payload.mediaId },
       select: { title: true, durationSec: true },
@@ -276,12 +300,17 @@ async function persistSponsorPlayLog(
   });
 
   if (!existing) {
+    const identity = sponsorPlayLogIdentity({
+      sponsorId: payload.sponsorId,
+      sponsorRowName: sponsor?.name,
+      mediaTitle: media?.title,
+    });
     await prisma.sponsorPlayLog.create({
       data: {
         matchId: payload.matchId,
-        sponsorId: payload.sponsorId,
+        sponsorId: identity.sponsorId,
         mediaId: payload.mediaId,
-        sponsorName: sponsor?.name ?? "(verwijderd)",
+        sponsorName: identity.sponsorName,
         mediaTitle: media?.title ?? "(verwijderd)",
         segmentKey: payload.segmentKey,
         matchStatus: match?.status ?? null,
@@ -885,19 +914,20 @@ async function resetAnnouncementOnStartup(): Promise<void> {
   );
 }
 
+/**
+ * Ververst alleen `updatedAt`: clients (Match-tab, display) hangen daaraan voor hun refetch.
+ *
+ * Loopt in de commandowachtrij en schrijft niets anders terug. Vroeger las dit de stand, en schreef
+ * het daarna `mode` opnieuw weg: een commando dat er net tussen viel (bv. een moduswissel) werd zo
+ * teruggedraaid.
+ */
 async function touchState() {
-  const state = await getStateRow();
-  let now = new Date();
-  if (state.updatedAt && now.getTime() <= state.updatedAt.getTime()) {
-    now = new Date(state.updatedAt.getTime() + 1);
-  }
-  await prisma.displayState.update({
-    where: { id: 1 },
-    data: {
-      mode: state.mode,
-      /** Altijd verversen: clients (Match-tab, display) hangen aan `updatedAt` voor sponsor-refetch. */
-      updatedAt: now,
-    },
+  await enqueueStateWrite(async () => {
+    const state = await getStateRow();
+    await prisma.displayState.update({
+      where: { id: 1 },
+      data: { updatedAt: nextStateUpdatedAt(state.updatedAt) },
+    });
   });
 }
 
@@ -994,6 +1024,7 @@ async function detachDisplayStateForMatchId(matchId: string): Promise<void> {
   await prisma.displayState.update({
     where: { id: 1 },
     data: {
+      updatedAt: nextStateUpdatedAt(state.updatedAt),
       matchId: null,
       mode: "IDLE",
       activePlayerId: null,
@@ -1091,6 +1122,53 @@ export async function getDisplaySnapshot() {
   };
 }
 
+/**
+ * Schermtoestand voor de Stream Deck-knoppen. Die kijken een paar keer per seconde, dus dit leest de
+ * gedeelde kopie (elk commando en elke tick ververst die) en niet telkens de database.
+ */
+export async function getDeckState() {
+  return serializeDisplayState(await getStateRowCached());
+}
+
+/** Wat een Stream Deck-knop van de wedstrijd moet weten: stand, periode en tellers, zonder spelers of events. */
+export async function getMatchForDeck(matchId: string) {
+  const match = await prisma.match.findUnique({
+    where: { id: matchId },
+    select: {
+      sport: true,
+      status: true,
+      currentPeriod: true,
+      periodDurationSec: true,
+      homeScore: true,
+      awayScore: true,
+      homeFouls: true,
+      awayFouls: true,
+      homeTimeouts: true,
+      awayTimeouts: true,
+      setsToWin: true,
+      timeoutsPerSet: true,
+      homeTeam: { select: { shortName: true } },
+      awayTeam: { select: { shortName: true } },
+    },
+  });
+  if (!match) return null;
+  const { homeTeam, awayTeam, ...rest } = match;
+  return { ...rest, homeName: homeTeam?.shortName ?? "", awayName: awayTeam?.shortName ?? "" };
+}
+
+/**
+ * De snelle mediaknoppen voor de Stream Deck: de vastgepinde media uit de regie, in haar volgorde.
+ * Zelfde selectie als het regiepaneel: alleen media die aan staan en in de bibliotheek zichtbaar zijn.
+ */
+export async function getQuickButtonsForDeck(pinnedMediaIds: string[]) {
+  if (pinnedMediaIds.length === 0) return [];
+  const media = await prisma.mediaItem.findMany({
+    where: { id: { in: pinnedMediaIds }, active: true, hideFromLibrary: false },
+    select: { id: true, title: true, quickButtonLabel: true },
+  });
+  return quickMediaButtons(pinnedMediaIds, media);
+}
+
 export async function broadcastDisplayState() {
   const state = await getDisplaySnapshot();
   sendAll("display:state", state);
@@ -1152,6 +1230,151 @@ function detectWallClockJumpMs(): number {
   return jump;
 }
 
+type TickStateWrite = (
+  state: DisplayStateRow,
+  data: Record<string, unknown>,
+) => Promise<DisplayStateRow>;
+
+type TickOutcome = {
+  state: DisplayStateRow;
+  mutated: boolean;
+  horns: HornPayload["reason"][];
+  logs: string[];
+};
+
+/** De voorcontrole van de tick-loop gooit dit zodra er iets te schrijven valt. */
+const TICK_NEEDS_WRITE = Symbol("tick-needs-write");
+
+const tickProbeWrite: TickStateWrite = async () => {
+  throw TICK_NEEDS_WRITE;
+};
+
+const tickDatabaseWrite: TickStateWrite = (state, data) =>
+  prisma.displayState.update({
+    where: { id: 1 },
+    data: { ...data, updatedAt: nextStateUpdatedAt(state.updatedAt) },
+  });
+
+/**
+ * Wat de tick-loop aan de stand verandert: klokken opnieuw verankeren na een sprong van de
+ * systeemklok, de wedstrijdklok stoppen op 00:00, en aflopende shotclock, straftijd, time-out en
+ * pauze afsluiten. Schrijven gaat via `write`; claxons en logregels komen terug zodat de aanroeper
+ * ze pas geeft als de schrijfactie echt gebeurd is.
+ */
+async function applyTickStateChanges(
+  initial: DisplayStateRow,
+  now: number,
+  jumpMs: number,
+  write: TickStateWrite,
+): Promise<TickOutcome> {
+  let state = initial;
+  let mutated = false;
+  const horns: HornPayload["reason"][] = [];
+  const logs: string[] = [];
+
+  if (Math.abs(jumpMs) > 1000) {
+    const anyRunning =
+      state.timerRunning || state.shotClockRunning || state.homePenaltyRunning ||
+      state.awayPenaltyRunning || state.timeoutRunning || state.breakRunning;
+    logs.push(`[clock-guard] systeemklok sprong ${Math.round(jumpMs)} ms${anyRunning ? " — lopende klokken opnieuw verankerd" : ""}`);
+    if (anyRunning) {
+      // Elke lopende klok krijgt de waarde van vóór de sprong (elapsed op basis van de tijd vóór de sprong)
+      // en start opnieuw vanaf nu, zodat er geen seconden bijkomen of verdwijnen.
+      const before = now - jumpMs;
+      const data: Record<string, unknown> = {};
+      if (state.timerRunning) Object.assign(data, runFrom(computeElapsedSeconds(state, before)));
+      if (state.shotClockRunning) Object.assign(data, runShotClockFrom(computeShotClockSeconds(state, before)));
+      if (state.homePenaltyRunning) {
+        const rem = computePenaltySeconds(penaltyStateFor(state, "home"), before);
+        Object.assign(data, { homePenaltyStartedAt: new Date(now), homePenaltyBaseSec: rem });
+      }
+      if (state.awayPenaltyRunning) {
+        const rem = computePenaltySeconds(penaltyStateFor(state, "away"), before);
+        Object.assign(data, { awayPenaltyStartedAt: new Date(now), awayPenaltyBaseSec: rem });
+      }
+      if (state.timeoutRunning) {
+        const rem = computeTimeoutSeconds(state, before);
+        Object.assign(data, { timeoutStartedAt: new Date(now), timeoutBaseSec: rem });
+      }
+      if (state.breakRunning) {
+        const rem = computeBreakSeconds(state, before);
+        Object.assign(data, { breakStartedAt: new Date(now), breakBaseSec: rem });
+      }
+      state = await write(state, data);
+      mutated = true;
+    }
+  }
+
+  // Aftellende wedstrijdklok: automatisch stoppen op 00:00 en horn.
+  if (state.timerRunning) {
+    const match = await tickMatchInfo(state);
+    if (match) {
+      const profile = getSportProfile(match.sport);
+      if (profile.timerMode === "COUNT_DOWN") {
+        const duration = periodDurationSecFor(match.sport, match.currentPeriod, match.periodDurationSec);
+        if (duration > 0 && computeElapsedSeconds(state, now) >= duration) {
+          const data: Record<string, unknown> = { ...stopAt(duration) };
+          if (state.shotClockRunning) Object.assign(data, pauseShotClockAt(computeShotClockSeconds(state, now)));
+          if (profile.penaltyFollowsClock) {
+            if (state.homePenaltyRunning) {
+              Object.assign(data, pausePenaltyAt("home", computePenaltySeconds(penaltyStateFor(state, "home"), now)));
+            }
+            if (state.awayPenaltyRunning) {
+              Object.assign(data, pausePenaltyAt("away", computePenaltySeconds(penaltyStateFor(state, "away"), now)));
+            }
+          }
+          const interval = basketballIntervalBreak(match);
+          if (interval) Object.assign(data, runBreakFrom(interval.seconds, interval.warnAt30));
+          state = await write(state, data);
+          mutated = true;
+          if (!officialClockHornMute.game) horns.push("period_end");
+          logs.push(`[tick] periode-einde: klok gestopt op 00:00 (${match.sport} periode ${match.currentPeriod})`);
+        }
+      }
+    }
+  }
+
+  if (state.shotClockRunning && computeShotClockSeconds(state, now) <= 0) {
+    state = await write(state, pauseShotClockAt(0));
+    mutated = true;
+    if (!officialClockHornMute.shot) horns.push("shot_clock");
+  }
+  if (state.homePenaltyRunning && computePenaltySeconds(penaltyStateFor(state, "home"), now) <= 0) {
+    state = await write(state, pausePenaltyAt("home", 0));
+    mutated = true;
+  }
+  if (state.awayPenaltyRunning && computePenaltySeconds(penaltyStateFor(state, "away"), now) <= 0) {
+    state = await write(state, pausePenaltyAt("away", 0));
+    mutated = true;
+  }
+  if (state.timeoutRunning) {
+    const timeoutLeft = computeTimeoutSeconds(state, now);
+    if (timeoutLeft <= 0) {
+      state = await write(state, clearTimeoutClock());
+      mutated = true;
+      horns.push("timeout_end");
+    } else if (!state.timeoutWarnSent && state.timeoutBaseSec - timeoutLeft >= 50) {
+      state = await write(state, { timeoutWarnSent: true });
+      mutated = true;
+      horns.push("timeout_warning");
+    }
+  }
+  if (state.breakRunning) {
+    const breakLeft = computeBreakSeconds(state, now);
+    if (breakLeft <= 0) {
+      state = await write(state, clearBreakClock());
+      mutated = true;
+      horns.push("break_end");
+    } else if (state.breakWarnArmed && !state.breakWarnSent && breakLeft <= 30) {
+      state = await write(state, { breakWarnSent: true });
+      mutated = true;
+      horns.push("break_warning");
+    }
+  }
+
+  return { state, mutated, horns, logs };
+}
+
 function startTickLoop() {
   if (tickInterval) return;
   let tickInFlight = false;
@@ -1162,131 +1385,29 @@ function startTickLoop() {
     if (tickInFlight) return;
     tickInFlight = true;
     try {
-      let state = await getStateRowCached();
-      let mutated = false;
+      const cached = await getStateRowCached();
       const now = Date.now();
-
       const jumpMs = detectWallClockJumpMs();
-      if (Math.abs(jumpMs) > 1000) {
-        const anyRunning =
-          state.timerRunning || state.shotClockRunning || state.homePenaltyRunning ||
-          state.awayPenaltyRunning || state.timeoutRunning || state.breakRunning;
-        requireOpts().log(`[clock-guard] systeemklok sprong ${Math.round(jumpMs)} ms${anyRunning ? " — lopende klokken opnieuw verankerd" : ""}`);
-        if (anyRunning) {
-          // Elke lopende klok krijgt de waarde van vóór de sprong (elapsed op basis van de tijd vóór de sprong)
-          // en start opnieuw vanaf nu, zodat er geen seconden bijkomen of verdwijnen.
-          const before = now - jumpMs;
-          const data: Record<string, unknown> = {};
-          if (state.timerRunning) Object.assign(data, runFrom(computeElapsedSeconds(state, before)));
-          if (state.shotClockRunning) Object.assign(data, runShotClockFrom(computeShotClockSeconds(state, before)));
-          if (state.homePenaltyRunning) {
-            const rem = computePenaltySeconds(penaltyStateFor(state, "home"), before);
-            Object.assign(data, { homePenaltyStartedAt: new Date(now), homePenaltyBaseSec: rem });
-          }
-          if (state.awayPenaltyRunning) {
-            const rem = computePenaltySeconds(penaltyStateFor(state, "away"), before);
-            Object.assign(data, { awayPenaltyStartedAt: new Date(now), awayPenaltyBaseSec: rem });
-          }
-          if (state.timeoutRunning) {
-            const rem = computeTimeoutSeconds(state, before);
-            Object.assign(data, { timeoutStartedAt: new Date(now), timeoutBaseSec: rem });
-          }
-          if (state.breakRunning) {
-            const rem = computeBreakSeconds(state, before);
-            Object.assign(data, { breakStartedAt: new Date(now), breakBaseSec: rem });
-          }
-          state = await prisma.displayState.update({ where: { id: 1 }, data });
-          mutated = true;
-        }
-      }
 
-      // Aftellende wedstrijdklok: automatisch stoppen op 00:00 en horn.
-      if (state.timerRunning) {
-        const match = await tickMatchInfo(state);
-        if (match) {
-          const profile = getSportProfile(match.sport);
-          if (profile.timerMode === "COUNT_DOWN") {
-            const duration = periodDurationSecFor(match.sport, match.currentPeriod, match.periodDurationSec);
-            if (duration > 0 && computeElapsedSeconds(state, now) >= duration) {
-              const data: Record<string, unknown> = { ...stopAt(duration) };
-              if (state.shotClockRunning) Object.assign(data, pauseShotClockAt(computeShotClockSeconds(state, now)));
-              if (profile.penaltyFollowsClock) {
-                if (state.homePenaltyRunning) {
-                  Object.assign(data, pausePenaltyAt("home", computePenaltySeconds(penaltyStateFor(state, "home"), now)));
-                }
-                if (state.awayPenaltyRunning) {
-                  Object.assign(data, pausePenaltyAt("away", computePenaltySeconds(penaltyStateFor(state, "away"), now)));
-                }
-              }
-              const interval = basketballIntervalBreak(match);
-              if (interval) Object.assign(data, runBreakFrom(interval.seconds, interval.warnAt30));
-              state = await prisma.displayState.update({ where: { id: 1 }, data });
-              mutated = true;
-              if (!officialClockHornMute.game) broadcastHorn("period_end");
-              requireOpts().log(`[tick] periode-einde: klok gestopt op 00:00 (${match.sport} periode ${match.currentPeriod})`);
-            }
-          }
-        }
+      // Voorcontrole op de gecachte stand: meestal valt er niets te schrijven en blijft de database
+      // met rust. Is er wel iets, dan gebeurt het in de commandowachtrij op de stand van dát moment.
+      // Zo overschrijft de tick-loop geen commando dat net is uitgevoerd, bv. een shotclock-reset
+      // op het ogenblik dat de oude shotclock op 0 kwam.
+      let outcome: TickOutcome;
+      try {
+        outcome = await applyTickStateChanges(cached, now, jumpMs, tickProbeWrite);
+      } catch (err) {
+        if (err !== TICK_NEEDS_WRITE) throw err;
+        outcome = await enqueueStateWrite(async () =>
+          applyTickStateChanges(await getStateRow(), Date.now(), jumpMs, tickDatabaseWrite),
+        );
+        // Ook zonder wijziging is dit de verse stand: de cache liep kennelijk achter.
+        rememberState(outcome.state);
       }
-
-      if (state.shotClockRunning && computeShotClockSeconds(state, now) <= 0) {
-        state = await prisma.displayState.update({
-          where: { id: 1 },
-          data: pauseShotClockAt(0),
-        });
-        mutated = true;
-        if (!officialClockHornMute.shot) broadcastHorn("shot_clock");
-      }
-      if (state.homePenaltyRunning && computePenaltySeconds(penaltyStateFor(state, "home"), now) <= 0) {
-        state = await prisma.displayState.update({
-          where: { id: 1 },
-          data: pausePenaltyAt("home", 0),
-        });
-        mutated = true;
-      }
-      if (state.awayPenaltyRunning && computePenaltySeconds(penaltyStateFor(state, "away"), now) <= 0) {
-        state = await prisma.displayState.update({
-          where: { id: 1 },
-          data: pausePenaltyAt("away", 0),
-        });
-        mutated = true;
-      }
-      if (state.timeoutRunning) {
-        const timeoutLeft = computeTimeoutSeconds(state, now);
-        if (timeoutLeft <= 0) {
-          state = await prisma.displayState.update({
-            where: { id: 1 },
-            data: clearTimeoutClock(),
-          });
-          mutated = true;
-          broadcastHorn("timeout_end");
-        } else if (!state.timeoutWarnSent && state.timeoutBaseSec - timeoutLeft >= 50) {
-          state = await prisma.displayState.update({
-            where: { id: 1 },
-            data: { timeoutWarnSent: true },
-          });
-          mutated = true;
-          broadcastHorn("timeout_warning");
-        }
-      }
-      if (state.breakRunning) {
-        const breakLeft = computeBreakSeconds(state, now);
-        if (breakLeft <= 0) {
-          state = await prisma.displayState.update({
-            where: { id: 1 },
-            data: clearBreakClock(),
-          });
-          mutated = true;
-          broadcastHorn("break_end");
-        } else if (state.breakWarnArmed && !state.breakWarnSent && breakLeft <= 30) {
-          state = await prisma.displayState.update({
-            where: { id: 1 },
-            data: { breakWarnSent: true },
-          });
-          mutated = true;
-          broadcastHorn("break_warning");
-        }
-      }
+      const state = outcome.state;
+      const mutated = outcome.mutated;
+      for (const line of outcome.logs) requireOpts().log(line);
+      for (const horn of outcome.horns) broadcastHorn(horn);
 
       if (mutated) {
         rememberState(state);
@@ -1367,15 +1488,19 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   await seedLiveWallCueClockIfMissing();
   await seedCuePhaseClocksIfMissing();
   startTickLoop();
-  await prepareRiskyVideosInBackground();
   await broadcastDisplayState();
   broadcastSponsorLedger();
+  // Niet afwachten: elke video krijgt een probe en risicovideo's worden omgezet (tot minuten per
+  // stuk). Wie daarop wacht, houdt de vensters tegen, ook bij een herstart midden in een wedstrijd.
+  // De omzetting meldt zelf een nieuwe stand zodra er een pad veranderd is.
+  void prepareRiskyVideosInBackground();
 }
 
 async function persistPreparedVideo(
   item: { id: string; title: string; path: string; durationSec: number },
+  opts?: { force?: boolean },
 ): Promise<boolean> {
-  const prepared = await prepareVideoForDisplay(item.path);
+  const prepared = await prepareVideoForDisplay(item.path, opts);
   if (!prepared.transcoded) {
     if (prepared.reason === "ok" && item.path) {
       await prisma.mediaItem.update({
@@ -1408,18 +1533,29 @@ async function prepareRiskyVideosInBackground() {
       select: { id: true, title: true, path: true, durationSec: true, playbackWarning: true },
     });
     let changed = 0;
-    for (const item of videos) {
-      const inspect = await inspectVideoForDisplay(item.path);
-      if (!isDisplayPlaybackRisk(inspect.reason)) {
-        if (item.playbackWarning) {
-          await prisma.mediaItem.update({
-            where: { id: item.id },
-            data: { playbackWarning: null },
-          });
+    for (const listed of videos) {
+      // Dit loopt terwijl de app al in gebruik is: lees het item opnieuw, want het kan intussen
+      // verwijderd zijn of een ander pad hebben. Eén item dat mislukt, houdt de rest niet tegen.
+      try {
+        const item = await prisma.mediaItem.findUnique({
+          where: { id: listed.id },
+          select: { id: true, title: true, path: true, durationSec: true, playbackWarning: true, type: true },
+        });
+        if (!item || item.type !== "VIDEO") continue;
+        const inspect = await inspectVideoForDisplay(item.path);
+        if (!isDisplayPlaybackRisk(inspect.reason)) {
+          if (item.playbackWarning) {
+            await prisma.mediaItem.update({
+              where: { id: item.id },
+              data: { playbackWarning: null },
+            });
+          }
+          continue;
         }
-        continue;
+        if (await persistPreparedVideo(item)) changed += 1;
+      } catch (err) {
+        requireOpts().log(`[media] automatische omzetting ${listed.title} mislukt: ${String(err)}`);
       }
-      if (await persistPreparedVideo(item)) changed += 1;
     }
     if (changed > 0) {
       await touchState();
@@ -1430,75 +1566,56 @@ async function prepareRiskyVideosInBackground() {
   }
 }
 
+/** Eén omzetpoging per media-id per sessie — voorkomt een ffmpeg-storm als de watchdog blijft vuren. */
+const hangingPrepareQueued = new Set<string>();
+
+/**
+ * Clip hing op het stadionscherm (t=0, geen metadata, decoderfout). Zet hem om naar
+ * Chromium-H.264, ook als de probe “ok” was — sponsors exporteren allemaal anders.
+ */
+export function queuePrepareAfterPlaybackFault(mediaId: string | undefined, event: string): void {
+  if (!mediaId || !isStadiumPlaybackHangEvent(event)) return;
+  if (hangingPrepareQueued.has(mediaId)) return;
+  hangingPrepareQueued.add(mediaId);
+  void (async () => {
+    try {
+      const item = await prisma.mediaItem.findUnique({
+        where: { id: mediaId },
+        select: { id: true, title: true, path: true, durationSec: true, type: true },
+      });
+      if (!item || item.type !== "VIDEO") return;
+      if (isCurrentStadiumCompatPath(item.path)) return;
+      requireOpts().log(`[media] hang op scherm (${event}) — omzetten ${item.title}`);
+      if (await persistPreparedVideo(item, { force: true })) {
+        await touchState();
+        await broadcastDisplayState();
+        return;
+      }
+      hangingPrepareQueued.delete(mediaId);
+    } catch (err) {
+      hangingPrepareQueued.delete(mediaId);
+      requireOpts().log(`[media] omzetting na hang mislukt: ${String(err)}`);
+    }
+  })();
+}
+
 export function disposeDesktopRuntime() {
   if (tickInterval) {
     clearInterval(tickInterval);
     tickInterval = null;
   }
+  hangingPrepareQueued.clear();
   sponsorLedgerSnapshot = null;
   sponsorClipBestActualSec.clear();
   cachedState = null;
   tickMatchCache = null;
 }
 
-type SponsorPlayFilters = {
-  matchId?: string;
-  sponsorId?: string;
-  segmentKey?: string;
-  fromIso?: string;
-  toIso?: string;
-};
-
-function parseSponsorPlayFilters(params: URLSearchParams): SponsorPlayFilters {
-  return {
-    matchId: params.get("matchId") ?? undefined,
-    sponsorId: params.get("sponsorId") ?? undefined,
-    segmentKey: params.get("segmentKey") ?? undefined,
-    fromIso: params.get("from") ?? undefined,
-    toIso: params.get("to") ?? undefined,
-  };
-}
-
-function buildSponsorPlayWhere(f: SponsorPlayFilters) {
-  const where: Record<string, unknown> = {};
-  if (f.matchId) where.matchId = f.matchId;
-  if (f.sponsorId) where.sponsorId = f.sponsorId;
-  if (f.segmentKey) where.segmentKey = { startsWith: f.segmentKey };
-  if (f.fromIso || f.toIso) {
-    const range: Record<string, Date> = {};
-    if (f.fromIso) {
-      const d = new Date(f.fromIso);
-      if (!Number.isNaN(d.valueOf())) range.gte = d;
-    }
-    if (f.toIso) {
-      const d = new Date(f.toIso);
-      if (!Number.isNaN(d.valueOf())) range.lte = d;
-    }
-    if (Object.keys(range).length > 0) where.endedAt = range;
-  }
-  return where;
-}
-
 async function handleSponsorPlaysList(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const limit = Math.min(2000, Math.max(1, Number(params.get("limit") ?? 500)));
-  const rows = await prisma.sponsorPlayLog.findMany({
-    where: buildSponsorPlayWhere(filters),
-    orderBy: { endedAt: "desc" },
-    take: limit,
-    include: {
-      match: {
-        select: {
-          id: true,
-          kickoffAt: true,
-          homeTeam: { select: { name: true, shortName: true } },
-          awayTeam: { select: { name: true, shortName: true } },
-        },
-      },
-    },
-  });
+  const rows = await listSponsorPlays(prisma, filters, sponsorPlayListLimit(params));
   return json(200, { rows });
 }
 
@@ -1506,21 +1623,7 @@ async function handleSponsorPlaysSummary(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const grouped = await prisma.sponsorPlayLog.groupBy({
-    by: ["sponsorId", "sponsorName"],
-    where: buildSponsorPlayWhere(filters),
-    _count: { _all: true },
-    _sum: { actualSec: true, expectedSec: true },
-  });
-  const rows = grouped
-    .map((g) => ({
-      sponsorId: g.sponsorId,
-      sponsorName: g.sponsorName,
-      plays: g._count._all,
-      actualSec: g._sum.actualSec ?? 0,
-      expectedSec: g._sum.expectedSec ?? 0,
-    }))
-    .sort((a, b) => b.actualSec - a.actualSec);
+  const rows = await summarizeSponsorPlays(prisma, filters);
   return json(200, { rows });
 }
 
@@ -2119,6 +2222,16 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         include: { media: { orderBy: { createdAt: "asc" } } },
         orderBy: { createdAt: "asc" },
       });
+      if (searchParams.get("rotation") === "1") {
+        const clubMedia = await prisma.mediaItem.findMany({
+          where: { sponsorId: null, active: true, hideFromLibrary: false },
+          orderBy: { createdAt: "asc" },
+        });
+        return json(
+          200,
+          mergeSponsorsWithClubMedia(sponsors as unknown as Sponsor[], clubMedia as unknown as MediaItem[]),
+        );
+      }
       return json(200, sponsors);
     }
 
@@ -2836,9 +2949,17 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
 
     const mediaId = pathname.match(/^\/api\/media\/([^/]+)$/)?.[1];
     if (mediaId && method === "PATCH") {
+      const body = parseJsonBody(req) as Record<string, unknown>;
+      if ("clubPhaseBudgetJson" in body) {
+        body.clubPhaseBudgetJson = serializeClubPhaseBudgetJson(
+          parseClubPhaseBudgetJson(
+            typeof body.clubPhaseBudgetJson === "string" ? body.clubPhaseBudgetJson : null,
+          ),
+        );
+      }
       const media = await prisma.mediaItem.update({
         where: { id: mediaId },
-        data: parseJsonBody(req),
+        data: body,
       });
       await touchState();
       await broadcastDisplayState();
@@ -2970,6 +3091,26 @@ function commandResetsSponsorTelemetry(cmd: Command): boolean {
  */
 let commandQueue: Promise<unknown> = Promise.resolve();
 
+/**
+ * Zet een schrijfactie op DisplayState in dezelfde rij als de commando's. Wie de stand eerst leest
+ * en daarna schrijft (tick-loop, `touchState`), doet dat hier: dan kan er geen commando tussen
+ * lezen en schrijven vallen dat vervolgens overschreven wordt.
+ *
+ * Niet aanroepen vanuit een taak die zelf al in de rij staat: die wacht dan op zichzelf.
+ */
+function enqueueStateWrite<T>(job: () => Promise<T>): Promise<T> {
+  const next = commandQueue.then(job, job);
+  commandQueue = next.catch(() => undefined);
+  return next;
+}
+
+/** Een commando dat niets hoefde te doen, bv. de periodeknop van de periode die al loopt. */
+function commandLeftStateUnchanged(result: CommandAck): boolean {
+  if (!result.ok) return false;
+  const detail = result.result;
+  return !!detail && typeof detail === "object" && (detail as { unchanged?: unknown }).unchanged === true;
+}
+
 export async function runCommand(input: Command): Promise<CommandAck> {
   const run = async (): Promise<CommandAck> => {
     try {
@@ -2978,7 +3119,7 @@ export async function runCommand(input: Command): Promise<CommandAck> {
         maxWait: 10_000,
         timeout: 20_000,
       });
-      if (result.ok && commandResetsSponsorTelemetry(cmd)) {
+      if (result.ok && commandResetsSponsorTelemetry(cmd) && !commandLeftStateUnchanged(result)) {
         resetSponsorLedger();
       }
       await broadcastDisplayState();
@@ -3058,12 +3199,22 @@ export async function syncOfficialClock(
           if (targets.game) {
             const plan = planGameClockSync({ state, match, official: targets.game, nowMs: Date.now() });
             gameHold = plan.hold;
-            if (plan.before) state = await tx.displayState.update({ where: { id: 1 }, data: plan.before });
+            if (plan.before) {
+              state = await tx.displayState.update({
+                where: { id: 1 },
+                data: { ...plan.before, updatedAt: nextStateUpdatedAt(state.updatedAt) },
+              });
+            }
             if (plan.command) {
               await handleCommand({ type: plan.command }, tx);
               state = (await tx.displayState.findUnique({ where: { id: 1 } })) ?? state;
             }
-            if (plan.after) state = await tx.displayState.update({ where: { id: 1 }, data: plan.after });
+            if (plan.after) {
+              state = await tx.displayState.update({
+                where: { id: 1 },
+                data: { ...plan.after, updatedAt: nextStateUpdatedAt(state.updatedAt) },
+              });
+            }
           }
           if (targets.shot) {
             const patch = planShotClockSync({
@@ -3072,7 +3223,12 @@ export async function syncOfficialClock(
               official: targets.shot,
               nowMs: Date.now(),
             });
-            if (patch) await tx.displayState.update({ where: { id: 1 }, data: patch });
+            if (patch) {
+              await tx.displayState.update({
+                where: { id: 1 },
+                data: { ...patch, updatedAt: nextStateUpdatedAt(state.updatedAt) },
+              });
+            }
           }
         },
         { maxWait: 10_000, timeout: 20_000 },

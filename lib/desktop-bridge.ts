@@ -266,6 +266,11 @@ export type ElectronBridge = {
   submitFeatureRequest?: (input: FeatureRequestDraft) => Promise<FeatureRequestResult>;
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
   getStreamDeckInfo: () => Promise<StreamDeckInfo | null>;
+  /**
+   * Meldt welke media de regie als snelle knop heeft vastgepind, in haar volgorde, zodat de
+   * Stream Deck dezelfde knoppen kan tonen. Alleen in de desktop-app.
+   */
+  setQuickMediaButtons?: (mediaIds: string[]) => void;
   /** Officiële klok volgen (console van de jurytafel). Alleen in de desktop-app. */
   getOfficialClockSettings?: () => Promise<OfficialClockSettings | null>;
   saveOfficialClockSettings?: (

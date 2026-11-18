@@ -181,6 +181,128 @@ describe("voetbal", () => {
   });
 });
 
+describe("wissels", () => {
+  async function homePlayer(matchId: string, number: number) {
+    const m = await matchRow(matchId);
+    const p = await prisma.player.findFirst({ where: { teamId: m.homeTeamId, number } });
+    if (!p) throw new Error(`no player ${number}`);
+    return p;
+  }
+
+  async function homeField(matchId: string): Promise<string[]> {
+    return JSON.parse((await matchRow(matchId)).homeFieldPlayerIdsJson ?? "[]") as string[];
+  }
+
+  async function subEvents(matchId: string) {
+    return prisma.matchEvent.findMany({
+      where: { matchId, type: "SUB" },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  it("registreert een dubbele wissel meteen, ook als daarna een clip handmatig start", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const [p1, p2, p12] = await Promise.all([
+      homePlayer(m.id, 1),
+      homePlayer(m.id, 2),
+      homePlayer(m.id, 12),
+    ]);
+    const media = await prisma.mediaItem.create({
+      data: { type: "VIDEO", path: "clip.mp4", title: "Clip", durationSec: 10 },
+    });
+
+    // 12 in voor 1, daarna 1 terug in voor 2: de tweede kan pas na de eerste.
+    await run({
+      type: "sub:triggerBatch",
+      substitutions: [
+        { teamId: m.homeTeamId, playerOutId: p1.id, playerInId: p12.id },
+        { teamId: m.homeTeamId, playerOutId: p2.id, playerInId: p1.id },
+      ],
+    });
+    let s = await state();
+    expect(s.mode).toBe("SUBSTITUTION");
+    expect(s.activeSubInId).toBe(p12.id);
+    expect((await subEvents(m.id)).map((e) => [e.playerOutId, e.playerInId])).toEqual([
+      [p1.id, p12.id],
+      [p2.id, p1.id],
+    ]);
+
+    // De operator start een clip voor de tweede animatie: de wachtrij vervalt, de wissel niet.
+    await run({
+      type: "display:setMode",
+      mode: "SPONSOR",
+      meta: { activeMediaId: media.id },
+    });
+    s = await state();
+    expect(s.mode).toBe("SPONSOR");
+    expect(s.substitutionQueueJson).toBe("[]");
+
+    const field = await homeField(m.id);
+    expect(field).toContain(p12.id);
+    expect(field).toContain(p1.id);
+    expect(field).not.toContain(p2.id);
+    expect(await subEvents(m.id)).toHaveLength(2);
+    await prisma.mediaItem.delete({ where: { id: media.id } });
+  });
+
+  it("toont de volgende animatie zonder de wissel opnieuw te registreren", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const [p1, p2, p3, p12] = await Promise.all([
+      homePlayer(m.id, 1),
+      homePlayer(m.id, 2),
+      homePlayer(m.id, 3),
+      homePlayer(m.id, 12),
+    ]);
+    await run({
+      type: "sub:triggerBatch",
+      substitutions: [
+        { teamId: m.homeTeamId, playerOutId: p1.id, playerInId: p12.id },
+        { teamId: m.homeTeamId, playerOutId: p2.id, playerInId: p1.id },
+      ],
+    });
+    // Nog een wissel terwijl de eerste animatie loopt: ook die staat meteen in de opstelling.
+    await run({ type: "sub:trigger", teamId: m.homeTeamId, playerOutId: p3.id, playerInId: p2.id });
+    expect(await subEvents(m.id)).toHaveLength(3);
+    expect(await homeField(m.id)).not.toContain(p3.id);
+
+    await run({ type: "sub:queueAdvance" });
+    let s = await state();
+    expect(s.mode).toBe("SUBSTITUTION");
+    expect(s.activeSubInId).toBe(p1.id);
+    expect(s.activeSubOutId).toBe(p2.id);
+
+    await run({ type: "sub:queueAdvance" });
+    s = await state();
+    expect(s.activeSubInId).toBe(p2.id);
+    expect(s.activeSubOutId).toBe(p3.id);
+
+    await run({ type: "sub:queueAdvance" });
+    s = await state();
+    expect(s.mode).not.toBe("SUBSTITUTION");
+    expect(await subEvents(m.id)).toHaveLength(3);
+  });
+
+  it("registreert een wachtrij uit een oudere versie nog bij het tonen", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const [p1, p12] = await Promise.all([homePlayer(m.id, 1), homePlayer(m.id, 12)]);
+    await run({ type: "sub:trigger", teamId: m.homeTeamId, playerOutId: p1.id, playerInId: p12.id });
+    const p2 = await homePlayer(m.id, 2);
+    // Zoals 0.2.2 hem achterliet: nog niet in de opstelling of het log.
+    await prisma.displayState.update({
+      where: { id: 1 },
+      data: {
+        substitutionQueueJson: JSON.stringify([
+          { teamId: m.homeTeamId, playerOutId: p2.id, playerInId: p1.id },
+        ]),
+      },
+    });
+    await run({ type: "sub:queueAdvance" });
+    expect((await state()).activeSubInId).toBe(p1.id);
+    expect(await subEvents(m.id)).toHaveLength(2);
+    expect(await homeField(m.id)).not.toContain(p2.id);
+  });
+});
+
 describe("basketbal", () => {
   it("onthoudt standaard uit bij reset, periodewissel en nieuwe wedstrijden", async () => {
     await seedMatch("BASKETBALL", { periodDurationSec: 600 });
@@ -356,6 +478,96 @@ describe("basketbal", () => {
     s = await state();
     expect(s.breakBaseSec).toBe(900);
     expect(s.breakWarnArmed).toBe(false);
+  });
+
+  it("laat de klok staan als de lopende periode opnieuw wordt gekozen", async () => {
+    const m = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "sport:setPeriod", period: 2 });
+    await run({ type: "timer:set", seconds: 250 });
+    await run({ type: "shotclock:set", seconds: 9 });
+    await run({ type: "sport:statAdjust", stat: "foul", side: "home", delta: 1 });
+    const before = await state();
+    expect(before.timerBaseSec).toBe(250);
+
+    // Tweede klik op Q2 (of een dubbelklik): geen nieuwe periode, dus niets terugzetten.
+    const ack = await run({ type: "sport:setPeriod", period: 2 });
+    expect(ack).toMatchObject({ ok: true, result: { unchanged: true } });
+    const after = await state();
+    expect(after.timerBaseSec).toBe(250);
+    expect(after.timerRunning).toBe(before.timerRunning);
+    expect(after.shotClockBaseSec).toBe(9);
+    const row = await matchRow(m.id);
+    expect(row.currentPeriod).toBe(2);
+    expect(row.homeFouls).toBe(1);
+    expect(await prisma.matchEvent.count({ where: { matchId: m.id, type: "PERIOD" } })).toBe(1);
+
+    // Een andere periode begint wel opnieuw.
+    await run({ type: "sport:setPeriod", period: 3 });
+    expect((await state()).timerBaseSec).toBe(0);
+    expect((await matchRow(m.id)).currentPeriod).toBe(3);
+  });
+
+  it("begint een periode opnieuw als de wedstrijd in de pauze staat", async () => {
+    const m = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "sport:setPeriod", period: 2 });
+    await run({ type: "timer:set", seconds: 250 });
+    await run({ type: "match:setStatus", status: "HALF_TIME" });
+    await run({ type: "sport:setPeriod", period: 2 });
+    expect((await state()).timerBaseSec).toBe(0);
+    expect((await matchRow(m.id)).status).not.toBe("HALF_TIME");
+  });
+});
+
+describe("actieve wedstrijd wisselen", () => {
+  it("geeft een andere wedstrijd een stilstaande klok op de beginstand", async () => {
+    await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "timer:set", seconds: 321 });
+    await run({ type: "timer:start" });
+    expect((await state()).timerRunning).toBe(true);
+
+    const next = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    const s = await state();
+    expect(s.matchId).toBe(next.id);
+    expect(s.timerRunning).toBe(false);
+    expect(s.timerStartedAt).toBeNull();
+    expect(s.timerBaseSec).toBe(0);
+  });
+
+  it("zet een oplopende klok op het begin van de periode van de nieuwe wedstrijd", async () => {
+    await seedMatch("FOOTBALL");
+    await run({ type: "timer:set", seconds: 1234 });
+    await run({ type: "timer:start" });
+
+    const next = await seedMatch("FOOTBALL", { currentPeriod: 2, status: "SECOND_HALF", periodDurationSec: 2700 });
+    const s = await state();
+    expect(s.matchId).toBe(next.id);
+    expect(s.timerRunning).toBe(false);
+    expect(s.timerBaseSec).toBe(2700);
+  });
+
+  it("laat de klok lopen als dezelfde wedstrijd opnieuw actief wordt gezet", async () => {
+    const m = await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "timer:set", seconds: 321 });
+    await run({ type: "timer:start" });
+    const before = await state();
+
+    await run({ type: "match:setActive", matchId: m.id });
+    const after = await state();
+    expect(after.timerRunning).toBe(true);
+    expect(after.timerBaseSec).toBe(before.timerBaseSec);
+    expect(after.timerStartedAt?.getTime()).toBe(before.timerStartedAt?.getTime());
+  });
+
+  it("zet de klok stil als er geen wedstrijd meer actief is", async () => {
+    await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await run({ type: "timer:set", seconds: 321 });
+    await run({ type: "timer:start" });
+
+    await run({ type: "match:setActive", matchId: null });
+    const s = await state();
+    expect(s.matchId).toBeNull();
+    expect(s.timerRunning).toBe(false);
+    expect(s.timerBaseSec).toBe(0);
   });
 });
 

@@ -4,6 +4,7 @@ import {
   forwardRef,
   useEffect,
   useRef,
+  useState,
   type CSSProperties,
   type MutableRefObject,
   type Ref,
@@ -25,37 +26,77 @@ export const DisplayVideo = forwardRef<HTMLVideoElement, VideoHTMLAttributes<HTM
   function DisplayVideo({ style, className, ...props }, ref) {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
+    const paintedRef = useRef(false);
+    const [painted, setPainted] = useState(false);
     const objectFit = (style?.objectFit as CSSProperties["objectFit"]) ?? "cover";
+    const hideUntilReady = style?.opacity === 0;
+
+    useEffect(() => {
+      paintedRef.current = false;
+      setPainted(false);
+    }, [props.src]);
 
     useEffect(() => {
       const video = videoRef.current;
       const canvas = canvasRef.current;
       if (!video || !canvas) return;
 
+      type RvfcVideo = HTMLVideoElement & {
+        requestVideoFrameCallback?: (cb: () => void) => number;
+        cancelVideoFrameCallback?: (handle: number) => void;
+      };
+      const rvfcVideo = video as RvfcVideo;
+
       let stopped = false;
       let raf = 0;
+      let rvfc = 0;
       let looping = false;
+      let ctx: CanvasRenderingContext2D | null = null;
+      let lastPaintTime = -1;
 
-      const paint = () => {
+      const paint = (force = false) => {
         const w = video.videoWidth;
         const h = video.videoHeight;
         if (w < 2 || h < 2) return;
+        const t = video.currentTime;
+        if (!force && t === lastPaintTime && paintedRef.current) return;
+        lastPaintTime = t;
         if (canvas.width !== w || canvas.height !== h) {
           canvas.width = w;
           canvas.height = h;
+          ctx = null;
         }
-        const ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+        if (!ctx) {
+          ctx = canvas.getContext("2d", { alpha: false, desynchronized: true });
+        }
         if (!ctx) return;
         ctx.drawImage(video, 0, 0, w, h);
+        if (!paintedRef.current) {
+          paintedRef.current = true;
+          setPainted(true);
+        }
       };
 
-      const tick = () => {
+      const playingNow = () =>
+        !video.paused && !video.ended && video.readyState >= 2;
+
+      const tickRaf = () => {
         if (stopped) return;
         looping = true;
         paint();
-        const playing = !video.paused && !video.ended && video.readyState >= 2;
-        if (playing) raf = requestAnimationFrame(tick);
+        if (playingNow()) raf = requestAnimationFrame(tickRaf);
         else looping = false;
+      };
+
+      const tickRvfc = () => {
+        if (stopped) return;
+        looping = true;
+        paint();
+        if (!playingNow() || !rvfcVideo.requestVideoFrameCallback) {
+          looping = false;
+          return;
+        }
+        rvfc = rvfcVideo.requestVideoFrameCallback(tickRvfc);
       };
 
       const tryPlay = () => {
@@ -65,29 +106,42 @@ export const DisplayVideo = forwardRef<HTMLVideoElement, VideoHTMLAttributes<HTM
 
       const ensureLoop = () => {
         if (stopped || looping) return;
+        if (rvfcVideo.requestVideoFrameCallback) {
+          rvfc = rvfcVideo.requestVideoFrameCallback(tickRvfc);
+          looping = true;
+          return;
+        }
         cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(tick);
+        raf = requestAnimationFrame(tickRaf);
+      };
+
+      const paintHold = () => paint(true);
+      const onWaiting = () => {
+        looping = false;
       };
 
       video.addEventListener("loadeddata", tryPlay);
       video.addEventListener("canplay", tryPlay);
       video.addEventListener("playing", ensureLoop);
       video.addEventListener("timeupdate", ensureLoop);
-      video.addEventListener("pause", paint);
-      video.addEventListener("ended", paint);
-      tick();
+      video.addEventListener("waiting", onWaiting);
+      video.addEventListener("pause", paintHold);
+      video.addEventListener("ended", paintHold);
+      ensureLoop();
       tryPlay();
 
       return () => {
         stopped = true;
         looping = false;
         cancelAnimationFrame(raf);
+        rvfcVideo.cancelVideoFrameCallback?.(rvfc);
         video.removeEventListener("loadeddata", tryPlay);
         video.removeEventListener("canplay", tryPlay);
         video.removeEventListener("playing", ensureLoop);
         video.removeEventListener("timeupdate", ensureLoop);
-        video.removeEventListener("pause", paint);
-        video.removeEventListener("ended", paint);
+        video.removeEventListener("waiting", onWaiting);
+        video.removeEventListener("pause", paintHold);
+        video.removeEventListener("ended", paintHold);
       };
     }, [props.src, props.autoPlay]);
 
@@ -104,8 +158,9 @@ export const DisplayVideo = forwardRef<HTMLVideoElement, VideoHTMLAttributes<HTM
       };
     }, []);
 
+    const showFrame = painted && !hideUntilReady;
     return (
-      <div className="absolute inset-0 overflow-hidden bg-black">
+      <div className={`absolute inset-0 overflow-hidden ${showFrame ? "bg-black" : ""}`}>
         <video
           {...props}
           ref={(el) => {
@@ -137,6 +192,7 @@ export const DisplayVideo = forwardRef<HTMLVideoElement, VideoHTMLAttributes<HTM
             objectPosition: style?.objectPosition ?? "center",
             pointerEvents: "none",
             zIndex: 1,
+            opacity: showFrame ? 1 : 0,
           }}
         />
       </div>

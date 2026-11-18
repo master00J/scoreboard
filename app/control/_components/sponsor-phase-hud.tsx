@@ -64,7 +64,7 @@ export function SponsorPhaseHud({ match }: { match: Match | null }) {
               }
             >
               <span className="text-[11px] font-normal uppercase tracking-wide text-muted-foreground">
-                {model.hasLiveClip ? t("sponsors.hudMedia") : t("sponsors.hudMediaPlanned")}
+                {hudMediaKindLabel(t, model.hasLiveClip, model.mediaKind)}
                 {": "}
               </span>
               {clipLabel}
@@ -151,4 +151,15 @@ function hudClipLabel(
     return title === sponsorName ? file : title;
   }
   return title ?? file;
+}
+
+function hudMediaKindLabel(
+  t: (key: string) => string,
+  hasLiveClip: boolean,
+  kind?: "IMAGE" | "VIDEO" | null,
+): string {
+  if (kind === "IMAGE") {
+    return hasLiveClip ? t("sponsors.hudMediaImage") : t("sponsors.hudMediaPlannedImage");
+  }
+  return hasLiveClip ? t("sponsors.hudMedia") : t("sponsors.hudMediaPlanned");
 }

@@ -70,7 +70,7 @@ export function useStreamSponsorSlot(match: Match | null): StreamSponsorSlotView
   useEffect(() => {
     let cancelled = false;
     const load = () => {
-      void fetch("/api/sponsors")
+      void fetch("/api/sponsors?rotation=1")
         .then((res) => (res.ok ? res.json() : []))
         .then((data) => {
           if (!cancelled && Array.isArray(data)) setSponsors(data);

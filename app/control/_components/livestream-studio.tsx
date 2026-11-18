@@ -442,6 +442,12 @@ export function LivestreamStudio({ active = true }: { active?: boolean }) {
     setEditPhase(programPhase);
   }, [programPhase]);
 
+  // De studio blijft geladen terwijl je in een ander tabblad werkt. Is daar intussen de LED-indeling
+  // opgeslagen, dan vertrok de overlay-editor hier nog van de oude en zette opslaan die terug.
+  useEffect(() => {
+    if (active) reloadAppSettings();
+  }, [active, reloadAppSettings]);
+
   const previewWanted = settings.studioPreview && active;
   const activeVideo = resolveActiveVideoInput(settings);
 
