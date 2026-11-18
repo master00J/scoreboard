@@ -579,7 +579,7 @@ function prismaDatabaseUrl(dbPath: string): string {
   return `file:${dbPath.replace(/\\/g, "/")}?connection_limit=1`;
 }
 
-function configureDesktopContext() {
+async function configureDesktopContext() {
   const root = appRoot();
   const userDataDir = app.getPath("userData");
   const dataDir = path.join(userDataDir, "data");
@@ -607,7 +607,7 @@ function configureDesktopContext() {
   bootLog(`DATABASE_URL=${process.env.DATABASE_URL}`);
 
   // Een klaargezette venue-back-up omwisselen terwijl nog niets de database open heeft.
-  const restore = applyPendingRestore({ userDataDir, appVersion: app.getVersion() });
+  const restore = await applyPendingRestore({ userDataDir, appVersion: app.getVersion() });
   if (restore.kind === "applied") {
     bootLog(`[restore] back-up teruggezet; vorige gegevens in ${restore.followup.safetyDir}`);
   } else if (restore.kind === "failed") {
@@ -654,7 +654,7 @@ async function runOperatorCommand(cmd: any) {
 }
 
 async function loadRuntime() {
-  desktopContext = configureDesktopContext();
+  desktopContext = await configureDesktopContext();
   runtime = await import("./runtime");
   await runtime.initDesktopRuntime({
     getControlWindow: () => controlWindow,
@@ -2179,7 +2179,7 @@ async function runVenueBackupRestore(parent: BrowserWindow | null): Promise<Venu
       discard();
       return { ok: false, error: m("restoreUnpackFailed") };
     }
-    const inspection = inspectBackupDir(pending, app.getVersion());
+    const inspection = await inspectBackupDir(pending, app.getVersion());
     if (!inspection.ok) {
       discard();
       return {

@@ -138,6 +138,32 @@ describe("voetbal", () => {
     expect((await state()).timerRunning).toBe(false);
   });
 
+  it("registreert een doelpunt zonder een blackout of de klaargezette clip op te heffen", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const file = await prisma.mediaItem.create({ data: { title: "Spot", path: "spot.png", type: "IMAGE", durationSec: 4 } });
+    await run({ type: "display:setMode", mode: "SPONSOR", meta: { activeMediaId: file.id } });
+    await run({ type: "display:blackout" });
+    await run({ type: "goal:prepare", side: "home" });
+    await run({ type: "goal:trigger", side: "home" });
+    expect(await state()).toMatchObject({ mode: "BLACKOUT", activeMediaId: file.id });
+    expect((await matchRow(m.id)).homeScore).toBe(1);
+    await run({ type: "display:blackout" });
+    expect(await state()).toMatchObject({ mode: "SPONSOR", activeMediaId: file.id });
+  });
+
+  it("behoudt toegevoegde tijd en een later doelpunt bij herhaalde of oudere opdrachten", async () => {
+    const m = await seedMatch("FOOTBALL");
+    await run({ type: "match:setStatus", status: "FIRST_HALF" });
+    await run({ type: "timer:setAddedTime", minutes: 4 });
+    await run({ type: "match:setStatus", status: "FIRST_HALF" });
+    expect((await state()).addedTimeMinutes).toBe(4);
+    await run({ type: "score:set", homeScore: 2, awayScore: 0 });
+    const edit = await prisma.matchEvent.findFirstOrThrow({ where: { matchId: m.id, type: "SCORE_SET" } });
+    await run({ type: "goal:trigger", side: "home" });
+    await expect(run({ type: "event:undo", eventId: edit.id })).rejects.toMatchObject({ code: "undoLaterEventFirst" });
+    expect((await matchRow(m.id)).homeScore).toBe(3);
+  });
+
   it("logt een doelpunt met periode en klokstand en draait het terug via undo", async () => {
     const m = await seedMatch("FOOTBALL");
     await run({ type: "timer:set", seconds: 1500 });
@@ -199,6 +225,23 @@ describe("wissels", () => {
       orderBy: { createdAt: "asc" },
     });
   }
+
+  it("draait de tweede wissel terug in de opstelling, het log en de animatiewachtrij", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const [p1, p2, p12] = await Promise.all([1, 2, 12].map(n => homePlayer(m.id, n)));
+    await run({ type: "sub:triggerBatch", substitutions: [
+      { teamId: m.homeTeamId, playerOutId: p1.id, playerInId: p12.id },
+      { teamId: m.homeTeamId, playerOutId: p2.id, playerInId: p1.id },
+    ] });
+    const [first, second] = await subEvents(m.id);
+    await expect(run({ type: "event:undo", eventId: first.id })).rejects.toMatchObject({ code: "undoLaterEventFirst" });
+    await run({ type: "event:undo", eventId: second.id });
+    expect(await homeField(m.id)).toContain(p2.id);
+    expect(await homeField(m.id)).not.toContain(p1.id);
+    expect(await subEvents(m.id)).toHaveLength(1);
+    await run({ type: "sub:queueAdvance" });
+    expect((await state()).activeSubInId).toBeNull();
+  });
 
   it("registreert een dubbele wissel meteen, ook als daarna een clip handmatig start", async () => {
     const m = await seedMatch("FOOTBALL");

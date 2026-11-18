@@ -15,6 +15,7 @@
  */
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 export const BACKUP_ROOT_DIR = "stadium-backup";
 export const BACKUP_MANIFEST = "backup.json";
@@ -355,7 +356,7 @@ export function compareVersions(a: string, b: string): number {
  * Kijkt een uitgepakte back-up na. De database mag in `stadium-backup/data/` staan (zo maakt de app
  * ze) of rechtstreeks in `data/` (als iemand de map zelf heeft gezipt).
  */
-export function inspectBackupDir(dir: string, appVersion: string): BackupInspection {
+export async function inspectBackupDir(dir: string, appVersion: string): Promise<BackupInspection> {
   const root = [path.join(dir, BACKUP_ROOT_DIR), dir].find((candidate) =>
     fs.existsSync(path.join(candidate, "data", DB_NAME)),
   );
@@ -365,6 +366,29 @@ export function inspectBackupDir(dir: string, appVersion: string): BackupInspect
   // Een oudere app kent de kolommen van een nieuwere database niet: eerst de app bijwerken.
   if (manifest?.appVersion && compareVersions(manifest.appVersion, appVersion) > 0) {
     return { ok: false, reason: "newer_version", backupVersion: manifest.appVersion };
+  }
+  const { PrismaClient } = await import("@prisma/client");
+  // SQLite can checkpoint a WAL when the connection closes. Inspect private copies, since a
+  // staged rollback can be hard-linked to the only remaining safety backup.
+  const scratch = await fs.promises.mkdtemp(path.join(os.tmpdir(), "arenacue-restore-check-"));
+  const dbPath = path.join(scratch, DB_NAME).split(path.sep).join("/");
+  const copy = new PrismaClient({ datasourceUrl: `file:${dbPath}?connection_limit=1` });
+  try {
+    for (const name of [DB_NAME, DB_NAME + "-wal"]) {
+      const source = path.join(root, "data", name);
+      if (fs.existsSync(source)) await fs.promises.copyFile(source, path.join(scratch, name));
+    }
+    const rows = await copy.$queryRawUnsafe<Array<{ integrity_check: string }>>("PRAGMA integrity_check");
+    const tables = await copy.$queryRawUnsafe<Array<{ name: string }>>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('Match', 'Team', 'MediaItem')",
+    );
+    if (rows.length !== 1 || rows[0].integrity_check !== "ok" || tables.length !== 3) {
+      return { ok: false, reason: "not_a_database" };
+    }
+  } catch {
+    return { ok: false, reason: "not_a_database" };
+  } finally {
+    try { await copy.$disconnect(); } finally { await fs.promises.rm(scratch, { recursive: true, force: true }); }
   }
   return { ok: true, root, manifest };
 }
@@ -456,13 +480,13 @@ function restoreConfigFiles(root: string, userDataDir: string): void {
  * databaseverbinding open is. Wat er stond gaat naar `restore-safety/<datum>/` (alleen de laatste
  * blijft bewaard). Gaat er iets mis, dan komt de oude toestand terug.
  */
-export function applyPendingRestore(opts: {
+export async function applyPendingRestore(opts: {
   userDataDir: string;
   appVersion: string;
   now?: Date;
   /** Bestaat dit pad op deze pc? Vervangbaar in tests. */
   fileExists?: (file: string) => boolean;
-}): RestoreApplyResult {
+}): Promise<RestoreApplyResult> {
   const pending = path.join(opts.userDataDir, RESTORE_PENDING_DIR);
   if (!fs.existsSync(pending)) return { kind: "none" };
   if (!fs.existsSync(path.join(pending, RESTORE_READY_MARKER))) {
@@ -476,13 +500,16 @@ export function applyPendingRestore(opts: {
   const uploadsDir = path.join(opts.userDataDir, "uploads");
   const stamp = (opts.now ?? new Date()).toISOString().slice(0, 19).replace(/:/g, "-");
   const safetyRoot = path.join(opts.userDataDir, RESTORE_SAFETY_DIR);
-  const safetyDir = path.join(safetyRoot, stamp);
+  let safetyName = stamp;
+  for (let suffix = 1; fs.existsSync(path.join(safetyRoot, safetyName)); suffix++) safetyName = stamp + "-" + suffix;
+  const safetyDir = path.join(safetyRoot, safetyName);
+  let safetyCreated = false;
   const movedDb: string[] = [];
   const placedDb: string[] = [];
   let movedUploads = false;
 
   try {
-    const inspection = inspectBackupDir(pending, opts.appVersion);
+    const inspection = await inspectBackupDir(pending, opts.appVersion);
     if (!inspection.ok) throw new Error(`Back-up is niet bruikbaar (${inspection.reason}).`);
     const { root, manifest } = inspection;
 
@@ -490,6 +517,7 @@ export function applyPendingRestore(opts: {
 
     // 1. Wat er nu staat veiligstellen, ook de instellingen naast de database (voor een weg terug).
     fs.mkdirSync(path.join(safetyDir, "data"), { recursive: true });
+    safetyCreated = true;
     stageConfigFiles(safetyDir, opts.userDataDir);
     for (const name of DB_FILES) {
       const current = path.join(dataDir, name);
@@ -542,7 +570,7 @@ export function applyPendingRestore(opts: {
     clearRestoreFollowup(opts.userDataDir);
     writeRestoreFollowup(opts.userDataDir, followup);
     fs.rmSync(pending, { recursive: true, force: true });
-    pruneSafetyCopies(safetyRoot, stamp);
+    pruneSafetyCopies(safetyRoot, safetyName);
     return { kind: "applied", followup };
   } catch (err) {
     // Terug naar hoe het was: de app moet met de oude gegevens blijven starten. Alleen weghalen wat
@@ -554,7 +582,7 @@ export function applyPendingRestore(opts: {
         fs.rmSync(uploadsDir, { recursive: true, force: true });
         move(path.join(safetyDir, "uploads"), uploadsDir);
       }
-      fs.rmSync(safetyDir, { recursive: true, force: true });
+      if (safetyCreated) fs.rmSync(safetyDir, { recursive: true, force: true });
     } catch {
       /* de veiligheidskopie blijft dan in restore-safety staan */
     }
@@ -628,13 +656,13 @@ export type UnreadableMediaFile = {
 
 /** Alle bestanden die op het scherm kunnen komen: actieve media, logo's, spelersbeelden, goal-intro. */
 const MEDIA_REFERENCES = [
-  `SELECT title AS label, path AS file FROM "MediaItem" WHERE active = 1`,
-  `SELECT name AS label, logoPath AS file FROM "Team" WHERE logoPath IS NOT NULL`,
-  `SELECT firstName || ' ' || lastName AS label, photoPath AS file FROM "Player" WHERE photoPath IS NOT NULL`,
-  `SELECT firstName || ' ' || lastName AS label, goalVideoPath AS file FROM "Player" WHERE goalVideoPath IS NOT NULL`,
-  `SELECT firstName || ' ' || lastName AS label, subImagePath AS file FROM "Player" WHERE subImagePath IS NOT NULL`,
-  `SELECT firstName || ' ' || lastName AS label, lineupVideoPath AS file FROM "Player" WHERE lineupVideoPath IS NOT NULL`,
-  `SELECT 'Goal-intro' AS label, goalIntroVideoPath AS file FROM "AppSettings" WHERE goalIntroVideoPath IS NOT NULL`,
+  `SELECT title AS label, path AS file, type AS kind FROM "MediaItem" WHERE active = 1`,
+  `SELECT name AS label, logoPath AS file, 'IMAGE' AS kind FROM "Team" WHERE logoPath IS NOT NULL`,
+  `SELECT firstName || ' ' || lastName AS label, photoPath AS file, 'IMAGE' AS kind FROM "Player" WHERE photoPath IS NOT NULL`,
+  `SELECT firstName || ' ' || lastName AS label, goalVideoPath AS file, 'VIDEO' AS kind FROM "Player" WHERE goalVideoPath IS NOT NULL`,
+  `SELECT firstName || ' ' || lastName AS label, subImagePath AS file, 'IMAGE' AS kind FROM "Player" WHERE subImagePath IS NOT NULL`,
+  `SELECT firstName || ' ' || lastName AS label, lineupVideoPath AS file, 'VIDEO' AS kind FROM "Player" WHERE lineupVideoPath IS NOT NULL`,
+  `SELECT 'Goal-intro' AS label, goalIntroVideoPath AS file, 'VIDEO' AS kind FROM "AppSettings" WHERE goalIntroVideoPath IS NOT NULL`,
 ];
 
 /** Pad op schijf voor een opgeslagen pad, of null als het geen bestand op deze pc is (bv. een URL). */
@@ -663,22 +691,23 @@ export function canOpenFile(file: string): boolean {
 /** Media waarnaar de database verwijst en die op deze pc niet opent. */
 export async function findUnreadableMediaFiles(
   db: RawDb,
-  opts: { uploadsDir: string; canOpen?: (file: string) => boolean },
+  opts: { uploadsDir: string; canOpen?: (file: string, kind: "IMAGE" | "VIDEO") => boolean | Promise<boolean> },
 ): Promise<UnreadableMediaFile[]> {
   const canOpen = opts.canOpen ?? canOpenFile;
   const checked = new Map<string, boolean>();
   const seen = new Set<string>();
   const out: UnreadableMediaFile[] = [];
   for (const query of MEDIA_REFERENCES) {
-    const rows = await db.$queryRawUnsafe<Array<{ label: string | null; file: string | null }>>(query);
+    const rows = await db.$queryRawUnsafe<Array<{ label: string | null; file: string | null; kind: "IMAGE" | "VIDEO" }>>(query);
     for (const row of rows) {
       if (typeof row.file !== "string" || !row.file.trim()) continue;
       const resolved = resolveStoredMediaPath(row.file, opts.uploadsDir);
       if (!resolved) continue;
-      let ok = checked.get(resolved);
+      const cacheKey = JSON.stringify([resolved, row.kind]);
+      let ok = checked.get(cacheKey);
       if (ok === undefined) {
-        ok = canOpen(resolved);
-        checked.set(resolved, ok);
+        ok = await canOpen(resolved, row.kind);
+        checked.set(cacheKey, ok);
       }
       if (ok) continue;
       const label = (row.label ?? "").trim() || path.basename(resolved);
@@ -715,7 +744,7 @@ export type RestoreFinishResult =
  */
 export async function finishPendingRestore(
   db: RawDb,
-  opts: { userDataDir: string; uploadsDir: string; canOpen?: (file: string) => boolean },
+  opts: { userDataDir: string; uploadsDir: string; canOpen?: (file: string, kind: "IMAGE" | "VIDEO") => boolean | Promise<boolean> },
 ): Promise<RestoreFinishResult> {
   let followup = readRestoreFollowup(opts.userDataDir);
   if (!followup) return { kind: "none" };

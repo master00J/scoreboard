@@ -99,6 +99,14 @@ describe("applyVisibleProgress (two plays reporting at once)", () => {
     expect(rotation.countedMs).toBe(2_000);
   });
 
+  it("counts the very first half-second after the overlay has ended", () => {
+    const rotation = createPlaySessionState({ clipSessionId: "r", source: "rotation", counted: true });
+    const cue = createPlaySessionState({ clipSessionId: "c", source: "cue", counted: true });
+    applyVisibleProgress([cue, rotation], cue, 2000, 2000);
+    cue.endedAtMs = 2000;
+    expect(applyVisibleProgress([cue, rotation], rotation, 500, 2500)).toBe(500);
+  });
+
   it("a manual play is kept but does not count when the setting is off", () => {
     expect(playSourceCounts("manual", false)).toBe(false);
     expect(playSourceCounts("manual", true)).toBe(true);

@@ -88,7 +88,7 @@ export function parseMediaCheckRecord(json: string | null | undefined): MediaChe
     return {
       v: 1,
       key: value.key,
-      status: value.status,
+      status: value.status === "ok" && value.reason === "not_decodable_here" ? "warning" : value.status,
       reason: value.reason as MediaHealthReason,
       expectedSec: typeof value.expectedSec === "number" ? value.expectedSec : null,
       decodedSec: typeof value.decodedSec === "number" ? value.decodedSec : null,

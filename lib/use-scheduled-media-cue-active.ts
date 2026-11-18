@@ -7,6 +7,7 @@ import {
   computePrematchRundownClock,
   cueClockPhaseKey,
   cueHasClockWindow,
+  cueIsDueAtElapsed,
   cueLeftClockWindow,
   cuePhaseMatches,
   cueResumesAfterInterruption,
@@ -35,6 +36,8 @@ type Options = {
   elapsed: number;
   /** Zelfde als display: geen cue-detectie in standalone preview-iframe. */
   skip?: boolean;
+  /** The rendered image closes itself once its full visible hold has elapsed. */
+  imageTimerOnDisplay?: boolean;
 };
 
 type UseScheduledMediaCueActiveResult = {
@@ -59,6 +62,7 @@ export function useScheduledMediaCueActive({
   mode,
   elapsed,
   skip = false,
+  imageTimerOnDisplay = false,
 }: Options): UseScheduledMediaCueActiveResult {
   const [scheduledCues, setScheduledCues] = useState<ScheduledMediaCue[]>([]);
   const [activeScheduledCue, setActiveScheduledCue] = useState<ScheduledMediaCue | null>(null);
@@ -192,14 +196,19 @@ export function useScheduledMediaCueActive({
     fetch("/api/scheduled-media-cues")
       .then(async (r) => {
         const body = await r.json().catch(() => null);
-        if (!r.ok || !Array.isArray(body)) return [];
+        if (!r.ok || !Array.isArray(body)) return null;
         return body as ScheduledMediaCue[];
       })
       .then((list) => {
-        if (cancelled) return;
+        if (cancelled || !list) return;
         setScheduledCues(list);
+        setActiveScheduledCue(current => {
+          if (!current) return null;
+          const saved = list.find(cue => cue.id === current.id);
+          return saved?.enabled && saved.media?.active ? current : null;
+        });
       })
-      .catch(() => setScheduledCues([]));
+      .catch(() => { /* Keep the last confirmed schedule during a temporary read error. */ });
     return () => {
       cancelled = true;
     };
@@ -250,8 +259,9 @@ export function useScheduledMediaCueActive({
       alreadyStarted: (candidate) => firedScheduledCueKeysRef.current.has(keyOf(candidate)),
     });
     if (cue) {
+      owedCueKeysRef.current.delete(owedKeyOf(cue, match.id, match.status));
       firedScheduledCueKeysRef.current.add(keyOf(cue));
-      return cue;
+      return cueOwesFullPlay(cue) ? { ...cue, endSec: null } : cue;
     }
     // Geen nieuwe cue aan de beurt: een onderbroken cue met een verschuldigde vertoning gaat voor.
     const owed = pickOwedScheduledCue(scheduledCues, {
@@ -263,16 +273,26 @@ export function useScheduledMediaCueActive({
       owedCueKeysRef.current.delete(owedKeyOf(owed, match.id, match.status));
       firedScheduledCueKeysRef.current.add(keyOf(owed));
     }
-    return owed;
+    return owed ? { ...owed, endSec: null } : null;
   };
 
   useLayoutEffect(() => {
     if (skip) return;
-    if (!state || !match || mode === "BLACKOUT") return;
+    if (!state || !match) return;
     // "Alleen scorebord" is een harde opt-out, ook voor Volleybal zonder wedstrijdklok.
     // Een lopende cue verdwijnt hieronder bij de wissel naar MATCH.
     const liveProgramMode = scheduledCueLiveProgramActive(mode, holdLiveWallOnBreak);
-    if (!liveProgramMode) {
+    if (!prematchBlocked && ((state.timerRunning ?? false) || usesLiveWallClock)) {
+      // A manual clip can cover the entire trigger window. Remember a due full play even
+      // when another cue is still playing or the display is blacked out.
+      for (const cue of phaseCues) {
+        if (cueOwesFullPlay(cue) && cueIsDueAtElapsed(cue, playhead) &&
+            !firedScheduledCueKeysRef.current.has(startedKeyOf(cue, match.id, match.status))) {
+          owedCueKeysRef.current.add(owedKeyOf(cue, match.id, match.status));
+        }
+      }
+    }
+    if (!liveProgramMode || mode === "BLACKOUT") {
       if (activeScheduledCue) {
         // Een losse clip, goal of kaart haalt de sponsor even weg. Loopt zijn venster daarna nog,
         // dan komt hij terug; anders bleef het scherm tot de volgende sponsor op het scorebord staan.
@@ -331,10 +351,10 @@ export function useScheduledMediaCueActive({
     if (cueHasClockWindow(activeScheduledCue)) return;
     const dur = activeScheduledCue.media.durationSec;
     const sec = typeof dur === "number" && Number.isFinite(dur) && dur > 0 ? dur : 10;
-    const ms = Math.max(1500, sec * 1000);
+    const ms = Math.max(1500, sec * 1000) + (imageTimerOnDisplay ? 12_000 : 0);
     const id = window.setTimeout(() => setActiveScheduledCue(null), ms);
     return () => window.clearTimeout(id);
-  }, [skip, activeScheduledCue]);
+  }, [skip, activeScheduledCue, imageTimerOnDisplay]);
 
   const scheduledCueStint =
     activeScheduledCue && match

@@ -428,7 +428,7 @@ export function cueResumesAfterInterruption(cue: {
 
 /** Cue zonder venster die één volledige vertoning verschuldigd is. */
 export function cueOwesFullPlay(cue: { triggerSec: number; endSec?: number | null; guarantee?: string | null }): boolean {
-  return cue.guarantee === "fullPlay" && !cueHasClockWindow(cue);
+  return cue.guarantee === "fullPlay";
 }
 
 /**

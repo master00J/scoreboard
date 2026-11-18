@@ -365,7 +365,7 @@ export async function decodeCheckFile(
   if (kind === "IMAGE" && /\.webp$/i.test(file)) {
     try {
       if (isAnimatedWebp(readHead(file, 32))) {
-        return { status: "ok", reason: "not_decodable_here", expectedSec: null, decodedSec: null, detail: null };
+        return { status: "warning", reason: "not_decodable_here", expectedSec: null, decodedSec: null, detail: null };
       }
     } catch {
       /* lezen mislukt: de decode hieronder meldt het */

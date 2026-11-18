@@ -119,6 +119,31 @@ describe("phase booking snapshots", () => {
 });
 
 describe("report: booked seconds and open shortfall", () => {
+  it("keeps the file targets at booking time, including a cue-only sponsor that never started", async () => {
+    const s = await sponsor("Cue only");
+    await prisma.sponsor.update({ where: { id: s.id }, data: { matchFirstHalfSeconds: 0 } });
+    const media = await prisma.mediaItem.create({ data: { sponsorId: s.id, type: "IMAGE", title: "Banner", path: "banner.png", durationSec: 5 } });
+    await prisma.scheduledMediaCue.create({ data: { mediaId: media.id, matchStatus: "FIRST_HALF", triggerSec: 2, endSec: 9 } });
+    await g.snapshotPhaseBookings(prisma, matchId);
+    await prisma.scheduledMediaCue.deleteMany();
+    const r = (await g.summarizeSponsorBookings(prisma, { matchId })).get(s.id);
+    expect(r).toMatchObject({ bookedSec: 7, shortfallSec: 7, files: [{ title: "Banner", plannedSec: 7, deliveredSec: 0 }] });
+  });
+
+  it("rejects overlapping slots and rolls back the whole batch, including phase aliases", async () => {
+    const { writeScheduledCues } = await import("./scheduled-cue-writes");
+    const media = await prisma.mediaItem.create({ data: { type: "IMAGE", title: "Banner", path: "banner.png", durationSec: 5 } });
+    const cue = { mediaId: media.id, matchStatus: "SETUP", triggerSec: 0, endSec: 5 };
+    expect((await writeScheduledCues(prisma, [cue, { ...cue, matchStatus: "PREMATCH", triggerSec: 4, endSec: 8 }])).status).toBe(409);
+    expect(await prisma.scheduledMediaCue.count()).toBe(0);
+    const saved = await writeScheduledCues(prisma, [cue, { ...cue, triggerSec: 5, endSec: 12 }]);
+    expect(saved.status).toBe(200);
+    const [one, two] = await prisma.scheduledMediaCue.findMany({ orderBy: { triggerSec: "asc" } });
+    expect((await writeScheduledCues(prisma, [{ id: one.id, endSec: 7 }, { id: two.id, triggerSec: 7 }])).status).toBe(200);
+    expect((await writeScheduledCues(prisma, [{ id: two.id, triggerSec: 3 }])).status).toBe(409);
+    expect((await prisma.scheduledMediaCue.findUniqueOrThrow({ where: { id: two.id } })).triggerSec).toBe(7);
+  });
+
   it("adds booked and shortfall to the per-sponsor summary, also for a sponsor that never played", async () => {
     const a = await sponsor("A");
     const b = await sponsor("B");

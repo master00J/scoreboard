@@ -44,7 +44,12 @@ export type ProofOfPlayRow = {
   } | null;
 };
 
+export type SponsorFileResult = {
+  mediaId: string; title: string; plannedSec: number; deliveredSec: number; plannedPlays: number; completePlays: number;
+};
+
 export type ProofOfPlaySummaryRow = {
+  files?: SponsorFileResult[];
   sponsorId: string | null;
   sponsorName: string;
   plays: number;
@@ -108,6 +113,8 @@ export type ProofOfPlayExportLabels = {
   segmentExtraTime: string;
   segmentPostmatch: string;
   colBooked: string;
+  plannedPlays: string;
+  completePlays: string;
   colShortfall: string;
   totalBooked: string;
   totalShortfall: string;
@@ -275,6 +282,8 @@ export function formatSegmentNl(key: string): string {
     segmentExtraTime: "Verlenging",
     segmentPostmatch: "Na wedstrijd",
     colBooked: "Geboekt",
+    plannedPlays: "Geplande vertoningen",
+    completePlays: "Volledige vertoningen",
     colShortfall: "Open tekort",
     totalBooked: "Totaal geboekt",
     totalShortfall: "Totaal open tekort",
@@ -295,6 +304,15 @@ function fulfillmentPct(actual: number, expected: number): string {
 
 function interpolate(template: string, vars: Record<string, string | number>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => String(vars[key] ?? ""));
+}
+
+function fileSummaryTable(summary: ProofOfPlaySummaryRow[], labels: ProofOfPlayExportLabels) {
+  return {
+    head: [labels.colSponsor, labels.colMedia, labels.colBooked, labels.colActualShort, labels.plannedPlays, labels.completePlays],
+    body: summary.flatMap(s => (s.files ?? []).map(f => [
+      s.sponsorName, f.title, formatSecForExport(f.plannedSec), formatSecForExport(f.deliveredSec), f.plannedPlays, f.completePlays,
+    ])),
+  };
 }
 
 export async function buildProofOfPlayXlsx(
@@ -342,6 +360,9 @@ export async function buildProofOfPlayXlsx(
       formatSecForExport(s.shortfallSec ?? 0),
     ]);
   }
+
+  const files = fileSummaryTable(summary, labels);
+  if (files.body.length) overview.push([], files.head, ...files.body);
 
   const wsRapport = wb.addWorksheet(labels.sheetReport);
   overview.forEach((row) => wsRapport.addRow(row));
@@ -502,6 +523,15 @@ export function buildProofOfPlayPdf(
   });
 
   const d = doc as DocWithAutoTable;
+  const files = fileSummaryTable(summary, labels);
+  if (files.body.length) {
+    autoTable(doc, {
+      startY: (d.lastAutoTable?.finalY ?? y) + 5,
+      head: [files.head], body: files.body, theme: "striped",
+      headStyles: { fillColor: tableHeaders, textColor: tableHeaderText },
+      styles: { fontSize: 8, cellPadding: 1.8 }, margin: { left: 10, right: 10, bottom: 12 },
+    });
+  }
   const afterSummary = d.lastAutoTable?.finalY ?? y + 24;
 
   if (rows.length === 0) {
@@ -643,6 +673,8 @@ export function proofOfPlayLabelsFromT(t: (key: string) => string): ProofOfPlayE
     segmentExtraTime: k("segmentExtraTime"),
     segmentPostmatch: k("segmentPostmatch"),
     colBooked: k("colBooked"),
+    plannedPlays: t("reports.plannedPlays"),
+    completePlays: t("reports.completePlays"),
     colShortfall: k("colShortfall"),
     totalBooked: k("totalBooked"),
     totalShortfall: k("totalShortfall"),

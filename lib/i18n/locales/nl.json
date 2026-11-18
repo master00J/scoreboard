@@ -127,6 +127,7 @@
     "serviceVolleyballOnly": "Service is alleen actief voor volleybal.",
     "cardsNotActive": "Kaarten van type {{color}} zijn niet actief voor {{sport}}.",
     "eventNotFound": "Gebeurtenis niet gevonden",
+    "undoLaterEventFirst": "Maak eerst de latere, afhankelijke wedstrijdactie ongedaan.",
     "volleyballUndoLastOnly": "Bij volleybal kan alleen het laatste punt ongedaan gemaakt worden (of gebruik −1).",
     "matchClosed": "Deze wedstrijd is afgesloten (rapportage bewaard). Heropen in Setup → Matches of kies een andere wedstrijd.",
     "licenseNoAutoSponsors": "Automatische sponsorrotatie is niet beschikbaar in dit licentieplan."
@@ -577,6 +578,7 @@
     "uploadFirst": "Upload eerst media.",
     "cueInvalidInput": "Kies media en vul een tijd in zoals 12:30",
     "cueRepeatInvalid": "Controleer starttijd, eindtijd en interval (minimaal 0,5 minuut).",
+    "cueOverlap": "Dit tijdstip overlapt met een andere actieve spot in dezelfde fase.",
     "cueSaveFailed": "Tijdscue opslaan mislukt",
     "cueAdded": "Tijdscue toegevoegd op {{time}}",
     "cueSeriesAdded": "{{count}} automatische afspeelmomenten toegevoegd",
@@ -718,6 +720,8 @@
     "cueWindow": "{{start}} – {{end}}"
   },
   "reports": {
+    "plannedPlays": "Geplande vertoningen",
+    "completePlays": "Volledige vertoningen",
     "title": "Proof-of-play",
     "filterMatch": "Wedstrijd",
     "filterAll": "Alle wedstrijden",
@@ -1309,6 +1313,7 @@
     "healthReasonFfmpegMissing": "FFmpeg ontbreekt: niet volledig gecontroleerd",
     "healthReasonTimeout": "Controle duurde te lang",
     "healthReasonDeferredLiveMatch": "Volledige controle na de wedstrijd",
+    "healthAnimatedWebp": "Bewegende WebP. De volledige animatie kon niet worden gecontroleerd.",
     "healthReasonNotChecked": "Nog niet volledig gecontroleerd",
     "themeSurfaceHint": "Stel beide stadionscherm-vlakken in. Bij Achtergronden geldt de algemene scorebord-achtergrond voor allebei, tenzij je er een apart beeld voor kiest.",
     "themeLayoutSaved": "Opgeslagen in “{{name}}”. Het scherm gebruikt de nieuwe versie overal waar die indeling geldt.",

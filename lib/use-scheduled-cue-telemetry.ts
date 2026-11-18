@@ -121,6 +121,8 @@ export function useVisiblePlayTelemetry(opts: {
 
     const session: PlaySession = {
       ...current,
+      // A rewind, renderer restart or return from blackout can present the same booking again.
+      clipSessionId: current.clipSessionId + ":" + crypto.randomUUID(),
       matchId: match.id,
       segmentKey,
       clock: createVisiblePlayClock(current.mediaType === "VIDEO" ? "VIDEO" : "IMAGE", !visibleRef.current),

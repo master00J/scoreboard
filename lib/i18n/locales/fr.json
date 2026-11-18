@@ -127,6 +127,7 @@
     "serviceVolleyballOnly": "Le service n’est utilisé qu’au volley-ball.",
     "cardsNotActive": "Les cartons {{color}} ne s’appliquent pas au {{sport}}.",
     "eventNotFound": "Événement introuvable",
+    "undoLaterEventFirst": "Annulez d’abord l’action de match ultérieure qui en dépend.",
     "volleyballUndoLastOnly": "Au volley-ball, seul le dernier point peut être annulé (ou utilisez −1).",
     "matchClosed": "Ce match est clôturé (rapport enregistré). Rouvrez-le dans Préparer → Matchs ou choisissez un autre match.",
     "licenseNoAutoSponsors": "La rotation automatique des sponsors n’est pas disponible avec cette licence."
@@ -577,6 +578,7 @@
     "uploadFirst": "Importez d’abord des médias.",
     "cueInvalidInput": "Choisissez un média et saisissez une heure comme 12:30",
     "cueRepeatInvalid": "Vérifiez l’heure de début, l’heure de fin et l’intervalle (minimum 0,5 minute).",
+    "cueOverlap": "Ce créneau chevauche un autre spot actif de cette phase.",
     "cueSaveFailed": "Échec de l’enregistrement du repère",
     "cueAdded": "Repère ajouté à {{time}}",
     "cueSeriesAdded": "{{count}} moments de lecture automatiques ajoutés",
@@ -718,6 +720,8 @@
     "cueWindow": "{{start}} – {{end}}"
   },
   "reports": {
+    "plannedPlays": "Diffusions prévues",
+    "completePlays": "Diffusions complètes",
     "title": "Proof of play",
     "filterMatch": "Match",
     "filterAll": "Tous les matchs",
@@ -1309,6 +1313,7 @@
     "healthReasonFfmpegMissing": "FFmpeg manquant : contrôle incomplet",
     "healthReasonTimeout": "Le contrôle a pris trop de temps",
     "healthReasonDeferredLiveMatch": "Contrôle complet après le match",
+    "healthAnimatedWebp": "WebP animé. La vérification de l’animation complète est indisponible.",
     "healthReasonNotChecked": "Pas encore entièrement contrôlé",
     "themeSurfaceHint": "Configurez les deux surfaces de l'écran du stade. Sous Arrière-plans, l'arrière-plan commun du tableau s'applique aux deux, sauf si vous choisissez une image distincte.",
     "themeLayoutSaved": "Enregistré dans « {{name}} ». L’écran utilise la nouvelle version partout où cette disposition s’applique.",

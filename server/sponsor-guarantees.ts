@@ -1,3 +1,4 @@
+import { phaseFileBookings, readFileBookings, fileDeliveries, type FileDelivery } from "./sponsor-file-bookings";
 import type { Prisma } from "@prisma/client";
 import type { Db } from "./db";
 import type { Sponsor } from "../lib/types";
@@ -36,6 +37,7 @@ type PlayForGuarantee = {
   expectedSec: number;
   actualSec: number;
   actualMs: number;
+  state: string;
   counted: boolean;
   clipSessionId: string;
 };
@@ -49,6 +51,7 @@ const PLAY_SELECT = {
   expectedSec: true,
   actualSec: true,
   actualMs: true,
+  state: true,
   counted: true,
   clipSessionId: true,
 } as const;
@@ -111,18 +114,19 @@ export async function snapshotPhaseBookings(db: Db, matchId: string): Promise<nu
     select: { sponsorId: true },
   });
   const have = new Set(existing.map((e) => e.sponsorId));
-  const sponsors = (await db.sponsor.findMany({ where: { active: true } })) as unknown as Sponsor[];
+  const sponsors = (await db.sponsor.findMany({ where: { active: true }, include: { media: true } })) as unknown as Sponsor[];
   const section = sponsorBudgetSectionFromMatchStatus(match.status);
   const todo = sponsors.filter((s) => !have.has(s.id));
   if (todo.length === 0) return 0;
 
-  const [snapshots, plays] = await Promise.all([
+  const [snapshots, plays, cues] = await Promise.all([
     db.sponsorPhaseBooking.findMany({ where: { matchId } }),
     db.sponsorPlayLog.findMany({ where: { matchId }, select: PLAY_SELECT }),
+    db.scheduledMediaCue.findMany({ where: { enabled: true }, include: { media: true } }),
   ]);
   let written = 0;
   for (const s of todo) {
-    const bookedSec = Math.round(sponsorSectionBudgetSeconds(s, section, match.status));
+    const rotationSec = Math.round(sponsorSectionBudgetSeconds(s, section, match.status));
     const guarantee = parseSponsorGuarantee(s.guaranteeJson);
     const bookings = new Map<GuaranteeSegment, number>();
     for (const b of snapshots) {
@@ -132,6 +136,8 @@ export async function snapshotPhaseBookings(db: Db, matchId: string): Promise<nu
     }
     const ledger = sponsorLedgerFor(bookings, deliveredLedger(plays, s.id, guarantee), guarantee);
     const carryInSec = Math.round(carryInForSegment(ledger, guarantee, segment));
+    const { files, cueSeconds } = phaseFileBookings(s, match.status, rotationSec + carryInSec, cues);
+    const bookedSec = Math.max(rotationSec, cueSeconds);
     if (bookedSec <= 0 && carryInSec <= 0) continue;
     try {
       await db.sponsorPhaseBooking.create({
@@ -142,6 +148,7 @@ export async function snapshotPhaseBookings(db: Db, matchId: string): Promise<nu
           sponsorName: s.name,
           bookedSec,
           carryInSec,
+          filePlanJson: JSON.stringify(files),
           guaranteeJson: s.guaranteeJson ?? null,
         },
       });
@@ -181,7 +188,7 @@ export type GuaranteeSponsorPayload = {
   /** Per fase van deze wedstrijd: geboekt, ingehaald, geleverd, tekort. */
   segments: ReturnType<typeof computeShortfall>["bySegment"];
   /** Per bestand in de lopende fase, als de sponsor meer dan één bestand of eigen cue-afspraken heeft. */
-  files: { mediaId: string; title: string; deliveredSec: number }[];
+  files: FileDelivery[];
   cues: GuaranteeCueStatus[];
 };
 
@@ -210,16 +217,18 @@ export async function sponsorGuaranteeLive(db: Db, matchId: string): Promise<Gua
     const guarantee = parseSponsorGuarantee(s.guaranteeJson);
     const bookings = new Map<GuaranteeSegment, number>();
     let carryFromSnapshot: number | null = null;
+    let filePlanJson: string | null = null;
     for (const b of snapshots) {
       if (b.sponsorId !== s.id) continue;
       const seg = guaranteeSegmentOf(b.segmentKey);
       if (!seg) continue;
       bookings.set(seg, b.bookedSec);
-      if (seg === segment) carryFromSnapshot = b.carryInSec;
+      if (seg === segment) { carryFromSnapshot = b.carryInSec; filePlanJson = b.filePlanJson; }
     }
+    const livePlan = phaseFileBookings(s, match.status, sponsorSectionBudgetSeconds(s, section, match.status) + (carryFromSnapshot ?? 0), cues);
     if (segment && !bookings.has(segment) && s.active) {
       const live = Math.round(sponsorSectionBudgetSeconds(s, section, match.status));
-      if (live > 0) bookings.set(segment, live);
+      if (live > 0 || livePlan.cueSeconds > 0) bookings.set(segment, Math.max(live, livePlan.cueSeconds));
     }
     const delivered = deliveredLedger(plays, s.id, guarantee);
     const ledger = sponsorLedgerFor(bookings, delivered, guarantee);
@@ -231,15 +240,13 @@ export async function sponsorGuaranteeLive(db: Db, matchId: string): Promise<Gua
     const idx = segment ? GUARANTEE_SEGMENTS.indexOf(segment) : -1;
     const openBefore = idx > 0 ? computeShortfall(ledger, guarantee, GUARANTEE_SEGMENTS[idx - 1]).openSec : 0;
 
-    const media = (s.media ?? []).filter((m) => m.active);
+    const phasePlays = plays.filter(p => playSponsorId(p) === s.id && guaranteeSegmentOf(p.segmentKey) === segment);
     const sponsorCues = cues.filter(
       (c) => c.media.sponsorId === s.id && segment != null && guaranteeSegmentForStatus(c.matchStatus) === segment,
     );
-    const filesInPhase = new Map<string, number>();
     const cueDelivered = new Map<string, { sec: number; complete: boolean }>();
-    for (const p of plays) {
-      if (!p.counted || playSponsorId(p) !== s.id || guaranteeSegmentOf(p.segmentKey) !== segment) continue;
-      if (p.mediaId) filesInPhase.set(p.mediaId, (filesInPhase.get(p.mediaId) ?? 0) + playLogVisibleSec(p));
+    for (const p of phasePlays) {
+      if (!p.counted) continue;
       const m = /^cue:[^:]+:([^:]+):/.exec(p.clipSessionId);
       if (m) {
         const cur = cueDelivered.get(m[1]!) ?? { sec: 0, complete: false };
@@ -257,10 +264,7 @@ export async function sponsorGuaranteeLive(db: Db, matchId: string): Promise<Gua
       deliveredSec: current?.deliveredSec ?? 0,
       openFromEarlierSec: Math.max(0, openBefore - carryInSec),
       segments: result.bySegment,
-      files:
-        media.length > 1 || sponsorCues.length > 0
-          ? media.map((m) => ({ mediaId: m.id, title: m.title, deliveredSec: filesInPhase.get(m.id) ?? 0 }))
-          : [],
+      files: fileDeliveries(filePlanJson ? readFileBookings(filePlanJson) : livePlan.files, phasePlays),
       cues: sponsorCues.map((c) => {
         const d = cueDelivered.get(c.id);
         return {
@@ -283,10 +287,12 @@ export async function sponsorGuaranteeLive(db: Db, matchId: string): Promise<Gua
  * Geboekte seconden en open tekort per sponsor voor het rapport, met dezelfde filters als de
  * vertoningen (wedstrijd, sponsor, fase, periode).
  */
+type ReportBooking = SponsorBookingTotals & { sponsorName: string; files: FileDelivery[] };
+
 export async function summarizeSponsorBookings(
   db: Db,
   filters: SponsorPlayFilters,
-): Promise<Map<string, SponsorBookingTotals & { sponsorName: string }>> {
+): Promise<Map<string, ReportBooking>> {
   const where: Prisma.SponsorPhaseBookingWhereInput = {};
   if (filters.matchId) where.matchId = filters.matchId;
   if (filters.sponsorId) where.sponsorId = filters.sponsorId;
@@ -302,7 +308,7 @@ export async function summarizeSponsorBookings(
   if (snapshots.length === 0) return new Map();
   const matchIds = Array.from(new Set(snapshots.map((s) => s.matchId)));
   const plays = await db.sponsorPlayLog.findMany({
-    where: { matchId: { in: matchIds }, sponsorId: { in: Array.from(new Set(snapshots.map((s) => s.sponsorId))) } },
+    where: { ...playWhere, matchId: { in: matchIds }, sponsorId: { in: Array.from(new Set(snapshots.map((s) => s.sponsorId))) } },
     select: PLAY_SELECT,
   });
   // Alleen fases die in de filter vallen tellen; een fase zonder vastlegging hoort er niet bij.
@@ -318,8 +324,28 @@ export async function summarizeSponsorBookings(
     plays.filter((p) => included.has(`${p.matchId}|${p.segmentKey}`)),
   );
   const names = new Map(snapshots.map((s) => [s.sponsorId, s.sponsorName]));
-  const out = new Map<string, SponsorBookingTotals & { sponsorName: string }>();
-  for (const [id, t] of totals) out.set(id, { ...t, sponsorName: names.get(id) ?? id });
+  const out = new Map<string, ReportBooking>();
+  for (const [id, t] of totals) out.set(id, { ...t, sponsorName: names.get(id) ?? id, files: [] });
+  const byBooking = new Map<string, PlayForGuarantee[]>();
+  for (const p of plays) {
+    const key = JSON.stringify([p.matchId, p.segmentKey, playSponsorId(p)]);
+    const group = byBooking.get(key) ?? [];
+    group.push(p);
+    byBooking.set(key, group);
+  }
+  for (const b of snapshots) {
+    const summary = out.get(b.sponsorId);
+    if (!summary || !b.filePlanJson) continue;
+    const key = JSON.stringify([b.matchId, b.segmentKey, b.sponsorId]);
+    for (const file of fileDeliveries(readFileBookings(b.filePlanJson), byBooking.get(key) ?? [])) {
+      const prev = summary.files.find(f => f.mediaId === file.mediaId);
+      if (!prev) { summary.files.push(file); continue; }
+      prev.plannedSec += file.plannedSec;
+      prev.plannedPlays += file.plannedPlays;
+      prev.deliveredSec += file.deliveredSec;
+      prev.completePlays += file.completePlays;
+    }
+  }
   return out;
 }
 
@@ -331,18 +357,19 @@ export type SummaryRowWithBooking = {
   expectedSec: number;
   bookedSec: number;
   shortfallSec: number;
+  files?: FileDelivery[];
 };
 
 /** Zet geboekt en open tekort bij de rapportregels; sponsors met een boeking maar zonder vertoning komen erbij. */
 export function mergeBookingsIntoSummary(
   summary: ReadonlyArray<Omit<SummaryRowWithBooking, "bookedSec" | "shortfallSec">>,
-  bookings: ReadonlyMap<string, SponsorBookingTotals & { sponsorName: string }>,
+  bookings: ReadonlyMap<string, ReportBooking>,
 ): SummaryRowWithBooking[] {
   const seen = new Set<string>();
   const rows: SummaryRowWithBooking[] = summary.map((r) => {
     const b = r.sponsorId ? bookings.get(r.sponsorId) : undefined;
     if (r.sponsorId && b) seen.add(r.sponsorId);
-    return { ...r, bookedSec: b?.bookedSec ?? 0, shortfallSec: b?.shortfallSec ?? 0 };
+    return { ...r, bookedSec: b?.bookedSec ?? 0, shortfallSec: b?.shortfallSec ?? 0, files: b?.files };
   });
   for (const [sponsorId, b] of bookings) {
     if (seen.has(sponsorId)) continue;
@@ -354,6 +381,7 @@ export function mergeBookingsIntoSummary(
       expectedSec: 0,
       bookedSec: b.bookedSec,
       shortfallSec: b.shortfallSec,
+      files: b.files,
     });
   }
   return rows;

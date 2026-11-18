@@ -249,6 +249,12 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     for (const c of planCues) map.set(c.mediaId, [...(map.get(c.mediaId) ?? []), c]);
     return map;
   }, [planCues]);
+  const overlapping = useMemo(() => {
+    const titles = new Map(cuesRaw?.map(c => [c.id, c.media?.title ?? c.mediaId]));
+    return planCues.filter(c => c.enabled && planCues.some(other => other.enabled && c.id !== other.id &&
+      c.phase === other.phase && c.startSec < other.startSec + other.seconds && other.startSec < c.startSec + c.seconds))
+      .map(c => titles.get(c.id) + " (" + formatClock(c.startSec) + ")");
+  }, [cuesRaw, planCues]);
   const effective = useMemo(() => planEffectiveSeconds(rows, engineCtx, planCues), [rows, engineCtx, planCues]);
   const capacity = planCapacity(activeMatch);
 
@@ -877,6 +883,11 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
         </div>
       </div>
 
+      {overlapping.length > 0 && (
+        <p role="alert" className="mb-3 text-sm text-amber-700 dark:text-amber-400">
+          {t("media.cueOverlap")} {overlapping.join(", ")}
+        </p>
+      )}
       {dirty ? (
         <div className="sticky top-0 z-10 mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm">
           <span>{t("seasonPlan.unsaved", { count: dirtyKeys.length })}</span>
@@ -1052,7 +1063,7 @@ function CueForm({ mediaId, halfDurationSec, onDone }: { mediaId: string; halfDu
         }),
       });
       if (!res.ok) {
-        toast({ title: t("media.cueSaveFailed"), variant: "error" });
+        toast({ title: t(res.status === 409 ? "media.cueOverlap" : "media.cueSaveFailed"), variant: "error" });
         return;
       }
       toast({ title: t("media.cueAdded", { time: formatClock(startSec) }), variant: "success" });

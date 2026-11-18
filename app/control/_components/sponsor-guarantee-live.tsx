@@ -34,7 +34,7 @@ type GuaranteePayload = {
     deliveredSec: number;
     openFromEarlierSec: number;
     segments: Partial<Record<GuaranteeSegment, { bookedSec: number; carryInSec: number; deliveredSec: number; shortSec: number }>>;
-    files: { mediaId: string; title: string; deliveredSec: number }[];
+    files: import("@/lib/proof-of-play-export").SponsorFileResult[];
     cues: {
       cueId: string;
       title: string;
@@ -260,7 +260,7 @@ export function SponsorGuaranteeLive({ activeMatch }: { activeMatch: Match | nul
                     ) : null}
                     {s?.files.map((f) => (
                       <span key={f.mediaId} className="block truncate text-[10px] text-muted-foreground" title={f.title}>
-                        {f.title}: {fmt(f.deliveredSec)}
+                        {f.title} · {fmt(f.deliveredSec)} / {fmt(f.plannedSec)} · {t("reports.completePlays")} {f.completePlays} / {f.plannedPlays}
                       </span>
                     ))}
                     {s?.cues

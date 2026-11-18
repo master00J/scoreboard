@@ -167,19 +167,22 @@ export function maxClipSecondsForSponsor(
  * Duur (s) van elke vertoning in de rotatie van deze sponsor, in afspeelvolgorde
  * (inclusief per-clip herhalingen). Eén vertoning = één clip.
  */
-export function sponsorRotationClipSeconds(
-  s: Sponsor,
-  section?: SponsorSection,
-  matchStatus?: string,
-): number[] {
-  const media = buildSponsorRotationMediaList(
+export function sponsorRotationMedia(s: Sponsor, section?: SponsorSection, matchStatus?: string) {
+  return buildSponsorRotationMediaList(
     (s.media ?? []).filter(
       (m) => m.active && (!section || mediaAllowedForSponsorPhase(m, section, matchStatus)),
     ),
     s.sponsorPlaybackOrderJson,
     s.sponsorPlaybackRepeatsJson,
   );
-  return media.map((item) =>
+}
+
+export function sponsorRotationClipSeconds(
+  s: Sponsor,
+  section?: SponsorSection,
+  matchStatus?: string,
+): number[] {
+  return sponsorRotationMedia(s, section, matchStatus).map((item) =>
     item.type === "VIDEO"
       ? Math.max(1, item.durationSec > 0 ? item.durationSec : 10)
       : Math.max(1, item.durationSec > 0 ? item.durationSec : s.imageDefaultSec || 10),
@@ -202,10 +205,12 @@ export function sponsorPassSecondsForSponsor(
   return Math.min(Math.max(total, 1), 600);
 }
 
+const appearanceStarts = new WeakMap<(string | null)[], Map<string, number[]>>();
+
 /**
  * Index (0-based) van de vertoning die op seconde `t` van de slotmap loopt:
- * hoeveel keer deze sponsor daarvóór al aan de beurt is geweest. Elke aaneengesloten
- * run in de slotmap is één vertoning.
+ * hoeveel keer deze sponsor daarvóór al aan de beurt is geweest. Ook twee direct op elkaar
+ * aansluitende clips hebben elk een eigen start in het rooster.
  */
 export function sponsorAppearanceIndexAt(
   map: (string | null)[],
@@ -214,6 +219,12 @@ export function sponsorAppearanceIndexAt(
 ): number {
   if (map.length === 0) return 0;
   const end = Math.min(map.length - 1, Math.max(0, Math.floor(tSec)));
+  const starts = appearanceStarts.get(map)?.get(sponsorId);
+  if (starts) {
+    let index = starts.length - 1;
+    while (index > 0 && starts[index]! > end) index--;
+    return Math.max(0, index);
+  }
   let count = 0;
   let prev: string | null = null;
   for (let i = 0; i <= end; i++) {
@@ -574,12 +585,15 @@ export function buildSponsorSlotMap(
    */
   const gapSec = rawGap >= MIN_VISIBLE_SCOREBOARD_SEC ? leftover / gapCount : 0;
 
+  const starts = new Map(plan.map(p => [p.id, [] as number[]]));
+  appearanceStarts.set(map, starts);
   let cursor = gapSec;
   for (let r = 0; r < roundItems.length; r++) {
     let t = Math.round(cursor);
     for (const item of roundItems[r]!) {
       if (t >= Hc) return map;
       if (t >= 0) {
+        starts.get(item.id)!.push(t);
         const triggerWindowSec = Math.min(3, Math.max(1, item.sec));
         for (let w = 0; w < triggerWindowSec && t + w < Hc && w < item.sec; w++) {
           if (map[t + w] == null) map[t + w] = item.id;

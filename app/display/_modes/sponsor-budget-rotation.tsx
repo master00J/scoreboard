@@ -439,8 +439,8 @@ export function SponsorBudgetRotation({
   followPlaybackRef.current = followPlayback;
 
   const readMediaCursor = useCallback(
-    (sponsorId: string) =>
-      sponsorRotationCursors.get(`${cursorScopeRef.current}::${sponsorId}`) ?? 0,
+    (sponsorId: string, initialIndex = 0) =>
+      sponsorRotationCursors.get(`${cursorScopeRef.current}::${sponsorId}`) ?? initialIndex,
     [],
   );
   const writeMediaCursor = useCallback((sponsorId: string, value: number) => {
@@ -621,11 +621,9 @@ export function SponsorBudgetRotation({
     const idx = tieBreakCursorRef.current % tied.length;
     const sponsor = tied[idx]!;
 
-    /** In een ingeroosterd slot bepaalt het rooster welke clip; anders de eigen rotatieteller. */
-    const mediaIndex =
-      scheduledSponsorMode && scheduledMediaIndex != null
-        ? scheduledMediaIndex
-        : readMediaCursor(sponsor.id);
+    // A late start may enter halfway through the schedule. Once playing, continue the actual
+    // rotation in order, even if decoding or an interruption delayed the previous file.
+    const mediaIndex = readMediaCursor(sponsor.id, scheduledMediaIndex ?? 0);
     return planForSponsor(sponsor, mediaIndex, now);
   }, [
     activeSponsors,
@@ -2256,7 +2254,7 @@ function MediaRenderer({
               onLoad={(e) => {
                 const img = e.currentTarget;
                 const shown = () => onShownRef.current?.();
-                if (typeof img.decode === "function") img.decode().then(shown, shown);
+                if (typeof img.decode === "function") img.decode().then(() => { if (img.isConnected) shown(); }, () => { if (img.isConnected) onImageError?.(); });
                 else shown();
               }}
               onError={() => onImageError?.()}
