@@ -61,7 +61,7 @@ import {
 } from "../lib/scoreboard-templates";
 import { displayExtrasFromJson, serializeDisplayExtras } from "../lib/display-extras";
 import { isMatchInPlay } from "../lib/match-in-play";
-import { listExternalFileReferences, remapStoredFilePaths } from "../server/venue-backup";
+import { finishPendingRestore, listExternalFileReferences, type RestoreFinishResult } from "../server/venue-backup";
 import { isCommandUserError } from "../lib/command-user-error";
 import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import { handleCommand } from "../server/handlers";
@@ -1454,14 +1454,18 @@ export async function listExternalFilesForBackup(): Promise<string[]> {
   return listExternalFileReferences(prisma);
 }
 
-/** Na het terugzetten van een back-up: verwijs naar de teruggezette kopieën in uploads. */
-export async function remapRestoredFilePaths(remap: Record<string, string>): Promise<number> {
-  const changed = await remapStoredFilePaths(prisma, remap);
-  if (changed > 0) {
+/**
+ * Na het terugzetten van een back-up: verwijs naar de teruggezette kopieën in uploads en kijk na of
+ * alle media opent. Zie `finishPendingRestore`.
+ */
+export async function finishVenueRestore(opts: { userDataDir: string; uploadsDir: string }): Promise<RestoreFinishResult> {
+  const result = await finishPendingRestore(prisma, opts);
+  // Ook na een onderbroken padwijziging: een deel van de paden kan al nieuw zijn.
+  if (result.kind !== "none" && Object.keys(result.followup.remap).length > 0) {
     await touchState();
     await broadcastDisplayState();
   }
-  return changed;
+  return result;
 }
 
 /** Loopt er nu een wedstrijd? Dan geen ingrepen die de app herstarten. */

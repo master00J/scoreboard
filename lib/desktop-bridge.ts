@@ -198,8 +198,9 @@ export type VenueBackupResult = {
   skipped?: Array<{ path: string; reason: "missing" | "too_large" }>;
 };
 
+/** "restored" komt pas als de paden in de database staan en alle media opent. */
 export type RestoreNotice =
-  | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
+  | { kind: "restored"; source?: "backup" | "rollback"; backupCreatedAt: string | null; restoredFiles: number }
   | { kind: "failed"; error: string };
 
 export type NetworkSourceResetInfo = { mode: "copy" | "h264" };

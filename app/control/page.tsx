@@ -102,6 +102,10 @@ export default function ControlPage() {
         toast({ title: t("backup.restoreFailed"), description: notice.error, variant: "error" });
         return;
       }
+      if (notice.source === "rollback") {
+        toast({ title: t("backup.rolledBack"), description: t("backup.rolledBackDetail"), variant: "success" });
+        return;
+      }
       toast({
         title: t("backup.restored"),
         description: t("backup.restoredDetail", {

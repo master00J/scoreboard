@@ -2009,7 +2009,9 @@
     "restoreHint": "Terugzetten vervangt alle gegevens op deze pc door die uit de back-up en herstart de app. Wat er stond blijft als veiligheidskopie bewaard. Dit kan niet tijdens een wedstrijd.",
     "restoreFailed": "Back-up terugzetten mislukt",
     "restored": "Back-up teruggezet",
-    "restoredDetail": "Back-up van {{date}}. {{count}} mediabestanden komen uit de back-up.",
+    "restoredDetail": "Back-up van {{date}}. {{count}} mediabestanden komen uit de back-up. Alle media is nagekeken en opent.",
+    "rolledBack": "Vorige toestand teruggezet",
+    "rolledBackDetail": "De gegevens van vóór het terugzetten staan terug. Alle media is nagekeken en opent.",
     "skipped": "{{count}} bestanden zitten niet in de back-up (verwijderd of groter dan 2 GB)."
   },
   "officialClock": {

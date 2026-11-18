@@ -2009,7 +2009,9 @@
     "restoreHint": "Restoring replaces all data on this PC with the data from the backup and restarts the app. What was here is kept as a safety copy. This is not possible during a match.",
     "restoreFailed": "Restoring the backup failed",
     "restored": "Backup restored",
-    "restoredDetail": "Backup of {{date}}. {{count}} media files come from the backup.",
+    "restoredDetail": "Backup of {{date}}. {{count}} media files come from the backup. All media has been checked and opens.",
+    "rolledBack": "Previous state restored",
+    "rolledBackDetail": "The data from before the restore is back. All media has been checked and opens.",
     "skipped": "{{count}} files are not in the backup (deleted or larger than 2 GB)."
   },
   "officialClock": {
