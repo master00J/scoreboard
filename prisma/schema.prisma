@@ -194,6 +194,8 @@ model ScheduledMediaCue {
   enabled     Boolean   @default(true)
   /// Rundown van deze fase herhaalt na de laatste clip.
   loop        Boolean   @default(false)
+  /// Soort boeking: window | fullPlay | none. Null = venster met eindtijd, anders één keer op zijn moment.
+  guarantee   String?
   createdAt   DateTime  @default(now())
 }
 
@@ -239,6 +241,8 @@ model Sponsor {
   sportBudgetsJson  String?
   /// Vrije notitie uit het seizoensplan ("direct na sponsor X", "vanaf 20/09"); de operator ziet ze live.
   notes             String?
+  /// Garantie van de boeking: {"kind":"seconds"|"plays","catchUpIn":[fases]} (lib/sponsor-guarantee.ts). Null = seconden, niet inhalen.
+  guaranteeJson     String?
   createdAt         DateTime    @default(now())
   media             MediaItem[]
   playLogs          SponsorPlayLog[]
@@ -418,6 +422,26 @@ model SponsorPlayLog {
   @@index([sponsorId])
   @@index([endedAt])
   @@index([state])
+}
+
+/// Geboekte sponsortijd per fase van een wedstrijd, vastgelegd bij de start van die fase.
+/// De rapportage zet de geleverde tijd hiertegenover (geboekt en open tekort), ook als de
+/// sponsor later in het seizoen andere minuten krijgt.
+model SponsorPhaseBooking {
+  id           String   @id @default(cuid())
+  matchId      String
+  segmentKey   String
+  sponsorId    String
+  sponsorName  String
+  /// Eigen geboekte seconden voor deze fase.
+  bookedSec    Int
+  /// Tekort uit eerdere fases dat hier ingehaald mag worden.
+  carryInSec   Int      @default(0)
+  guaranteeJson String?
+  createdAt    DateTime @default(now())
+
+  @@unique([matchId, segmentKey, sponsorId])
+  @@index([sponsorId])
 }
 
 /// Commando's die via de cloud-relay (telefoon over internet) binnenkwamen en hier al uitgevoerd zijn.

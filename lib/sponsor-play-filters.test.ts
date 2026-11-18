@@ -47,6 +47,15 @@ describe("sponsorPlaySegmentKeyCondition", () => {
 });
 
 describe("proofOfPlayTotals", () => {
+  it("adds booked seconds and the open shortfall", () => {
+    const totals = proofOfPlayTotals([
+      { plays: 3, actualSec: 45.5, expectedSec: 30, bookedSec: 60, shortfallSec: 14.5 },
+      { plays: 0, actualSec: 0, expectedSec: 0, bookedSec: 60, shortfallSec: 60 },
+    ]);
+    expect(totals.totalBookedSec).toBe(120);
+    expect(totals.totalShortfallSec).toBe(74.5);
+  });
+
   it("sums the per-sponsor aggregate", () => {
     const totals = proofOfPlayTotals([
       { plays: 400, actualSec: 6000, expectedSec: 6000 },
@@ -57,6 +66,8 @@ describe("proofOfPlayTotals", () => {
       totalActualSec: 8000,
       totalExpectedSec: 10000,
       avgFulfillmentPercent: 80,
+      totalBookedSec: 0,
+      totalShortfallSec: 0,
     });
   });
 
@@ -66,6 +77,8 @@ describe("proofOfPlayTotals", () => {
       totalActualSec: 0,
       totalExpectedSec: 0,
       avgFulfillmentPercent: 0,
+      totalBookedSec: 0,
+      totalShortfallSec: 0,
     });
   });
 });

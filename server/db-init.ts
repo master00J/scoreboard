@@ -256,6 +256,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("MediaItem", "clubGroup", "TEXT");
   await addColumnIfMissing("ScheduledMediaCue", "endSec", "INTEGER");
   await addColumnIfMissing("ScheduledMediaCue", "loop", "BOOLEAN NOT NULL DEFAULT 0");
+  await addColumnIfMissing("ScheduledMediaCue", "guarantee", "TEXT");
   await addColumnIfMissing("AppSettings", "sponsorLayoutsJson", "TEXT");
   await addColumnIfMissing("Match", "homeFieldPlayerIdsJson", "TEXT");
   await addColumnIfMissing("Match", "awayFieldPlayerIdsJson", "TEXT");
@@ -325,6 +326,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("Sponsor", "sponsorPlaybackRepeatsJson", "TEXT");
   await addColumnIfMissing("Sponsor", "sportBudgetsJson", "TEXT");
   await addColumnIfMissing("Sponsor", "notes", "TEXT");
+  await addColumnIfMissing("Sponsor", "guaranteeJson", "TEXT");
   await migrateSponsorMatchHalfFromLegacy();
 
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPlayLog" (
@@ -372,6 +374,25 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   );
   await prisma.$executeRawUnsafe(
     `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_endedAt_idx" ON "SponsorPlayLog" ("endedAt")`,
+  );
+
+  // Geboekte sponsortijd per wedstrijdfase (prisma: SponsorPhaseBooking).
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "SponsorPhaseBooking" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "matchId" TEXT NOT NULL,
+    "segmentKey" TEXT NOT NULL,
+    "sponsorId" TEXT NOT NULL,
+    "sponsorName" TEXT NOT NULL,
+    "bookedSec" INTEGER NOT NULL,
+    "carryInSec" INTEGER NOT NULL DEFAULT 0,
+    "guaranteeJson" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`);
+  await prisma.$executeRawUnsafe(
+    `CREATE UNIQUE INDEX IF NOT EXISTS "SponsorPhaseBooking_matchId_segmentKey_sponsorId_key" ON "SponsorPhaseBooking" ("matchId", "segmentKey", "sponsorId")`,
+  );
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "SponsorPhaseBooking_sponsorId_idx" ON "SponsorPhaseBooking" ("sponsorId")`,
   );
 
   // Cloud-commando's die al uitgevoerd zijn (server/cloud-command-ledger.ts).

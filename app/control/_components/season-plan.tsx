@@ -26,6 +26,7 @@ import { useApi } from "@/lib/use-api";
 import { useDisplayStore } from "@/lib/store";
 import { isElectron, selectFilesViaDialog } from "@/lib/electron";
 import type { Match, MediaItem, ScheduledMediaCue, Sponsor } from "@/lib/types";
+import { defaultSponsorGuarantee, type CueGuarantee } from "@/lib/sponsor-guarantee";
 import {
   CUE_PLAN_PHASES,
   OUTSIDE_PHASES,
@@ -125,6 +126,7 @@ function newRow(kind: PlanRowKind): PlanRow {
     active: true,
     seconds: emptySeconds(),
     notes: "",
+    guarantee: defaultSponsorGuarantee(),
     mediaCount: 0,
     clips: [],
   };
@@ -465,6 +467,16 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     reload();
   }
 
+  async function patchCueGuarantee(cue: PlanCue, guarantee: CueGuarantee) {
+    const res = await fetch(`/api/scheduled-media-cues/${cue.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ guarantee }),
+    });
+    if (!res.ok) toast({ title: t("media.cuePatchFailed"), variant: "error" });
+    reloadCues();
+  }
+
   async function deleteCue(cue: PlanCue) {
     if (!window.confirm(t("media.cueDeleteConfirm"))) return;
     const res = await fetch(`/api/scheduled-media-cues/${cue.id}`, { method: "DELETE" });
@@ -482,6 +494,58 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
     return (
       <tr className="border-b border-border/60 bg-muted/20">
         <td colSpan={9} className="px-3 py-2">
+          {row.kind === "sponsor" ? (
+            <div
+              className={`mb-3 flex flex-wrap items-center gap-2 rounded-lg border p-2 text-xs ${
+                original && JSON.stringify(original.guarantee) !== JSON.stringify(row.guarantee)
+                  ? "border-amber-500/50"
+                  : "border-border"
+              }`}
+            >
+              <span className="font-medium">{t("seasonPlan.guaranteeLabel")}</span>
+              <Select
+                value={row.guarantee.kind}
+                onChange={(e) =>
+                  updateRow(row.key, (r) => ({
+                    ...r,
+                    guarantee: { ...r.guarantee, kind: e.target.value === "plays" ? "plays" : "seconds" },
+                  }))
+                }
+                className="h-7 w-52 text-xs"
+              >
+                <option value="seconds">{t("seasonPlan.guaranteeSeconds")}</option>
+                <option value="plays">{t("seasonPlan.guaranteePlays")}</option>
+              </Select>
+              <span className="text-muted-foreground">{t("seasonPlan.guaranteeCatchUp")}</span>
+              {PLAN_PHASES.filter((p) => p !== "prematch").map((phase) => {
+                const on = row.guarantee.catchUpIn.includes(phase);
+                return (
+                  <button
+                    key={phase}
+                    type="button"
+                    aria-pressed={on}
+                    className={`rounded-full border px-2 py-0.5 ${
+                      on ? "border-primary bg-primary/15 text-primary" : "border-border text-muted-foreground"
+                    }`}
+                    onClick={() =>
+                      updateRow(row.key, (r) => ({
+                        ...r,
+                        guarantee: {
+                          ...r.guarantee,
+                          catchUpIn: on
+                            ? r.guarantee.catchUpIn.filter((p) => p !== phase)
+                            : PLAN_PHASES.filter((p) => p === phase || r.guarantee.catchUpIn.includes(p)),
+                        },
+                      }))
+                    }
+                  >
+                    {t(`seasonPlan.phaseShort_${phase}`)}
+                  </button>
+                );
+              })}
+              <span className="basis-full text-[11px] text-muted-foreground">{t("seasonPlan.guaranteeHint")}</span>
+            </div>
+          ) : null}
           <p className="mb-2 text-xs text-muted-foreground">
             {t("seasonPlan.clipPhasesHint")} {t("seasonPlan.cueHint")}
           </p>
@@ -542,6 +606,16 @@ export function SeasonPlanSection({ activeMatch }: { activeMatch: Match | null }
                           <Clock className="size-3" />
                           {t(`seasonPlan.phaseShort_${cue.phase}`)} {formatClock(cue.startSec)}
                           {cue.endSec != null ? `–${formatClock(cue.endSec)}` : ""}
+                          <select
+                            className="rounded bg-transparent text-[11px] text-muted-foreground"
+                            title={t("seasonPlan.cueGuaranteeLabel")}
+                            value={cue.guarantee}
+                            onChange={(e) => void patchCueGuarantee(cue, e.target.value as CueGuarantee)}
+                          >
+                            {cue.endSec != null ? <option value="window">{t("seasonPlan.cueGuarantee_window")}</option> : null}
+                            <option value="fullPlay">{t("seasonPlan.cueGuarantee_fullPlay")}</option>
+                            <option value="none">{t("seasonPlan.cueGuarantee_none")}</option>
+                          </select>
                           <button
                             type="button"
                             className="rounded-full p-0.5 hover:bg-accent"
@@ -949,6 +1023,7 @@ function CueForm({ mediaId, halfDurationSec, onDone }: { mediaId: string; halfDu
   const [phase, setPhase] = useState<CuePlanPhase>("firstHalf");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [guarantee, setGuarantee] = useState<CueGuarantee | "auto">("auto");
   const [busy, setBusy] = useState(false);
   const placeholder = phase === "secondHalf" ? formatClock(halfDurationSec + 15 * 60) : phase === "firstHalf" ? "11:00" : "5:00";
 
@@ -968,7 +1043,13 @@ function CueForm({ mediaId, halfDurationSec, onDone }: { mediaId: string; halfDu
       const res = await fetch("/api/scheduled-media-cues", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mediaId, matchStatus: cueStatusForPlanPhase(phase), triggerSec: startSec, endSec }),
+        body: JSON.stringify({
+          mediaId,
+          matchStatus: cueStatusForPlanPhase(phase),
+          triggerSec: startSec,
+          endSec,
+          guarantee: guarantee === "auto" || (guarantee === "window" && endSec == null) ? null : guarantee,
+        }),
       });
       if (!res.ok) {
         toast({ title: t("media.cueSaveFailed"), variant: "error" });
@@ -1000,6 +1081,20 @@ function CueForm({ mediaId, halfDurationSec, onDone }: { mediaId: string; halfDu
       <label className="text-xs">
         <span className="mb-1 block text-muted-foreground">{t("seasonPlan.cueEndOptional")}</span>
         <Input value={end} onChange={(e) => setEnd(e.target.value)} placeholder="–" className="h-8 w-24" />
+      </label>
+      <label className="text-xs">
+        <span className="mb-1 block text-muted-foreground">{t("seasonPlan.cueGuaranteeLabel")}</span>
+        <Select
+          value={guarantee}
+          onChange={(e) => setGuarantee(e.target.value as CueGuarantee | "auto")}
+          className="h-8 w-48 text-xs"
+        >
+          <option value="auto">
+            {end.trim() ? t("seasonPlan.cueGuarantee_window") : t("seasonPlan.cueGuarantee_none")}
+          </option>
+          <option value="fullPlay">{t("seasonPlan.cueGuarantee_fullPlay")}</option>
+          <option value="none">{t("seasonPlan.cueGuarantee_none")}</option>
+        </Select>
       </label>
       <Button size="sm" onClick={() => void add()} disabled={busy}>
         {t("media.cueAddOnce")}

@@ -78,6 +78,13 @@ import {
 } from "../lib/sponsor-guarantee-settings";
 import { sectionForStatus } from "../lib/sponsor-display-helpers";
 import {
+  mergeBookingsIntoSummary,
+  snapshotPhaseBookings,
+  sponsorGuaranteeLive,
+  summarizeSponsorBookings,
+} from "../server/sponsor-guarantees";
+import { normalizeCueGuarantee, parseSponsorGuarantee, serializeSponsorGuarantee } from "../lib/sponsor-guarantee";
+import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
   sanitizeTemplateThemeJson,
@@ -235,6 +242,8 @@ function ensureSponsorLedger(matchId: string, segmentKey: string): SponsorLedger
       updatedAtMs: now,
     };
     ledgerSessionIds.clear();
+    // Vangnet: de geboekte tijd van deze fase vastleggen als dat bij de fasewissel niet lukte.
+    void snapshotPhaseBookingsFor(matchId);
   }
   return sponsorLedgerSnapshot;
 }
@@ -542,6 +551,25 @@ async function restoreSponsorLedgerOnStartup(): Promise<void> {
     broadcastSponsorLedger();
   } catch (err) {
     console.warn("[runtime] kon sponsorstand niet herstellen", err);
+  }
+}
+
+/** Legt de geboekte sponsortijd van de lopende fase vast (idempotent). */
+async function snapshotPhaseBookingsFor(matchId: string | null | undefined): Promise<void> {
+  if (!matchId) return;
+  try {
+    await snapshotPhaseBookings(prisma, matchId);
+  } catch (err) {
+    console.warn("[runtime] kon geboekte sponsortijd niet vastleggen", err);
+  }
+}
+
+async function snapshotPhaseBookingsForCurrentMatch(): Promise<void> {
+  try {
+    const state = await prisma.displayState.findUnique({ where: { id: 1 }, select: { matchId: true } });
+    await snapshotPhaseBookingsFor(state?.matchId);
+  } catch {
+    /* geen stand: niets vast te leggen */
   }
 }
 
@@ -1749,6 +1777,7 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   await refreshSponsorGuaranteeSettings();
   await recoverSponsorPlaysOnStartup();
   await restoreSponsorLedgerOnStartup();
+  await snapshotPhaseBookingsForCurrentMatch();
   startTickLoop();
   await broadcastDisplayState();
   broadcastSponsorLedger();
@@ -2014,8 +2043,11 @@ async function handleSponsorPlaysSummary(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const rows = await summarizeSponsorPlays(prisma, filters);
-  return json(200, { rows });
+  const [plays, bookings] = await Promise.all([
+    summarizeSponsorPlays(prisma, filters),
+    summarizeSponsorBookings(prisma, filters),
+  ]);
+  return json(200, { rows: mergeBookingsIntoSummary(plays, bookings) });
 }
 
 function csvEscape(value: unknown): string {
@@ -2647,6 +2679,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         imageDefaultSec?: number;
         active?: boolean;
         notes?: string | null;
+        guaranteeJson?: string | null;
       };
       const m1 = (body as { matchFirstHalfSeconds?: number }).matchFirstHalfSeconds ?? 0;
       const m2 = (body as { matchSecondHalfSeconds?: number }).matchSecondHalfSeconds ?? 0;
@@ -2665,6 +2698,9 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           imageDefaultSec: body.imageDefaultSec ?? 10,
           active: body.active ?? true,
           notes: typeof body.notes === "string" && body.notes.trim() ? body.notes.trim() : null,
+          guaranteeJson: serializeSponsorGuarantee(
+            parseSponsorGuarantee(typeof body.guaranteeJson === "string" ? body.guaranteeJson : null),
+          ),
         },
       });
       await touchState();
@@ -2689,10 +2725,18 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         sponsorPlaybackRepeatsJson: true,
         sportBudgetsJson: true,
         notes: true,
+        guaranteeJson: true,
       };
       const data: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(body)) {
         if (allowed[key]) data[key] = value;
+      }
+      if ("guaranteeJson" in data) {
+        // Altijd genormaliseerd: null voor de standaard (seconden, niet inhalen).
+        const raw = data.guaranteeJson;
+        data.guaranteeJson = serializeSponsorGuarantee(
+          parseSponsorGuarantee(typeof raw === "string" ? raw : null),
+        );
       }
       const sponsor = await prisma.sponsor.update({
         where: { id: sponsorId },
@@ -3095,6 +3139,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           enabled: boolean | number;
           createdAt: Date | string;
           loop: boolean | number | null;
+          guarantee: string | null;
           mediaType: string;
           mediaPath: string;
           mediaTitle: string;
@@ -3108,7 +3153,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         }>
       >(
         `SELECT
-          c."id", c."mediaId", c."matchStatus", c."triggerSec", c."endSec", c."enabled", c."loop", c."createdAt",
+          c."id", c."mediaId", c."matchStatus", c."triggerSec", c."endSec", c."enabled", c."loop", c."guarantee", c."createdAt",
           m."type" AS "mediaType", m."path" AS "mediaPath", m."title" AS "mediaTitle",
           m."durationSec" AS "mediaDurationSec", m."sponsorName" AS "mediaSponsorName",
           m."sponsorId" AS "mediaSponsorId", m."active" AS "mediaActive",
@@ -3128,6 +3173,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           endSec: c.endSec == null ? null : Number(c.endSec),
           enabled: Boolean(c.enabled),
           loop: Boolean(c.loop),
+          guarantee: normalizeCueGuarantee(c.guarantee),
           createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
           media: {
             id: c.mediaId,
@@ -3154,6 +3200,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         endSec?: number | null;
         enabled?: boolean;
         loop?: boolean;
+        guarantee?: string | null;
       }) ?? {};
       if (!body.mediaId || !body.matchStatus || !Number.isFinite(body.triggerSec)) {
         return json(400, { error: "Media, fase en tijdstip zijn verplicht." });
@@ -3167,8 +3214,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       if (!media) return json(400, { error: "Media niet gevonden." });
       const id = `cue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       await prisma.$executeRawUnsafe(
-        `INSERT INTO "ScheduledMediaCue" ("id", "mediaId", "matchStatus", "triggerSec", "endSec", "enabled", "loop")
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO "ScheduledMediaCue" ("id", "mediaId", "matchStatus", "triggerSec", "endSec", "enabled", "loop", "guarantee")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         id,
         body.mediaId,
         body.matchStatus,
@@ -3176,6 +3223,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         endSec,
         body.enabled === false ? 0 : 1,
         body.loop === true ? 1 : 0,
+        normalizeCueGuarantee(body.guarantee),
       );
       await touchState();
       await broadcastDisplayState();
@@ -3191,6 +3239,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         endSec?: number | null;
         enabled?: boolean;
         loop?: boolean;
+        guarantee?: string | null;
       }) ?? {};
       const updates: string[] = [];
       const values: unknown[] = [];
@@ -3222,6 +3271,10 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       if (typeof body.loop === "boolean") {
         updates.push(`"loop" = ?`);
         values.push(body.loop ? 1 : 0);
+      }
+      if ("guarantee" in body) {
+        updates.push(`"guarantee" = ?`);
+        values.push(normalizeCueGuarantee(body.guarantee));
       }
       if (updates.length === 0) return json(400, { error: "Geen wijzigingen." });
       await prisma.$executeRawUnsafe(
@@ -3507,6 +3560,13 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
     if (pathname === "/api/sponsor-plays/export.csv" && method === "GET") {
       return await handleSponsorPlaysCsv(searchParams);
     }
+    if (pathname === "/api/sponsor-guarantees" && method === "GET") {
+      const matchId = searchParams.get("matchId");
+      if (!matchId) return json(400, { error: "matchId ontbreekt" });
+      const payload = await sponsorGuaranteeLive(prisma, matchId);
+      if (!payload) return json(404, { error: "Wedstrijd niet gevonden" });
+      return json(200, { ...payload, reserveSec: sponsorGuaranteeSettings.reserveSec });
+    }
     if (pathname === "/api/sponsor-plays/summary" && method === "GET") {
       return await handleSponsorPlaysSummary(searchParams);
     }
@@ -3623,6 +3683,8 @@ async function executeCommand(
       const cmd = parsed.success ? parsed.data : null;
       if (cmd && result.ok && commandResetsSponsorTelemetry(cmd) && !commandLeftStateUnchanged(result)) {
         resetSponsorLedger();
+        // Nieuwe fase: vastleggen wat elke sponsor hier geboekt heeft (en mag inhalen).
+        void snapshotPhaseBookingsForCurrentMatch();
       }
       await broadcastDisplayState();
       if (result.ok && result.warning) {

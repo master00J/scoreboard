@@ -515,7 +515,26 @@
     "legendNoMedia": "Keine Medien verknüpft",
     "hudUnconfirmed": "Nicht bestätigt",
     "hudUnconfirmedHint": "Das Scoreboard meldet diesen Clip nicht. Er ist möglicherweise nicht wirklich auf dem Bildschirm — prüfen Sie das Anzeigefenster.",
-    "hudCapturePaused": "Eine externe Aufnahme überdeckt das Scoreboard. Die Sponsorrotation ist pausiert: Solange das Signal auf dem Bildschirm ist, werden kein Budget und kein Proof-of-Play gezählt."
+    "hudCapturePaused": "Eine externe Aufnahme überdeckt das Scoreboard. Die Sponsorrotation ist pausiert: Solange das Signal auf dem Bildschirm ist, werden kein Budget und kein Proof-of-Play gezählt.",
+    "guaranteeTitle": "Garantien dieser Phase",
+    "guaranteeAvailable": "Noch verfügbar: {{available}} (nach {{reserve}} Reserve)",
+    "guaranteeNoEnd": "Diese Phase hat kein festes Ende.",
+    "guaranteeOverbooked": "Insgesamt noch {{owed}} offen: mehr als diese Phase noch geben kann.",
+    "guaranteeNone": "Keine gebuchte Sponsorzeit in dieser Phase.",
+    "guaranteeColBooked": "Gebucht",
+    "guaranteeColDelivered": "Auf dem Bildschirm",
+    "guaranteeColOwed": "Offen",
+    "guaranteeKindPlays": "nur vollständige Ausspielungen",
+    "guaranteeOpenEarlier": "{{sec}} offen aus einer früheren Phase",
+    "guaranteeCuePlayed": "vollständig gespielt",
+    "guaranteeCueOwed": "eine vollständige Ausspielung noch offen",
+    "guaranteeCarry": "+{{sec}} nachholen",
+    "guaranteeDone": "erreicht",
+    "guaranteeAtRisk": "passt nicht mehr",
+    "phaseShortfallNone": "Ende {{phase}}: jeder Sponsor hat seine gebuchte Zeit bekommen.",
+    "phaseShortfallTitle": "Ende {{phase}}: noch nicht geliefert",
+    "phaseShortfallCatchUp": "wird in {{phases}} nachgeholt",
+    "phaseShortfallOpen": "bleibt offen (steht im Bericht)"
   },
   "media": {
     "title": "Sponsoren & Bildschirmzeit",
@@ -796,7 +815,11 @@
       "segmentFirstHalf": "1. Hälfte",
       "segmentSecondHalf": "2. Hälfte",
       "segmentExtraTime": "Verlängerung",
-      "segmentPostmatch": "Nach dem Spiel"
+      "segmentPostmatch": "Nach dem Spiel",
+      "colBooked": "Gebucht",
+      "colShortfall": "Offene Fehlzeit",
+      "totalBooked": "Gesamt gebucht",
+      "totalShortfall": "Gesamte offene Fehlzeit"
     },
     "guaranteeSettingsTitle": "Zählung der Sponsorzeit",
     "countManualPlays": "Von Hand gestartete Sponsorclips zählen zur gebuchten Zeit",
@@ -810,7 +833,13 @@
     "source_manual": "Manuell",
     "notCounted": "zählt nicht",
     "stateInterrupted": "unterbrochen",
-    "stateRunning": "läuft"
+    "stateRunning": "läuft",
+    "colBooked": "Gebucht",
+    "colShortfall": "Offene Fehlzeit",
+    "statBooked": "Gebucht",
+    "statBookedHint": "zu Beginn jeder Phase festgehalten",
+    "statShortfall": "Offene Fehlzeit",
+    "statShortfallHint": "gebucht, aber nicht auf dem Bildschirm, nach Nachholen"
   },
   "setup": {
     "venueBackupTitle": "Venue-Backup",
@@ -2239,7 +2268,16 @@
     "clipDeleteFailed": "{{name}} konnte nicht gelöscht werden.",
     "clipDeleted": "{{name}} gelöscht",
     "clipRemovePending": "Diese neue Datei entfernen",
-    "filesAddedTo": "{{count}} Datei(en) zu {{name}} hinzugefügt"
+    "filesAddedTo": "{{count}} Datei(en) zu {{name}} hinzugefügt",
+    "guaranteeLabel": "Garantie",
+    "guaranteeSeconds": "Sekunden (auch unterbrochene Clips)",
+    "guaranteePlays": "Nur vollständige Ausspielungen",
+    "guaranteeCatchUp": "Fehlzeit nachholen in:",
+    "guaranteeHint": "Was in einer Phase nicht auf den Bildschirm kam, läuft zusätzlich in den gewählten späteren Phasen. Ohne Auswahl bleibt es offen und steht als Fehlzeit im Bericht.",
+    "cueGuaranteeLabel": "Buchung",
+    "cueGuarantee_window": "Festes Zeitfenster",
+    "cueGuarantee_fullPlay": "Eine vollständige Ausspielung",
+    "cueGuarantee_none": "Einmal zu seinem Zeitpunkt"
   },
   "matchPackage": {
     "help": "Bereiten Sie ein Spiel auf einem anderen PC vor? Exportieren Sie es dort als Spielpaket und importieren Sie es hier mit „Spiel importieren…“. Beide Mannschaften, die Spieler und ihre Fotos, Videos und Logos kommen mit. Alles andere auf diesem PC bleibt, wie es ist.",

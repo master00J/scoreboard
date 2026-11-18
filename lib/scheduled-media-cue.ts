@@ -415,10 +415,53 @@ export function pickDueScheduledCue<
 /**
  * Komt een cue terug nadat iets anders hem van het scherm haalde (losse clip, goal, kaart)?
  * Met een klokvenster wel: het venster zegt tot wanneer hij hoort te staan. Zonder venster speelt
- * een cue één keer op zijn moment, en dat moment is dan voorbij.
+ * een cue één keer op zijn moment en is dat moment dan voorbij, tenzij de boeking één volledige
+ * vertoning belooft (`guarantee: "fullPlay"`): dan krijgt hij in dezelfde fase opnieuw zijn beurt.
  */
-export function cueResumesAfterInterruption(cue: { triggerSec: number; endSec?: number | null }): boolean {
-  return cueHasClockWindow(cue);
+export function cueResumesAfterInterruption(cue: {
+  triggerSec: number;
+  endSec?: number | null;
+  guarantee?: string | null;
+}): boolean {
+  return cueHasClockWindow(cue) || cueOwesFullPlay(cue);
+}
+
+/** Cue zonder venster die één volledige vertoning verschuldigd is. */
+export function cueOwesFullPlay(cue: { triggerSec: number; endSec?: number | null; guarantee?: string | null }): boolean {
+  return cue.guarantee === "fullPlay" && !cueHasClockWindow(cue);
+}
+
+/**
+ * Een onderbroken cue die nog een volledige vertoning tegoed heeft en nu weer mag: zelfde fase,
+ * aan, en (zonder venster) alleen terwijl de klok loopt. De vroegste eerst.
+ */
+export function pickOwedScheduledCue<
+  T extends {
+    id: string;
+    enabled: boolean;
+    matchStatus: string;
+    triggerSec: number;
+    endSec?: number | null;
+    guarantee?: string | null;
+    media?: { active?: boolean } | null;
+  },
+>(
+  cues: T[],
+  opts: { matchStatus: string; clockRuns: boolean; owed: (cue: T) => boolean },
+): T | null {
+  if (!opts.clockRuns) return null;
+  return (
+    cues
+      .filter(
+        (cue) =>
+          cue.enabled &&
+          cue.media?.active &&
+          cuePhaseMatches(cue.matchStatus, opts.matchStatus) &&
+          cueOwesFullPlay(cue) &&
+          opts.owed(cue),
+      )
+      .sort((a, b) => a.triggerSec - b.triggerSec)[0] ?? null
+  );
 }
 
 /**

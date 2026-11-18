@@ -49,6 +49,10 @@ const labels: ProofOfPlayExportLabels = {
   segmentSecondHalf: "2e",
   segmentExtraTime: "Verlenging",
   segmentPostmatch: "Na",
+  colBooked: "Geboekt",
+  colShortfall: "Open tekort",
+  totalBooked: "Totaal geboekt",
+  totalShortfall: "Totaal open tekort",
 };
 
 describe("proof-of-play brand", () => {

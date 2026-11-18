@@ -10,8 +10,10 @@ import {
   cueLeftClockWindow,
   cuePhaseMatches,
   cueResumesAfterInterruption,
+  cueOwesFullPlay,
   cueUsesLiveWallClock,
   pickDueScheduledCue,
+  pickOwedScheduledCue,
   liveWallCueClockFromPersisted,
   liveWallCueElapsedSec,
   cueWindowExpired,
@@ -63,6 +65,11 @@ export function useScheduledMediaCueActive({
   const firedScheduledCueKeysRef = useRef<Set<string>>(new Set());
   /** Hoe vaak een cue in deze doorloop al onderbroken is; een terugkeer telt als nieuw stuk schermtijd. */
   const interruptedCountRef = useRef<Map<string, number>>(new Map());
+  /**
+   * Cues zonder venster die één volledige vertoning beloven en onderbroken werden: ze krijgen in
+   * deze fase opnieuw hun beurt zodra het programma terug is. Sleutel zonder doorloop.
+   */
+  const owedCueKeysRef = useRef<Set<string>>(new Set());
   const lastScheduledCueClockRef = useRef<{
     matchId: string | null;
     status: string | null;
@@ -205,6 +212,7 @@ export function useScheduledMediaCueActive({
       setActiveScheduledCue(null);
       firedScheduledCueKeysRef.current.clear();
       interruptedCountRef.current.clear();
+      owedCueKeysRef.current.clear();
       return;
     }
     const prev = lastScheduledCueClockRef.current;
@@ -215,6 +223,8 @@ export function useScheduledMediaCueActive({
     if (prev.matchId !== matchId || prev.status !== status || cueElapsed < prev.elapsed - 1) {
       firedScheduledCueKeysRef.current.clear();
       interruptedCountRef.current.clear();
+      // Een verschuldigde vertoning hoort bij haar fase; daarna staat ze als tekort in het rapport.
+      if (prev.matchId !== matchId || prev.status !== status) owedCueKeysRef.current.clear();
       setActiveScheduledCue(null);
     }
     lastScheduledCueClockRef.current = { matchId, status, elapsed: cueElapsed };
@@ -223,6 +233,9 @@ export function useScheduledMediaCueActive({
   /** Onthoudt per doorloop welke cue al gestart is. */
   const startedKeyOf = (cue: ScheduledMediaCue, matchId: string, matchStatus: string) =>
     `${matchId}:${cueClockPhaseKey(matchStatus) ?? matchStatus}:${cue.id}:${scheduledCueCycle}`;
+
+  const owedKeyOf = (cue: ScheduledMediaCue, matchId: string, matchStatus: string) =>
+    `${matchId}:${cueClockPhaseKey(matchStatus) ?? matchStatus}:${cue.id}`;
 
   /** De cue die nu hoort te starten, of null. Telt meteen als gestart in deze doorloop. */
   const takeDueCue = (): ScheduledMediaCue | null => {
@@ -236,8 +249,21 @@ export function useScheduledMediaCueActive({
       clockRuns: (state.timerRunning ?? false) || usesLiveWallClock,
       alreadyStarted: (candidate) => firedScheduledCueKeysRef.current.has(keyOf(candidate)),
     });
-    if (cue) firedScheduledCueKeysRef.current.add(keyOf(cue));
-    return cue;
+    if (cue) {
+      firedScheduledCueKeysRef.current.add(keyOf(cue));
+      return cue;
+    }
+    // Geen nieuwe cue aan de beurt: een onderbroken cue met een verschuldigde vertoning gaat voor.
+    const owed = pickOwedScheduledCue(scheduledCues, {
+      matchStatus: match.status,
+      clockRuns: (state.timerRunning ?? false) || usesLiveWallClock,
+      owed: (candidate) => owedCueKeysRef.current.has(owedKeyOf(candidate, match.id, match.status)),
+    });
+    if (owed) {
+      owedCueKeysRef.current.delete(owedKeyOf(owed, match.id, match.status));
+      firedScheduledCueKeysRef.current.add(keyOf(owed));
+    }
+    return owed;
   };
 
   useLayoutEffect(() => {
@@ -254,6 +280,9 @@ export function useScheduledMediaCueActive({
           const key = startedKeyOf(activeScheduledCue, match.id, match.status);
           firedScheduledCueKeysRef.current.delete(key);
           interruptedCountRef.current.set(key, (interruptedCountRef.current.get(key) ?? 0) + 1);
+          if (cueOwesFullPlay(activeScheduledCue)) {
+            owedCueKeysRef.current.add(owedKeyOf(activeScheduledCue, match.id, match.status));
+          }
         }
         setActiveScheduledCue(null);
       }

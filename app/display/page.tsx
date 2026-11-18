@@ -82,6 +82,7 @@ import {
   type VisiblePlay,
 } from "@/lib/use-scheduled-cue-telemetry";
 import { useDisplayWindowVisible } from "@/lib/use-display-window-visible";
+import { sponsorWithCatchUp } from "@/lib/sponsor-guarantee";
 import { cueHasClockWindow, cueWindowLengthSec, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 import {
   finalizeSponsorDistPhase,
@@ -227,7 +228,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const [activeMedia, setActiveMedia] = useState<MediaItem | null>(null);
   /** Media-id waarvoor het opzoeken klaar is. Tot dan is "geen media" nog geen antwoord. */
   const [activeMediaSettledId, setActiveMediaSettledId] = useState<string | null>(null);
-  const [sponsors, setSponsors] = useState<Sponsor[]>([]);
+  const [rotationSponsors, setSponsors] = useState<Sponsor[]>([]);
+  /** Tekort uit eerdere fases dat elke sponsor in de lopende fase mag inhalen (seconden). */
+  const [catchUpBySponsor, setCatchUpBySponsor] = useState<Record<string, number>>({});
   /** Opgeslagen indeling uit `/api/settings`; alleen nog de terugval. */
   const [themeJsonFromSettings, setThemeJsonFromSettings] = useState<string | null>(null);
   /**
@@ -388,6 +391,41 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       .then((list: Sponsor[]) => setSponsors(Array.isArray(list) ? list : []))
       .catch(() => setSponsors([]));
   }, [state?.updatedAt, previewIframe]);
+
+  /**
+   * Inhalen: een sponsor waarvan de boeking zegt dat een tekort in deze fase ingehaald mag
+   * worden, krijgt dat tekort bij zijn budget voor deze fase. Rooster en rotatie plannen het dan
+   * gewoon mee. Vastgelegd bij de start van de fase, dus het verandert niet midden in de fase.
+   * Alleen voetbal (de minuten per fase); zonder inhaalafspraak verandert er niets.
+   */
+  useEffect(() => {
+    if (previewIframe || !match?.id || normalizeSport(match.sport) !== "FOOTBALL") {
+      setCatchUpBySponsor({});
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/sponsor-guarantees?matchId=${encodeURIComponent(match.id)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((payload: { sponsors?: Array<{ id: string; carryInSec?: number }> } | null) => {
+        if (cancelled) return;
+        const next: Record<string, number> = {};
+        for (const s of payload?.sponsors ?? []) {
+          if ((s.carryInSec ?? 0) > 0) next[s.id] = s.carryInSec!;
+        }
+        setCatchUpBySponsor((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [previewIframe, match?.id, match?.status, match?.sport]);
+
+  const sponsors = useMemo(() => {
+    if (Object.keys(catchUpBySponsor).length === 0) return rotationSponsors;
+    return rotationSponsors.map((s) =>
+      catchUpBySponsor[s.id] ? sponsorWithCatchUp(s, catchUpBySponsor[s.id]!, match?.status) : s,
+    );
+  }, [rotationSponsors, catchUpBySponsor, match?.status]);
 
   useEffect(() => {
     if (previewIframe) return;

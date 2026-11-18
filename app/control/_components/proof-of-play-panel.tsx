@@ -288,6 +288,8 @@ export function ProofOfPlayPanel() {
           filterLabel,
           totalPlays: exportTotals.totalPlays,
           totalActualSec: exportTotals.totalActualSec,
+          totalBookedSec: exportTotals.totalBookedSec,
+          totalShortfallSec: exportTotals.totalShortfallSec,
           totalExpectedSec: exportTotals.totalExpectedSec,
           avgFulfillmentPercent: exportTotals.avgFulfillmentPercent,
         };
@@ -339,6 +341,8 @@ export function ProofOfPlayPanel() {
     totalActualSec,
     totalExpectedSec,
     avgFulfillmentPercent: avgFulfillment,
+    totalBookedSec,
+    totalShortfallSec,
   } = proofOfPlayTotals(summary);
 
   return (
@@ -591,6 +595,16 @@ export function ProofOfPlayPanel() {
             value={`${avgFulfillment}%`}
             hint={t("reports.statFulfillmentHint")}
           />
+          <Stat
+            label={t("reports.statBooked")}
+            value={formatSecForExport(totalBookedSec)}
+            hint={t("reports.statBookedHint")}
+          />
+          <Stat
+            label={t("reports.statShortfall")}
+            value={formatSecForExport(totalShortfallSec)}
+            hint={t("reports.statShortfallHint")}
+          />
         </div>
       </section>
 
@@ -610,6 +624,8 @@ export function ProofOfPlayPanel() {
                   <th className="py-2 pr-3 text-right">{t("reports.colActual")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colExpected")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colFulfillment")}</th>
+                  <th className="py-2 pr-3 text-right">{t("reports.colBooked")}</th>
+                  <th className="py-2 pr-3 text-right">{t("reports.colShortfall")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -627,6 +643,16 @@ export function ProofOfPlayPanel() {
                       {s.expectedSec > 0
                         ? `${Math.round((s.actualSec / s.expectedSec) * 100)}%`
                         : "—"}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {s.bookedSec ? formatSecForExport(s.bookedSec) : "—"}
+                    </td>
+                    <td
+                      className={`py-2 pr-3 text-right tabular-nums ${
+                        (s.shortfallSec ?? 0) >= 0.5 ? "font-semibold text-amber-600 dark:text-amber-400" : ""
+                      }`}
+                    >
+                      {s.bookedSec ? formatSecForExport(s.shortfallSec ?? 0) : "—"}
                     </td>
                   </tr>
                 ))}

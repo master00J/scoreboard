@@ -515,7 +515,26 @@
     "hudInactiveBody": "Non appena la rotazione sponsor è attiva, qui vedi lo sponsor corrente, l’avanzamento del clip e il prossimo momento programmato.",
     "hudUnconfirmed": "Non confermato",
     "hudUnconfirmedHint": "Il tabellone non segnala questo clip. Potrebbe non essere davvero sullo schermo — controlla la finestra display.",
-    "hudCapturePaused": "L’acquisizione esterna copre il tabellone. La rotazione sponsor è in pausa: finché il segnale è sullo schermo non vengono conteggiati né budget né prova di diffusione."
+    "hudCapturePaused": "L’acquisizione esterna copre il tabellone. La rotazione sponsor è in pausa: finché il segnale è sullo schermo non vengono conteggiati né budget né prova di diffusione.",
+    "guaranteeTitle": "Garanzie di questa fase",
+    "guaranteeAvailable": "Ancora disponibile: {{available}} (dopo {{reserve}} di riserva)",
+    "guaranteeNoEnd": "Questa fase non ha una fine fissa.",
+    "guaranteeOverbooked": "{{owed}} ancora dovuti in totale: più di quanto questa fase possa ancora dare.",
+    "guaranteeNone": "Nessun tempo sponsor prenotato in questa fase.",
+    "guaranteeColBooked": "Prenotato",
+    "guaranteeColDelivered": "Sullo schermo",
+    "guaranteeColOwed": "Dovuto",
+    "guaranteeKindPlays": "solo riproduzioni complete",
+    "guaranteeOpenEarlier": "{{sec}} in sospeso da una fase precedente",
+    "guaranteeCuePlayed": "riprodotto per intero",
+    "guaranteeCueOwed": "una riproduzione completa ancora dovuta",
+    "guaranteeCarry": "+{{sec}} da recuperare",
+    "guaranteeDone": "raggiunto",
+    "guaranteeAtRisk": "non ci sta più",
+    "phaseShortfallNone": "Fine di {{phase}}: ogni sponsor ha avuto il suo tempo prenotato.",
+    "phaseShortfallTitle": "Fine di {{phase}}: non ancora erogato",
+    "phaseShortfallCatchUp": "recuperato in {{phases}}",
+    "phaseShortfallOpen": "resta in sospeso (nel report)"
   },
   "media": {
     "title": "Sponsor e tempo schermo",
@@ -796,7 +815,11 @@
       "segmentFirstHalf": "Primo tempo",
       "segmentSecondHalf": "Secondo tempo",
       "segmentExtraTime": "Supplementari",
-      "segmentPostmatch": "Post-partita"
+      "segmentPostmatch": "Post-partita",
+      "colBooked": "Prenotato",
+      "colShortfall": "Ammanco aperto",
+      "totalBooked": "Totale prenotato",
+      "totalShortfall": "Totale ammanco aperto"
     },
     "guaranteeSettingsTitle": "Conteggio del tempo sponsor",
     "countManualPlays": "Le clip sponsor avviate a mano contano per il tempo prenotato",
@@ -810,7 +833,13 @@
     "source_manual": "Manuale",
     "notCounted": "non conteggiato",
     "stateInterrupted": "interrotto",
-    "stateRunning": "in corso"
+    "stateRunning": "in corso",
+    "colBooked": "Prenotato",
+    "colShortfall": "Ammanco aperto",
+    "statBooked": "Prenotato",
+    "statBookedHint": "registrato all'inizio di ogni fase",
+    "statShortfall": "Ammanco aperto",
+    "statShortfallHint": "prenotato ma non sullo schermo, dopo il recupero"
   },
   "setup": {
     "venueBackupTitle": "Backup impianto",
@@ -2239,7 +2268,16 @@
     "clipDeleteFailed": "Impossibile eliminare {{name}}.",
     "clipDeleted": "{{name}} eliminato",
     "clipRemovePending": "Togli questo nuovo file",
-    "filesAddedTo": "{{count}} file aggiunti a {{name}}"
+    "filesAddedTo": "{{count}} file aggiunti a {{name}}",
+    "guaranteeLabel": "Garanzia",
+    "guaranteeSeconds": "Secondi (anche clip interrotte)",
+    "guaranteePlays": "Solo riproduzioni complete",
+    "guaranteeCatchUp": "Recuperare un ammanco in:",
+    "guaranteeHint": "Ciò che non è andato sullo schermo in una fase viene riprodotto in più nelle fasi successive scelte. Senza scelta resta in sospeso e compare come ammanco nel report.",
+    "cueGuaranteeLabel": "Prenotazione",
+    "cueGuarantee_window": "Finestra temporale fissa",
+    "cueGuarantee_fullPlay": "Una riproduzione completa",
+    "cueGuarantee_none": "Una volta al suo momento"
   },
   "matchPackage": {
     "help": "Prepari una partita su un altro PC? Esportala lì come pacchetto partita e importala qui con «Importa partita…». Entrambe le squadre, i giocatori e le loro foto, video e loghi vengono inclusi. Il resto su questo PC resta com’è.",
