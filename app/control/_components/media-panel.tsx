@@ -55,6 +55,7 @@ import {
 import { ChevronDown, Film, Plus } from "lucide-react";
 import type { TFunction } from "i18next";
 import { isDisplayPlaybackRisk } from "@/lib/media-playback-compat";
+import { MediaHealthBadge } from "./media-health-badge";
 import {
   RUNDOWN_PHASES,
   cueRundownPhaseKey,
@@ -1046,6 +1047,7 @@ function MediaCard({
       </div>
       <div className="p-2 text-xs flex flex-col gap-1">
         <div className="truncate font-semibold">{item.title}</div>
+        <MediaHealthBadge item={item} />
         {isDisplayPlaybackRisk(item.playbackWarning) ? (
           <div className="flex flex-col gap-1">
             <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 leading-snug">
@@ -2089,6 +2091,7 @@ function SponsorCard({
               </div>
               <div className="p-2 text-xs flex flex-col gap-1">
                 <div className="truncate font-semibold">{m.title}</div>
+                <MediaHealthBadge item={m} />
                 {isDisplayPlaybackRisk(m.playbackWarning) ? (
                   <div className="flex flex-col gap-1">
                     <div className="text-[10px] font-semibold text-amber-700 dark:text-amber-400 leading-snug">

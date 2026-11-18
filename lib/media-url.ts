@@ -1,3 +1,5 @@
+import { resolveStoredMediaPath } from "./media-file-path";
+
 /**
  * Convert a stored media/photo/logo path to a URL usable in <img> / <video>.
  *
@@ -12,10 +14,9 @@ export function mediaUrl(storedPath: string | null | undefined): string {
   if (!storedPath) return "";
   if (typeof window !== "undefined" && window.electronAPI) {
     if (storedPath.startsWith("/uploads/")) {
-      const uploadsDir = window.electronAPI.context.uploadsDir;
-      if (!uploadsDir) return storedPath;
-      const fileName = storedPath.replace(/^\/uploads\//, "");
-      return toFileUrl(`${uploadsDir}\\${fileName}`);
+      // Zelfde vertaling als de controle en de omzetting in het hoofdproces.
+      const file = resolveStoredMediaPath(storedPath, window.electronAPI.context.uploadsDir);
+      return file ? toFileUrl(file) : storedPath;
     }
     return toFileUrl(storedPath);
   }
@@ -24,10 +25,19 @@ export function mediaUrl(storedPath: string | null | undefined): string {
   return `/api/localfile?path=${encodeURIComponent(storedPath)}`;
 }
 
-function toFileUrl(filePath: string): string {
+/**
+ * Absolute file path → file:// URL. Every path segment is percent-encoded on its own, so
+ * characters that mean something in a URL (`#`, `?`, `%`) stay part of the file name:
+ * `encodeURI` would turn `Sponsor #1.png` into a fragment and the file would not load.
+ * The drive letter and the slashes are kept as they are.
+ */
+export function toFileUrl(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/");
-  const prefixed = /^[a-zA-Z]:\//.test(normalized)
-    ? `file:///${normalized}`
-    : `file://${normalized}`;
-  return encodeURI(prefixed);
+  const drive = /^([a-zA-Z]:)(\/.*)$/.exec(normalized);
+  if (drive) return `file:///${drive[1]}${encodePathSegments(drive[2])}`;
+  return `file://${encodePathSegments(normalized)}`;
+}
+
+function encodePathSegments(path: string): string {
+  return path.split("/").map(encodeURIComponent).join("/");
 }

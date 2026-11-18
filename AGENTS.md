@@ -24,6 +24,7 @@ The layout a club makes under "Scherm indelen" is stored as JSON in `AppSettings
 
 - The countdown to the planned start and the operator's announcement live in `AppSettings.displayExtrasJson` (`lib/display-extras.ts`). `DisplayExtrasLayer` draws them on top of every screen mode. Change them through `useDisplayExtras().update(...)`, which reads the latest value first so two panels do not overwrite each other.
 - Which monitor shows the stadium screen is a choice per PC, stored in `stadium-screen.json` next to the database (`lib/stadium-screen.ts`). It is not a database setting and is not part of a backup.
+- The network the phone bridge listens on is also a choice per PC, stored in `mobile-bridge-network.json` in the same folder (`lib/mobile-bridge-network.ts`). The default is the network of the PC's default route, not `0.0.0.0`; the QR codes only show addresses the bridge really listens on.
 - A venue backup must let a club continue on another PC. It holds the database, `uploads/`, and every file the database points to outside `uploads/`. `server/venue-backup.ts` finds those files by scanning all text columns, including paths inside JSON, so store a file path as a plain string. Restoring swaps the files at startup, before the database is opened (`applyPendingRestore`), and keeps what was there in `restore-safety/`.
 
 ## Checks

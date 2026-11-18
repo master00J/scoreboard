@@ -1,6 +1,7 @@
 import { app } from "electron";
 import { readStoredLicense } from "./license-service";
 import { withClockTelemetry } from "../lib/clock-telemetry";
+import { checkAckResponse, CloudAckError, isRetryableAckStatus, relayCloudCommands, type CloudAck } from "../lib/cloud-command-relay";
 
 type CloudRuntime = {
   apiRequest?: (request: {
@@ -11,7 +12,13 @@ type CloudRuntime = {
     bodyText?: string;
   }) => Promise<{ status: number; json?: unknown; text?: string }>;
   getDisplaySnapshot: () => Promise<unknown>;
-  runCommand: (command: unknown) => Promise<unknown>;
+  /** Voert een cloud-commando hoogstens één keer per id uit (zie `runtime.runCloudCommand`). */
+  runCloudCommand: (
+    commandId: string,
+    command: unknown,
+  ) => Promise<{ ack: { ok: boolean; error?: string; result?: unknown }; duplicate: boolean }>;
+  markCloudCommandAcked: (commandId: string) => Promise<void>;
+  pruneCloudCommandLedger: () => Promise<number>;
 };
 
 type CloudAgentOptions = {
@@ -32,6 +39,10 @@ export type CloudAgentHandle = {
 };
 
 const FETCH_TIMEOUT_MS = 5000;
+/** Oude uitgevoerde cloud-ids opruimen: bij de start en daarna elk uur. */
+const LEDGER_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+/** Na een 401 hoogstens zo vaak de sleutel opnieuw uit het licentiebestand lezen. */
+const KEY_RELOAD_MIN_INTERVAL_MS = 60 * 1000;
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   const ctrl = new AbortController();
@@ -97,8 +108,29 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
     return null;
   }
   const cloudBaseUrl = normalizeCloudBaseUrl(baseUrl);
-  const cloudDesktopKey = desktopKey;
+  let cloudDesktopKey = desktopKey;
   const cloudVenueId = venueId;
+  const desktopKeyFromEnv = !!process.env.CONTROL_DESKTOP_KEY?.trim();
+  let lastKeyReloadAt = 0;
+
+  /**
+   * De licentiecheck kan een nieuwe sleutel uitdelen (bv. na intrekken of vernieuwen op de site).
+   * Weigert de cloud de huidige, dan de sleutel uit het licentiebestand opnieuw lezen in plaats van
+   * tot de volgende herstart met een ingetrokken sleutel te blijven aankloppen.
+   */
+  function reloadDesktopKeyAfterUnauthorized() {
+    if (desktopKeyFromEnv) return;
+    const now = Date.now();
+    if (now - lastKeyReloadAt < KEY_RELOAD_MIN_INTERVAL_MS) return;
+    lastKeyReloadAt = now;
+    const fresh = readStoredLicense(app.getPath("userData"));
+    if (fresh?.controlVenueId && fresh.controlVenueId !== cloudVenueId) return;
+    const nextKey = fresh?.controlDesktopKey?.trim();
+    if (nextKey && nextKey !== cloudDesktopKey) {
+      cloudDesktopKey = nextKey;
+      options.log("[cloud-control] nieuwe desktop-sleutel uit de licentie in gebruik");
+    }
+  }
 
   const customerPairCode = operatorPairToken
     ? `ACPAIR:cloud|${encodeURIComponent(cloudBaseUrl)}|${encodeURIComponent(cloudVenueId)}|${encodeURIComponent(operatorPairToken)}`
@@ -118,6 +150,7 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
       },
       body: JSON.stringify({ venueId: cloudVenueId, state }),
     });
+    if (res.status === 401) reloadDesktopKeyAfterUnauthorized();
     if (!res.ok) {
       const now = Date.now();
       if (now - lastStatePostErrorLogAt > 30_000) {
@@ -143,13 +176,14 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
         headers: { "x-desktop-key": cloudDesktopKey },
       },
     );
+    if (res.status === 401) reloadDesktopKeyAfterUnauthorized();
     if (!res.ok) return [];
     const payload = (await res.json()) as { commands?: PendingCommand[] };
     return Array.isArray(payload.commands) ? payload.commands : [];
   }
 
-  async function ackCommand(commandId: string, result: { ok: boolean; error?: string; result?: unknown }) {
-    await fetchWithTimeout(`${cloudBaseUrl}/api/control/desktop/commands`, {
+  async function postAck(commandId: string, ack: CloudAck) {
+    const res = await fetchWithTimeout(`${cloudBaseUrl}/api/control/desktop/commands`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -157,38 +191,48 @@ export function startCloudControlAgent(options: CloudAgentOptions): CloudAgentHa
       },
       body: JSON.stringify({
         commandId,
-        ok: result.ok,
-        error: result.error,
-        result: result.result ?? null,
+        ok: ack.ok,
+        error: ack.error,
+        result: ack.result ?? null,
       }),
     });
+    if (res.status === 401) reloadDesktopKeyAfterUnauthorized();
+    let body: unknown = null;
+    try {
+      body = await res.json();
+    } catch {
+      if (res.ok) throw new CloudAckError(`bevestiging zonder geldig antwoord (${res.status})`, true);
+      throw new CloudAckError(`bevestiging geweigerd (${res.status})`, isRetryableAckStatus(res.status));
+    }
+    checkAckResponse(res.status, body);
+  }
+
+  let lastPruneAt = 0;
+  async function pruneLedgerIfDue() {
+    const now = Date.now();
+    if (now - lastPruneAt < LEDGER_PRUNE_INTERVAL_MS) return;
+    lastPruneAt = now;
+    try {
+      const removed = await options.runtime.pruneCloudCommandLedger();
+      if (removed > 0) options.log(`[cloud-control] ${removed} oude commando-ids opgeruimd`);
+    } catch (err) {
+      options.log(`[cloud-control] opruimen commando-ids mislukt: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async function tick() {
     if (disposed || busy) return;
     busy = true;
     try {
+      await pruneLedgerIfDue();
       await postState();
       const commands = await pullCommands();
-      for (const item of commands) {
-        try {
-          const runResult = (await options.runtime.runCommand(item.command)) as {
-            ok?: boolean;
-            error?: string;
-            result?: unknown;
-          };
-          await ackCommand(item.id, {
-            ok: !!runResult?.ok,
-            error: runResult?.error,
-            result: runResult?.result,
-          });
-        } catch (err) {
-          await ackCommand(item.id, {
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      await relayCloudCommands(commands, {
+        apply: (commandId, command) => options.runtime.runCloudCommand(commandId, command),
+        postAck,
+        markAcked: (commandId) => options.runtime.markCloudCommandAcked(commandId),
+        log: options.log,
+      });
     } catch (err) {
       options.log(`[cloud-control] sync fout: ${err instanceof Error ? err.message : String(err)}`);
     } finally {

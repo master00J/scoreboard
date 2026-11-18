@@ -426,14 +426,20 @@ export function cueResumesAfterInterruption(cue: { triggerSec: number; endSec?: 
  * Komt een cue na een onderbreking terug (`stint` 1, 2, …), dan telt dat als een nieuw stuk
  * schermtijd. Onder dezelfde naam bleef alleen het langste stuk over en kreeg de sponsor te
  * weinig seconden op zijn naam.
+ *
+ * De naam bevat ook de wedstrijd: `SponsorPlayLog.clipSessionId` is uniek en een latere melding
+ * werkt die rij bij, dus zonder wedstrijd overschreef dezelfde cue in de volgende wedstrijd de
+ * rij van de vorige. Voor alle meldingen (start, voortgang, einde) over hetzelfde stuk blijft
+ * de naam gelijk.
  */
 export function cueClipSessionId(opts: {
+  matchId: string;
   cueId: string;
   cycle: number;
   mediaId: string;
   stint?: number;
 }): string {
-  const base = `cue:${opts.cueId}:${opts.cycle}:${opts.mediaId}`;
+  const base = `cue:${opts.matchId}:${opts.cueId}:${opts.cycle}:${opts.mediaId}`;
   return opts.stint && opts.stint > 0 ? `${base}:r${opts.stint}` : base;
 }
 

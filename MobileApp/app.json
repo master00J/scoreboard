@@ -27,7 +27,8 @@
           "cameraPermission": "Camera nodig om de ArenaCue desktop QR-code te scannen.",
           "recordAudioAndroid": false
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "android": {
       "package": "be.arenacue.control",

@@ -250,6 +250,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("MediaItem", "playbackWarning", "TEXT");
   await addColumnIfMissing("MediaItem", "quickLaunch", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("MediaItem", "clubPhaseBudgetJson", "TEXT");
+  await addColumnIfMissing("MediaItem", "mediaCheckJson", "TEXT");
   await addColumnIfMissing("MediaItem", "notes", "TEXT");
   await addColumnIfMissing("MediaItem", "clubGroup", "TEXT");
   await addColumnIfMissing("ScheduledMediaCue", "endSec", "INTEGER");
@@ -360,6 +361,18 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   );
   await prisma.$executeRawUnsafe(
     `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_endedAt_idx" ON "SponsorPlayLog" ("endedAt")`,
+  );
+
+  // Cloud-commando's die al uitgevoerd zijn (server/cloud-command-ledger.ts).
+  await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "AppliedCloudCommand" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "ok" BOOLEAN NOT NULL,
+    "error" TEXT,
+    "appliedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "ackedAt" DATETIME
+  )`);
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "AppliedCloudCommand_appliedAt_idx" ON "AppliedCloudCommand" ("appliedAt")`,
   );
 }
 
