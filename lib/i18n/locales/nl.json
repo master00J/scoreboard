@@ -1313,6 +1313,7 @@
     "healthReasonFfmpegMissing": "FFmpeg ontbreekt: niet volledig gecontroleerd",
     "healthReasonTimeout": "Controle duurde te lang",
     "healthReasonDeferredLiveMatch": "Volledige controle na de wedstrijd",
+    "healthReasonChecking": "Wordt nu gecontroleerd. Het bestand komt op het scherm zodra de controle klaar is.",
     "healthAnimatedWebp": "Bewegende WebP. De volledige animatie kon niet worden gecontroleerd.",
     "healthReasonNotChecked": "Nog niet volledig gecontroleerd",
     "themeSurfaceHint": "Stel beide stadionscherm-vlakken in. Bij Achtergronden geldt de algemene scorebord-achtergrond voor allebei, tenzij je er een apart beeld voor kiest.",

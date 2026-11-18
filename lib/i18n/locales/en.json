@@ -1313,6 +1313,7 @@
     "healthReasonFfmpegMissing": "FFmpeg missing: not fully checked",
     "healthReasonTimeout": "Check took too long",
     "healthReasonDeferredLiveMatch": "Full check after the match",
+    "healthReasonChecking": "Being checked now. The file goes on screen as soon as the check is done.",
     "healthAnimatedWebp": "Animated WebP. The complete animation could not be verified.",
     "healthReasonNotChecked": "Not fully checked yet",
     "themeSurfaceHint": "Set up both stadium-screen surfaces. Under Backgrounds, the shared scoreboard background applies to both unless you pick a separate image.",

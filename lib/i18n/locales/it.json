@@ -1265,6 +1265,7 @@
     "healthReasonFfmpegMissing": "FFmpeg mancante: verifica incompleta",
     "healthReasonTimeout": "La verifica ha richiesto troppo tempo",
     "healthReasonDeferredLiveMatch": "Verifica completa dopo la partita",
+    "healthReasonChecking": "Verifica in corso. Il file va sullo schermo appena la verifica è terminata.",
     "healthAnimatedWebp": "WebP animato. Non è stato possibile verificare l’intera animazione.",
     "healthReasonNotChecked": "Non ancora verificato del tutto",
     "healthPreparing": "Conversione… {{done}}/{{total}}",
