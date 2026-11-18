@@ -1349,7 +1349,7 @@
     "networkFallback": "The chosen network is not connected. Until it is back, phone control listens on {{network}}.",
     "networkNone": "No network found. Connect the PC to the network; phone control follows automatically.",
     "networkAllWarning": "Every network this PC is on can reach phone control. Prefer choosing the phones' network.",
-    "networkUpgradeHint": "After the update, mobile control uses {{network}}. Select the stadium adapter if the phones use a different network.",
+    "networkUpgradeHint": "This PC is on more than one network. As before, phone control listens on all of them so paired phones keep working. Choose the phones' network to close off the others.",
     "networkFixedByEnv": "Fixed by MOBILE_BRIDGE_BIND on this PC: {{network}}.",
     "networkSaveFailed": "Could not move phone control to that network. It stays on the previous network."
   },

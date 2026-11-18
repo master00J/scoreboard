@@ -1349,7 +1349,7 @@
     "networkFallback": "Het gekozen netwerk is niet aangesloten. Tot het terug is, luistert de telefoonbediening op {{network}}.",
     "networkNone": "Geen netwerk gevonden. Sluit de pc aan op het netwerk; de telefoonbediening volgt vanzelf.",
     "networkAllWarning": "Elk netwerk waarop deze pc zit kan de telefoonbediening bereiken. Kies liever het netwerk van de telefoons.",
-    "networkUpgradeHint": "Na de update gebruikt de telefoonbediening {{network}}. Kies de kaart van het stadion als de telefoons op een ander netwerk zitten.",
+    "networkUpgradeHint": "Deze pc zit op meer dan één netwerk. Zoals vroeger luistert de telefoonbediening op alle netwerken, zodat gekoppelde telefoons blijven werken. Kies het netwerk van de telefoons om de andere af te sluiten.",
     "networkFixedByEnv": "Vastgezet door MOBILE_BRIDGE_BIND op deze pc: {{network}}.",
     "networkSaveFailed": "Kon de telefoonbediening niet op dat netwerk zetten. Ze blijft op het vorige netwerk."
   },

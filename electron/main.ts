@@ -1268,8 +1268,8 @@ function bridgeNetworkChoice(adapters: NetworkAdapter[], route: string | null, b
   } catch (error) {
     bootLog(`[mobile-bridge] kon netwerkkeuze niet bewaren: ${String(error)}`);
   }
-  if (initial.mode === "auto" && initial.fromUpgrade) {
-    bootLog("[mobile-bridge] bestaande koppeling met meerdere netwerken: automatisch één kaart gekozen");
+  if (initial.mode === "all") {
+    bootLog("[mobile-bridge] bestaande koppeling en meerdere netwerken: blijft op alle netwerken tot de club er een kiest");
   }
   return initial;
 }

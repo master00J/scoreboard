@@ -1349,7 +1349,7 @@
     "networkFallback": "Le réseau choisi n’est pas connecté. En attendant, la commande par téléphone écoute sur {{network}}.",
     "networkNone": "Aucun réseau trouvé. Connectez le PC au réseau ; la commande par téléphone suit automatiquement.",
     "networkAllWarning": "Tous les réseaux de ce PC peuvent joindre la commande par téléphone. Choisissez plutôt le réseau des téléphones.",
-    "networkUpgradeHint": "Après la mise à jour, la commande mobile utilise {{network}}. Choisissez la carte du stade si les téléphones utilisent un autre réseau.",
+    "networkUpgradeHint": "Ce PC est sur plusieurs réseaux. Comme avant, la commande par téléphone écoute sur tous, pour que les téléphones couplés continuent de fonctionner. Choisissez le réseau des téléphones pour fermer les autres.",
     "networkFixedByEnv": "Fixé par MOBILE_BRIDGE_BIND sur ce PC : {{network}}.",
     "networkSaveFailed": "Impossible de passer la commande par téléphone sur ce réseau. Elle reste sur le réseau précédent."
   },

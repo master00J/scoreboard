@@ -161,10 +161,16 @@ describe("phaseRemainingSec", () => {
 
 describe("isCompletePlay", () => {
   it("uses the measured milliseconds and excludes unfinished plays", () => {
-    expect(isCompletePlay({ expectedSec: 8, actualSec: 8, actualMs: 7_600 })).toBe(false);
+    expect(isCompletePlay({ expectedSec: 8, actualSec: 7, actualMs: 7_400 })).toBe(false);
     expect(isCompletePlay({ expectedSec: 8, actualSec: 8, actualMs: 7_968, state: "done" })).toBe(true);
     expect(isCompletePlay({ expectedSec: 8, actualSec: 8, actualMs: 7_968, state: "interrupted" })).toBe(false);
     expect(isCompletePlay({ expectedSec: 8, actualSec: 1, actualMs: 1_210 })).toBe(false);
+  });
+
+  it("counts a clip whose stored duration was rounded up", () => {
+    // 29,6 s clip, durationSec opgeslagen als 30.
+    expect(isCompletePlay({ expectedSec: 30, actualSec: 30, actualMs: 29_580, state: "done" })).toBe(true);
+    expect(isCompletePlay({ expectedSec: 30, actualSec: 29, actualMs: 29_400, state: "done" })).toBe(false);
   });
 });
 
