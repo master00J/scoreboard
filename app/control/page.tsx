@@ -30,6 +30,7 @@ import { isFullMatch } from "@/lib/is-full-match";
 import { isMatchInPlay } from "@/lib/match-in-play";
 import { exportMatch, focusDisplayWindow } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
+import { CLUB_BRAND } from "@/lib/club-brand";
 import { MatchTabGrid, LivePreviewPanel } from "./_components/match-tab-grid";
 import { InterfaceProfileControl } from "./_components/interface-profile-control";
 import { MusicPanel, MusicPlayingIndicator } from "./_components/music-panel";
@@ -175,12 +176,16 @@ export default function ControlPage() {
 
       <header className="mb-3 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/80 bg-card/80 px-3 py-3 shadow-lg shadow-black/10 backdrop-blur sm:px-4">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/15">
-            <Gauge className="size-6" />
-          </div>
+          {CLUB_BRAND ? (
+            <img src={CLUB_BRAND.headerLogoSrc} alt={t("shell.clubName")} className="h-12 w-auto shrink-0" draggable={false} />
+          ) : (
+            <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/15">
+              <Gauge className="size-6" />
+            </div>
+          )}
           <div className="min-w-0">
             <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-primary">
-              {t("shell.title")}
+              {CLUB_BRAND ? `${t("shell.clubName")} · ${t("shell.title")}` : t("shell.title")}
             </div>
             {isFullMatch(match) ? (
               <div className="flex min-w-0 items-baseline gap-2">
