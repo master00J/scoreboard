@@ -146,6 +146,7 @@ const REASON_KEYS: Partial<Record<MediaHealthReason, string>> = {
   ffmpeg_missing: "setup.healthReasonFfmpegMissing",
   timeout: "setup.healthReasonTimeout",
   deferred_live_match: "setup.healthReasonDeferredLiveMatch",
+  checking: "setup.healthReasonChecking",
   not_checked: "setup.healthReasonNotChecked",
   not_decodable_here: "setup.healthAnimatedWebp",
 };

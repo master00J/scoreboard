@@ -34,6 +34,8 @@ export type MediaHealthReason =
   | "not_decodable_here"
   /** Er loopt een wedstrijd: de controle wacht tot erna, zodat het scherm niet hapert. */
   | "deferred_live_match"
+  /** Net toegevoegd of vervangen: wordt nu gecontroleerd en speelt pas daarna. */
+  | "checking"
   /** Nog niet gecontroleerd. */
   | "not_checked";
 
@@ -240,6 +242,8 @@ export function mediaHealthFor(input: {
   probeReason?: string | null;
   /** Er loopt een wedstrijd en de decode is uitgesteld. */
   deferred?: boolean;
+  /** Nieuw of vervangen bestand dat nu gecontroleerd wordt; gaat voor `deferred`. */
+  checking?: boolean;
 }): MediaHealth {
   const empty = { detail: null, expectedSec: null, decodedSec: null };
   if (!input.fileExists) return { ...empty, status: "broken", reason: "missing_file" };
@@ -271,6 +275,36 @@ export function mediaHealthFor(input: {
   return {
     ...empty,
     status: "pending",
-    reason: input.deferred ? "deferred_live_match" : "not_checked",
+    reason: input.checking ? "checking" : input.deferred ? "deferred_live_match" : "not_checked",
   };
+}
+
+/**
+ * Mag dit bestand in de rotatie en bij tijdstippen? Niet zolang een nieuw of vervangen bestand
+ * nog gecontroleerd wordt (`awaitingCheck`), en niet als de controle van deze bestandsversie het
+ * kapot vond. Oudere bestanden die nooit gecontroleerd zijn, blijven spelen zoals vroeger.
+ * `version` wordt alleen opgevraagd bij een kapot bestand (dat kost een stat op schijf).
+ */
+export function isPlayableMedia(input: {
+  record: MediaCheckRecord | null;
+  awaitingCheck: boolean;
+  version: () => { exists: boolean; key: string | null };
+}): boolean {
+  if (input.awaitingCheck) return false;
+  if (input.record?.status !== "broken") return true;
+  const version = input.version();
+  return version.exists && version.key !== input.record.key;
+}
+
+/**
+ * Welk bestand de controle nu neemt. Nieuwe of vervangen bestanden (`urgent`) eerst, ook tijdens
+ * een wedstrijd: ze spelen pas na hun controle. De rest wacht tijdens een wedstrijd tot erna.
+ */
+export function nextMediaCheckId(queue: Iterable<string>, urgent: ReadonlySet<string>, inPlay: boolean): string | null {
+  let first: string | null = null;
+  for (const id of queue) {
+    if (urgent.has(id)) return id;
+    first ??= id;
+  }
+  return inPlay ? null : first;
 }
