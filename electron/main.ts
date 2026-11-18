@@ -682,7 +682,9 @@ async function loadRuntime() {
     runtime: {
       apiRequest: (req) => runtime!.apiRequest(req),
       getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
-      runCommand: (command) => runtime!.runCommand(command as any),
+      runCloudCommand: (commandId, command) => runtime!.runCloudCommand(commandId, command),
+      markCloudCommandAcked: (commandId) => runtime!.markCloudCommandAcked(commandId),
+      pruneCloudCommandLedger: () => runtime!.pruneCloudCommandLedger(),
     },
     log: bootLog,
   });
