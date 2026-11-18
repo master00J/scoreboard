@@ -4,9 +4,11 @@ import {
   decodeErrorLines,
   decodeTimeoutMs,
   isAnimatedWebp,
+  isPlayableMedia,
   isValidTranscodeOutput,
   mediaFileVersionKey,
   mediaHealthFor,
+  nextMediaCheckId,
   parseDecodeProgress,
   parseMediaCheckRecord,
   type DecodeRun,
@@ -251,6 +253,12 @@ describe("mediaHealthFor", () => {
     });
   });
 
+  it("zegt dat een nieuw bestand nu gecontroleerd wordt, ook tijdens een wedstrijd", () => {
+    expect(
+      mediaHealthFor({ fileExists: true, currentKey: "k1", record: null, deferred: true, checking: true }),
+    ).toMatchObject({ status: "pending", reason: "checking" });
+  });
+
   it("meldt ontbrekende FFmpeg als waarschuwing", () => {
     expect(
       mediaHealthFor({ fileExists: true, currentKey: "k1", record: null, probeReason: "ffmpeg_missing" }),
@@ -290,5 +298,52 @@ describe("isAnimatedWebp", () => {
     expect(isAnimatedWebp(webp("VP8X", 0x10))).toBe(false);
     expect(isAnimatedWebp(webp("VP8 ", 0x02))).toBe(false);
     expect(isAnimatedWebp(new Uint8Array(4))).toBe(false);
+  });
+});
+
+describe("isPlayableMedia", () => {
+  const record = (status: MediaCheckRecord["status"]): MediaCheckRecord => ({
+    v: 1,
+    key: "k1",
+    status,
+    reason: status === "broken" ? "truncated" : "ok",
+    expectedSec: 10,
+    decodedSec: status === "broken" ? 4 : 10,
+    detail: null,
+    checkedAt: "2026-11-18T12:00:00.000Z",
+  });
+  const same = () => ({ exists: true, key: "k1" });
+
+  it("houdt een nieuw of vervangen bestand uit beeld tot de controle klaar is", () => {
+    expect(isPlayableMedia({ record: null, awaitingCheck: true, version: same })).toBe(false);
+    expect(isPlayableMedia({ record: record("ok"), awaitingCheck: true, version: same })).toBe(false);
+  });
+
+  it("laat oudere, nooit gecontroleerde bestanden spelen zoals vroeger", () => {
+    expect(isPlayableMedia({ record: null, awaitingCheck: false, version: same })).toBe(true);
+  });
+
+  it("speelt een goedgekeurd bestand en houdt een kapot bestand uit beeld", () => {
+    expect(isPlayableMedia({ record: record("ok"), awaitingCheck: false, version: same })).toBe(true);
+    expect(isPlayableMedia({ record: record("warning"), awaitingCheck: false, version: same })).toBe(true);
+    expect(isPlayableMedia({ record: record("broken"), awaitingCheck: false, version: same })).toBe(false);
+  });
+
+  it("geeft een kapot bestand een nieuwe kans als het bestand op schijf veranderde", () => {
+    expect(isPlayableMedia({ record: record("broken"), awaitingCheck: false, version: () => ({ exists: true, key: "k2" }) })).toBe(true);
+    expect(isPlayableMedia({ record: record("broken"), awaitingCheck: false, version: () => ({ exists: false, key: null }) })).toBe(false);
+  });
+});
+
+describe("nextMediaCheckId", () => {
+  it("neemt nieuwe of vervangen bestanden eerst", () => {
+    expect(nextMediaCheckId(["a", "b", "c"], new Set(["c"]), false)).toBe("c");
+    expect(nextMediaCheckId(["a", "b"], new Set(), false)).toBe("a");
+  });
+
+  it("controleert tijdens een wedstrijd alleen nieuwe of vervangen bestanden", () => {
+    expect(nextMediaCheckId(["a", "b"], new Set(["b"]), true)).toBe("b");
+    expect(nextMediaCheckId(["a", "b"], new Set(), true)).toBeNull();
+    expect(nextMediaCheckId([], new Set(), false)).toBeNull();
   });
 });

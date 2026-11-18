@@ -132,7 +132,14 @@ import {
   prepareVideoForDisplay,
   resolveMediaFile,
 } from "./media-transcode";
-import { mediaHealthFor, parseMediaCheckRecord, type MediaCheckRecord, type MediaHealth } from "../lib/media-health";
+import {
+  isPlayableMedia,
+  mediaHealthFor,
+  nextMediaCheckId,
+  parseMediaCheckRecord,
+  type MediaCheckRecord,
+  type MediaHealth,
+} from "../lib/media-health";
 import {
   applyMediaSequences,
   isSequenceRotationSponsorId,
@@ -1938,6 +1945,13 @@ async function prepareRiskyVideosInBackground() {
 
 /** Media die nog volledig gedecodeerd moet worden (na import, vervangen of bij het opstarten). */
 const mediaCheckQueue = new Set<string>();
+/**
+ * Bestanden die in deze sessie zijn toegevoegd of vervangen en nog niet gecontroleerd zijn. Ze
+ * spelen pas na hun controle (zie `isPlayableMedia`), en de controle wacht niet op het einde van
+ * de wedstrijd: zo kan een club tijdens de wedstrijd clips toevoegen zonder dat er een haperende
+ * clip op het scherm komt.
+ */
+const urgentMediaChecks = new Set<string>();
 let mediaCheckWorkerRunning = false;
 let mediaCheckRetryTimer: ReturnType<typeof setTimeout> | null = null;
 /** Tijdens een wedstrijd wachten we; zo vaak kijken we of hij voorbij is. */
@@ -1948,6 +1962,17 @@ function queueMediaCheck(...ids: string[]) {
   startMediaCheckWorker();
 }
 
+/** Nieuw of vervangen bestand: meteen controleren, ook tijdens een wedstrijd, en pas daarna afspelen. */
+function queueUrgentMediaCheck(id: string) {
+  urgentMediaChecks.add(id);
+  mediaCheckQueue.add(id);
+  if (mediaCheckRetryTimer) {
+    clearTimeout(mediaCheckRetryTimer);
+    mediaCheckRetryTimer = null;
+  }
+  startMediaCheckWorker();
+}
+
 function startMediaCheckWorker() {
   if (mediaCheckWorkerRunning || mediaCheckRetryTimer || mediaCheckQueue.size === 0) return;
   mediaCheckWorkerRunning = true;
@@ -1955,25 +1980,32 @@ function startMediaCheckWorker() {
     try {
       while (mediaCheckQueue.size > 0) {
         // Een volledige decode kost CPU. Tijdens een wedstrijd speelt het scherm op deze pc:
-        // dan wachten tot erna, zodat de controle zelf geen clip laat haperen.
-        if (await isMatchInPlayNow()) {
+        // dan alleen nieuwe of vervangen bestanden (één tegelijk, lage prioriteit), de rest erna.
+        const id = nextMediaCheckId(mediaCheckQueue, urgentMediaChecks, await isMatchInPlayNow());
+        if (!id) {
           mediaCheckRetryTimer = setTimeout(() => {
             mediaCheckRetryTimer = null;
             startMediaCheckWorker();
           }, MEDIA_CHECK_RETRY_MS);
           return;
         }
-        const id = mediaCheckQueue.values().next().value as string;
         mediaCheckQueue.delete(id);
+        const urgent = urgentMediaChecks.has(id);
         try {
           const item = await prisma.mediaItem.findUnique({ where: { id } });
           if (!item) continue;
-          const health = await mediaHealthForItem(item, { runDecode: true });
+          const health = await mediaHealthForItem(item, { runDecode: true, duringMatch: urgent });
           if (health.status === "broken") {
             requireOpts().log(`[media] ${item.title} kan niet volledig afspelen (${health.reason})`);
           }
         } catch (err) {
           requireOpts().log(`[media] controle ${id} mislukt: ${String(err)}`);
+        } finally {
+          // Ook als de controle niet kon (geen FFmpeg, fout): dan speelt het bestand zoals vroeger.
+          if (urgentMediaChecks.delete(id)) {
+            await touchState().catch(() => undefined);
+            await broadcastDisplayState().catch(() => undefined);
+          }
         }
       }
     } finally {
@@ -1982,11 +2014,12 @@ function startMediaCheckWorker() {
   })();
 }
 
-function availableForPlayback(item: { path: string; mediaCheckJson: string | null }): boolean {
-  const record = parseMediaCheckRecord(item.mediaCheckJson);
-  if (record?.status !== "broken") return true;
-  const version = mediaFileVersion(item.path);
-  return version.exists && version.key !== record.key;
+function availableForPlayback(item: { id: string; path: string; mediaCheckJson: string | null }): boolean {
+  return isPlayableMedia({
+    record: parseMediaCheckRecord(item.mediaCheckJson),
+    awaitingCheck: urgentMediaChecks.has(item.id),
+    version: () => mediaFileVersion(item.path),
+  });
 }
 
 type MediaItemForCheck = {
@@ -2011,7 +2044,7 @@ function storedFileName(stored: string): string {
  */
 async function mediaHealthForItem(
   item: MediaItemForCheck,
-  opts: { runDecode: boolean },
+  opts: { runDecode: boolean; duringMatch?: boolean },
 ): Promise<MediaItemHealth> {
   const kind = item.type === "VIDEO" ? "VIDEO" : "IMAGE";
   const previous = parseMediaCheckRecord(item.mediaCheckJson);
@@ -2019,9 +2052,10 @@ async function mediaHealthForItem(
   let record: MediaCheckRecord | null = previous && previous.key === version.key ? previous : null;
   let deferred = false;
   let ffmpegMissing = false;
+  const urgent = urgentMediaChecks.has(item.id);
   if (version.exists && !record) {
     const inPlay = await isMatchInPlayNow();
-    if (opts.runDecode && !inPlay) {
+    if (opts.runDecode && (!inPlay || opts.duringMatch)) {
       const result = await checkMediaFile(item.path, kind, {
         fallbackDurationSec: item.durationSec,
         previous,
@@ -2036,9 +2070,9 @@ async function mediaHealthForItem(
         });
       }
     } else {
-      deferred = inPlay;
+      deferred = inPlay && !urgent;
       mediaCheckQueue.add(item.id);
-      if (!inPlay) startMediaCheckWorker();
+      if (!deferred) startMediaCheckWorker();
     }
   }
   const health = mediaHealthFor({
@@ -2047,6 +2081,7 @@ async function mediaHealthForItem(
     record,
     probeReason: ffmpegMissing ? "ffmpeg_missing" : kind === "VIDEO" ? item.playbackWarning : null,
     deferred,
+    checking: urgent && !record && !ffmpegMissing,
   });
   return { ...health, id: item.id, fileName: storedFileName(item.path) };
 }
@@ -3257,7 +3292,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
             durationSec: Number(c.mediaDurationSec),
             sponsorName: c.mediaSponsorName,
             sponsorId: c.mediaSponsorId,
-            active: Boolean(c.mediaActive) && availableForPlayback({ path: c.mediaPath, mediaCheckJson: c.mediaCheckJson }),
+            active: Boolean(c.mediaActive) && availableForPlayback({ id: c.mediaId, path: c.mediaPath, mediaCheckJson: c.mediaCheckJson }),
             playAudio: Boolean(c.mediaPlayAudio),
             sponsorPhaseTagsJson: c.mediaSponsorPhaseTagsJson,
             createdAt: c.mediaCreatedAt instanceof Date ? c.mediaCreatedAt.toISOString() : String(c.mediaCreatedAt),
@@ -3325,23 +3360,29 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       const media = await prisma.mediaItem.create({
         data: { ...body, playbackWarning } as never,
       });
+      // Meteen uit de rotatie houden, ook terwijl een risicovideo hieronder wordt omgezet.
+      urgentMediaChecks.add(media.id);
       if (playbackInspect && isDisplayPlaybackRisk(playbackInspect.reason) && typeof body.path === "string") {
-        const preparedOk = await persistPreparedVideo({
-          id: media.id,
-          title: media.title,
-          path: media.path,
-          durationSec: media.durationSec,
-        });
+        let preparedOk = false;
+        try {
+          preparedOk = await persistPreparedVideo({
+            id: media.id,
+            title: media.title,
+            path: media.path,
+            durationSec: media.durationSec,
+          });
+        } finally {
+          queueUrgentMediaCheck(media.id);
+        }
         if (preparedOk) {
           const updated = await prisma.mediaItem.findUnique({ where: { id: media.id } });
-          queueMediaCheck(media.id);
           await touchState();
           await broadcastDisplayState();
           return json(200, { ...(updated ?? media), playbackInspect, transcoded: true });
         }
       }
-      // Volledige decode op de achtergrond (na de wedstrijd als er nu een loopt).
-      queueMediaCheck(media.id);
+      // Volledige decode meteen, ook tijdens een wedstrijd; het bestand speelt pas als die klaar is.
+      queueUrgentMediaCheck(media.id);
       await touchState();
       await broadcastDisplayState();
       return json(200, { ...media, playbackInspect });
@@ -3401,18 +3442,16 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       const version = mediaFileVersion(newPath);
       const previous = parseMediaCheckRecord(candidate.mediaCheckJson);
       const cached = previous && previous.key === version.key ? previous : null;
-      const live = await isMatchInPlayNow();
-      const check = live
-        ? { record: cached, ffmpegMissing: false }
-        : await checkMediaFile(newPath, item.type === "VIDEO" ? "VIDEO" : "IMAGE", { fallbackDurationSec: durationSec, previous: cached });
+      // Ook tijdens een wedstrijd: het nieuwe bestand wordt eerst volledig gecontroleerd (één decode
+      // tegelijk, lage prioriteit). Tot het is goedgekeurd, blijft het oude bestand spelen.
+      const check = await checkMediaFile(newPath, item.type === "VIDEO" ? "VIDEO" : "IMAGE", { fallbackDurationSec: durationSec, previous: cached });
       let health = { ...mediaHealthFor({ fileExists: version.exists, currentKey: version.key, record: check.record,
-        probeReason: check.ffmpegMissing ? "ffmpeg_missing" : candidate.playbackWarning, deferred: live }),
+        probeReason: check.ffmpegMissing ? "ffmpeg_missing" : candidate.playbackWarning }),
         fileName: storedFileName(newPath), id: item.id };
       if (health.status !== "ok" || !check.record) return json(422, { health });
       let acceptedPath = newPath;
       let acceptedRecord = check.record;
       if (playbackInspect && isDisplayPlaybackRisk(playbackInspect.reason)) {
-        if (live) return json(409, { health: { ...health, status: "pending", reason: "deferred_live_match" } });
         const prepared = await prepareVideoForDisplay(newPath);
         if (!prepared.transcoded || !prepared.check) return json(422, { error: "prepare_failed" });
         acceptedPath = prepared.path;

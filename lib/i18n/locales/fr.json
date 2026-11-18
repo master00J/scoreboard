@@ -1313,6 +1313,7 @@
     "healthReasonFfmpegMissing": "FFmpeg manquant : contrôle incomplet",
     "healthReasonTimeout": "Le contrôle a pris trop de temps",
     "healthReasonDeferredLiveMatch": "Contrôle complet après le match",
+    "healthReasonChecking": "Contrôle en cours. Le fichier passe à l’écran dès que le contrôle est terminé.",
     "healthAnimatedWebp": "WebP animé. La vérification de l’animation complète est indisponible.",
     "healthReasonNotChecked": "Pas encore entièrement contrôlé",
     "themeSurfaceHint": "Configurez les deux surfaces de l'écran du stade. Sous Arrière-plans, l'arrière-plan commun du tableau s'applique aux deux, sauf si vous choisissez une image distincte.",

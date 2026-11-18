@@ -1313,6 +1313,7 @@
     "healthReasonFfmpegMissing": "FFmpeg fehlt: nicht vollständig geprüft",
     "healthReasonTimeout": "Prüfung dauerte zu lange",
     "healthReasonDeferredLiveMatch": "Vollständige Prüfung nach dem Spiel",
+    "healthReasonChecking": "Wird gerade geprüft. Die Datei erscheint auf dem Bildschirm, sobald die Prüfung fertig ist.",
     "healthAnimatedWebp": "Animiertes WebP. Die vollständige Animation konnte nicht geprüft werden.",
     "healthReasonNotChecked": "Noch nicht vollständig geprüft",
     "themeSurfaceHint": "Richten Sie beide Flächen des Stadionbildschirms ein. Unter Hintergründe gilt der gemeinsame Anzeigetafel-Hintergrund für beide, sofern Sie kein eigenes Bild wählen.",
