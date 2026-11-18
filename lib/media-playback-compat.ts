@@ -131,6 +131,18 @@ export function needsStadiumTranscode(info: VideoProbeInfo): boolean {
   return stadiumTranscodeReason(info) !== "ok";
 }
 
+/**
+ * Wat er in `MediaItem.playbackWarning` komt. Een afspeelrisico, of `probe_failed`: dan kan
+ * FFmpeg de kop van de video niet lezen. Dat is geen reden om om te zetten (dat lukt dan ook niet),
+ * maar de club moet het wel zien in de media-check.
+ */
+export function playbackWarningForReason(
+  reason: StadiumTranscodeReason | string | null | undefined,
+): string | null {
+  if (reason === "probe_failed") return "probe_failed";
+  return isDisplayPlaybackRisk(reason) ? (reason as string) : null;
+}
+
 export function isDisplayPlaybackRisk(reason: StadiumTranscodeReason | string | null | undefined): boolean {
   return (
     reason === "unsupported_codec" ||

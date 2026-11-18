@@ -61,10 +61,17 @@ import {
 } from "../lib/scoreboard-templates";
 import { displayExtrasFromJson, serializeDisplayExtras } from "../lib/display-extras";
 import { isMatchInPlay } from "../lib/match-in-play";
-import { listExternalFileReferences, remapStoredFilePaths } from "../server/venue-backup";
+import { finishPendingRestore, listExternalFileReferences, type RestoreFinishResult } from "../server/venue-backup";
 import { isCommandUserError } from "../lib/command-user-error";
 import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import { handleCommand } from "../server/handlers";
+import {
+  buildSponsorPlayWhere,
+  listSponsorPlays,
+  parseSponsorPlayFilters,
+  sponsorPlayListLimit,
+  summarizeSponsorPlays,
+} from "../server/sponsor-plays";
 import type { Prisma } from "@prisma/client";
 import {
   markCloudCommandAcked as markLedgerAcked,
@@ -78,8 +85,16 @@ import {
   isCurrentStadiumCompatPath,
   isDisplayPlaybackRisk,
   isStadiumPlaybackHangEvent,
+  playbackWarningForReason,
 } from "../lib/media-playback-compat";
-import { inspectVideoForDisplay, prepareVideoForDisplay } from "./media-transcode";
+import {
+  checkMediaFile,
+  inspectVideoForDisplay,
+  mediaFileVersion,
+  prepareVideoForDisplay,
+  resolveMediaFile,
+} from "./media-transcode";
+import { mediaHealthFor, parseMediaCheckRecord, type MediaCheckRecord, type MediaHealth } from "../lib/media-health";
 import { cueEndSec } from "../lib/scheduled-media-cue";
 import {
   isClubRotationSponsorId,
@@ -691,12 +706,8 @@ export async function clubLogoFilePath(): Promise<string | null> {
   const team = await prisma.team.findUnique({ where: { id: s.homeTeamId }, select: { logoPath: true } });
   const stored = team?.logoPath?.trim();
   if (!stored) return null;
-  let resolved = stored;
-  if (stored.startsWith("/uploads/")) {
-    const uploadsDir = process.env.STADIUM_UPLOADS_DIR;
-    if (!uploadsDir) return null;
-    resolved = path.join(uploadsDir, stored.replace(/^\/uploads\//, ""));
-  }
+  const resolved = resolveMediaFile(stored);
+  if (!resolved) return null;
   return path.isAbsolute(resolved) && fs.existsSync(resolved) ? resolved : null;
 }
 
@@ -1453,14 +1464,18 @@ export async function listExternalFilesForBackup(): Promise<string[]> {
   return listExternalFileReferences(prisma);
 }
 
-/** Na het terugzetten van een back-up: verwijs naar de teruggezette kopieën in uploads. */
-export async function remapRestoredFilePaths(remap: Record<string, string>): Promise<number> {
-  const changed = await remapStoredFilePaths(prisma, remap);
-  if (changed > 0) {
+/**
+ * Na het terugzetten van een back-up: verwijs naar de teruggezette kopieën in uploads en kijk na of
+ * alle media opent. Zie `finishPendingRestore`.
+ */
+export async function finishVenueRestore(opts: { userDataDir: string; uploadsDir: string }): Promise<RestoreFinishResult> {
+  const result = await finishPendingRestore(prisma, opts);
+  // Ook na een onderbroken padwijziging: een deel van de paden kan al nieuw zijn.
+  if (result.kind !== "none" && Object.keys(result.followup.remap).length > 0) {
     await touchState();
     await broadcastDisplayState();
   }
-  return changed;
+  return result;
 }
 
 /** Loopt er nu een wedstrijd? Dan geen ingrepen die de app herstarten. */
@@ -1507,6 +1522,11 @@ async function persistPreparedVideo(
         data: { playbackWarning: null },
       });
     }
+    if (prepared.validationFailed) {
+      requireOpts().log(
+        `[media] omgezette kopie van ${item.title} niet volledig afspeelbaar (${prepared.validationFailed}): origineel blijft`,
+      );
+    }
     return false;
   }
   await prisma.mediaItem.update({
@@ -1517,6 +1537,8 @@ async function persistPreparedVideo(
         ? Math.max(1, Math.round(prepared.durationSec))
         : item.durationSec,
       playbackWarning: null,
+      // De kopie is net volledig gedecodeerd: niet nog eens controleren.
+      mediaCheckJson: prepared.check ? JSON.stringify(prepared.check) : null,
     },
   });
   requireOpts().log(
@@ -1543,10 +1565,11 @@ async function prepareRiskyVideosInBackground() {
         if (!item || item.type !== "VIDEO") continue;
         const inspect = await inspectVideoForDisplay(item.path);
         if (!isDisplayPlaybackRisk(inspect.reason)) {
-          if (item.playbackWarning) {
+          const warning = playbackWarningForReason(inspect.reason);
+          if ((item.playbackWarning ?? null) !== warning) {
             await prisma.mediaItem.update({
               where: { id: item.id },
-              data: { playbackWarning: null },
+              data: { playbackWarning: warning },
             });
           }
           continue;
@@ -1563,6 +1586,121 @@ async function prepareRiskyVideosInBackground() {
   } catch (err) {
     requireOpts().log(`[media] automatische omzetting mislukt: ${String(err)}`);
   }
+  // Daarna elk bestand volledig decoderen; wat sinds de vorige keer niet veranderde, wordt overgeslagen.
+  try {
+    const all = await prisma.mediaItem.findMany({ select: { id: true } });
+    queueMediaCheck(...all.map((m) => m.id));
+  } catch (err) {
+    requireOpts().log(`[media] controle plannen mislukt: ${String(err)}`);
+  }
+}
+
+/** Media die nog volledig gedecodeerd moet worden (na import, vervangen of bij het opstarten). */
+const mediaCheckQueue = new Set<string>();
+let mediaCheckWorkerRunning = false;
+let mediaCheckRetryTimer: ReturnType<typeof setTimeout> | null = null;
+/** Tijdens een wedstrijd wachten we; zo vaak kijken we of hij voorbij is. */
+const MEDIA_CHECK_RETRY_MS = 60_000;
+
+function queueMediaCheck(...ids: string[]) {
+  for (const id of ids) if (id) mediaCheckQueue.add(id);
+  startMediaCheckWorker();
+}
+
+function startMediaCheckWorker() {
+  if (mediaCheckWorkerRunning || mediaCheckRetryTimer || mediaCheckQueue.size === 0) return;
+  mediaCheckWorkerRunning = true;
+  void (async () => {
+    try {
+      while (mediaCheckQueue.size > 0) {
+        // Een volledige decode kost CPU. Tijdens een wedstrijd speelt het scherm op deze pc:
+        // dan wachten tot erna, zodat de controle zelf geen clip laat haperen.
+        if (await isMatchInPlayNow()) {
+          mediaCheckRetryTimer = setTimeout(() => {
+            mediaCheckRetryTimer = null;
+            startMediaCheckWorker();
+          }, MEDIA_CHECK_RETRY_MS);
+          return;
+        }
+        const id = mediaCheckQueue.values().next().value as string;
+        mediaCheckQueue.delete(id);
+        try {
+          const item = await prisma.mediaItem.findUnique({ where: { id } });
+          if (!item) continue;
+          const health = await mediaHealthForItem(item, { runDecode: true });
+          if (health.status === "broken") {
+            requireOpts().log(`[media] ${item.title} kan niet volledig afspelen (${health.reason})`);
+          }
+        } catch (err) {
+          requireOpts().log(`[media] controle ${id} mislukt: ${String(err)}`);
+        }
+      }
+    } finally {
+      mediaCheckWorkerRunning = false;
+    }
+  })();
+}
+
+type MediaItemForCheck = {
+  id: string;
+  type: string;
+  path: string;
+  durationSec: number;
+  playbackWarning: string | null;
+  mediaCheckJson: string | null;
+};
+
+export type MediaItemHealth = MediaHealth & { id: string; fileName: string };
+
+function storedFileName(stored: string): string {
+  return stored.split(/[\\/]/).filter(Boolean).pop() ?? stored;
+}
+
+/**
+ * Status van één mediabestand voor de media-check. Met `runDecode` wordt een bestand dat sinds de
+ * vorige controle veranderde volledig gedecodeerd, behalve tijdens een wedstrijd: dan komt het in
+ * de wachtrij en meldt de check "na de wedstrijd".
+ */
+async function mediaHealthForItem(
+  item: MediaItemForCheck,
+  opts: { runDecode: boolean },
+): Promise<MediaItemHealth> {
+  const kind = item.type === "VIDEO" ? "VIDEO" : "IMAGE";
+  const previous = parseMediaCheckRecord(item.mediaCheckJson);
+  const version = mediaFileVersion(item.path);
+  let record: MediaCheckRecord | null = previous && previous.key === version.key ? previous : null;
+  let deferred = false;
+  let ffmpegMissing = false;
+  if (version.exists && !record) {
+    const inPlay = await isMatchInPlayNow();
+    if (opts.runDecode && !inPlay) {
+      const result = await checkMediaFile(item.path, kind, {
+        fallbackDurationSec: item.durationSec,
+        previous,
+      });
+      ffmpegMissing = result.ffmpegMissing;
+      if (result.record) {
+        record = result.record;
+        // Alleen bewaren als het item nog naar hetzelfde bestand wijst (niet intussen vervangen).
+        await prisma.mediaItem.updateMany({
+          where: { id: item.id, path: item.path },
+          data: { mediaCheckJson: JSON.stringify(result.record) },
+        });
+      }
+    } else {
+      deferred = inPlay;
+      mediaCheckQueue.add(item.id);
+      if (!inPlay) startMediaCheckWorker();
+    }
+  }
+  const health = mediaHealthFor({
+    fileExists: version.exists,
+    currentKey: version.key,
+    record,
+    probeReason: ffmpegMissing ? "ffmpeg_missing" : kind === "VIDEO" ? item.playbackWarning : null,
+    deferred,
+  });
+  return { ...health, id: item.id, fileName: storedFileName(item.path) };
 }
 
 /** Eén omzetpoging per media-id per sessie — voorkomt een ffmpeg-storm als de watchdog blijft vuren. */
@@ -1604,70 +1742,22 @@ export function disposeDesktopRuntime() {
     tickInterval = null;
   }
   hangingPrepareQueued.clear();
+  mediaCheckQueue.clear();
+  if (mediaCheckRetryTimer) {
+    clearTimeout(mediaCheckRetryTimer);
+    mediaCheckRetryTimer = null;
+  }
   sponsorLedgerSnapshot = null;
   sponsorClipBestActualSec.clear();
   cachedState = null;
   tickMatchCache = null;
 }
 
-type SponsorPlayFilters = {
-  matchId?: string;
-  sponsorId?: string;
-  segmentKey?: string;
-  fromIso?: string;
-  toIso?: string;
-};
-
-function parseSponsorPlayFilters(params: URLSearchParams): SponsorPlayFilters {
-  return {
-    matchId: params.get("matchId") ?? undefined,
-    sponsorId: params.get("sponsorId") ?? undefined,
-    segmentKey: params.get("segmentKey") ?? undefined,
-    fromIso: params.get("from") ?? undefined,
-    toIso: params.get("to") ?? undefined,
-  };
-}
-
-function buildSponsorPlayWhere(f: SponsorPlayFilters) {
-  const where: Record<string, unknown> = {};
-  if (f.matchId) where.matchId = f.matchId;
-  if (f.sponsorId) where.sponsorId = f.sponsorId;
-  if (f.segmentKey) where.segmentKey = { startsWith: f.segmentKey };
-  if (f.fromIso || f.toIso) {
-    const range: Record<string, Date> = {};
-    if (f.fromIso) {
-      const d = new Date(f.fromIso);
-      if (!Number.isNaN(d.valueOf())) range.gte = d;
-    }
-    if (f.toIso) {
-      const d = new Date(f.toIso);
-      if (!Number.isNaN(d.valueOf())) range.lte = d;
-    }
-    if (Object.keys(range).length > 0) where.endedAt = range;
-  }
-  return where;
-}
-
 async function handleSponsorPlaysList(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const limit = Math.min(2000, Math.max(1, Number(params.get("limit") ?? 500)));
-  const rows = await prisma.sponsorPlayLog.findMany({
-    where: buildSponsorPlayWhere(filters),
-    orderBy: { endedAt: "desc" },
-    take: limit,
-    include: {
-      match: {
-        select: {
-          id: true,
-          kickoffAt: true,
-          homeTeam: { select: { name: true, shortName: true } },
-          awayTeam: { select: { name: true, shortName: true } },
-        },
-      },
-    },
-  });
+  const rows = await listSponsorPlays(prisma, filters, sponsorPlayListLimit(params));
   return json(200, { rows });
 }
 
@@ -1675,21 +1765,7 @@ async function handleSponsorPlaysSummary(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const grouped = await prisma.sponsorPlayLog.groupBy({
-    by: ["sponsorId", "sponsorName"],
-    where: buildSponsorPlayWhere(filters),
-    _count: { _all: true },
-    _sum: { actualSec: true, expectedSec: true },
-  });
-  const rows = grouped
-    .map((g) => ({
-      sponsorId: g.sponsorId,
-      sponsorName: g.sponsorName,
-      plays: g._count._all,
-      actualSec: g._sum.actualSec ?? 0,
-      expectedSec: g._sum.expectedSec ?? 0,
-    }))
-    .sort((a, b) => b.actualSec - a.actualSec);
+  const rows = await summarizeSponsorPlays(prisma, filters);
   return json(200, { rows });
 }
 
@@ -1775,13 +1851,8 @@ function readLocalImageAsDataUrl(rawPath: string | null): string | null {
             ? "image/gif"
             : null;
   if (!mime) return null;
-  let resolved = stored;
-  if (stored.startsWith("/uploads/")) {
-    const uploadsDir = process.env.STADIUM_UPLOADS_DIR;
-    if (!uploadsDir) return null;
-    resolved = path.join(uploadsDir, stored.replace(/^\/uploads\//, ""));
-  }
-  if (!path.isAbsolute(resolved)) return null;
+  const resolved = resolveMediaFile(stored);
+  if (!resolved || !path.isAbsolute(resolved)) return null;
   try {
     const buf = fs.readFileSync(resolved);
     if (buf.length < 8 || buf.length > 4_000_000) return null;
@@ -2915,8 +2986,9 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       let playbackWarning: string | null = null;
       if (body.type === "VIDEO" && typeof body.path === "string") {
         playbackInspect = await inspectVideoForDisplay(body.path);
+        // probe_failed blijft als waarschuwing staan; omzetten gebeurt alleen bij een afspeelrisico.
+        playbackWarning = playbackWarningForReason(playbackInspect.reason);
         if (isDisplayPlaybackRisk(playbackInspect.reason)) {
-          playbackWarning = playbackInspect.reason;
           const fpsBit = playbackInspect.fps ? ` ${playbackInspect.fps}fps` : "";
           const codecBit = playbackInspect.codec ? ` ${playbackInspect.codec}` : "";
           requireOpts().log(
@@ -2927,7 +2999,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       const media = await prisma.mediaItem.create({
         data: { ...body, playbackWarning } as never,
       });
-      if (playbackWarning && typeof body.path === "string") {
+      if (playbackInspect && isDisplayPlaybackRisk(playbackInspect.reason) && typeof body.path === "string") {
         const preparedOk = await persistPreparedVideo({
           id: media.id,
           title: media.title,
@@ -2936,11 +3008,14 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         });
         if (preparedOk) {
           const updated = await prisma.mediaItem.findUnique({ where: { id: media.id } });
+          queueMediaCheck(media.id);
           await touchState();
           await broadcastDisplayState();
           return json(200, { ...(updated ?? media), playbackInspect, transcoded: true });
         }
       }
+      // Volledige decode op de achtergrond (na de wedstrijd als er nu een loopt).
+      queueMediaCheck(media.id);
       await touchState();
       await broadcastDisplayState();
       return json(200, { ...media, playbackInspect });
@@ -2951,7 +3026,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       const rows = [];
       for (const item of videos) {
         const inspect = await inspectVideoForDisplay(item.path);
-        const warning = isDisplayPlaybackRisk(inspect.reason) ? inspect.reason : null;
+        const warning = playbackWarningForReason(inspect.reason);
         if (item.playbackWarning !== warning) {
           await prisma.mediaItem.update({
             where: { id: item.id },
@@ -2967,6 +3042,51 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         });
       }
       return json(200, rows);
+    }
+
+    const checkId = pathname.match(/^\/api\/media\/([^/]+)\/check$/)?.[1];
+    if (checkId && method === "POST") {
+      const item = await prisma.mediaItem.findUnique({ where: { id: checkId } });
+      if (!item) return json(404, { error: "No media" });
+      return json(200, await mediaHealthForItem(item, { runDecode: true }));
+    }
+
+    /** Ander bestand voor hetzelfde media-item: sponsor, playlists en cues blijven gekoppeld. */
+    const replaceId = pathname.match(/^\/api\/media\/([^/]+)\/replace$/)?.[1];
+    if (replaceId && method === "POST") {
+      const body = parseJsonBody(req) as { path?: unknown };
+      const newPath = typeof body.path === "string" ? body.path.trim() : "";
+      if (!newPath) return json(400, { error: "path_required" });
+      const resolved = resolveMediaFile(newPath);
+      if (!resolved || !fs.existsSync(resolved)) return json(400, { error: "file_not_found" });
+      const item = await prisma.mediaItem.findUnique({ where: { id: replaceId } });
+      if (!item) return json(404, { error: "No media" });
+      let playbackInspect: Awaited<ReturnType<typeof inspectVideoForDisplay>> | null = null;
+      let durationSec = item.durationSec;
+      if (item.type === "VIDEO") {
+        playbackInspect = await inspectVideoForDisplay(newPath);
+        if (playbackInspect.durationSec && playbackInspect.durationSec > 0) {
+          durationSec = Math.max(1, Math.round(playbackInspect.durationSec));
+        }
+      }
+      let media = await prisma.mediaItem.update({
+        where: { id: replaceId },
+        data: {
+          path: newPath,
+          durationSec,
+          playbackWarning: playbackInspect ? playbackWarningForReason(playbackInspect.reason) : null,
+          mediaCheckJson: null,
+        },
+      });
+      requireOpts().log(`[media] bestand vervangen voor ${item.title} → ${storedFileName(newPath)}`);
+      if (playbackInspect && isDisplayPlaybackRisk(playbackInspect.reason)) {
+        await persistPreparedVideo(media);
+        media = (await prisma.mediaItem.findUnique({ where: { id: replaceId } })) ?? media;
+      }
+      await touchState();
+      await broadcastDisplayState();
+      const health = await mediaHealthForItem(media, { runDecode: true });
+      return json(200, { media, health, playbackInspect });
     }
 
     const prepareId = pathname.match(/^\/api\/media\/([^/]+)\/prepare$/)?.[1];

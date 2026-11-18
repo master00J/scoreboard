@@ -31,6 +31,7 @@ import {
   type ProofOfPlayRow,
   type ProofOfPlaySummaryRow,
 } from "@/lib/proof-of-play-export";
+import { proofOfPlayTotals } from "@/lib/sponsor-play-filters";
 
 export function ProofOfPlayPanel() {
   const { t, i18n } = useTranslation();
@@ -65,6 +66,7 @@ export function ProofOfPlayPanel() {
       { value: "halftime", label: t("phases.halftime") },
       { value: "SECOND_HALF", label: t("phases.SECOND_HALF") },
       { value: "EXTRA_TIME", label: t("phases.EXTRA_TIME") },
+      { value: "postmatch", label: t("phases.postmatch") },
     ],
     [t],
   );
@@ -266,8 +268,10 @@ export function ProofOfPlayPanel() {
       setExporting(true);
       setError(null);
       try {
+        // Export: every matching play (`all=1`), totals from the uncapped per-sponsor aggregate.
+        const listQuery = queryString ? `${queryString}&all=1` : "all=1";
         const [listRes, sumRes] = await Promise.all([
-          fetch(`/api/sponsor-plays?${queryString}`),
+          fetch(`/api/sponsor-plays?${listQuery}`),
           fetch(`/api/sponsor-plays/summary?${queryString}`),
         ]);
         if (!listRes.ok) throw new Error(t("reports.listError", { status: listRes.status }));
@@ -276,20 +280,14 @@ export function ProofOfPlayPanel() {
         const sumJson = (await sumRes.json()) as { rows: ProofOfPlaySummaryRow[] };
         const exportRows = listJson.rows ?? [];
         const exportSummary = sumJson.rows ?? [];
-        const totalPlays = exportRows.length;
-        const totalActualSec = exportRows.reduce((acc, r) => acc + r.actualSec, 0);
-        const totalExpectedSec = exportRows.reduce((acc, r) => acc + r.expectedSec, 0);
-        const avgFulfillment =
-          totalExpectedSec > 0
-            ? Math.round((totalActualSec / totalExpectedSec) * 100)
-            : 0;
+        const exportTotals = proofOfPlayTotals(exportSummary);
         const meta: ProofOfPlayExportMeta = {
           generatedAtIso: new Date().toISOString(),
           filterLabel,
-          totalPlays,
-          totalActualSec,
-          totalExpectedSec,
-          avgFulfillmentPercent: avgFulfillment,
+          totalPlays: exportTotals.totalPlays,
+          totalActualSec: exportTotals.totalActualSec,
+          totalExpectedSec: exportTotals.totalExpectedSec,
+          avgFulfillmentPercent: exportTotals.avgFulfillmentPercent,
         };
         const resolvedBrand = parseProofOfPlayBrand(JSON.stringify(brand));
         if (format === "pdf") {
@@ -333,13 +331,13 @@ export function ProofOfPlayPanel() {
     [queryString, filterLabel, exportAllowed, t, exportLabels, dateLocale, brand, persistBrand],
   );
 
-  const totalPlays = rows.length;
-  const totalActualSec = rows.reduce((acc, r) => acc + r.actualSec, 0);
-  const totalExpectedSec = rows.reduce((acc, r) => acc + r.expectedSec, 0);
-  const avgFulfillment =
-    totalExpectedSec > 0
-      ? Math.round((totalActualSec / totalExpectedSec) * 100)
-      : 0;
+  // Totals from the per-sponsor aggregate: the detail list below is capped.
+  const {
+    totalPlays,
+    totalActualSec,
+    totalExpectedSec,
+    avgFulfillmentPercent: avgFulfillment,
+  } = proofOfPlayTotals(summary);
 
   return (
     <div className="space-y-4">

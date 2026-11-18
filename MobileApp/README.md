@@ -8,7 +8,8 @@ De **wedstrijd-PC** die de display en video draait heeft hogere eisen dan deze t
 
 Start de desktop-app zoals normaal. In de boot-log verschijnt daarna o.a.:
 
-- `[mobile-bridge] actief op 0.0.0.0:17890` (of `127.0.0.1` als je `MOBILE_BRIDGE_BIND` zo zet)
+- `[mobile-bridge] actief op 192.168.1.10:17890`: het netwerk van de pc. In het menu "Mobiele app" kies je per pc een andere netwerkkaart of "Alle netwerken" (`0.0.0.0`); `MOBILE_BRIDGE_BIND` gaat voor die keuze.
+- Pairing code, operator-PIN en sessiesleutel staan op de telefoon in de versleutelde opslag van het toestel (`expo-secure-store`), niet in AsyncStorage.
 - pairing-code (6 cijfers) en operator-PIN (**minstens 6 cijfers**), of vast via env — zie root-`README.md`
 
 Die pairing-code heb je nodig in de mobiele app.

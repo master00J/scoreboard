@@ -165,6 +165,8 @@ model MediaItem {
   hideFromLibrary Boolean @default(false)
   /// VIDEO: risico op het stadionscherm (high_fps, unsupported_codec, pixel_format). Null = ok of niet gecheckt.
   playbackWarning String?
+  /// JSON: uitkomst van de volledige decode-controle (status, reden, duur) per bestandsversie. Null = nog niet gecontroleerd.
+  mediaCheckJson String?
   /// Toon als sneltoets op Display (waarschuwingen, manuele clips).
   quickLaunch Boolean @default(false)
   /// JSON: totale zendtijd in seconden per fase voor losse clubmedia. Null = niet in de rotatie.

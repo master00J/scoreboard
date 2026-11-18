@@ -38,7 +38,13 @@ export function useScheduledCueTelemetry(opts: {
     if (!segmentKey) return;
 
     const sponsorId = cue.media.sponsorId ?? SCHEDULED_CUE_SPONSOR_ID;
-    const clipSessionId = cueClipSessionId({ cueId: cue.id, cycle, mediaId: cue.media.id, stint });
+    const clipSessionId = cueClipSessionId({
+      matchId: match.id,
+      cueId: cue.id,
+      cycle,
+      mediaId: cue.media.id,
+      stint,
+    });
     const startedAtMs = Date.now();
     startedAtRef.current = startedAtMs;
     // Een cue blijft staan tot zijn venster om is. De duur van de foto zelf melden liet de
