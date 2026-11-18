@@ -160,8 +160,10 @@ describe("phaseRemainingSec", () => {
 });
 
 describe("isCompletePlay", () => {
-  it("counts a play as full when at most half a second is missing", () => {
-    expect(isCompletePlay({ expectedSec: 8, actualSec: 8, actualMs: 7_600 })).toBe(true);
+  it("uses the measured milliseconds and excludes unfinished plays", () => {
+    expect(isCompletePlay({ expectedSec: 8, actualSec: 8, actualMs: 7_600 })).toBe(false);
+    expect(isCompletePlay({ expectedSec: 8, actualSec: 8, actualMs: 7_968, state: "done" })).toBe(true);
+    expect(isCompletePlay({ expectedSec: 8, actualSec: 8, actualMs: 7_968, state: "interrupted" })).toBe(false);
     expect(isCompletePlay({ expectedSec: 8, actualSec: 1, actualMs: 1_210 })).toBe(false);
   });
 });

@@ -127,6 +127,7 @@
     "serviceVolleyballOnly": "Il servizio si usa solo nella pallavolo.",
     "cardsNotActive": "I cartellini {{color}} non si usano nella {{sport}}.",
     "eventNotFound": "Evento non trovato",
+    "undoLaterEventFirst": "Annulla prima l’azione di gara successiva che dipende da questa.",
     "volleyballUndoLastOnly": "Nella pallavolo si può annullare solo l’ultimo punto (o usa −1).",
     "matchClosed": "Questa partita è chiusa (report salvato). Riapri in Prepara → Partite o scegli un’altra partita.",
     "licenseNoAutoSponsors": "La rotazione automatica degli sponsor non è disponibile in questo piano."
@@ -576,6 +577,7 @@
     "addPlaylistItem": "Aggiungi elemento",
     "uploadFirst": "Carica prima i media.",
     "cueInvalidInput": "Scegli un media e un orario di inizio tipo 12:00",
+    "cueOverlap": "Questo intervallo si sovrappone a un altro spot attivo della fase.",
     "cueSaveFailed": "Impossibile salvare il clip in rundown",
     "cueAdded": "Aggiunto in rundown alle {{time}}",
     "cuePatchFailed": "Impossibile aggiornare la rundown",
@@ -718,6 +720,8 @@
     "clipAirtimeEffective": "≈ {{time}} effettivi · {{repeats}} riproduzione/i completa/e"
   },
   "reports": {
+    "plannedPlays": "Riproduzioni previste",
+    "completePlays": "Riproduzioni complete",
     "title": "Prova di diffusione",
     "filterMatch": "Partita",
     "filterAll": "Tutte le partite",
@@ -1261,6 +1265,7 @@
     "healthReasonFfmpegMissing": "FFmpeg mancante: verifica incompleta",
     "healthReasonTimeout": "La verifica ha richiesto troppo tempo",
     "healthReasonDeferredLiveMatch": "Verifica completa dopo la partita",
+    "healthAnimatedWebp": "WebP animato. Non è stato possibile verificare l’intera animazione.",
     "healthReasonNotChecked": "Non ancora verificato del tutto",
     "healthPreparing": "Conversione… {{done}}/{{total}}",
     "breakMinutes": "Durata pausa (minuti)",
@@ -1344,7 +1349,7 @@
     "networkFallback": "La rete scelta non è collegata. Finché non torna, il controllo da telefono ascolta su {{network}}.",
     "networkNone": "Nessuna rete trovata. Collega il PC alla rete; il controllo da telefono si adegua da solo.",
     "networkAllWarning": "Ogni rete a cui è collegato questo PC può raggiungere il controllo da telefono. Meglio scegliere la rete dei telefoni.",
-    "networkUpgradeHint": "Questo PC è su più di una rete. Come prima, il controllo da telefono ascolta su tutte, così i telefoni associati continuano a funzionare. Scegli la rete dei telefoni per chiudere le altre.",
+    "networkUpgradeHint": "Dopo l’aggiornamento il controllo mobile usa {{network}}. Se i telefoni usano un’altra rete, seleziona la scheda dello stadio.",
     "networkFixedByEnv": "Impostato da MOBILE_BRIDGE_BIND su questo PC: {{network}}.",
     "networkSaveFailed": "Impossibile spostare il controllo da telefono su quella rete. Resta sulla rete precedente."
   },

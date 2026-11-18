@@ -8,8 +8,8 @@
  */
 
 export type BridgeNetworkChoice =
-  | { mode: "auto" }
-  | { mode: "all"; /** Gekozen door de update, niet door de club: het menu vraagt dan om te kiezen. */ fromUpgrade?: boolean }
+  | { mode: "auto"; fromUpgrade?: boolean }
+  | { mode: "all" }
   | { mode: "interface"; name: string; address: string };
 
 /** Een IPv4-netwerkkaart van deze pc. */
@@ -72,8 +72,9 @@ export function listNetworkAdapters(nets: Record<string, OsNetworkEntry[] | unde
 export function normalizeBridgeNetworkChoice(raw: unknown): BridgeNetworkChoice | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const rec = raw as Record<string, unknown>;
+  if ((rec.mode === "all" || rec.mode === "auto") && rec.fromUpgrade === true) return { mode: "auto", fromUpgrade: true };
   if (rec.mode === "auto") return { mode: "auto" };
-  if (rec.mode === "all") return rec.fromUpgrade === true ? { mode: "all", fromUpgrade: true } : { mode: "all" };
+  if (rec.mode === "all") return { mode: "all" };
   if (rec.mode === "interface") {
     const name = typeof rec.name === "string" ? rec.name.slice(0, 200) : "";
     const address = typeof rec.address === "string" && isIpv4(rec.address) ? rec.address : "";
@@ -122,10 +123,8 @@ export function resolveBridgeBind(
 }
 
 /**
- * Keuze bij de eerste start van deze versie. Tot nu toe luisterde de bridge op alle netwerken. Heeft
- * deze pc al een gekoppelde telefoon (`bridgeUsedBefore`) en meer dan één netwerk waarop die kan
- * zitten, dan weten we niet welk; we houden dan alle netwerken aan zodat die telefoon blijft werken,
- * en het menu vraagt de club om te kiezen. Anders: automatisch.
+ * Gebruik één netwerk bij een upgrade. Bij meerdere mogelijke kaarten toont het menu op welk
+ * netwerk gekoppelde telefoons de bridge nu kunnen bereiken.
  */
 export function initialBridgeNetworkChoice(
   adapters: NetworkAdapter[],
@@ -134,7 +133,7 @@ export function initialBridgeNetworkChoice(
 ): BridgeNetworkChoice {
   if (!bridgeUsedBefore) return { mode: "auto" };
   const candidates = new Set(adapters.filter((a) => !a.virtual || a.address === routeAddress).map((a) => a.address));
-  return candidates.size > 1 ? { mode: "all", fromUpgrade: true } : { mode: "auto" };
+  return candidates.size > 1 ? { mode: "auto", fromUpgrade: true } : { mode: "auto" };
 }
 
 /** Adressen die de telefoon kan gebruiken: het gekozen adres, of bij alle netwerken elke kaart (echte eerst). */

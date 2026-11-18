@@ -597,25 +597,14 @@ function ScheduledCuesSection({
       triggerSeconds.splice(0, triggerSeconds.length, ...recurringTimes);
     }
     setSaving(true);
-    let savedCount = 0;
-    for (const plannedTriggerSec of triggerSeconds) {
-      const res = await fetch("/api/scheduled-media-cues", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mediaId,
-          matchStatus,
-          triggerSec: plannedTriggerSec,
-          enabled: true,
-        }),
-      });
-      if (!res.ok) break;
-      savedCount += 1;
-    }
+    const res = await fetch("/api/scheduled-media-cues/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ edits: triggerSeconds.map(triggerSec => ({ mediaId, matchStatus, triggerSec, enabled: true })) }),
+    });
     setSaving(false);
-    if (savedCount !== triggerSeconds.length) {
-      toast({ title: t("media.cueSaveFailed"), variant: "error" });
-      if (savedCount > 0) onChange();
+    if (!res.ok) {
+      toast({ title: t(res.status === 409 ? "media.cueOverlap" : "media.cueSaveFailed"), variant: "error" });
       return;
     }
     onChange();
@@ -650,7 +639,7 @@ function ScheduledCuesSection({
     });
     setSaving(false);
     if (!res.ok) {
-      toast({ title: t("media.cueSaveFailed"), variant: "error" });
+      toast({ title: t(res.status === 409 ? "media.cueOverlap" : "media.cueSaveFailed"), variant: "error" });
       return;
     }
     onChange();
@@ -664,7 +653,7 @@ function ScheduledCuesSection({
       body: JSON.stringify(body),
     });
     if (!res.ok) {
-      toast({ title: t("media.cuePatchFailed"), variant: "error" });
+      toast({ title: t(res.status === 409 ? "media.cueOverlap" : "media.cuePatchFailed"), variant: "error" });
       return;
     }
     onChange();
@@ -682,7 +671,7 @@ function ScheduledCuesSection({
         body: JSON.stringify({ loop }),
       });
       if (!res.ok) {
-        toast({ title: t("media.cuePatchFailed"), variant: "error" });
+        toast({ title: t(res.status === 409 ? "media.cueOverlap" : "media.cuePatchFailed"), variant: "error" });
         setSaving(false);
         onChange();
         return;
@@ -694,18 +683,11 @@ function ScheduledCuesSection({
 
   async function applyRestack(list: ScheduledMediaCue[]) {
     const stacked = restackRundownWindows(list);
-    for (const row of stacked) {
-      const res = await fetch(`/api/scheduled-media-cues/${row.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ triggerSec: row.triggerSec, endSec: row.endSec }),
-      });
-      if (!res.ok) {
-        toast({ title: t("media.cuePatchFailed"), variant: "error" });
-        onChange();
-        return;
-      }
-    }
+    const res = await fetch("/api/scheduled-media-cues/batch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ edits: stacked.map(({ id, triggerSec, endSec }) => ({ id, triggerSec, endSec })) }),
+    });
+    if (!res.ok) toast({ title: t(res.status === 409 ? "media.cueOverlap" : "media.cuePatchFailed"), variant: "error" });
     onChange();
   }
 

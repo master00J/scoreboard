@@ -127,6 +127,7 @@
     "serviceVolleyballOnly": "Serve is only used in volleyball.",
     "cardsNotActive": "{{color}} cards are not used in {{sport}}.",
     "eventNotFound": "Event not found",
+    "undoLaterEventFirst": "Undo the later dependent match event first.",
     "volleyballUndoLastOnly": "In volleyball only the last point can be undone (or use −1).",
     "matchClosed": "This match is closed (report saved). Reopen it in Setup → Matches or pick another match.",
     "licenseNoAutoSponsors": "Automatic sponsor rotation is not available on this license plan."
@@ -577,6 +578,7 @@
     "uploadFirst": "Upload media first.",
     "cueInvalidInput": "Choose media and enter a time like 12:30",
     "cueRepeatInvalid": "Check the start time, end time and interval (at least 0.5 minute).",
+    "cueOverlap": "This slot overlaps another active spot in this phase.",
     "cueSaveFailed": "Could not save time cue",
     "cueAdded": "Time cue added at {{time}}",
     "cueSeriesAdded": "Added {{count}} automatic playback moments",
@@ -718,6 +720,8 @@
     "cueWindow": "{{start}} – {{end}}"
   },
   "reports": {
+    "plannedPlays": "Planned plays",
+    "completePlays": "Complete plays",
     "title": "Proof of play",
     "filterMatch": "Match",
     "filterAll": "All matches",
@@ -1309,6 +1313,7 @@
     "healthReasonFfmpegMissing": "FFmpeg missing: not fully checked",
     "healthReasonTimeout": "Check took too long",
     "healthReasonDeferredLiveMatch": "Full check after the match",
+    "healthAnimatedWebp": "Animated WebP. The complete animation could not be verified.",
     "healthReasonNotChecked": "Not fully checked yet",
     "themeSurfaceHint": "Set up both stadium-screen surfaces. Under Backgrounds, the shared scoreboard background applies to both unless you pick a separate image.",
     "themeLayoutSaved": "Saved in “{{name}}”. The screen uses the new version wherever that layout applies.",
@@ -1344,7 +1349,7 @@
     "networkFallback": "The chosen network is not connected. Until it is back, phone control listens on {{network}}.",
     "networkNone": "No network found. Connect the PC to the network; phone control follows automatically.",
     "networkAllWarning": "Every network this PC is on can reach phone control. Prefer choosing the phones' network.",
-    "networkUpgradeHint": "This PC is on more than one network. As before, phone control listens on all of them so paired phones keep working. Choose the phones' network to close off the others.",
+    "networkUpgradeHint": "After the update, mobile control uses {{network}}. Select the stadium adapter if the phones use a different network.",
     "networkFixedByEnv": "Fixed by MOBILE_BRIDGE_BIND on this PC: {{network}}.",
     "networkSaveFailed": "Could not move phone control to that network. It stays on the previous network."
   },

@@ -97,8 +97,8 @@ describe("eerste start na de update", () => {
     expect(initialBridgeNetworkChoice([ethernet, hyperV], "192.168.1.20", true)).toEqual({ mode: "auto" });
   });
 
-  it("een gekoppelde pc met meerdere netwerken blijft op alle netwerken tot de club kiest", () => {
-    expect(initialBridgeNetworkChoice([ethernet, wifi], "10.0.5.7", true)).toEqual({ mode: "all", fromUpgrade: true });
+  it("een gekoppelde pc met meerdere netwerken start op één kaart en meldt welke", () => {
+    expect(initialBridgeNetworkChoice([ethernet, wifi], "10.0.5.7", true)).toEqual({ mode: "auto", fromUpgrade: true });
   });
 });
 
@@ -106,7 +106,7 @@ describe("keuze opslaan en tonen", () => {
   it("leest alleen geldige keuzes", () => {
     expect(normalizeBridgeNetworkChoice({ mode: "auto" })).toEqual({ mode: "auto" });
     expect(normalizeBridgeNetworkChoice({ mode: "all" })).toEqual({ mode: "all" });
-    expect(normalizeBridgeNetworkChoice({ mode: "all", fromUpgrade: true })).toEqual({ mode: "all", fromUpgrade: true });
+    expect(normalizeBridgeNetworkChoice({ mode: "all", fromUpgrade: true })).toEqual({ mode: "auto", fromUpgrade: true });
     expect(normalizeBridgeNetworkChoice({ mode: "interface", name: "Ethernet", address: "192.168.1.20" })).toEqual({
       mode: "interface",
       name: "Ethernet",

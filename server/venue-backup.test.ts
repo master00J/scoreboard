@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { PrismaClient } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import {
   BACKUP_MANIFEST,
   BACKUP_ROOT_DIR,
@@ -34,7 +34,20 @@ import {
   type RestoreFollowup,
 } from "./venue-backup";
 
-const SQLITE = Buffer.concat([Buffer.from("SQLite format 3\u0000", "latin1"), Buffer.alloc(84)]);
+let SQLITE: Buffer;
+beforeAll(async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arenacue-backup-fixture-"));
+  const file = path.join(dir, "stadium.db");
+  const copy = new PrismaClient({ datasourceUrl: "file:" + file.split(path.sep).join("/") });
+  try {
+    for (const name of ["Match", "Team", "MediaItem"]) {
+      await copy.$executeRawUnsafe(`CREATE TABLE "${name}" (id TEXT PRIMARY KEY)`);
+    }
+  } finally {
+    await copy.$disconnect();
+    try { SQLITE = fs.readFileSync(file); } finally { fs.rmSync(dir, { recursive: true }); }
+  }
+});
 
 let tmp: string;
 beforeEach(() => {
@@ -161,33 +174,33 @@ describe("back-up samenstellen", () => {
 });
 
 describe("back-up nakijken", () => {
-  it("aanvaardt een back-up van de app en een zelf gezipte map", () => {
+  it("aanvaardt een back-up van de app en een zelf gezipte map", async () => {
     const viaApp = path.join(tmp, "a");
     write(path.join(viaApp, BACKUP_ROOT_DIR, "data", "stadium.db"), SQLITE);
-    expect(inspectBackupDir(viaApp, "0.1.36")).toMatchObject({ ok: true, root: path.join(viaApp, BACKUP_ROOT_DIR), manifest: null });
+    expect(await inspectBackupDir(viaApp, "0.1.36")).toMatchObject({ ok: true, root: path.join(viaApp, BACKUP_ROOT_DIR), manifest: null });
     const zelf = path.join(tmp, "b");
     write(path.join(zelf, "data", "stadium.db"), SQLITE);
-    expect(inspectBackupDir(zelf, "0.1.36")).toMatchObject({ ok: true, root: zelf });
+    expect(await inspectBackupDir(zelf, "0.1.36")).toMatchObject({ ok: true, root: zelf });
   });
 
-  it("weigert een map zonder database of met een ander bestand", () => {
+  it("weigert een map zonder database of met een ander bestand", async () => {
     const leeg = path.join(tmp, "leeg");
     fs.mkdirSync(leeg);
-    expect(inspectBackupDir(leeg, "0.1.36")).toEqual({ ok: false, reason: "no_database" });
+    expect(await inspectBackupDir(leeg, "0.1.36")).toEqual({ ok: false, reason: "no_database" });
     const fout = path.join(tmp, "fout");
     write(path.join(fout, "data", "stadium.db"), "dit is geen database");
-    expect(inspectBackupDir(fout, "0.1.36")).toEqual({ ok: false, reason: "not_a_database" });
+    expect(await inspectBackupDir(fout, "0.1.36")).toEqual({ ok: false, reason: "not_a_database" });
   });
 
-  it("weigert een back-up van een nieuwere app-versie", () => {
+  it("weigert een back-up van een nieuwere app-versie", async () => {
     const dir = path.join(tmp, "nieuw");
     write(path.join(dir, BACKUP_ROOT_DIR, "data", "stadium.db"), SQLITE);
     write(path.join(dir, BACKUP_ROOT_DIR, BACKUP_MANIFEST), JSON.stringify({ appVersion: "0.2.0", files: [] }));
-    expect(inspectBackupDir(dir, "0.1.36")).toEqual({ ok: false, reason: "newer_version", backupVersion: "0.2.0" });
-    expect(inspectBackupDir(dir, "0.2.0")).toMatchObject({ ok: true });
+    expect(await inspectBackupDir(dir, "0.1.36")).toEqual({ ok: false, reason: "newer_version", backupVersion: "0.2.0" });
+    expect(await inspectBackupDir(dir, "0.2.0")).toMatchObject({ ok: true });
   });
 
-  it("negeert bestandsverwijzingen die buiten de back-up wijzen", () => {
+  it("negeert bestandsverwijzingen die buiten de back-up wijzen", async () => {
     const dir = path.join(tmp, "kwaad");
     write(path.join(dir, "data", "stadium.db"), SQLITE);
     write(
@@ -201,7 +214,7 @@ describe("back-up nakijken", () => {
         ],
       }),
     );
-    const result = inspectBackupDir(dir, "0.1.36");
+    const result = await inspectBackupDir(dir, "0.1.36");
     expect(result.ok && result.manifest?.files.map((file) => file.archived)).toEqual(["files/0001-a.mp4"]);
   });
 });
@@ -209,24 +222,32 @@ describe("back-up nakijken", () => {
 describe("terugzetten bij het opstarten", () => {
   const now = new Date("2026-10-04T12:00:00Z");
 
-  it("doet niets zonder klaarstaande back-up", () => {
+  it("behoudt de actieve database wanneer de aangeleverde SQLite-pagina's afgeknot zijn", async () => {
     const userData = makeUserData("pc", "huidig");
-    expect(applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now })).toEqual({ kind: "none" });
+    const root = stagePending(userData, { marker: "backup" });
+    write(path.join(root, "data", "stadium.db"), SQLITE.subarray(0, Math.floor(SQLITE.length / 2)));
+    expect(await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now })).toMatchObject({ kind: "failed" });
     expect(fs.readFileSync(path.join(userData, "data", "stadium.db")).toString("latin1")).toContain("huidig");
   });
 
-  it("ruimt een half uitgepakte back-up op zonder iets te wijzigen", () => {
+  it("doet niets zonder klaarstaande back-up", async () => {
+    const userData = makeUserData("pc", "huidig");
+    expect(await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now })).toEqual({ kind: "none" });
+    expect(fs.readFileSync(path.join(userData, "data", "stadium.db")).toString("latin1")).toContain("huidig");
+  });
+
+  it("ruimt een half uitgepakte back-up op zonder iets te wijzigen", async () => {
     const userData = makeUserData("pc", "huidig");
     stagePending(userData, { marker: "backup", ready: false });
-    expect(applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now })).toEqual({ kind: "none" });
+    expect(await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now })).toEqual({ kind: "none" });
     expect(fs.existsSync(path.join(userData, RESTORE_PENDING_DIR))).toBe(false);
     expect(fs.readFileSync(path.join(userData, "data", "stadium.db")).toString("latin1")).toContain("huidig");
   });
 
-  it("zet database en uploads terug en bewaart wat er stond", () => {
+  it("zet database en uploads terug en bewaart wat er stond", async () => {
     const userData = makeUserData("pc", "huidig");
     stagePending(userData, { marker: "backup", manifest: {} });
-    const result = applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
+    const result = await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
     expect(result.kind).toBe("applied");
 
     expect(fs.readFileSync(path.join(userData, "data", "stadium.db")).toString("latin1")).toContain("backup");
@@ -256,7 +277,7 @@ describe("terugzetten bij het opstarten", () => {
     expect(readRestoreFollowup(userData)).toBeNull();
   });
 
-  it("zet media van elders alleen terug als ze op deze pc ontbreekt", () => {
+  it("zet media van elders alleen terug als ze op deze pc ontbreekt", async () => {
     const userData = makeUserData("pc", "huidig");
     const hier = path.join(tmp, "media", "blijft.mp4");
     write(hier, "staat er nog");
@@ -273,7 +294,7 @@ describe("terugzetten bij het opstarten", () => {
     write(path.join(root, "files", "0001-blijft.mp4"), "uit backup 1");
     write(path.join(root, "files", "0002-weg.mp4"), "uit backup 2");
 
-    const result = applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
+    const result = await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
     expect(result).toMatchObject({
       kind: "applied",
       followup: { remap: { [weg]: "/uploads/restored-0002-weg.mp4" }, pathsRewritten: false },
@@ -284,22 +305,22 @@ describe("terugzetten bij het opstarten", () => {
     expect(fs.readFileSync(hier, "utf8")).toBe("staat er nog");
   });
 
-  it("zet instellingen terug maar houdt de streamsleutels van deze pc", () => {
+  it("zet instellingen terug maar houdt de streamsleutels van deze pc", async () => {
     const userData = makeUserData("pc", "huidig");
     write(path.join(userData, "livestream-settings.json"), JSON.stringify({ streamKey: "lokaal", fps: 25 }));
     const root = stagePending(userData, { marker: "backup", manifest: {} });
     write(path.join(root, "config", "livestream-settings.json"), JSON.stringify({ fps: 60, streamKey2: "mag niet" }));
     write(path.join(root, "config", "control-match-tab-layout.json"), '{"van":"backup"}');
-    expect(applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now }).kind).toBe("applied");
+    expect((await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now })).kind).toBe("applied");
     expect(JSON.parse(fs.readFileSync(path.join(userData, "livestream-settings.json"), "utf8"))).toEqual({ fps: 60, streamKey: "lokaal" });
     expect(fs.readFileSync(path.join(userData, "control-match-tab-layout.json"), "utf8")).toBe('{"van":"backup"}');
   });
 
-  it("laat alles staan als de back-up niet bruikbaar is", () => {
+  it("laat alles staan als de back-up niet bruikbaar is", async () => {
     const userData = makeUserData("pc", "huidig");
     const root = stagePending(userData, { marker: "backup" });
     fs.writeFileSync(path.join(root, "data", "stadium.db"), "geen database");
-    const result = applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
+    const result = await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
     expect(result.kind).toBe("failed");
     expect(fs.readFileSync(path.join(userData, "data", "stadium.db")).toString("latin1")).toContain("huidig");
     expect(fs.readFileSync(path.join(userData, "data", "stadium.db-wal"), "utf8")).toBe("wal-huidig");
@@ -308,28 +329,28 @@ describe("terugzetten bij het opstarten", () => {
     expect(fs.existsSync(path.join(userData, RESTORE_FOLLOWUP_FILE))).toBe(false);
   });
 
-  it("werkt op een nieuwe pc zonder bestaande gegevens", () => {
+  it("werkt op een nieuwe pc zonder bestaande gegevens", async () => {
     const userData = path.join(tmp, "nieuw");
     fs.mkdirSync(userData, { recursive: true });
     stagePending(userData, { marker: "backup", manifest: {} });
-    expect(applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now }).kind).toBe("applied");
+    expect((await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now })).kind).toBe("applied");
     expect(fs.readFileSync(path.join(userData, "data", "stadium.db")).toString("latin1")).toContain("backup");
     expect(fs.readFileSync(path.join(userData, "uploads", "logo.png"), "utf8")).toBe("upload-backup");
   });
 
-  it("gaat terug naar de toestand van vóór het terugzetten", () => {
+  it("gaat terug naar de toestand van vóór het terugzetten", async () => {
     const userData = makeUserData("pc", "huidig");
     write(path.join(userData, "control-match-tab-layout.json"), '{"van":"pc"}');
     const root = stagePending(userData, { marker: "backup", manifest: {} });
     write(path.join(root, "config", "control-match-tab-layout.json"), '{"van":"backup"}');
-    const applied = applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
+    const applied = await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
     if (applied.kind !== "applied") throw new Error("terugzetten mislukt");
     expect(canRollbackRestore(userData, applied.followup)).toBe(true);
 
     stageRollbackFromSafety(userData, applied.followup);
     // De veiligheidskopie blijft staan tot de omwisseling gelukt is.
     expect(fs.existsSync(path.join(applied.followup.safetyDir, "data", "stadium.db"))).toBe(true);
-    const back = applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now: new Date("2026-10-04T12:05:00Z") });
+    const back = await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now: new Date("2026-10-04T12:05:00Z") });
     expect(back).toMatchObject({ kind: "applied", followup: { source: "rollback" } });
     expect(readRestoreFollowup(userData)?.source).toBe("rollback");
     expect(fs.readFileSync(path.join(userData, "data", "stadium.db")).toString("latin1")).toContain("huidig");
@@ -341,11 +362,11 @@ describe("terugzetten bij het opstarten", () => {
     expect(fs.readdirSync(path.join(userData, RESTORE_SAFETY_DIR))).toEqual(["2026-10-04T12-05-00"]);
   });
 
-  it("biedt geen weg terug op een nieuwe pc of naar een map buiten restore-safety", () => {
+  it("biedt geen weg terug op een nieuwe pc of naar een map buiten restore-safety", async () => {
     const userData = path.join(tmp, "nieuw");
     fs.mkdirSync(userData, { recursive: true });
     stagePending(userData, { marker: "backup", manifest: {} });
-    const applied = applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
+    const applied = await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
     if (applied.kind !== "applied") throw new Error("terugzetten mislukt");
     expect(canRollbackRestore(userData, applied.followup)).toBe(false);
     expect(() => stageRollbackFromSafety(userData, applied.followup)).toThrow();
@@ -355,12 +376,12 @@ describe("terugzetten bij het opstarten", () => {
     expect(canRollbackRestore(userData, { ...applied.followup, safetyDir: elders })).toBe(false);
   });
 
-  it("bewaart alleen de laatste veiligheidskopie", () => {
+  it("bewaart alleen de laatste veiligheidskopie", async () => {
     const userData = makeUserData("pc", "een");
     stagePending(userData, { marker: "twee", manifest: {} });
-    applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
+    await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now });
     stagePending(userData, { marker: "drie", manifest: {} });
-    applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now: new Date("2026-10-05T12:00:00Z") });
+    await applyPendingRestore({ userDataDir: userData, appVersion: "0.1.36", now: new Date("2026-10-05T12:00:00Z") });
     expect(fs.readdirSync(path.join(userData, RESTORE_SAFETY_DIR))).toEqual(["2026-10-05T12-00-00"]);
     expect(fs.readFileSync(path.join(userData, "data", "stadium.db")).toString("latin1")).toContain("drie");
   });

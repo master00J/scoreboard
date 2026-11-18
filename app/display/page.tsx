@@ -545,6 +545,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       mode,
       elapsed,
       skip: previewIframe,
+      imageTimerOnDisplay: true,
     });
   /**
    * Foto's uit de rundown delen één element: bij een wissel verandert alleen het beeld en blijft
@@ -1534,6 +1535,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
    * (mediavak naast het scorebord, of volledig scherm), en het venster moet zichtbaar zijn.
    * Alleen dan telt zijn schermtijd.
    */
+  const sponsorPanelVisible = frameKind !== "custom" || liveTheme.elements.sponsor.some(el => el.type === "media" && !el.hidden);
   const scheduledCueOnScreen =
     activeScheduledCue != null &&
     displayWindowVisible &&
@@ -1541,7 +1543,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       mode !== "MATCH" &&
       mode !== "BLACKOUT" &&
       !exclusiveFullscreen &&
-      !!match &&
+      !!match && sponsorPanelVisible &&
       sponsorRotationBesideScoreboard(match.status)) ||
       (mode === "SPONSOR_ROTATION" && !(match && sponsorRotationBesideScoreboard(match.status))));
   const cueTelemetry = useScheduledCueTelemetry({
@@ -1549,7 +1551,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     cycle: scheduledCueCycle,
     stint: scheduledCueStint,
     match: match ? { id: match.id, status: match.status } : null,
-    enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT",
+    enabled: !embedInControl && !previewIframe && mode !== "BLACKOUT" &&
+      (!match || !sponsorRotationBesideScoreboard(match.status) || sponsorPanelVisible),
     playheadSec: scheduledCuePlayheadSec,
     visible: scheduledCueOnScreen,
   });
@@ -1584,8 +1587,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   const manualTelemetry = useVisiblePlayTelemetry({
     play: manualPlay,
     match: match ? { id: match.id, status: match.status } : null,
-    enabled: !embedInControl && !previewIframe,
-    visible: manualPlay != null && displayWindowVisible,
+    enabled: !embedInControl && !previewIframe && (!showScoreFrame || sponsorPanelVisible),
+    visible: manualPlay != null && displayWindowVisible && (!showScoreFrame || sponsorPanelVisible),
   });
   const manualPlayKey = manualPlay?.key;
   const onManualShown = manualPlayKey
@@ -2091,10 +2094,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 cueHasClockWindow(activeScheduledCue)
               }
               finishAfterMs={
-                activeScheduledCue.media.type === "VIDEO" &&
-                !cueHasClockWindow(activeScheduledCue)
-                  ? Math.max(2500, Math.max(1, activeScheduledCue.media.durationSec || 10) * 1000 + 500)
-                  : undefined
+                !cueHasClockWindow(activeScheduledCue) ? oneOffMediaHoldMs(activeScheduledCue.media) : undefined
               }
               onVideoEnded={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -2125,10 +2125,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
                 cueHasClockWindow(activeScheduledCue)
               }
               finishAfterMs={
-                activeScheduledCue.media.type === "VIDEO" &&
-                !cueHasClockWindow(activeScheduledCue)
-                  ? Math.max(2500, Math.max(1, activeScheduledCue.media.durationSec || 10) * 1000 + 500)
-                  : undefined
+                !cueHasClockWindow(activeScheduledCue) ? oneOffMediaHoldMs(activeScheduledCue.media) : undefined
               }
               onVideoEnded={
                 activeScheduledCue.media.type === "VIDEO" &&
@@ -2513,6 +2510,8 @@ function SingleMediaMode({
   /** Wisselt per vertoning; dezelfde foto in een volgende vertoning meldt zich dan opnieuw. */
   shownKey?: string;
 }) {
+  const imageKey = JSON.stringify([media?.id, media?.path, shownKey]);
+  const [readyImageKey, setReadyImageKey] = useState<string | null>(null);
   const [videoElapsed01, setVideoElapsed01] = useState(0);
   const [videoDurSec, setVideoDurSec] = useState(0);
 
@@ -2586,15 +2585,18 @@ function SingleMediaMode({
     setVideoDurSec(0);
     finishedRef.current = false;
     everPlayedRef.current = false;
-  }, [media?.id, media?.path]);
+  }, [media?.id, media?.path, shownKey]);
 
   useEffect(() => {
     if (!finishAfterMs || loop || !onVideoEnded) return;
-    const id = window.setTimeout(() => finishOnce(), finishAfterMs);
+    // A still owes its full duration after decode. A bounded load timeout releases a file
+    // that never produces either an image or a browser error.
+    const waitingForImage = media?.type === "IMAGE" && readyImageKey !== imageKey;
+    const id = window.setTimeout(() => finishOnce(), waitingForImage ? 12000 : finishAfterMs);
     return () => window.clearTimeout(id);
     // finishOnce leest onVideoEnded via ref; niet herstarten bij elke parent-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finishAfterMs, loop, media?.id, media?.path]);
+  }, [finishAfterMs, loop, imageKey, readyImageKey, media?.type]);
 
   useEffect(() => {
     if (loop || !onVideoEnded || media?.type !== "VIDEO") return;
@@ -2718,7 +2720,8 @@ function SingleMediaMode({
           style={DISPLAY_COVER_MEDIA_STYLE}
           slot={holdSlot}
           shownKey={shownKey}
-          onShown={onShown ? () => onShown() : undefined}
+          onShown={() => { setReadyImageKey(imageKey); onShown?.(); }}
+          onError={() => finishOnce()}
         />
       )}
       </DisplayMediaStage>

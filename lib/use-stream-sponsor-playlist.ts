@@ -7,7 +7,7 @@ import type { Match } from "./types";
 
 function mediaFingerprint(slot: StreamSponsorSlotView, match: Match | null): string {
   const media = slot.current?.media ?? [];
-  const items = media.map((m) => `${m.id}:${m.path}:${m.active}:${m.type}:${m.durationSec}`).join("|");
+  const items = media.map((m) => `${m.id}:${m.path}:${m.active}:${m.type}:${m.durationSec}:${m.mediaCheckJson ?? ""}`).join("|");
   return [
     slot.current?.id ?? "",
     slot.section,
@@ -35,19 +35,21 @@ function looksLikeFalseEnded(video: HTMLVideoElement, catalogDur: number): boole
 
 export function useStreamSponsorPlaylist(slot: StreamSponsorSlotView, match: Match | null) {
   const fingerprint = mediaFingerprint(slot, match);
-  const slides = useMemo(
+  const orderedSlides = useMemo(
     () => streamSponsorSlidesForSlot(slot, match),
     // fingerprint vangt media/pin-wijzigingen; slot/match zelf zouden elke tick resetten.
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [fingerprint],
   );
+  const [failed, setFailed] = useState<{ fingerprint: string; ids: string[] }>({ fingerprint: "", ids: [] });
+  const slides = failed.fingerprint === fingerprint ? orderedSlides.filter(s => !failed.ids.includes(s.id)) : orderedSlides;
   const [index, setIndex] = useState(0);
   const endedRef = useRef(false);
 
   useEffect(() => {
     setIndex(0);
     endedRef.current = false;
-  }, [fingerprint, slides.length]);
+  }, [fingerprint]);
 
   const slide = slides.length > 0 ? slides[index % slides.length]! : null;
   const next = slides.length > 1 ? slides[(index + 1) % slides.length]! : null;
@@ -62,24 +64,28 @@ export function useStreamSponsorPlaylist(slot: StreamSponsorSlotView, match: Mat
     if (!slide || slide.type === "VIDEO" || slot.interrupted) return;
     const id = window.setTimeout(advance, slide.durationSec * 1000);
     return () => window.clearTimeout(id);
-  }, [slide?.id, slide?.type, slide?.durationSec, slot.interrupted, slides.length]);
+  }, [index, slide?.id, slide?.type, slide?.durationSec, slot.interrupted, slides.length]);
+
+  const onMediaError = () => {
+    if (!slide) return;
+    setFailed(previous => {
+      const ids = previous.fingerprint === fingerprint ? previous.ids : [];
+      return ids.includes(slide.id) ? previous : { fingerprint, ids: [...ids, slide.id] };
+    });
+    endedRef.current = false;
+  };
 
   const onVideoEnded = (video: HTMLVideoElement) => {
     if (!slide || endedRef.current) return;
     if (looksLikeFalseEnded(video, slide.durationSec)) {
-      try {
-        video.currentTime = 0;
-        void video.play().catch(() => undefined);
-      } catch {
-        /* ignore */
-      }
+      onMediaError();
       return;
     }
     endedRef.current = true;
     advance();
   };
 
-  return { slides, slide, next, advance, onVideoEnded };
+  return { slides, slide, next, advance, onVideoEnded, onMediaError };
 }
 
 export type { StreamSponsorSlide };

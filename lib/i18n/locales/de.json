@@ -127,6 +127,7 @@
     "serviceVolleyballOnly": "Aufschlag wird nur im Volleyball verwendet.",
     "cardsNotActive": "{{color}} Karten werden in {{sport}} nicht verwendet.",
     "eventNotFound": "Ereignis nicht gefunden",
+    "undoLaterEventFirst": "Zuerst die spätere abhängige Spielaktion rückgängig machen.",
     "volleyballUndoLastOnly": "Im Volleyball kann nur der letzte Punkt rückgängig gemacht werden (oder −1 verwenden).",
     "matchClosed": "Dieses Spiel ist abgeschlossen (Bericht gespeichert). Öffnen Sie es erneut unter Vorbereitung → Spiele oder wählen Sie ein anderes Spiel.",
     "licenseNoAutoSponsors": "Automatische Sponsorrotation ist in diesem Lizenzplan nicht verfügbar."
@@ -577,6 +578,7 @@
     "uploadFirst": "Laden Sie zuerst Medien hoch.",
     "cueInvalidInput": "Wählen Sie Medien und geben Sie eine Zeit wie 12:30 ein",
     "cueRepeatInvalid": "Prüfen Sie Startzeit, Endzeit und Intervall (mindestens 0,5 Minute).",
+    "cueOverlap": "Dieses Zeitfenster überschneidet sich mit einem anderen aktiven Spot dieser Phase.",
     "cueSaveFailed": "Zeitmarke konnte nicht gespeichert werden",
     "cueAdded": "Zeitmarke um {{time}} hinzugefügt",
     "cueSeriesAdded": "{{count}} automatische Wiedergabemomente hinzugefügt",
@@ -718,6 +720,8 @@
     "cueWindow": "{{start}} – {{end}}"
   },
   "reports": {
+    "plannedPlays": "Geplante Wiedergaben",
+    "completePlays": "Vollständige Wiedergaben",
     "title": "Proof of play",
     "filterMatch": "Spiel",
     "filterAll": "Alle Spiele",
@@ -1309,6 +1313,7 @@
     "healthReasonFfmpegMissing": "FFmpeg fehlt: nicht vollständig geprüft",
     "healthReasonTimeout": "Prüfung dauerte zu lange",
     "healthReasonDeferredLiveMatch": "Vollständige Prüfung nach dem Spiel",
+    "healthAnimatedWebp": "Animiertes WebP. Die vollständige Animation konnte nicht geprüft werden.",
     "healthReasonNotChecked": "Noch nicht vollständig geprüft",
     "themeSurfaceHint": "Richten Sie beide Flächen des Stadionbildschirms ein. Unter Hintergründe gilt der gemeinsame Anzeigetafel-Hintergrund für beide, sofern Sie kein eigenes Bild wählen.",
     "themeLayoutSaved": "In „{{name}}“ gespeichert. Der Bildschirm nutzt die neue Version überall, wo dieses Layout gilt.",
@@ -1344,7 +1349,7 @@
     "networkFallback": "Das gewählte Netzwerk ist nicht verbunden. Bis es zurück ist, lauscht die Handy-Steuerung auf {{network}}.",
     "networkNone": "Kein Netzwerk gefunden. Verbinden Sie den PC mit dem Netzwerk; die Handy-Steuerung folgt automatisch.",
     "networkAllWarning": "Jedes Netzwerk dieses PCs kann die Handy-Steuerung erreichen. Wählen Sie besser das Netzwerk der Handys.",
-    "networkUpgradeHint": "Dieser PC ist in mehr als einem Netzwerk. Wie bisher lauscht die Handy-Steuerung auf allen, damit gekoppelte Handys weiter funktionieren. Wählen Sie das Netzwerk der Handys, um die anderen zu sperren.",
+    "networkUpgradeHint": "Nach dem Update nutzt die Handybedienung {{network}}. Wähle den Stadionadapter, wenn die Handys ein anderes Netzwerk nutzen.",
     "networkFixedByEnv": "Durch MOBILE_BRIDGE_BIND auf diesem PC festgelegt: {{network}}.",
     "networkSaveFailed": "Die Handy-Steuerung konnte nicht auf dieses Netzwerk wechseln. Sie bleibt im vorherigen Netzwerk."
   },

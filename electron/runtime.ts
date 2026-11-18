@@ -133,7 +133,7 @@ import {
   resolveMediaFile,
 } from "./media-transcode";
 import { mediaHealthFor, parseMediaCheckRecord, type MediaCheckRecord, type MediaHealth } from "../lib/media-health";
-import { cueEndSec } from "../lib/scheduled-media-cue";
+import { writeScheduledCues } from "../server/scheduled-cue-writes";
 import {
   isClubRotationSponsorId,
   mergeSponsorsWithClubMedia,
@@ -165,10 +165,7 @@ function requireOpts() {
   return opts;
 }
 
-function parseCueEndSec(endSec: number | null | undefined, startSec: number): number | null {
-  if (endSec == null) return null;
-  return cueEndSec({ triggerSec: startSec, endSec });
-}
+
 
 function windows() {
   const { getControlWindow, getDisplayWindow, getStreamWindow } = requireOpts();
@@ -381,6 +378,14 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
   const prevVisibleMs = session.visibleMs;
   if (!payload.discard) feedVisibleMs(session, reported * 1000, now);
 
+  // The previous phase can finish after the new phase has already started reporting.
+  // Persist that last fragment without replacing the live ledger of the new phase.
+  if (sponsorLedgerSnapshot && (sponsorLedgerSnapshot.matchId !== payload.matchId ||
+      sponsorLedgerSnapshot.segmentKey !== payload.segmentKey)) {
+    session.endedAtMs = now;
+    queuePlayRowWrite(session, playRowActualMs(session) > 0 ? "done" : "delete");
+    return sponsorLedgerSnapshot;
+  }
   const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
   const ledgerDeltaMs = session.countedMs - session.ledgerAddedMs;
   if (ledgerDeltaMs > 0) {
@@ -412,10 +417,10 @@ export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): Spons
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
 
-  if (payload.discard || session.visibleMs <= 0) {
+  if (playRowActualMs(session) === 0) {
     // Niets zichtbaar gespeeld: geen vertoning. Een al aangemaakte rij verdwijnt weer.
-    if (session.rowState != null) queuePlayRowWrite(session, "delete");
-    if (payload.discard) session.endedAtMs = now;
+    queuePlayRowWrite(session, "delete");
+    if (payload.discard || reported > 0 || now - session.startedAtMs >= 2000) session.endedAtMs = now;
     return ledger;
   }
 
@@ -1713,7 +1718,10 @@ export async function listExternalFilesForBackup(): Promise<string[]> {
  * alle media opent. Zie `finishPendingRestore`.
  */
 export async function finishVenueRestore(opts: { userDataDir: string; uploadsDir: string }): Promise<RestoreFinishResult> {
-  const result = await finishPendingRestore(prisma, opts);
+  const result = await finishPendingRestore(prisma, {
+    ...opts,
+    canOpen: async (file, kind) => (await checkMediaFile(file, kind)).record?.status === "ok",
+  });
   // Ook na een onderbroken padwijziging: een deel van de paden kan al nieuw zijn.
   if (result.kind !== "none" && Object.keys(result.followup.remap).length > 0) {
     await touchState();
@@ -1916,6 +1924,13 @@ function startMediaCheckWorker() {
       mediaCheckWorkerRunning = false;
     }
   })();
+}
+
+function availableForPlayback(item: { path: string; mediaCheckJson: string | null }): boolean {
+  const record = parseMediaCheckRecord(item.mediaCheckJson);
+  if (record?.status !== "broken") return true;
+  const version = mediaFileVersion(item.path);
+  return version.exists && version.key !== record.key;
 }
 
 type MediaItemForCheck = {
@@ -2663,7 +2678,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         });
         return json(
           200,
-          mergeSponsorsWithClubMedia(sponsors as unknown as Sponsor[], clubMedia as unknown as MediaItem[]),
+          mergeSponsorsWithClubMedia(sponsors.map(s => ({ ...s, media: s.media.filter(availableForPlayback) })) as unknown as Sponsor[], clubMedia.filter(availableForPlayback) as unknown as MediaItem[]),
         );
       }
       return json(200, sponsors);
@@ -3146,6 +3161,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           mediaDurationSec: number;
           mediaSponsorName: string | null;
           mediaSponsorId: string | null;
+          mediaCheckJson: string | null;
           mediaActive: boolean | number;
           mediaPlayAudio: boolean | number;
           mediaSponsorPhaseTagsJson: string | null;
@@ -3156,7 +3172,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           c."id", c."mediaId", c."matchStatus", c."triggerSec", c."endSec", c."enabled", c."loop", c."guarantee", c."createdAt",
           m."type" AS "mediaType", m."path" AS "mediaPath", m."title" AS "mediaTitle",
           m."durationSec" AS "mediaDurationSec", m."sponsorName" AS "mediaSponsorName",
-          m."sponsorId" AS "mediaSponsorId", m."active" AS "mediaActive",
+          m."sponsorId" AS "mediaSponsorId", m."active" AS "mediaActive", m."mediaCheckJson" AS "mediaCheckJson",
           m."playAudio" AS "mediaPlayAudio", m."sponsorPhaseTagsJson" AS "mediaSponsorPhaseTagsJson",
           m."createdAt" AS "mediaCreatedAt"
         FROM "ScheduledMediaCue" c
@@ -3183,7 +3199,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
             durationSec: Number(c.mediaDurationSec),
             sponsorName: c.mediaSponsorName,
             sponsorId: c.mediaSponsorId,
-            active: Boolean(c.mediaActive),
+            active: Boolean(c.mediaActive) && availableForPlayback({ path: c.mediaPath, mediaCheckJson: c.mediaCheckJson }),
             playAudio: Boolean(c.mediaPlayAudio),
             sponsorPhaseTagsJson: c.mediaSponsorPhaseTagsJson,
             createdAt: c.mediaCreatedAt instanceof Date ? c.mediaCreatedAt.toISOString() : String(c.mediaCreatedAt),
@@ -3192,99 +3208,17 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       );
     }
 
-    if (pathname === "/api/scheduled-media-cues" && method === "POST") {
-      const body = (parseJsonBody(req) as {
-        mediaId?: string;
-        matchStatus?: string;
-        triggerSec?: number;
-        endSec?: number | null;
-        enabled?: boolean;
-        loop?: boolean;
-        guarantee?: string | null;
-      }) ?? {};
-      if (!body.mediaId || !body.matchStatus || !Number.isFinite(body.triggerSec)) {
-        return json(400, { error: "Media, fase en tijdstip zijn verplicht." });
-      }
-      const startSec = Math.max(0, Math.round(body.triggerSec ?? 0));
-      const endSec = parseCueEndSec(body.endSec, startSec);
-      if (body.endSec != null && endSec == null) {
-        return json(400, { error: "Eindtijd moet na de starttijd liggen." });
-      }
-      const media = await prisma.mediaItem.findUnique({ where: { id: body.mediaId } });
-      if (!media) return json(400, { error: "Media niet gevonden." });
-      const id = `cue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO "ScheduledMediaCue" ("id", "mediaId", "matchStatus", "triggerSec", "endSec", "enabled", "loop", "guarantee")
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        id,
-        body.mediaId,
-        body.matchStatus,
-        startSec,
-        endSec,
-        body.enabled === false ? 0 : 1,
-        body.loop === true ? 1 : 0,
-        normalizeCueGuarantee(body.guarantee),
-      );
-      await touchState();
-      await broadcastDisplayState();
-      return json(200, { id });
-    }
-
     const scheduledCueId = pathname.match(/^\/api\/scheduled-media-cues\/([^/]+)$/)?.[1];
-    if (scheduledCueId && method === "PATCH") {
-      const body = (parseJsonBody(req) as {
-        mediaId?: string;
-        matchStatus?: string;
-        triggerSec?: number;
-        endSec?: number | null;
-        enabled?: boolean;
-        loop?: boolean;
-        guarantee?: string | null;
-      }) ?? {};
-      const updates: string[] = [];
-      const values: unknown[] = [];
-      if (typeof body.mediaId === "string") {
-        const media = await prisma.mediaItem.findUnique({ where: { id: body.mediaId } });
-        if (!media) return json(400, { error: "Media niet gevonden." });
-        updates.push(`"mediaId" = ?`);
-        values.push(body.mediaId);
+    const batch = pathname === "/api/scheduled-media-cues/batch" && method === "POST";
+    if (batch || (pathname === "/api/scheduled-media-cues" && method === "POST") || (scheduledCueId && method === "PATCH")) {
+      const body = parseJsonBody(req) as Record<string, unknown> | null;
+      const input = batch ? body?.edits : [{ ...body, id: scheduledCueId }];
+      const result = await writeScheduledCues(prisma, input);
+      if (result.status === 200) {
+        await touchState();
+        await broadcastDisplayState();
       }
-      if (typeof body.matchStatus === "string") {
-        updates.push(`"matchStatus" = ?`);
-        values.push(body.matchStatus);
-      }
-      if (Number.isFinite(body.triggerSec)) {
-        updates.push(`"triggerSec" = ?`);
-        values.push(Math.max(0, Math.round(body.triggerSec ?? 0)));
-      }
-      if (body.endSec === null) {
-        updates.push(`"endSec" = ?`);
-        values.push(null);
-      } else if (Number.isFinite(body.endSec)) {
-        updates.push(`"endSec" = ?`);
-        values.push(Math.max(0, Math.round(body.endSec as number)));
-      }
-      if (typeof body.enabled === "boolean") {
-        updates.push(`"enabled" = ?`);
-        values.push(body.enabled ? 1 : 0);
-      }
-      if (typeof body.loop === "boolean") {
-        updates.push(`"loop" = ?`);
-        values.push(body.loop ? 1 : 0);
-      }
-      if ("guarantee" in body) {
-        updates.push(`"guarantee" = ?`);
-        values.push(normalizeCueGuarantee(body.guarantee));
-      }
-      if (updates.length === 0) return json(400, { error: "Geen wijzigingen." });
-      await prisma.$executeRawUnsafe(
-        `UPDATE "ScheduledMediaCue" SET ${updates.join(", ")} WHERE "id" = ?`,
-        ...values,
-        scheduledCueId,
-      );
-      await touchState();
-      await broadcastDisplayState();
-      return json(200, { ok: true });
+      return json(result.status, result.body);
     }
 
     if (scheduledCueId && method === "DELETE") {
@@ -3390,23 +3324,39 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           durationSec = Math.max(1, Math.round(playbackInspect.durationSec));
         }
       }
-      let media = await prisma.mediaItem.update({
-        where: { id: replaceId },
-        data: {
-          path: newPath,
-          durationSec,
-          playbackWarning: playbackInspect ? playbackWarningForReason(playbackInspect.reason) : null,
-          mediaCheckJson: null,
-        },
-      });
-      requireOpts().log(`[media] bestand vervangen voor ${item.title} → ${storedFileName(newPath)}`);
+      const stored = await prisma.mediaItem.findFirst({ where: { path: newPath, type: item.type, mediaCheckJson: { not: null } } });
+      const candidate = { ...item, path: newPath, durationSec, mediaCheckJson: stored?.mediaCheckJson ?? null,
+        playbackWarning: playbackInspect ? playbackWarningForReason(playbackInspect.reason) : null };
+      const version = mediaFileVersion(newPath);
+      const previous = parseMediaCheckRecord(candidate.mediaCheckJson);
+      const cached = previous && previous.key === version.key ? previous : null;
+      const live = await isMatchInPlayNow();
+      const check = live
+        ? { record: cached, ffmpegMissing: false }
+        : await checkMediaFile(newPath, item.type === "VIDEO" ? "VIDEO" : "IMAGE", { fallbackDurationSec: durationSec, previous: cached });
+      let health = { ...mediaHealthFor({ fileExists: version.exists, currentKey: version.key, record: check.record,
+        probeReason: check.ffmpegMissing ? "ffmpeg_missing" : candidate.playbackWarning, deferred: live }),
+        fileName: storedFileName(newPath), id: item.id };
+      if (health.status !== "ok" || !check.record) return json(422, { health });
+      let acceptedPath = newPath;
+      let acceptedRecord = check.record;
       if (playbackInspect && isDisplayPlaybackRisk(playbackInspect.reason)) {
-        await persistPreparedVideo(media);
-        media = (await prisma.mediaItem.findUnique({ where: { id: replaceId } })) ?? media;
+        if (live) return json(409, { health: { ...health, status: "pending", reason: "deferred_live_match" } });
+        const prepared = await prepareVideoForDisplay(newPath);
+        if (!prepared.transcoded || !prepared.check) return json(422, { error: "prepare_failed" });
+        acceptedPath = prepared.path;
+        acceptedRecord = prepared.check;
       }
+      if (mediaFileVersion(acceptedPath).key !== acceptedRecord.key) return json(409, { error: "file_changed" });
+      const saved = await prisma.mediaItem.updateMany({
+        where: { id: item.id, path: item.path, type: item.type },
+        data: { path: acceptedPath, durationSec, playbackWarning: null, mediaCheckJson: JSON.stringify(acceptedRecord) },
+      });
+      if (saved.count !== 1) return json(409, { error: "media_changed" });
+      const media = await prisma.mediaItem.findUniqueOrThrow({ where: { id: item.id } });
+      health = await mediaHealthForItem(media, { runDecode: false });
       await touchState();
       await broadcastDisplayState();
-      const health = await mediaHealthForItem(media, { runDecode: true });
       return json(200, { media, health, playbackInspect });
     }
 

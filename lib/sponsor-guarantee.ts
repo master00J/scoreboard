@@ -84,14 +84,15 @@ export function normalizeCueGuarantee(value: unknown): CueGuarantee | null {
   return value === "window" || value === "fullPlay" || value === "none" ? value : null;
 }
 
-/** Een vertoning telt als volledig als er hoogstens een halve seconde van de clip ontbrak. */
+/** Sta bij een afgesloten vertoning maximaal 50 ms afwijking van de spelerklok toe. */
 export function isCompletePlay(row: {
   expectedSec: number;
   actualSec: number;
   actualMs?: number | null;
+  state?: string;
 }): boolean {
-  if (!(row.expectedSec > 0)) return false;
-  return playLogVisibleSec(row) + 0.5 >= row.expectedSec;
+  if (!(row.expectedSec > 0) || (row.state != null && row.state !== "done")) return false;
+  return playLogVisibleSec(row) + 0.05 >= row.expectedSec;
 }
 
 /**
@@ -303,6 +304,7 @@ export type BookingPlayRow = {
   actualSec: number;
   actualMs?: number | null;
   counted?: boolean | null;
+  state?: string;
 };
 
 /** Geboekte tijd van een sponsor voor één fase van één wedstrijd, zoals bij de start vastgelegd. */

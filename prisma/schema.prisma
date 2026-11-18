@@ -437,6 +437,7 @@ model SponsorPhaseBooking {
   bookedSec    Int
   /// Tekort uit eerdere fases dat hier ingehaald mag worden.
   carryInSec   Int      @default(0)
+  filePlanJson String?
   guaranteeJson String?
   createdAt    DateTime @default(now())
 

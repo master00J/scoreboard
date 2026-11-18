@@ -39,6 +39,8 @@ export type PlaySessionState = {
   /** Laatste moment waarop de zichtbare tijd groeide. */
   lastActiveAtMs: number | null;
   paused: boolean;
+  endedAtMs?: number | null;
+  segmentKey?: string;
 };
 
 export function createPlaySessionState(opts: {
@@ -72,7 +74,7 @@ function coveredByHigherLayer(
   for (const other of sessions) {
     if (other === session || other.clipSessionId === session.clipSessionId) continue;
     if (SPONSOR_PLAY_SOURCE_LAYER[other.source] <= own) continue;
-    if (other.paused || other.lastActiveAtMs == null) continue;
+    if (other.paused || other.endedAtMs != null || other.segmentKey !== session.segmentKey || other.lastActiveAtMs == null) continue;
     if (nowMs - other.lastActiveAtMs <= PLAY_OVERLAP_WINDOW_MS) return true;
   }
   return false;

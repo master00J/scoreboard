@@ -10,8 +10,6 @@ import type { SponsorLedgerPayload } from "./sponsor-telemetry";
 import {
   ledgerActiveClipStillLiveForMatchSegment,
   sponsorLedgerMatchesSegment,
-  sponsorTelemetryActiveClipStillLive,
-  sponsorTelemetryConsumedSec,
 } from "./sponsor-telemetry";
 
 export type SponsorSpreadPhaseView = {
@@ -360,13 +358,8 @@ export function allActiveSponsorSectionBudgetsExhausted(
 }
 
 /**
- * Verbruik waarop het budgetplafond beslist: max van slotrooster en telemetry. Loopt er
- * volgens de ledger nog een clip van deze sponsor, dan telt alleen de telemetry. Het
- * slotrooster is een projectie die vóórloopt op het scherm (slots starten op hele
- * seconden, het display pas bij de volgende tick) en op hele seconden afrondt; zo kapte
- * het plafond de laatste clip van een sponsor tot ~0,5 s te vroeg af. In de rust bleef
- * die clip daarna gepauzeerd als "bezig" in de ledger staan en blokkeerde hij de
- * volgende slots. Een lopende clip speelt dus altijd uit; nieuwe clips stoppen wel.
+ * Zodra de speler deze fase meet, bepaalt de gemeten tijd of een nieuwe clip mag starten.
+ * Een lopende clip mag uitspelen. Alleen zonder meting gebruiken we het voorspelde rooster.
  */
 function sponsorConsumedForBudgetCap(
   sponsorId: string,
@@ -381,27 +374,11 @@ function sponsorConsumedForBudgetCap(
     nowMs: number;
   },
 ): number {
-  const consumedSlot = sponsorScreenSecondsConsumed(
-    opts.slotMap,
-    opts.sponsors,
-    opts.section,
-    opts.matchStatus,
-    opts.slotT,
-    sponsorId,
-  );
   const ledger = opts.ledgerMatchesSegment ? opts.sponsorLedger : null;
-  if (!ledger) return consumedSlot;
-  const ac = ledger.activeClip;
-  if (ac && ac.sponsorId === sponsorId && sponsorTelemetryActiveClipStillLive(ac, opts.nowMs)) {
-    /**
-     * De lopende clip telt pas mee als hij klaar is. Het rooster start een clip zolang er
-     * budget over is en laat die helemaal uitspelen, ook over het budget heen. Telde het
-     * lopende deel hier al mee, dan haalde het plafond een clip van 25 s met nog 15 s budget
-     * na 15 s van het scherm.
-     */
-    return ledger.bySponsorSec[sponsorId] ?? 0;
-  }
-  return Math.max(consumedSlot, sponsorTelemetryConsumedSec(ledger, sponsorId, opts.nowMs));
+  if (ledger) return ledger.bySponsorSec[sponsorId] ?? 0;
+  return sponsorScreenSecondsConsumed(
+    opts.slotMap, opts.sponsors, opts.section, opts.matchStatus, opts.slotT, sponsorId,
+  );
 }
 
 /**

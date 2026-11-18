@@ -22,7 +22,7 @@ export function StreamSponsorMedia({
   placeholder?: boolean;
 }) {
   const { t } = useTranslation();
-  const { slide, onVideoEnded } = useStreamSponsorPlaylist(slot, match);
+  const { slide, onVideoEnded, onMediaError } = useStreamSponsorPlaylist(slot, match);
   if (!slot.current || !slide) {
     if (!placeholder) return null;
     return (
@@ -33,7 +33,7 @@ export function StreamSponsorMedia({
   }
   return (
     <div className="relative h-full w-full overflow-hidden bg-black">
-      <StreamHdMedia src={slide.src} type={slide.type} title={slide.title} onEnded={onVideoEnded} />
+      <StreamHdMedia src={slide.src} type={slide.type} title={slide.title} onEnded={onVideoEnded} onMediaError={onMediaError} />
     </div>
   );
 }
@@ -62,7 +62,7 @@ export function StreamSponsorLayer({
   placeholder?: boolean;
 }) {
   const { t } = useTranslation();
-  const { slide, onVideoEnded } = useStreamSponsorPlaylist(slot, match);
+  const { slide, onVideoEnded, onMediaError } = useStreamSponsorPlaylist(slot, match);
   const showing = Boolean(slot.current && slide);
   if (!showing && !placeholder) return null;
 
@@ -93,7 +93,7 @@ export function StreamSponsorLayer({
   return (
     <div className={`absolute left-1/2 z-20 -translate-x-1/2 ${widthClass}`} style={plateStyle}>
       <div className="relative aspect-video overflow-hidden rounded-md bg-black shadow-[0_8px_32px_rgba(0,0,0,0.55)] ring-1 ring-white/15">
-        <StreamHdMedia src={slide.src} type={slide.type} title={slide.title} onEnded={onVideoEnded} />
+        <StreamHdMedia src={slide.src} type={slide.type} title={slide.title} onEnded={onVideoEnded} onMediaError={onMediaError} />
       </div>
       {style === "lowerthird" ? (
         <div className="mt-1.5 truncate text-center text-sm font-semibold text-white drop-shadow">

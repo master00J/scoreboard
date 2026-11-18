@@ -60,7 +60,7 @@ export function sponsorPlayListLimit(params: URLSearchParams): number | undefine
 
 export async function listSponsorPlays(db: Db, filters: SponsorPlayFilters, limit: number | undefined) {
   return db.sponsorPlayLog.findMany({
-    where: buildSponsorPlayWhere(filters),
+    where: { ...buildSponsorPlayWhere(filters), OR: [{ actualMs: { gt: 0 } }, { actualSec: { gt: 0 } }] },
     orderBy: { endedAt: "desc" },
     ...(limit != null ? { take: limit } : {}),
     include: {
@@ -84,7 +84,7 @@ export { playLogVisibleSec } from "../lib/sponsor-play-ledger";
  */
 export async function summarizeSponsorPlays(db: Db, filters: SponsorPlayFilters) {
   // Handmatige clips die volgens de instelling niet meetellen, staan wel in de lijst maar niet in de totalen.
-  const where: Prisma.SponsorPlayLogWhereInput = { AND: [buildSponsorPlayWhere(filters), { counted: true }] };
+  const where: Prisma.SponsorPlayLogWhereInput = { ...buildSponsorPlayWhere(filters), counted: true, OR: [{ actualMs: { gt: 0 } }, { actualSec: { gt: 0 } }] };
   const [grouped, legacy] = await Promise.all([
     db.sponsorPlayLog.groupBy({
       by: ["sponsorId", "sponsorName"],

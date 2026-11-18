@@ -17,7 +17,7 @@ export function StreamBreakSponsorOverlay({
   placeholder?: boolean;
 }) {
   const { t } = useTranslation();
-  const { slide, next, onVideoEnded } = useStreamSponsorPlaylist(slot, match);
+  const { slide, next, onVideoEnded, onMediaError } = useStreamSponsorPlaylist(slot, match);
   if (!slide) {
     if (!placeholder) return null;
     return (
@@ -34,7 +34,7 @@ export function StreamBreakSponsorOverlay({
           src={slide.src}
           type={slide.type}
           title={slide.title}
-          onEnded={onVideoEnded}
+          onEnded={onVideoEnded} onMediaError={onMediaError}
         />
       </div>
       {next ? (

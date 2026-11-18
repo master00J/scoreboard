@@ -631,7 +631,15 @@ export function ProofOfPlayPanel() {
               <tbody className="divide-y divide-border">
                 {summary.map((s) => (
                   <tr key={s.sponsorId ?? s.sponsorName}>
-                    <td className="py-2 pr-3 font-medium">{s.sponsorName}</td>
+                    <td className="py-2 pr-3 font-medium">
+                      {s.sponsorName}
+                      {s.files?.map(f => (
+                        <div key={f.mediaId} className="text-xs font-normal text-muted-foreground">
+                          {f.title} · {formatSecForExport(f.deliveredSec)} / {formatSecForExport(f.plannedSec)}
+                          {" · "}{t("reports.completePlays")} {f.completePlays} / {f.plannedPlays}
+                        </div>
+                      ))}
+                    </td>
                     <td className="py-2 pr-3 text-right tabular-nums">{s.plays}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">
                       {formatSecForExport(s.actualSec)}

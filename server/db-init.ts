@@ -395,6 +395,8 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
     `CREATE INDEX IF NOT EXISTS "SponsorPhaseBooking_sponsorId_idx" ON "SponsorPhaseBooking" ("sponsorId")`,
   );
 
+  await addColumnIfMissing("SponsorPhaseBooking", "filePlanJson", "TEXT");
+
   // Cloud-commando's die al uitgevoerd zijn (server/cloud-command-ledger.ts).
   await prisma.$executeRawUnsafe(`CREATE TABLE IF NOT EXISTS "AppliedCloudCommand" (
     "id" TEXT NOT NULL PRIMARY KEY,

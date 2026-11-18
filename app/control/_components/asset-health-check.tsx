@@ -39,7 +39,7 @@ function fileNameOf(stored: string): string {
 }
 
 /** Snelle controle in de browser: laadt de kop van de video of de afbeelding. */
-async function checkOne(item: MediaItem, t: TFunction): Promise<CheckRow> {
+async function checkOne(item: Pick<MediaItem, "id" | "type" | "title" | "path">, t: TFunction): Promise<CheckRow> {
   const url = mediaUrl(item.path);
   const start = performance.now();
   const base = { id: item.id, title: item.title, type: item.type, fileName: fileNameOf(item.path) };
@@ -65,6 +65,7 @@ async function checkOne(item: MediaItem, t: TFunction): Promise<CheckRow> {
       v.muted = true;
       v.src = url;
       const onLoaded = () => {
+        const duration = v.duration;
         const ms = performance.now() - start;
         cleanup();
         resolve({
@@ -74,7 +75,7 @@ async function checkOne(item: MediaItem, t: TFunction): Promise<CheckRow> {
           message:
             ms > SLOW_THRESHOLD_MS
               ? t("setup.healthSlowDecode", { ms: Math.round(ms) })
-              : t("setup.healthMetaOk", { ms: Math.round(ms), sec: Math.round(v.duration) }),
+              : t("setup.healthMetaOk", { ms: Math.round(ms), sec: Number.isFinite(duration) ? Math.round(duration) : "?" }),
         });
       };
       const onError = () => {
@@ -146,6 +147,7 @@ const REASON_KEYS: Partial<Record<MediaHealthReason, string>> = {
   timeout: "setup.healthReasonTimeout",
   deferred_live_match: "setup.healthReasonDeferredLiveMatch",
   not_checked: "setup.healthReasonNotChecked",
+  not_decodable_here: "setup.healthAnimatedWebp",
 };
 
 function healthMessage(t: TFunction, health: MediaHealth): string {
@@ -162,7 +164,9 @@ function healthMessage(t: TFunction, health: MediaHealth): string {
 
 /** Voegt de volledige decode (hoofdproces) toe aan de snelle browsercontrole. */
 function mergeHealth(row: CheckRow, health: ItemHealth | null, t: TFunction): CheckRow {
-  if (!health) return row;
+  if (!health) {
+    return row.status === "fail" ? row : { ...row, status: "pending", message: t("setup.healthReasonNotChecked") };
+  }
   const next: CheckRow = { ...row, fileName: health.fileName || row.fileName };
   if (health.status === "broken") {
     return {
@@ -224,7 +228,8 @@ export function AssetHealthCheck() {
     try {
       const res = await fetch("/api/media");
       const payload = await res.json().catch(() => null);
-      const all = (res.ok && Array.isArray(payload) ? (payload as MediaItem[]) : []).filter(
+      if (!res.ok || !Array.isArray(payload)) throw new Error("media_list_unavailable");
+      const all = (payload as MediaItem[]).filter(
         (m) => m.active,
       );
       setProgress({ done: 0, total: all.length });
@@ -281,6 +286,7 @@ export function AssetHealthCheck() {
       }
       setFinishedAt(Date.now());
     } catch (err) {
+      toast({ title: t("setup.healthReasonNotChecked"), variant: "error" });
       console.error("[AssetHealthCheck]", err);
     } finally {
       setRunning(false);
@@ -309,13 +315,21 @@ export function AssetHealthCheck() {
     async (row: CheckRow, newPath: string) => {
       setReplacingId(row.id);
       try {
+        if (row.type === "IMAGE") {
+          const image = await checkOne({ ...row, path: newPath }, t);
+          if (image.status === "fail") {
+            toast({ title: t("setup.healthReplaceFailed"), description: image.message, variant: "error" });
+            return;
+          }
+        }
         const res = await fetch(`/api/media/${row.id}/replace`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path: newPath }),
         });
         if (!res.ok) {
-          toast({ title: t("setup.healthReplaceFailed"), description: row.title, variant: "error" });
+          const failure = await res.json().catch(() => null);
+          toast({ title: t("setup.healthReplaceFailed"), description: failure?.health ? healthMessage(t, failure.health) : row.title, variant: "error" });
           return;
         }
         const payload = (await res.json()) as { media: MediaItem; health: ItemHealth };
@@ -452,6 +466,7 @@ export function AssetHealthCheck() {
             )}
             {finishedAt &&
               !running &&
+              rows.length > 0 &&
               failCount === 0 &&
               slowCount === 0 &&
               warnCount === 0 &&

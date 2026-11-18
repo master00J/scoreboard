@@ -85,11 +85,13 @@ function BridgeNetworkPicker({
   let status: { text: string; tone: "ok" | "warn" };
   if (bind.via === "all") {
     status = {
-      text: choice.mode === "all" && choice.fromUpgrade ? t("bridge.networkUpgradeHint") : t("bridge.networkAllWarning"),
+      text: t("bridge.networkAllWarning"),
       tone: "warn",
     };
   } else if (bind.via === "none") {
     status = { text: t("bridge.networkNone"), tone: "warn" };
+  } else if (choice.mode === "auto" && choice.fromUpgrade) {
+    status = { text: t("bridge.networkUpgradeHint", { network: adapterLabel }), tone: "warn" };
   } else if (bind.via === "fallback") {
     status = { text: t("bridge.networkFallback", { network: adapterLabel }), tone: "warn" };
   } else {
