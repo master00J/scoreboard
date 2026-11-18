@@ -1271,7 +1271,18 @@
     "lanCodeCopied": "Codice di abbinamento LAN copiato",
     "withPin": "Include PIN operatore",
     "viewerOnly": "Solo visualizzazione",
-    "viewerOnlyStatus": "solo visualizzazione"
+    "viewerOnlyStatus": "solo visualizzazione",
+    "networkLabel": "Rete per il controllo da telefono",
+    "networkAuto": "Automatico (rete di questo PC)",
+    "networkAll": "Tutte le reti",
+    "networkMissing": "{{name}} (non collegata)",
+    "networkListening": "I telefoni raggiungono questo PC tramite {{network}}. Le altre reti non vi accedono.",
+    "networkFallback": "La rete scelta non è collegata. Finché non torna, il controllo da telefono ascolta su {{network}}.",
+    "networkNone": "Nessuna rete trovata. Collega il PC alla rete; il controllo da telefono si adegua da solo.",
+    "networkAllWarning": "Ogni rete a cui è collegato questo PC può raggiungere il controllo da telefono. Meglio scegliere la rete dei telefoni.",
+    "networkUpgradeHint": "Questo PC è su più di una rete. Come prima, il controllo da telefono ascolta su tutte, così i telefoni associati continuano a funzionare. Scegli la rete dei telefoni per chiudere le altre.",
+    "networkFixedByEnv": "Impostato da MOBILE_BRIDGE_BIND su questo PC: {{network}}.",
+    "networkSaveFailed": "Impossibile spostare il controllo da telefono su quella rete. Resta sulla rete precedente."
   },
   "playerIntro": {
     "title": "Intro giocatore",

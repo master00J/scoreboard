@@ -22,6 +22,11 @@ type MobileBridgeOptions = {
   log: (line: string) => void;
   /** Blijft dezelfde pairing/PIN na een desktop-herstart, zodat de telefoon automatisch kan herkoppelen. */
   credentialsPath?: string;
+  /**
+   * Adres waarop de bridge luistert (één netwerkkaart, of `0.0.0.0` voor alle netwerken).
+   * `MOBILE_BRIDGE_BIND` gaat voor; zonder beide: alle netwerken.
+   */
+  bindHost?: string;
 };
 
 type SessionRole = "viewer" | "operator";
@@ -30,6 +35,12 @@ export type MobileBridgeHandle = {
   port: number;
   pairingCode: string;
   operatorPin: string;
+  /** Adres waarop de bridge nu luistert. */
+  readonly bindHost: string;
+  /** `MOBILE_BRIDGE_BIND` is gezet: de keuze in het menu doet dan niets. */
+  bindFixedByEnv: boolean;
+  /** Luistert voortaan op een ander adres; lopende sessies blijven geldig. */
+  rebind: (host: string) => Promise<void>;
   stop: () => Promise<void>;
 };
 
@@ -187,7 +198,11 @@ export async function startMobileBridge(
     ? normalizeOperatorPinFromEnv(process.env.MOBILE_BRIDGE_OPERATOR_PIN, options.log)
     : persisted.operatorPin || randomOperatorPin();
   writePersistedCredentials(options.credentialsPath, pairingCode, operatorPin, options.log);
-  const bindHost = parseBindHost(process.env.MOBILE_BRIDGE_BIND, options.log);
+  const bindFixedByEnv = Boolean(process.env.MOBILE_BRIDGE_BIND?.trim());
+  let bindHost = parseBindHost(
+    bindFixedByEnv ? process.env.MOBILE_BRIDGE_BIND : (options.bindHost ?? "0.0.0.0"),
+    options.log,
+  );
   const sessionTtlMs = Number(process.env.MOBILE_BRIDGE_SESSION_TTL_MS ?? 1000 * 60 * 60 * 8);
 
   const sessions = new Map<string, { expiresAtMs: number; role: SessionRole }>();
@@ -273,7 +288,7 @@ export async function startMobileBridge(
     return session;
   }
 
-  const server = http.createServer(async (req, res) => {
+  const handleRequest: http.RequestListener = async (req, res) => {
     try {
       if (!req.url || !req.method) {
         writeJson(res, 400, { error: "Bad request" });
@@ -399,15 +414,33 @@ export async function startMobileBridge(
         });
       }
     }
-  });
+  };
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, bindHost, () => {
-      server.off("error", reject);
-      resolve();
+  function listen(host: string): Promise<http.Server> {
+    const server = http.createServer(handleRequest);
+    return new Promise<http.Server>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, host, () => {
+        server.off("error", reject);
+        resolve(server);
+      });
     });
-  });
+  }
+
+  /** Stopt met luisteren; lopende verzoeken krijgen nog even de tijd. */
+  function close(target: http.Server): Promise<void> {
+    return new Promise<void>((resolve) => {
+      const force = setTimeout(() => target.closeAllConnections(), 2000);
+      target.close(() => {
+        clearTimeout(force);
+        resolve();
+      });
+      target.closeIdleConnections();
+    });
+  }
+
+  let server = await listen(bindHost);
+  let rebinding: Promise<void> = Promise.resolve();
 
   options.log(`[mobile-bridge] actief op ${bindHost}:${port}`);
   options.log("[mobile-bridge] pairing actief (code/pin afgeschermd)");
@@ -416,12 +449,32 @@ export async function startMobileBridge(
     port,
     pairingCode,
     operatorPin,
-    stop: () =>
-      new Promise<void>((resolve, reject) => {
-        server.close((err) => {
-          if (err) reject(err);
-          else resolve();
-        });
-      }),
+    get bindHost() {
+      return bindHost;
+    },
+    bindFixedByEnv,
+    rebind: (host: string) => {
+      const task = rebinding.catch(() => {}).then(async () => {
+        const next = parseBindHost(host, options.log);
+        if (bindFixedByEnv || next === bindHost) return;
+        const previous = bindHost;
+        // Dezelfde poort kan niet tegelijk op beide adressen open zijn als het oude 0.0.0.0 is.
+        await close(server);
+        try {
+          server = await listen(next);
+          bindHost = next;
+          options.log(`[mobile-bridge] luistert nu op ${next}:${port}`);
+        } catch (error) {
+          server = await listen(previous);
+          options.log(
+            `[mobile-bridge] kon niet luisteren op ${next}:${port}, blijft op ${previous}: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          throw error;
+        }
+      });
+      rebinding = task;
+      return task;
+    },
+    stop: () => rebinding.catch(() => {}).then(() => close(server)),
   };
 }

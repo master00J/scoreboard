@@ -206,7 +206,7 @@ export default function ControlPage() {
           <MusicPlayingIndicator player={musicPlayer} />
           <div className="hidden items-center gap-2 xl:flex">
             <AppResourceMeter />
-            <MobileBridgeMenu info={mobileBridge} />
+            <MobileBridgeMenu info={mobileBridge} onChange={setMobileBridge} />
           </div>
           <span
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-xs font-semibold ${

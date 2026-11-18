@@ -3,8 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import * as QRCode from "qrcode";
+import { Select } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
 import type { MobileBridgeInfo } from "@/lib/desktop-bridge";
+import { bridgeNetworkChoiceFromValue, bridgeNetworkOptionValue } from "@/lib/mobile-bridge-network";
 
 function buildLocalPairCode(bridgeUrl: string, pairingCode: string, operatorPinForQr: string): string {
   return [
@@ -45,7 +47,91 @@ function PairCodeQr({ pairCode, label }: { pairCode: string; label: string }) {
   return <img src={qrDataUrl} alt={label} className="h-[96px] w-[96px] rounded-md bg-white p-1" />;
 }
 
-function MobileBridgePanel({ info }: { info: MobileBridgeInfo }) {
+/** Op welk netwerk van deze pc de telefoonbediening luistert. */
+function BridgeNetworkPicker({
+  info,
+  onChange,
+}: {
+  info: MobileBridgeInfo;
+  onChange?: (info: MobileBridgeInfo) => void;
+}) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState(false);
+  const network = info.network;
+  if (!network || !window.electronAPI?.setMobileBridgeNetwork) return null;
+
+  const { choice, bind } = network;
+  const value = bridgeNetworkOptionValue(choice);
+  const chosenMissing =
+    choice.mode === "interface" &&
+    !network.options.some((option) => option.name === choice.name || option.address === choice.address);
+
+  async function choose(next: string) {
+    const picked = bridgeNetworkChoiceFromValue(next);
+    if (!picked || !window.electronAPI?.setMobileBridgeNetwork) return;
+    setBusy(true);
+    try {
+      const result = await window.electronAPI.setMobileBridgeNetwork(picked);
+      onChange?.(result.info);
+      if (!result.ok) toast({ title: t("bridge.networkSaveFailed"), variant: "error" });
+    } catch {
+      toast({ title: t("bridge.networkSaveFailed"), variant: "error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const adapterLabel = bind.adapter ? `${bind.adapter.name} (${bind.host})` : bind.host;
+  let status: { text: string; tone: "ok" | "warn" };
+  if (bind.via === "all") {
+    status = {
+      text: choice.mode === "all" && choice.fromUpgrade ? t("bridge.networkUpgradeHint") : t("bridge.networkAllWarning"),
+      tone: "warn",
+    };
+  } else if (bind.via === "none") {
+    status = { text: t("bridge.networkNone"), tone: "warn" };
+  } else if (bind.via === "fallback") {
+    status = { text: t("bridge.networkFallback", { network: adapterLabel }), tone: "warn" };
+  } else {
+    status = { text: t("bridge.networkListening", { network: adapterLabel }), tone: "ok" };
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-3 text-xs shadow-sm" data-bridge-network>
+      <label className="flex flex-col gap-1">
+        <span className="font-semibold text-foreground">{t("bridge.networkLabel")}</span>
+        <Select
+          className="h-8 w-full text-xs"
+          value={value}
+          disabled={busy || network.fixedByEnv}
+          aria-label={t("bridge.networkLabel")}
+          onChange={(e) => void choose(e.target.value)}
+        >
+          <option value="auto">{t("bridge.networkAuto")}</option>
+          {chosenMissing && choice.mode === "interface" ? (
+            <option value={value} disabled>
+              {t("bridge.networkMissing", { name: choice.name || choice.address })}
+            </option>
+          ) : null}
+          {network.options.map((option) => {
+            const optionValue = bridgeNetworkOptionValue({ mode: "interface", name: option.name, address: option.address });
+            return (
+              <option key={optionValue} value={optionValue}>
+                {option.name} · {option.address}
+              </option>
+            );
+          })}
+          <option value="all">{t("bridge.networkAll")}</option>
+        </Select>
+      </label>
+      <p className={`mt-1 ${status.tone === "ok" ? "text-muted-foreground" : "text-amber-500"}`} data-bridge-network-status>
+        {network.fixedByEnv ? t("bridge.networkFixedByEnv", { network: adapterLabel }) : status.text}
+      </p>
+    </div>
+  );
+}
+
+function MobileBridgePanel({ info, onChange }: { info: MobileBridgeInfo; onChange?: (info: MobileBridgeInfo) => void }) {
   const { t } = useTranslation();
   const [showOperatorSecrets, setShowOperatorSecrets] = useState(false);
   const bridgeUrl = info.bridgeUrls[0] ?? (info.port ? `http://localhost:${info.port}` : "");
@@ -150,11 +236,20 @@ function MobileBridgePanel({ info }: { info: MobileBridgeInfo }) {
           </div>
         </div>
       ) : null}
+
+      {info.enabled ? <BridgeNetworkPicker info={info} onChange={onChange} /> : null}
     </div>
   );
 }
 
-export function MobileBridgeMenu({ info }: { info: MobileBridgeInfo | null }) {
+export function MobileBridgeMenu({
+  info,
+  onChange,
+}: {
+  info: MobileBridgeInfo | null;
+  /** Nieuwe toestand na een netwerkkeuze, zodat het menu niet op de volgende peiling wacht. */
+  onChange?: (info: MobileBridgeInfo) => void;
+}) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -208,7 +303,7 @@ export function MobileBridgeMenu({ info }: { info: MobileBridgeInfo | null }) {
             <p className="text-sm font-semibold">{t("bridge.title")}</p>
             <p className="text-xs text-muted-foreground">{t("bridge.hint")}</p>
           </div>
-          <MobileBridgePanel info={info} />
+          <MobileBridgePanel info={info} onChange={onChange} />
         </div>
       ) : null}
     </div>

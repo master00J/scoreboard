@@ -1271,7 +1271,18 @@
     "lanCodeCopied": "LAN-Koppelcode kopiert",
     "withPin": "Enthält Operator-PIN",
     "viewerOnly": "Nur Zuschauer",
-    "viewerOnlyStatus": "nur Zuschauer"
+    "viewerOnlyStatus": "nur Zuschauer",
+    "networkLabel": "Netzwerk für die Handy-Steuerung",
+    "networkAuto": "Automatisch (Netzwerk dieses PCs)",
+    "networkAll": "Alle Netzwerke",
+    "networkMissing": "{{name}} (nicht verbunden)",
+    "networkListening": "Handys erreichen diesen PC über {{network}}. Andere Netzwerke haben keinen Zugriff.",
+    "networkFallback": "Das gewählte Netzwerk ist nicht verbunden. Bis es zurück ist, lauscht die Handy-Steuerung auf {{network}}.",
+    "networkNone": "Kein Netzwerk gefunden. Verbinden Sie den PC mit dem Netzwerk; die Handy-Steuerung folgt automatisch.",
+    "networkAllWarning": "Jedes Netzwerk dieses PCs kann die Handy-Steuerung erreichen. Wählen Sie besser das Netzwerk der Handys.",
+    "networkUpgradeHint": "Dieser PC ist in mehr als einem Netzwerk. Wie bisher lauscht die Handy-Steuerung auf allen, damit gekoppelte Handys weiter funktionieren. Wählen Sie das Netzwerk der Handys, um die anderen zu sperren.",
+    "networkFixedByEnv": "Durch MOBILE_BRIDGE_BIND auf diesem PC festgelegt: {{network}}.",
+    "networkSaveFailed": "Die Handy-Steuerung konnte nicht auf dieses Netzwerk wechseln. Sie bleibt im vorherigen Netzwerk."
   },
   "playerIntro": {
     "title": "Spielerintro",
