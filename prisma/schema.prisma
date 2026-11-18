@@ -380,6 +380,8 @@ model AppSettings {
   displayExtrasJson String?
   /// Sponsorgaranties: {"countManualPlays":bool,"reserveSec":n} (lib/sponsor-guarantee-settings.ts).
   sponsorGuaranteeJson String?
+  /// Reeksen: bestanden die in vaste volgorde na elkaar spelen (lib/media-sequences.ts).
+  mediaSequencesJson String?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.

@@ -133,6 +133,16 @@ import {
   resolveMediaFile,
 } from "./media-transcode";
 import { mediaHealthFor, parseMediaCheckRecord, type MediaCheckRecord, type MediaHealth } from "../lib/media-health";
+import {
+  applyMediaSequences,
+  isSequenceRotationSponsorId,
+  normalizeMediaSequences,
+  parseMediaSequencesJson,
+  sequencedMediaIds,
+  serializeMediaSequences,
+  type MediaSequence,
+  type SequenceMember,
+} from "../lib/media-sequences";
 import { writeScheduledCues } from "../server/scheduled-cue-writes";
 import {
   isClubRotationSponsorId,
@@ -448,16 +458,18 @@ async function writePlayRow(session: RuntimePlaySession, state: PlayRowState | "
     return;
   }
   const clubClip = isClubRotationSponsorId(session.sponsorId);
-  const [sponsor, media, match] = await Promise.all([
-    clubClip
+  /** Een reeks is geen sponsor: elk bestand telt onder de sponsor waar het bij hoort. */
+  const sequenceClip = isSequenceRotationSponsorId(session.sponsorId);
+  const [ownerSponsor, media, match] = await Promise.all([
+    clubClip || sequenceClip
       ? Promise.resolve(null)
       : prisma.sponsor.findUnique({
           where: { id: session.sponsorId },
-          select: { name: true },
+          select: { id: true, name: true },
         }),
     prisma.mediaItem.findUnique({
       where: { id: session.mediaId },
-      select: { title: true, durationSec: true },
+      select: { title: true, durationSec: true, sponsor: { select: { id: true, name: true } } },
     }),
     prisma.match.findUnique({
       where: { id: session.matchId },
@@ -465,8 +477,9 @@ async function writePlayRow(session: RuntimePlaySession, state: PlayRowState | "
     }),
   ]);
   const expected = Math.round(session.expectedSec > 0 ? session.expectedSec : (media?.durationSec ?? 0));
+  const sponsor = sequenceClip ? (media?.sponsor ?? null) : ownerSponsor;
   const identity = sponsorPlayLogIdentity({
-    sponsorId: session.sponsorId,
+    sponsorId: sponsor?.id ?? session.sponsorId,
     sponsorRowName: sponsor?.name,
     mediaTitle: media?.title,
   });
@@ -824,6 +837,49 @@ async function getAppSettings(): Promise<{
     sponsorGuaranteeJson: null,
     ...defaults,
   };
+}
+
+/** Reeksen uit `AppSettings.mediaSequencesJson` (lib/media-sequences.ts). */
+async function readMediaSequences(): Promise<MediaSequence[]> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ v: string | null }>>(
+      `SELECT "mediaSequencesJson" AS v FROM "AppSettings" WHERE "id" = 1`,
+    );
+    return parseMediaSequencesJson(rows[0]?.v ?? null);
+  } catch {
+    return [];
+  }
+}
+
+async function writeMediaSequences(sequences: MediaSequence[]): Promise<MediaSequence[]> {
+  await prisma.$executeRawUnsafe(`INSERT OR IGNORE INTO "AppSettings" ("id", "homeTeamId") VALUES (1, NULL)`);
+  const serialized = serializeMediaSequences(sequences);
+  await prisma.$executeRawUnsafe(`UPDATE "AppSettings" SET "mediaSequencesJson" = ? WHERE "id" = 1`, serialized);
+  return parseMediaSequencesJson(serialized);
+}
+
+/**
+ * Zet de reeksen in de rotatie: haalt hun bestanden op (alleen speelbare), met de fotoduur van hun
+ * sponsor, en laat `applyMediaSequences` de rest doen.
+ */
+async function withMediaSequences(participants: Sponsor[]): Promise<Sponsor[]> {
+  const sequences = await readMediaSequences();
+  const ids = [...sequencedMediaIds(sequences)];
+  if (ids.length === 0) return participants;
+  const items = await prisma.mediaItem.findMany({
+    where: { id: { in: ids } },
+    include: { sponsor: { select: { name: true, imageDefaultSec: true } } },
+  });
+  const members = new Map<string, SequenceMember>();
+  for (const item of items) {
+    if (!item.active || !availableForPlayback(item)) continue;
+    const { sponsor, ...media } = item;
+    members.set(item.id, {
+      media: { ...(media as unknown as MediaItem), sponsorName: sponsor?.name ?? null },
+      imageDefaultSec: sponsor?.imageDefaultSec ?? undefined,
+    });
+  }
+  return applyMediaSequences(participants, sequences, members);
 }
 
 async function setHomeTeamId(homeTeamId: string | null) {
@@ -2678,7 +2734,9 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         });
         return json(
           200,
-          mergeSponsorsWithClubMedia(sponsors.map(s => ({ ...s, media: s.media.filter(availableForPlayback) })) as unknown as Sponsor[], clubMedia.filter(availableForPlayback) as unknown as MediaItem[]),
+          await withMediaSequences(
+            mergeSponsorsWithClubMedia(sponsors.map(s => ({ ...s, media: s.media.filter(availableForPlayback) })) as unknown as Sponsor[], clubMedia.filter(availableForPlayback) as unknown as MediaItem[]),
+          ),
         );
       }
       return json(200, sponsors);
@@ -3226,6 +3284,19 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       await touchState();
       await broadcastDisplayState();
       return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/media-sequences" && method === "GET") {
+      return json(200, await readMediaSequences());
+    }
+
+    if (pathname === "/api/media-sequences" && method === "PUT") {
+      const body = parseJsonBody(req) as { sequences?: unknown };
+      if (!Array.isArray(body.sequences)) return json(400, { error: "sequences_required" });
+      const saved = await writeMediaSequences(normalizeMediaSequences(body.sequences));
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, saved);
     }
 
     if (pathname === "/api/media" && method === "GET") {

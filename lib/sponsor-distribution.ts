@@ -182,11 +182,16 @@ export function sponsorRotationClipSeconds(
   section?: SponsorSection,
   matchStatus?: string,
 ): number[] {
-  return sponsorRotationMedia(s, section, matchStatus).map((item) =>
+  const secs = sponsorRotationMedia(s, section, matchStatus).map((item) =>
     item.type === "VIDEO"
       ? Math.max(1, item.durationSec > 0 ? item.durationSec : 10)
       : Math.max(1, item.durationSec > 0 ? item.durationSec : s.imageDefaultSec || 10),
   );
+  /** Een reeks speelt elke beurt helemaal: één vertoning = alle bestanden na elkaar. */
+  if (s.rotationKind === "sequence" && secs.length > 0) {
+    return [secs.reduce((sum, sec) => sum + sec, 0)];
+  }
+  return secs;
 }
 
 /**

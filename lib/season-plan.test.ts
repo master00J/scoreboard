@@ -728,3 +728,52 @@ describe("hetzelfde nieuwe bestand bij twee rijen", () => {
     ).toHaveLength(1);
   });
 });
+
+describe("reeksen in het seizoensplan", () => {
+  const kumho = sponsor({
+    id: "kumho",
+    name: "Kumho",
+    matchFirstHalfSeconds: 120,
+    matchSeconds: 120,
+    media: [
+      media({ id: "k1", sponsorId: "kumho", durationSec: 20 }),
+      media({ id: "k2", sponsorId: "kumho", durationSec: 20 }),
+    ],
+  });
+  const library = [
+    ...kumho.media!,
+    media({ id: "club1", title: "Na Kumho", durationSec: 10, clubPhaseBudgetJson: JSON.stringify({ firstHalf: 30 }) }),
+  ];
+  const ctx = {
+    sponsorsById: new Map([[kumho.id, kumho]]),
+    mediaById: new Map(library.map((m) => [m.id, m])),
+  };
+  const seq = {
+    id: "s1",
+    name: "Kumho + club",
+    active: true,
+    notes: "",
+    mediaIds: ["k1", "club1"],
+    budget: { prematch: 0, firstHalf: 60, secondHalf: 0, halftime: 0, postmatch: 0 },
+  };
+
+  it("geeft de reeks hele reeksen en haalt haar bestanden uit de rij van hun sponsor en clubmedia", () => {
+    const rows = planRowsFromDatabase([kumho], library);
+    const eff = planEffectiveSeconds(rows, ctx, [], [seq]);
+    // Reeks van 30 s, 60 s gevraagd: twee keer.
+    expect(eff.bySequence.get("s1")!.firstHalf).toBe(60);
+    // Kumho speelt alleen nog k2 los: 120 s in clips van 20 s.
+    expect(eff.byRow.get("kumho")!.firstHalf).toBe(120);
+    // De clubmedia heeft geen los bestand meer.
+    expect(eff.byRow.get("club:club1")!.firstHalf).toBe(0);
+    expect(eff.totals.firstHalf).toBe(180);
+  });
+
+  it("verandert niets zonder reeks of met een reeks die uit staat", () => {
+    const rows = planRowsFromDatabase([kumho], library);
+    const without = planEffectiveSeconds(rows, ctx);
+    const off = planEffectiveSeconds(rows, ctx, [], [{ ...seq, active: false }]);
+    expect(off.totals).toEqual(without.totals);
+    expect(off.byRow.get("kumho")).toEqual(without.byRow.get("kumho"));
+  });
+});

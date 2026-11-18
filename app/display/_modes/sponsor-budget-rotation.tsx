@@ -17,6 +17,7 @@ import { DISPLAY_COVER_MEDIA_STYLE } from "@/lib/display-cover-media-style";
 import type { MediaItem, Sponsor, SponsorSection } from "@/lib/types";
 import type { DisplayMediaDiagnosticPayload } from "@/lib/desktop-bridge";
 import { matchPlayBudgetSeconds } from "@/lib/sponsor-distribution";
+import { isSequenceParticipant, sequenceStartIndex } from "@/lib/media-sequences";
 import { scheduledSlotRearms, type ScheduledSlotIdentity } from "@/lib/sponsor-display-helpers";
 import { sponsorTelemetrySegmentKey, resolveVideoExpectedPlaySec } from "@/lib/sponsor-telemetry";
 import {
@@ -336,6 +337,8 @@ export function SponsorBudgetRotation({
     spentPerSponsor: {},
   });
   const tieBreakCursorRef = useRef(0);
+  /** Beurt waarvoor een reeks al bij haar eerste bestand gezet is. */
+  const sequenceAppearanceRef = useRef<string | null>(null);
   const videoCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const videoFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const earlyEndedCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -623,6 +626,20 @@ export function SponsorBudgetRotation({
 
     // A late start may enter halfway through the schedule. Once playing, continue the actual
     // rotation in order, even if decoding or an interruption delayed the previous file.
+    if (isSequenceParticipant(sponsor)) {
+      /**
+       * Een reeks begint elke beurt bij haar eerste bestand. Binnen dezelfde beurt (bv. na een
+       * overgeslagen kapot bestand) gaat ze verder waar ze was.
+       */
+      const length = rotationMediaForSponsor(sponsor).length;
+      const appearance = `${sponsor.id}::${scheduledAppearanceKey ?? "free"}`;
+      let mediaIndex = readMediaCursor(sponsor.id, (scheduledMediaIndex ?? 0) * length);
+      if (sequenceAppearanceRef.current !== appearance) {
+        sequenceAppearanceRef.current = appearance;
+        mediaIndex = sequenceStartIndex(mediaIndex, length);
+      }
+      return planForSponsor(sponsor, mediaIndex, now);
+    }
     const mediaIndex = readMediaCursor(sponsor.id, scheduledMediaIndex ?? 0);
     return planForSponsor(sponsor, mediaIndex, now);
   }, [
@@ -632,8 +649,10 @@ export function SponsorBudgetRotation({
     cycleBudgetForever,
     sponsorIdFilter,
     scheduledMediaIndex,
+    scheduledAppearanceKey,
     planForSponsor,
     readMediaCursor,
+    rotationMediaForSponsor,
   ]);
 
   const finishTelemetryClip = useCallback((actualSec: number, opts?: { discard?: boolean; reason?: string }) => {
@@ -850,8 +869,14 @@ export function SponsorBudgetRotation({
        */
       const scheduledSlotMode = sponsorIdFilter != null;
       const sameSponsor = sponsorsById[sponsorId];
+      /**
+       * Een reeks is de uitzondering: één beurt is de hele reeks. Ook in een ingeroosterd slot en
+       * tijdens een pauze volgt het volgende bestand van de reeks meteen, tot ze rond is. Het rooster
+       * gaf het slot de duur van de hele reeks.
+       */
+      const sequencePass = isSequenceParticipant(sameSponsor);
       const sameSponsorMedia =
-        !scheduledSlotMode && sameSponsor
+        (!scheduledSlotMode || sequencePass) && sameSponsor
           ? passMediaForSponsor(sameSponsor, readMediaCursor(sponsorId), now)
           : [];
       const sameSponsorCursor = readMediaCursor(sponsorId);
@@ -864,6 +889,7 @@ export function SponsorBudgetRotation({
       if (
         sameSponsorNext &&
         sameSponsor &&
+        !sequencePass &&
         (st.spentPerSponsor[sponsorId] ?? 0) >= budgetFn(sameSponsor)
       ) {
         sameSponsorNext = null;
@@ -881,7 +907,11 @@ export function SponsorBudgetRotation({
        * ruimte voor.
        */
       const next =
-        pausedRef.current || scheduledSlotMode ? null : (sameSponsorNext ?? pickNext());
+        sequencePass && sameSponsorNext
+          ? sameSponsorNext
+          : pausedRef.current || scheduledSlotMode
+            ? null
+            : (sameSponsorNext ?? pickNext());
       setVideoProgressDurationMs(0);
       playbackProgressMsRef.current = 0;
       if (next) {
@@ -926,6 +956,8 @@ export function SponsorBudgetRotation({
       planForSponsorMediaList,
       sponsorIdFilter,
       sponsorsById,
+      budgetFn,
+      readMediaCursor,
     ],
   );
 

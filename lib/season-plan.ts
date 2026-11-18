@@ -8,6 +8,13 @@
  * dus de echte tijd is het budget naar boven afgerond op hele clips (`buildSponsorAppearancePlan`).
  */
 
+import {
+  applyMediaSequences,
+  sequenceIdFromRotationId,
+  sequencedMediaIds,
+  type MediaSequence,
+  type SequenceMember,
+} from "./media-sequences";
 import type { Match, MediaItem, Sponsor, SponsorSection } from "./types";
 import {
   clubGroupKey,
@@ -852,6 +859,8 @@ export function rotationParticipantFromRow(
 export type PlanEffective = {
   /** Per rij (sleutel) de tijd die de rotatie echt toont: hele clips, en 0 zonder bestand voor die fase. */
   byRow: Map<string, Record<PlanPhase, number>>;
+  /** Per reeks (id) de tijd die de rotatie haar geeft: hele reeksen. */
+  bySequence: Map<string, Record<PlanPhase, number>>;
   /** Per rij: hoeveel daarvan op een vast tijdstip speelt. */
   cueByRow: Map<string, Record<PlanPhase, number>>;
   /** Som over alle rijen plus vaste tijdstippen van bestanden zonder rij: wat de fase samen vraagt. */
@@ -937,17 +946,22 @@ export function planEffectiveSeconds(
   rows: PlanRow[],
   ctx: { sponsorsById: Map<string, Sponsor>; mediaById: Map<string, MediaItem> },
   cues: PlanCue[] = [],
+  sequences: MediaSequence[] = [],
 ): PlanEffective {
-  const participants = rows
-    .map((row) => rotationParticipantFromRow(row, ctx))
-    .filter((p): p is Sponsor => p != null);
+  const participants = applyMediaSequences(
+    rows.map((row) => rotationParticipantFromRow(row, ctx)).filter((p): p is Sponsor => p != null),
+    sequences,
+    sequenceMembersFromPlan(rows, ctx, sequences),
+  );
   const byRow = new Map<string, Record<PlanPhase, number>>(rows.map((r) => [r.key, emptySeconds()]));
+  const bySequence = new Map<string, Record<PlanPhase, number>>(sequences.map((q) => [q.id, emptySeconds()]));
   const cueByRow = new Map<string, Record<PlanPhase, number>>(rows.map((r) => [r.key, emptySeconds()]));
   for (const phase of PLAN_PHASES) {
     const { section, status } = PHASE_ENGINE[phase];
     const active = activeSponsorsForSection(participants, section, status);
     for (const plan of buildSponsorAppearancePlan(active, section, status)) {
-      const row = byRow.get(plan.id);
+      const seqId = sequenceIdFromRotationId(plan.id);
+      const row = seqId != null ? bySequence.get(seqId) : byRow.get(plan.id);
       if (row) row[phase] = plan.appearanceSecs.reduce((sum, x) => sum + x, 0);
     }
   }
@@ -975,7 +989,33 @@ export function planEffectiveSeconds(
       totals[phase] += rot[phase];
     }
   }
-  return { byRow, cueByRow, totals };
+  for (const seq of bySequence.values()) for (const phase of PLAN_PHASES) totals[phase] += seq[phase];
+  return { byRow, bySequence, cueByRow, totals };
+}
+
+/**
+ * De bestanden van de reeksen zoals het scherm ze zou krijgen: met de actief-stand van hun rij en
+ * de fotoduur van hun sponsor. Bestanden die nog niet opgeslagen zijn, kunnen nog niet in een reeks.
+ */
+export function sequenceMembersFromPlan(
+  rows: PlanRow[],
+  ctx: { sponsorsById: Map<string, Sponsor>; mediaById: Map<string, MediaItem> },
+  sequences: MediaSequence[],
+): Map<string, SequenceMember> {
+  const wanted = sequencedMediaIds(sequences);
+  const out = new Map<string, SequenceMember>();
+  if (wanted.size === 0) return out;
+  const clipRow = new Map<string, { row: PlanRow; clip: PlanClip }>();
+  for (const row of rows) for (const clip of row.clips) if (!clip.pending) clipRow.set(clip.id, { row, clip });
+  for (const id of wanted) {
+    const base = ctx.mediaById.get(id);
+    if (!base) continue;
+    const found = clipRow.get(id);
+    const active = base.active && (found ? found.row.active && found.clip.active : true);
+    const owner = base.sponsorId ? ctx.sponsorsById.get(base.sponsorId) : undefined;
+    out.set(id, { media: { ...base, active }, imageDefaultSec: owner?.imageDefaultSec });
+  }
+  return out;
 }
 
 /**
