@@ -5,6 +5,7 @@ import {
   isStadiumPlaybackHangEvent,
   needsStadiumTranscode,
   parseFfmpegInputProbe,
+  playbackWarningForReason,
   stadiumTranscodeReason,
 } from "./media-playback-compat";
 
@@ -132,6 +133,13 @@ describe("stadiumTranscodeReason", () => {
     expect(isDisplayPlaybackRisk("playback_fault")).toBe(true);
     expect(isDisplayPlaybackRisk("ok")).toBe(false);
     expect(isDisplayPlaybackRisk("probe_failed")).toBe(false);
+  });
+
+  it("bewaart probe_failed als waarschuwing, zonder het als afspeelrisico om te zetten", () => {
+    expect(playbackWarningForReason("probe_failed")).toBe("probe_failed");
+    expect(playbackWarningForReason("high_fps")).toBe("high_fps");
+    expect(playbackWarningForReason("ok")).toBeNull();
+    expect(playbackWarningForReason(null)).toBeNull();
   });
 
   it("zet Mainconcept AVC Coding om, ook zonder handler-naam", () => {
