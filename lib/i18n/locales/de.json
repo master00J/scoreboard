@@ -797,7 +797,20 @@
       "segmentSecondHalf": "2. Hälfte",
       "segmentExtraTime": "Verlängerung",
       "segmentPostmatch": "Nach dem Spiel"
-    }
+    },
+    "guaranteeSettingsTitle": "Zählung der Sponsorzeit",
+    "countManualPlays": "Von Hand gestartete Sponsorclips zählen zur gebuchten Zeit",
+    "countManualPlaysHint": "Sie werden immer gespeichert und aufgelistet; aus = nicht in den Summen.",
+    "reserveSec": "Reserve für Unterbrechungen pro Phase (s)",
+    "reserveSecHint": "Zeit, die die Live-Ansicht für Tore, Karten und Wechsel zurückhält.",
+    "settingsSaveFailed": "Einstellung nicht gespeichert",
+    "colSource": "Quelle",
+    "source_rotation": "Rotation",
+    "source_cue": "Cue",
+    "source_manual": "Manuell",
+    "notCounted": "zählt nicht",
+    "stateInterrupted": "unterbrochen",
+    "stateRunning": "läuft"
   },
   "setup": {
     "venueBackupTitle": "Venue-Backup",

@@ -76,21 +76,15 @@ export async function listSponsorPlays(db: Db, filters: SponsorPlayFilters, limi
   });
 }
 
-/**
- * Echt zichtbare seconden van een rij, onafgerond. Rijen van vóór `actualMs` hebben daar 0 en
- * tellen met hun oude hele seconden.
- */
-export function playLogVisibleSec(row: { actualSec: number; actualMs?: number | null }): number {
-  const ms = row.actualMs ?? 0;
-  return ms > 0 ? ms / 1000 : Math.max(0, row.actualSec);
-}
+export { playLogVisibleSec } from "../lib/sponsor-play-ledger";
 
 /**
  * Per-sponsor aggregate over every matching play (not capped). Seconds are summed unrounded
  * (`actualMs`); rounding happens only when the report shows them.
  */
 export async function summarizeSponsorPlays(db: Db, filters: SponsorPlayFilters) {
-  const where = buildSponsorPlayWhere(filters);
+  // Handmatige clips die volgens de instelling niet meetellen, staan wel in de lijst maar niet in de totalen.
+  const where: Prisma.SponsorPlayLogWhereInput = { AND: [buildSponsorPlayWhere(filters), { counted: true }] };
   const [grouped, legacy] = await Promise.all([
     db.sponsorPlayLog.groupBy({
       by: ["sponsorId", "sponsorName"],

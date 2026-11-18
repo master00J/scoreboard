@@ -797,7 +797,20 @@
       "segmentSecondHalf": "2e mi-temps",
       "segmentExtraTime": "Prolongation",
       "segmentPostmatch": "Après-match"
-    }
+    },
+    "guaranteeSettingsTitle": "Comptage du temps sponsor",
+    "countManualPlays": "Les clips sponsor lancés à la main comptent dans le temps réservé",
+    "countManualPlaysHint": "Ils sont toujours enregistrés et listés ; désactivé = hors des totaux.",
+    "reserveSec": "Réserve pour interruptions par phase (s)",
+    "reserveSecHint": "Temps que la vue en direct garde pour les buts, cartons et remplacements.",
+    "settingsSaveFailed": "Réglage non enregistré",
+    "colSource": "Source",
+    "source_rotation": "Rotation",
+    "source_cue": "Cue",
+    "source_manual": "Manuel",
+    "notCounted": "non compté",
+    "stateInterrupted": "interrompu",
+    "stateRunning": "en cours"
   },
   "setup": {
     "venueBackupTitle": "Sauvegarde venue",

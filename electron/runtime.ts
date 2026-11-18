@@ -53,7 +53,30 @@ import type {
   SponsorTelemetryClipProgress,
   SponsorTelemetryClipStart,
 } from "../lib/sponsor-telemetry";
-import { sponsorPlayLogIdentity } from "../lib/sponsor-telemetry";
+import {
+  normalizeSponsorPlaySource,
+  sponsorPlayLogIdentity,
+  sponsorTelemetrySegmentKey,
+} from "../lib/sponsor-telemetry";
+import {
+  SPONSOR_PLAY_SOURCE_LAYER,
+  applyVisibleProgress,
+  createPlaySessionState,
+  ledgerSecondsFromRows,
+  playLogVisibleSec,
+  playRowActualMs,
+  playSourceCounts,
+  shouldPersistPlayProgress,
+  type PlayRowState,
+  type PlaySessionState,
+} from "../lib/sponsor-play-ledger";
+import {
+  defaultSponsorGuaranteeSettings,
+  parseSponsorGuaranteeSettings,
+  serializeSponsorGuaranteeSettings,
+  type SponsorGuaranteeSettings,
+} from "../lib/sponsor-guarantee-settings";
+import { sectionForStatus } from "../lib/sponsor-display-helpers";
 import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
@@ -161,14 +184,37 @@ function sendControl(channel: string, payload: unknown) {
 }
 
 let sponsorLedgerSnapshot: SponsorLedgerPayload | null = null;
+
 /**
- * Per clipSessionId de hoogste gerapporteerde zichtbare duur (sec, onafgerond).
- * React Strict Mode kan een effect-cleanup direct na mount laten lopen met ~0s;
- * de echte clipEnd komt daarna met de juiste waarde — dan tellen we enkel het verschil
- * bij en overschrijven we proof-of-play niet meer met 0. Niet afronden: elk fragment van
- * 0,6 s telde vroeger als 1 s. Afronden gebeurt pas bij tonen.
+ * Vertoningen die het stadionscherm meldt, per clipSessionId. De zichtbare tijd is monotoon:
+ * React Strict Mode kan een effect-cleanup direct na mount laten lopen met ~0s; de echte
+ * clipEnd komt daarna met de juiste waarde — dan tellen we enkel het verschil bij. Niet
+ * afronden: elk fragment van 0,6 s telde vroeger als 1 s. Afronden gebeurt pas bij tonen.
+ *
+ * Elke vertoning krijgt bij de start meteen een rij (`state = running`) en de voortgang wordt
+ * om de paar seconden bewaard. Een herstart midden in een clip verliest zo hoogstens die paar
+ * seconden, en de lopende stand per fase wordt na de start opnieuw uit de rijen opgebouwd.
  */
-const sponsorClipBestActualSec = new Map<string, number>();
+type RuntimePlaySession = PlaySessionState & {
+  matchId: string;
+  segmentKey: string;
+  sponsorId: string;
+  mediaId: string;
+  expectedSec: number;
+  startedAtMs: number;
+  /** Deel van `countedMs` dat al in `sponsorLedgerSnapshot.bySponsorSec` staat. */
+  ledgerAddedMs: number;
+  lastPersistAtMs: number;
+  rowState: PlayRowState | null;
+  persist: Promise<void>;
+  endedAtMs: number | null;
+};
+
+const playSessions = new Map<string, RuntimePlaySession>();
+/** Vertoningen waarvan de tijd al in de lopende stand van deze fase zit (voor de heropbouw). */
+const ledgerSessionIds = new Set<string>();
+
+let sponsorGuaranteeSettings: SponsorGuaranteeSettings = defaultSponsorGuaranteeSettings();
 
 export function getSponsorLedgerSnapshot(): SponsorLedgerPayload | null {
   return sponsorLedgerSnapshot;
@@ -188,31 +234,118 @@ function ensureSponsorLedger(matchId: string, segmentKey: string): SponsorLedger
       activeClip: null,
       updatedAtMs: now,
     };
+    ledgerSessionIds.clear();
   }
   return sponsorLedgerSnapshot;
+}
+
+function prunePlaySessions(now: number) {
+  if (playSessions.size < 300) return;
+  for (const [id, s] of playSessions) {
+    if (s.endedAtMs != null && now - s.endedAtMs > 10 * 60_000) playSessions.delete(id);
+  }
+}
+
+function playSessionFor(payload: {
+  clipSessionId: string;
+  matchId: string;
+  segmentKey: string;
+  sponsorId: string;
+  mediaId: string;
+  startedAtMs: number;
+  source?: unknown;
+  expectedPlaySec?: number;
+  paused?: boolean;
+}): RuntimePlaySession {
+  const existing = playSessions.get(payload.clipSessionId);
+  if (existing) return existing;
+  const source = normalizeSponsorPlaySource(payload.source);
+  const session: RuntimePlaySession = {
+    ...createPlaySessionState({
+      clipSessionId: payload.clipSessionId,
+      source,
+      counted: playSourceCounts(source, sponsorGuaranteeSettings.countManualPlays),
+      paused: payload.paused,
+    }),
+    matchId: payload.matchId,
+    segmentKey: payload.segmentKey,
+    sponsorId: payload.sponsorId,
+    mediaId: payload.mediaId,
+    expectedSec: Math.max(0, payload.expectedPlaySec ?? 0),
+    startedAtMs: payload.startedAtMs,
+    ledgerAddedMs: 0,
+    lastPersistAtMs: 0,
+    rowState: null,
+    persist: Promise.resolve(),
+    endedAtMs: null,
+  };
+  playSessions.set(payload.clipSessionId, session);
+  prunePlaySessions(Date.now());
+  return session;
+}
+
+/** De HUD toont de clip die bovenaan op het scherm ligt; een lagere laag neemt die plek niet over. */
+function mayTakeActiveClip(ledger: SponsorLedgerPayload, session: RuntimePlaySession): boolean {
+  const ac = ledger.activeClip;
+  if (!ac || ac.clipSessionId === session.clipSessionId) return true;
+  const other = playSessions.get(ac.clipSessionId);
+  if (!other || other.endedAtMs != null) return true;
+  return SPONSOR_PLAY_SOURCE_LAYER[session.source] >= SPONSOR_PLAY_SOURCE_LAYER[other.source];
+}
+
+function feedVisibleMs(session: RuntimePlaySession, visibleMs: number, now: number): void {
+  applyVisibleProgress(playSessions.values(), session, visibleMs, now);
+}
+
+/** Bewaart de stand van een vertoning; schrijfacties per vertoning lopen na elkaar. */
+function queuePlayRowWrite(session: RuntimePlaySession, state: PlayRowState | "delete"): void {
+  session.lastPersistAtMs = Date.now();
+  session.persist = session.persist
+    .then(() => writePlayRow(session, state))
+    .catch((err) => {
+      console.warn("[runtime] kon proof-of-play niet opslaan", err);
+    });
 }
 
 export function sponsorTelemetryClipStart(payload: SponsorTelemetryClipStart): SponsorLedgerPayload {
   const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
   const now = Date.now();
-  ledger.activeClip = {
-    sponsorId: payload.sponsorId,
-    mediaId: payload.mediaId,
-    startedAtMs: payload.startedAtMs,
-    expectedPlaySec: payload.expectedPlaySec,
-    clipSessionId: payload.clipSessionId,
-    playbackPositionMs: payload.playbackPositionMs,
-    paused: payload.paused,
-  };
+  const isNew = !playSessions.has(payload.clipSessionId);
+  const session = playSessionFor(payload);
+  session.paused = !!payload.paused;
+  if (payload.expectedPlaySec > session.expectedSec) session.expectedSec = payload.expectedPlaySec;
+  if (payload.visibleMs != null) feedVisibleMs(session, payload.visibleMs, now);
+  if (mayTakeActiveClip(ledger, session)) {
+    ledger.activeClip = {
+      sponsorId: payload.sponsorId,
+      mediaId: payload.mediaId,
+      startedAtMs: payload.startedAtMs,
+      expectedPlaySec: payload.expectedPlaySec,
+      clipSessionId: payload.clipSessionId,
+      playbackPositionMs: payload.playbackPositionMs,
+      paused: payload.paused,
+    };
+  }
   ledger.updatedAtMs = now;
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
+  // Het begin van een vertoning meteen vastleggen: een herstart verliest hem dan niet.
+  if (isNew) queuePlayRowWrite(session, "running");
   return ledger;
 }
 
 export function sponsorTelemetryClipProgress(
   payload: SponsorTelemetryClipProgress,
 ): SponsorLedgerPayload | null {
+  const now = Date.now();
+  const session = playSessions.get(payload.clipSessionId);
+  if (session && session.endedAtMs == null) {
+    if (payload.paused != null) session.paused = payload.paused;
+    if (payload.visibleMs != null) {
+      feedVisibleMs(session, payload.visibleMs, now);
+      if (shouldPersistPlayProgress(session.lastPersistAtMs, now)) queuePlayRowWrite(session, "running");
+    }
+  }
   const ledger = sponsorLedgerSnapshot;
   if (!ledger || ledger.matchId !== payload.matchId || ledger.segmentKey !== payload.segmentKey) {
     return null;
@@ -225,139 +358,201 @@ export function sponsorTelemetryClipProgress(
   ac.playbackPositionMs = Math.max(0, payload.playbackPositionMs);
   if (payload.paused != null) ac.paused = payload.paused;
   if (payload.startedAtMs != null) ac.startedAtMs = payload.startedAtMs;
-  ledger.updatedAtMs = Date.now();
+  ledger.updatedAtMs = now;
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
   return ledger;
 }
 
 export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): SponsorLedgerPayload {
+  const now = Date.now();
   const sessionId = payload.clipSessionId;
   const reported = Number.isFinite(payload.actualSec) ? Math.max(0, payload.actualSec) : 0;
-  const prevBest = sponsorClipBestActualSec.get(sessionId) ?? 0;
-  const bestActual = Math.max(prevBest, reported);
-  const delta = bestActual - prevBest;
-  sponsorClipBestActualSec.set(sessionId, bestActual);
-  if (sponsorClipBestActualSec.size > 4000) {
-    sponsorClipBestActualSec.clear();
-  }
+  const session = playSessionFor(payload);
+  const prevVisibleMs = session.visibleMs;
+  if (!payload.discard) feedVisibleMs(session, reported * 1000, now);
 
   const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
-  if (delta > 0) {
-    const prevSpent = ledger.bySponsorSec[payload.sponsorId] ?? 0;
-    ledger.bySponsorSec[payload.sponsorId] = prevSpent + delta;
+  const ledgerDeltaMs = session.countedMs - session.ledgerAddedMs;
+  if (ledgerDeltaMs > 0) {
+    session.ledgerAddedMs = session.countedMs;
+    ledger.bySponsorSec[payload.sponsorId] =
+      (ledger.bySponsorSec[payload.sponsorId] ?? 0) + ledgerDeltaMs / 1000;
   }
+  ledgerSessionIds.add(sessionId);
 
   const ac = ledger.activeClip;
-  let expectedSecForLog = 0;
   const clipMatches =
     ac &&
     ac.clipSessionId === sessionId &&
     ac.sponsorId === payload.sponsorId &&
     ac.mediaId === payload.mediaId;
   if (clipMatches) {
-    expectedSecForLog = Math.max(0, Math.round(ac.expectedPlaySec || 0));
-    if (payload.discard) {
-      ledger.activeClip = null;
-    }
+    if (ac.expectedPlaySec > session.expectedSec) session.expectedSec = ac.expectedPlaySec;
     // Geen activeClip wissen op een spuriëne 0s-melding direct na mount (Strict Mode).
     // Wél wissen als er na enige tijd nog steeds 0s binnenkomt: anders blijft de HUD "Bezig"
     // terwijl het display al op scorebord-fallback staat.
-    const startedMs = ac.startedAtMs;
     const allowStaleZeroClear =
-      delta === 0 &&
-      reported === 0 &&
-      prevBest === 0 &&
-      Date.now() - startedMs >= 2000;
-    if (delta > 0 || allowStaleZeroClear) {
+      reported === 0 && prevVisibleMs === 0 && now - ac.startedAtMs >= 2000;
+    if (payload.discard || reported > 0 || allowStaleZeroClear) {
       ledger.activeClip = null;
     }
   }
 
-  ledger.updatedAtMs = Date.now();
+  ledger.updatedAtMs = now;
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
 
-  if (payload.discard || bestActual <= 0) {
+  if (payload.discard || session.visibleMs <= 0) {
+    // Niets zichtbaar gespeeld: geen vertoning. Een al aangemaakte rij verdwijnt weer.
+    if (session.rowState != null) queuePlayRowWrite(session, "delete");
+    if (payload.discard) session.endedAtMs = now;
     return ledger;
   }
 
-  // Proof-of-play: sla de beste bekende werkelijke duur op (monotoon stijgend).
-  void persistSponsorPlayLog(payload, expectedSecForLog, bestActual).catch((err) => {
-    console.warn("[runtime] kon proof-of-play niet opslaan", err);
-  });
-
+  session.endedAtMs = now;
+  queuePlayRowWrite(session, "done");
   return ledger;
 }
 
-async function persistSponsorPlayLog(
-  payload: SponsorTelemetryClipEnd,
-  expectedSec: number,
-  bestActualSec: number,
-): Promise<void> {
-  const clubClip = isClubRotationSponsorId(payload.sponsorId);
+async function writePlayRow(session: RuntimePlaySession, state: PlayRowState | "delete"): Promise<void> {
+  if (state === "delete") {
+    await prisma.sponsorPlayLog.deleteMany({ where: { clipSessionId: session.clipSessionId } });
+    session.rowState = null;
+    return;
+  }
+  const actualMs = playRowActualMs(session);
+  /** Oude kolom in hele seconden voor oudere lezers; optellen gebeurt op `actualMs`. */
+  const actualSec = Math.round(actualMs / 1000);
+  const endedAt = new Date();
+  if (session.rowState != null) {
+    await prisma.sponsorPlayLog.updateMany({
+      where: { clipSessionId: session.clipSessionId },
+      data: { actualMs, actualSec, endedAt, state, counted: session.counted },
+    });
+    session.rowState = state;
+    return;
+  }
+  const clubClip = isClubRotationSponsorId(session.sponsorId);
   const [sponsor, media, match] = await Promise.all([
     clubClip
       ? Promise.resolve(null)
       : prisma.sponsor.findUnique({
-          where: { id: payload.sponsorId },
+          where: { id: session.sponsorId },
           select: { name: true },
         }),
     prisma.mediaItem.findUnique({
-      where: { id: payload.mediaId },
+      where: { id: session.mediaId },
       select: { title: true, durationSec: true },
     }),
     prisma.match.findUnique({
-      where: { id: payload.matchId },
+      where: { id: session.matchId },
       select: { status: true },
     }),
   ]);
-
-  const expected =
-    expectedSec > 0 ? expectedSec : (media?.durationSec ?? 0);
-  const actualMs = Math.max(0, Math.round(bestActualSec * 1000));
-  /** Oude kolom in hele seconden voor oudere lezers; optellen gebeurt op `actualMs`. */
-  const actual = Math.round(actualMs / 1000);
-
-  const existing = await prisma.sponsorPlayLog.findUnique({
-    where: { clipSessionId: payload.clipSessionId },
-    select: { actualSec: true, actualMs: true },
+  const expected = Math.round(session.expectedSec > 0 ? session.expectedSec : (media?.durationSec ?? 0));
+  const identity = sponsorPlayLogIdentity({
+    sponsorId: session.sponsorId,
+    sponsorRowName: sponsor?.name,
+    mediaTitle: media?.title,
   });
+  await prisma.sponsorPlayLog.upsert({
+    where: { clipSessionId: session.clipSessionId },
+    create: {
+      matchId: match ? session.matchId : null,
+      sponsorId: identity.sponsorId,
+      mediaId: media ? session.mediaId : null,
+      sponsorName: identity.sponsorName,
+      mediaTitle: media?.title ?? "(verwijderd)",
+      segmentKey: session.segmentKey,
+      matchStatus: match?.status ?? null,
+      expectedSec: expected,
+      actualSec,
+      actualMs,
+      startedAt: new Date(session.startedAtMs),
+      endedAt,
+      clipSessionId: session.clipSessionId,
+      source: session.source,
+      state,
+      counted: session.counted,
+      ledgerSponsorId: session.sponsorId,
+    },
+    update: { actualMs, actualSec, endedAt, state, counted: session.counted },
+  });
+  session.rowState = state;
+}
 
-  if (!existing) {
-    const identity = sponsorPlayLogIdentity({
-      sponsorId: payload.sponsorId,
-      sponsorRowName: sponsor?.name,
-      mediaTitle: media?.title,
+/**
+ * Bij de start: rijen die nog op `running` stonden, zijn vertoningen die een herstart of crash
+ * onderbrak. Wat zichtbaar was (de laatst bewaarde voortgang) blijft als `interrupted`; een rij
+ * die nooit zichtbare tijd kreeg, is geen vertoning.
+ */
+async function recoverSponsorPlaysOnStartup(): Promise<void> {
+  try {
+    await prisma.sponsorPlayLog.deleteMany({ where: { state: "running", actualMs: 0 } });
+    const r = await prisma.sponsorPlayLog.updateMany({
+      where: { state: "running" },
+      data: { state: "interrupted" },
     });
-    await prisma.sponsorPlayLog.create({
-      data: {
-        matchId: payload.matchId,
-        sponsorId: identity.sponsorId,
-        mediaId: payload.mediaId,
-        sponsorName: identity.sponsorName,
-        mediaTitle: media?.title ?? "(verwijderd)",
-        segmentKey: payload.segmentKey,
-        matchStatus: match?.status ?? null,
-        expectedSec: expected,
-        actualSec: actual,
-        actualMs,
-        startedAt: new Date(payload.startedAtMs),
-        endedAt: new Date(),
-        clipSessionId: payload.clipSessionId,
+    if (r.count > 0) requireOpts().log(`[sponsor] ${r.count} onderbroken vertoning(en) na herstart bewaard`);
+  } catch (err) {
+    console.warn("[runtime] kon onderbroken vertoningen niet herstellen", err);
+  }
+}
+
+/**
+ * Bouwt de lopende stand van de huidige fase opnieuw op uit de bewaarde rijen, zodat de
+ * tellers in "Sponsors live" na een herstart niet op 0 beginnen.
+ */
+async function restoreSponsorLedgerOnStartup(): Promise<void> {
+  try {
+    const state = await prisma.displayState.findUnique({ where: { id: 1 }, select: { matchId: true } });
+    if (!state?.matchId) return;
+    const match = await prisma.match.findUnique({
+      where: { id: state.matchId },
+      select: { id: true, status: true },
+    });
+    if (!match) return;
+    const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, sectionForStatus(match.status));
+    if (!segmentKey) return;
+    const rows = await prisma.sponsorPlayLog.findMany({
+      where: { matchId: match.id, segmentKey },
+      select: {
+        clipSessionId: true,
+        matchId: true,
+        segmentKey: true,
+        sponsorId: true,
+        ledgerSponsorId: true,
+        actualSec: true,
+        actualMs: true,
+        counted: true,
       },
     });
-    return;
+    const ledger = ensureSponsorLedger(match.id, segmentKey);
+    const restored = ledgerSecondsFromRows(rows, {
+      matchId: match.id,
+      segmentKey,
+      skipSessionIds: new Set([...ledgerSessionIds, ...playSessions.keys()]),
+    });
+    for (const [id, sec] of Object.entries(restored)) {
+      ledger.bySponsorSec[id] = (ledger.bySponsorSec[id] ?? 0) + sec;
+    }
+    for (const r of rows) ledgerSessionIds.add(r.clipSessionId);
+    ledger.updatedAtMs = Date.now();
+    broadcastSponsorLedger();
+  } catch (err) {
+    console.warn("[runtime] kon sponsorstand niet herstellen", err);
   }
+}
 
-  await prisma.sponsorPlayLog.update({
-    where: { clipSessionId: payload.clipSessionId },
-    data: {
-      actualSec: Math.max(existing.actualSec, actual),
-      actualMs: Math.max(existing.actualMs, actualMs),
-      endedAt: new Date(),
-    },
-  });
+async function refreshSponsorGuaranteeSettings(): Promise<SponsorGuaranteeSettings> {
+  try {
+    const s = await getAppSettings();
+    sponsorGuaranteeSettings = parseSponsorGuaranteeSettings(s.sponsorGuaranteeJson);
+  } catch {
+    /* tabel/kolom nog niet klaar: standaard houden */
+  }
+  return sponsorGuaranteeSettings;
 }
 
 function broadcastSponsorLedger() {
@@ -370,7 +565,7 @@ function broadcastSponsorLedger() {
  */
 export function resetSponsorLedger(): void {
   sponsorLedgerSnapshot = null;
-  sponsorClipBestActualSec.clear();
+  ledgerSessionIds.clear();
   sendAll("display:sponsorLedger", null);
 }
 
@@ -474,6 +669,7 @@ type AppSettingsRow = {
   sponsorLayoutsJson?: string | null;
   interfaceProfilesJson?: string | null;
   displayExtrasJson?: string | null;
+  sponsorGuaranteeJson?: string | null;
 };
 
 function defaultLiveCycle(): LiveCycleStored {
@@ -523,6 +719,7 @@ async function getAppSettings(): Promise<{
   sponsorLayoutsJson: string | null;
   interfaceProfilesJson: string | null;
   displayExtrasJson: string | null;
+  sponsorGuaranteeJson: string | null;
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
@@ -534,7 +731,8 @@ async function getAppSettings(): Promise<{
       "scoreboardThemeJson", "proofOfPlayBrandJson",
       "displayCanvasWidth", "displayCanvasHeight",
       "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx",
-      "uiLocale", "sponsorLayoutsJson", "interfaceProfilesJson", "displayExtrasJson"
+      "uiLocale", "sponsorLayoutsJson", "interfaceProfilesJson", "displayExtrasJson",
+      "sponsorGuaranteeJson"
      FROM "AppSettings" WHERE "id" = 1`,
   );
   const row = rows[0];
@@ -566,6 +764,7 @@ async function getAppSettings(): Promise<{
       sponsorLayoutsJson: row.sponsorLayoutsJson ?? null,
       interfaceProfilesJson: row.interfaceProfilesJson ?? null,
       displayExtrasJson: row.displayExtrasJson ?? null,
+      sponsorGuaranteeJson: row.sponsorGuaranteeJson ?? null,
     };
   }
   await prisma.$executeRawUnsafe(
@@ -589,6 +788,7 @@ async function getAppSettings(): Promise<{
     sponsorLayoutsJson: null,
     interfaceProfilesJson: null,
     displayExtrasJson: null,
+    sponsorGuaranteeJson: null,
     ...defaults,
   };
 }
@@ -794,6 +994,9 @@ async function buildSettingsApiJson() {
     sponsorLayoutsJson: s.sponsorLayoutsJson,
     interfaceProfilesJson: s.interfaceProfilesJson,
     displayExtrasJson: s.displayExtrasJson,
+    sponsorGuaranteeJson: serializeSponsorGuaranteeSettings(
+      parseSponsorGuaranteeSettings(s.sponsorGuaranteeJson),
+    ),
   };
 }
 
@@ -1543,6 +1746,9 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   await resetAnnouncementOnStartup();
   await seedLiveWallCueClockIfMissing();
   await seedCuePhaseClocksIfMissing();
+  await refreshSponsorGuaranteeSettings();
+  await recoverSponsorPlaysOnStartup();
+  await restoreSponsorLedgerOnStartup();
   startTickLoop();
   await broadcastDisplayState();
   broadcastSponsorLedger();
@@ -1790,7 +1996,8 @@ export function disposeDesktopRuntime() {
     mediaCheckRetryTimer = null;
   }
   sponsorLedgerSnapshot = null;
-  sponsorClipBestActualSec.clear();
+  playSessions.clear();
+  ledgerSessionIds.clear();
   cachedState = null;
   tickMatchCache = null;
 }
@@ -1848,6 +2055,9 @@ async function handleSponsorPlaysCsv(
     "Gestart op",
     "Beëindigd op",
     "Sessie-id",
+    "Bron",
+    "Status",
+    "Telt mee",
   ];
   const lines: string[] = [header.map(csvEscape).join(",")];
   for (const r of rows) {
@@ -1864,10 +2074,13 @@ async function handleSponsorPlaysCsv(
         r.segmentKey,
         r.matchStatus ?? "",
         r.expectedSec,
-        r.actualSec,
+        Math.round(playLogVisibleSec(r) * 10) / 10,
         r.startedAt.toISOString(),
         r.endedAt.toISOString(),
         r.clipSessionId,
+        r.source,
+        r.state,
+        r.counted ? "ja" : "nee",
       ]
         .map(csvEscape)
         .join(","),
@@ -2111,6 +2324,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           sponsorLayoutsJson?: string | null;
           interfaceProfilesJson?: string | null;
           displayExtrasJson?: string | null;
+          sponsorGuaranteeJson?: string | null;
         }) ?? {};
       if ("uiLocale" in body && body.uiLocale) {
         await setUiLocale(normalizeUiLocale(body.uiLocale));
@@ -2169,6 +2383,15 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           return json(400, { error: "Interfaceprofiel is te groot" });
         }
         await setInterfaceProfilesJson(raw === null || raw === undefined ? null : String(raw));
+      }
+      if ("sponsorGuaranteeJson" in body) {
+        const raw = body.sponsorGuaranteeJson;
+        // Altijd genormaliseerd opslaan; het hoofdproces leest dit bij elke nieuwe vertoning.
+        await prisma.$executeRawUnsafe(
+          `UPDATE "AppSettings" SET "sponsorGuaranteeJson" = ? WHERE "id" = 1`,
+          serializeSponsorGuaranteeSettings(parseSponsorGuaranteeSettings(raw == null ? null : String(raw))),
+        );
+        await refreshSponsorGuaranteeSettings();
       }
       if ("displayExtrasJson" in body) {
         const raw = body.displayExtrasJson;

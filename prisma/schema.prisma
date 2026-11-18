@@ -374,6 +374,8 @@ model AppSettings {
   interfaceProfilesJson String?
   /// JSON: aftelklok naar de start en de mededeling op het stadionscherm (lib/display-extras.ts).
   displayExtrasJson String?
+  /// Sponsorgaranties: {"countManualPlays":bool,"reserveSec":n} (lib/sponsor-guarantee-settings.ts).
+  sponsorGuaranteeJson String?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.
@@ -403,10 +405,19 @@ model SponsorPlayLog {
   endedAt        DateTime @default(now())
   /// Unieke sessie-id voor deduplicatie.
   clipSessionId  String   @unique
+  /// Welke laag de vertoning meldde: rotation | cue | manual.
+  source         String   @default("rotation")
+  /// running (loopt, voortgang periodiek bewaard) | done | interrupted (herstart/crash midden in de clip).
+  state          String   @default("done")
+  /// Telt mee voor de sponsor. Onwaar voor een handmatige clip als de operator dat zo instelde.
+  counted        Boolean  @default(true)
+  /// Sponsor-id zoals de telemetrie hem kent (ook club:… en scheduled-cue), voor de heropbouw na een herstart.
+  ledgerSponsorId String?
 
   @@index([matchId])
   @@index([sponsorId])
   @@index([endedAt])
+  @@index([state])
 }
 
 /// Commando's die via de cloud-relay (telefoon over internet) binnenkwamen en hier al uitgevoerd zijn.

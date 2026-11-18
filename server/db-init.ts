@@ -202,6 +202,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("AppSettings", "uiLocale", `TEXT NOT NULL DEFAULT 'nl'`);
   await addColumnIfMissing("AppSettings", "interfaceProfilesJson", "TEXT");
   await addColumnIfMissing("AppSettings", "displayExtrasJson", "TEXT");
+  await addColumnIfMissing("AppSettings", "sponsorGuaranteeJson", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureToDisplay", "BOOLEAN NOT NULL DEFAULT 0");
   await addColumnIfMissing("DisplayState", "externalCaptureAudio", "BOOLEAN NOT NULL DEFAULT 0");
@@ -355,6 +356,14 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   );
   // Echt zichtbare ms, onafgerond (oude rijen: 0 → lezers vallen terug op actualSec).
   await addColumnIfMissing("SponsorPlayLog", "actualMs", "INTEGER NOT NULL DEFAULT 0");
+  // Bron, status en telling van een vertoning; zie prisma/schema.prisma.
+  await addColumnIfMissing("SponsorPlayLog", "source", "TEXT NOT NULL DEFAULT 'rotation'");
+  await addColumnIfMissing("SponsorPlayLog", "state", "TEXT NOT NULL DEFAULT 'done'");
+  await addColumnIfMissing("SponsorPlayLog", "counted", "BOOLEAN NOT NULL DEFAULT true");
+  await addColumnIfMissing("SponsorPlayLog", "ledgerSponsorId", "TEXT");
+  await prisma.$executeRawUnsafe(
+    `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_state_idx" ON "SponsorPlayLog" ("state")`,
+  );
   await prisma.$executeRawUnsafe(
     `CREATE INDEX IF NOT EXISTS "SponsorPlayLog_matchId_idx" ON "SponsorPlayLog" ("matchId")`,
   );

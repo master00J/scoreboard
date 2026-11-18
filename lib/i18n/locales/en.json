@@ -797,7 +797,20 @@
       "segmentSecondHalf": "2nd half",
       "segmentExtraTime": "Extra time",
       "segmentPostmatch": "Post-match"
-    }
+    },
+    "guaranteeSettingsTitle": "Counting sponsor time",
+    "countManualPlays": "Sponsor clips started by hand count toward the booked time",
+    "countManualPlaysHint": "They are always saved and listed; off = left out of the totals.",
+    "reserveSec": "Reserve for interruptions per phase (s)",
+    "reserveSecHint": "Time the live view keeps back for goals, cards and substitutions.",
+    "settingsSaveFailed": "Setting not saved",
+    "colSource": "Source",
+    "source_rotation": "Rotation",
+    "source_cue": "Cue",
+    "source_manual": "Manual",
+    "notCounted": "not counted",
+    "stateInterrupted": "interrupted",
+    "stateRunning": "running"
   },
   "setup": {
     "venueBackupTitle": "Venue backup",

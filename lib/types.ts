@@ -63,6 +63,8 @@ export type AppSettings = {
   interfaceProfilesJson?: string | null;
   /** JSON: aftelklok naar de start en de mededeling op het stadionscherm (lib/display-extras.ts). */
   displayExtrasJson?: string | null;
+  /** Telling van sponsortijd (lib/sponsor-guarantee-settings.ts). */
+  sponsorGuaranteeJson?: string | null;
 };
 
 export type Player = {

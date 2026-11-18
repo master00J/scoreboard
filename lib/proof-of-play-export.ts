@@ -7,6 +7,12 @@ import {
   pdfHeaderTitle,
   type ProofOfPlayBrand,
 } from "./proof-of-play-brand";
+import { playLogVisibleSec } from "./sponsor-play-ledger";
+
+/** Seconden van één vertoning zoals een export ze toont: afgerond op 0,1 s, pas hier. */
+export function presentPlaySec(row: { actualSec: number; actualMs?: number | null }): number {
+  return Math.round(playLogVisibleSec(row) * 10) / 10;
+}
 
 /** Rij uit GET /api/sponsor-plays — gelijk aan control panel. */
 export type ProofOfPlayRow = {
@@ -19,6 +25,14 @@ export type ProofOfPlayRow = {
   matchStatus: string | null;
   expectedSec: number;
   actualSec: number;
+  /** Echt zichtbare ms, onafgerond (0 bij rijen van vóór de kolom). */
+  actualMs?: number;
+  /** rotation | cue | manual */
+  source?: string;
+  /** running | done | interrupted */
+  state?: string;
+  /** Onwaar: handmatige clip die volgens de instelling niet meetelt. */
+  counted?: boolean;
   startedAt: string;
   endedAt: string;
   clipSessionId: string;
@@ -338,7 +352,7 @@ export async function buildProofOfPlayXlsx(
     r.matchStatus ?? "—",
     formatSegmentKey(r.segmentKey, labels),
     r.expectedSec,
-    r.actualSec,
+    presentPlaySec(r),
     r.clipSessionId,
   ]);
 
@@ -500,7 +514,7 @@ export function buildProofOfPlayPdf(
           matchLabel(r),
           formatSegmentKey(r.segmentKey, labels),
           String(r.expectedSec),
-          String(r.actualSec),
+          String(presentPlaySec(r)),
         ];
       }),
       theme: "grid",

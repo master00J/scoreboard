@@ -74,7 +74,13 @@ import {
 import { applySponsorSpreadTick } from "@/lib/sponsor-spread-tick";
 import { useScheduledMediaCueActive } from "@/lib/use-scheduled-media-cue-active";
 import { automaticSponsorMediaAllowed } from "@/lib/live-cycle-settings";
-import { scheduledCueShownKey, useScheduledCueTelemetry } from "@/lib/use-scheduled-cue-telemetry";
+import {
+  manualSponsorPlayKey,
+  scheduledCueShownKey,
+  useScheduledCueTelemetry,
+  useVisiblePlayTelemetry,
+  type VisiblePlay,
+} from "@/lib/use-scheduled-cue-telemetry";
 import { useDisplayWindowVisible } from "@/lib/use-display-window-visible";
 import { cueHasClockWindow, cueWindowLengthSec, sponsorPlayWallElapsedSec } from "@/lib/scheduled-media-cue";
 import {
@@ -1464,6 +1470,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     idleEmptyFallback,
     rotationBudgetSeconds,
     sponsorWindow,
+    displayWindowVisible,
   ]);
 
   const keepLiveSponsorBesideMounted =
@@ -1510,6 +1517,42 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   });
   const cueShownKey = scheduledCueShownKey(activeScheduledCue, scheduledCueCycle, scheduledCueStint);
   const onCueShown = (positionSec?: number) => cueTelemetry.onShown(cueShownKey, positionSec);
+
+  /**
+   * Een sponsorclip die de operator met de hand start (losse clip). Wordt altijd bewaard als
+   * vertoning met bron "manual"; of hij meetelt voor de sponsor, kiest de operator.
+   */
+  const manualSponsorMedia =
+    mode === "SPONSOR" && activeMedia?.sponsorId && match ? activeMedia : null;
+  const manualStartRef = useRef<{ mediaId: string; startedAtMs: number } | null>(null);
+  if (!manualSponsorMedia) manualStartRef.current = null;
+  else if (manualStartRef.current?.mediaId !== manualSponsorMedia.id) {
+    manualStartRef.current = { mediaId: manualSponsorMedia.id, startedAtMs: Date.now() };
+  }
+  const manualStartedAtMs = manualStartRef.current?.startedAtMs ?? null;
+  const manualPlay = useMemo<VisiblePlay | null>(() => {
+    if (!manualSponsorMedia?.sponsorId || !match || manualStartedAtMs == null) return null;
+    return {
+      key: manualSponsorPlayKey(manualSponsorMedia.id, manualStartedAtMs),
+      clipSessionId: `manual:${match.id}:${manualSponsorMedia.id}:${manualStartedAtMs}`,
+      sponsorId: manualSponsorMedia.sponsorId,
+      mediaId: manualSponsorMedia.id,
+      mediaType: manualSponsorMedia.type,
+      expectedPlaySec: Math.max(1, manualSponsorMedia.durationSec || 10),
+      source: "manual",
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualSponsorMedia?.id, match?.id, manualStartedAtMs]);
+  const manualTelemetry = useVisiblePlayTelemetry({
+    play: manualPlay,
+    match: match ? { id: match.id, status: match.status } : null,
+    enabled: !embedInControl && !previewIframe,
+    visible: manualPlay != null && displayWindowVisible,
+  });
+  const manualPlayKey = manualPlay?.key;
+  const onManualShown = manualPlayKey
+    ? (positionSec?: number) => manualTelemetry.onShown(manualPlayKey, positionSec)
+    : undefined;
 
   /** Scorebord met mediavak voor goal, kaart of een losse clip (niet de sponsorrotatie zelf). */
   const showFramedContent =
@@ -1600,6 +1643,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
             media={activeMedia}
             holdSlot="panel"
             showPreviewProgress={embedInControl}
+            shownKey={manualPlayKey}
+            onShown={onManualShown}
+            onPlayheadSec={manualPlayKey ? manualTelemetry.onPlayheadSec : undefined}
             finishAfterMs={oneOffMediaHoldMs(activeMedia)}
             onVideoEnded={() => finishOneOffMedia(activeMedia.id)}
           />
@@ -1647,6 +1693,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     matchClockFrozen,
     previewForcesSponsorBeside,
     finishOneOffMedia,
+    manualPlayKey,
+    displayWindowVisible,
     rotationBudgetSeconds,
     sponsorWindow,
   ]);
@@ -1893,6 +1941,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               media={activeMedia}
               holdSlot="fullscreen"
               showPreviewProgress={embedInControl}
+              shownKey={manualPlayKey}
+              onShown={onManualShown}
+              onPlayheadSec={manualPlayKey ? manualTelemetry.onPlayheadSec : undefined}
               finishAfterMs={oneOffMediaHoldMs(activeMedia)}
               onVideoEnded={() => finishOneOffMedia(activeMedia.id)}
             />

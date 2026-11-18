@@ -797,7 +797,20 @@
       "segmentSecondHalf": "2e helft",
       "segmentExtraTime": "Verlenging",
       "segmentPostmatch": "Na wedstrijd"
-    }
+    },
+    "guaranteeSettingsTitle": "Telling van sponsortijd",
+    "countManualPlays": "Handmatig gestarte sponsorclips tellen mee voor de geboekte tijd",
+    "countManualPlaysHint": "Ze worden altijd bewaard en in de lijst getoond; uit = niet in de totalen.",
+    "reserveSec": "Reserve voor onderbrekingen per fase (s)",
+    "reserveSecHint": "Tijd die de live-weergave achterhoudt voor goals, kaarten en wissels.",
+    "settingsSaveFailed": "Instelling niet opgeslagen",
+    "colSource": "Bron",
+    "source_rotation": "Rotatie",
+    "source_cue": "Cue",
+    "source_manual": "Handmatig",
+    "notCounted": "telt niet",
+    "stateInterrupted": "onderbroken",
+    "stateRunning": "loopt"
   },
   "setup": {
     "venueBackupTitle": "Venue-backup",

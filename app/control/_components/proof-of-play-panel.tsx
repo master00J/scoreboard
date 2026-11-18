@@ -32,6 +32,8 @@ import {
   type ProofOfPlaySummaryRow,
 } from "@/lib/proof-of-play-export";
 import { proofOfPlayTotals } from "@/lib/sponsor-play-filters";
+import { playLogVisibleSec } from "@/lib/sponsor-play-ledger";
+import { SponsorGuaranteeSettingsCard } from "./sponsor-guarantee-settings-card";
 
 export function ProofOfPlayPanel() {
   const { t, i18n } = useTranslation();
@@ -341,6 +343,10 @@ export function ProofOfPlayPanel() {
 
   return (
     <div className="space-y-4">
+      <SponsorGuaranteeSettingsCard
+        sponsorGuaranteeJson={settings?.sponsorGuaranteeJson}
+        onSaved={reloadSettings}
+      />
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -648,6 +654,7 @@ export function ProofOfPlayPanel() {
                   <th className="py-2 pr-3">{t("reports.colMedia")}</th>
                   <th className="py-2 pr-3">{t("reports.colMatch")}</th>
                   <th className="py-2 pr-3">{t("reports.colPhase")}</th>
+                  <th className="py-2 pr-3">{t("reports.colSource")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colExpectedShort")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colActualShort")}</th>
                 </tr>
@@ -668,8 +675,22 @@ export function ProofOfPlayPanel() {
                     <td className="py-1.5 pr-3">
                       {formatSegmentKey(r.segmentKey, exportLabels)}
                     </td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">
+                      {t(`reports.source_${r.source ?? "rotation"}`)}
+                      {r.counted === false && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.notCounted")})</span>
+                      )}
+                      {r.state === "interrupted" && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.stateInterrupted")})</span>
+                      )}
+                      {r.state === "running" && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.stateRunning")})</span>
+                      )}
+                    </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{r.expectedSec}s</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">{r.actualSec}s</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">
+                      {formatSecForExport(playLogVisibleSec(r))}
+                    </td>
                   </tr>
                 ))}
               </tbody>

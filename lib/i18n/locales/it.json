@@ -797,7 +797,20 @@
       "segmentSecondHalf": "Secondo tempo",
       "segmentExtraTime": "Supplementari",
       "segmentPostmatch": "Post-partita"
-    }
+    },
+    "guaranteeSettingsTitle": "Conteggio del tempo sponsor",
+    "countManualPlays": "Le clip sponsor avviate a mano contano per il tempo prenotato",
+    "countManualPlaysHint": "Vengono sempre salvate ed elencate; disattivato = escluse dai totali.",
+    "reserveSec": "Riserva per interruzioni per fase (s)",
+    "reserveSecHint": "Tempo che la vista live tiene da parte per gol, cartellini e sostituzioni.",
+    "settingsSaveFailed": "Impostazione non salvata",
+    "colSource": "Origine",
+    "source_rotation": "Rotazione",
+    "source_cue": "Cue",
+    "source_manual": "Manuale",
+    "notCounted": "non conteggiato",
+    "stateInterrupted": "interrotto",
+    "stateRunning": "in corso"
   },
   "setup": {
     "venueBackupTitle": "Backup impianto",

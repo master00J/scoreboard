@@ -167,3 +167,56 @@ describe("proof-of-play rounding", () => {
     expect(plays.playLogVisibleSec({ actualSec: 8, actualMs: 0 })).toBe(8);
   });
 });
+
+describe("proof-of-play sources", () => {
+  it("lists a manual play that does not count, but leaves it out of the totals", async () => {
+    const base = Date.UTC(2026, 10, 1, 18, 0, 0);
+    await prisma.sponsorPlayLog.createMany({
+      data: [
+        {
+          sponsorName: "A",
+          mediaTitle: "clip",
+          segmentKey: "m:FIRST_HALF",
+          expectedSec: 10,
+          actualSec: 10,
+          actualMs: 10_000,
+          source: "rotation",
+          startedAt: new Date(base),
+          endedAt: new Date(base + 10_000),
+          clipSessionId: "rot",
+        },
+        {
+          sponsorName: "A",
+          mediaTitle: "clip",
+          segmentKey: "m:FIRST_HALF",
+          expectedSec: 10,
+          actualSec: 7,
+          actualMs: 7_000,
+          source: "manual",
+          counted: false,
+          startedAt: new Date(base + 20_000),
+          endedAt: new Date(base + 27_000),
+          clipSessionId: "man",
+        },
+        {
+          sponsorName: "A",
+          mediaTitle: "clip",
+          segmentKey: "m:FIRST_HALF",
+          expectedSec: 10,
+          actualSec: 4,
+          actualMs: 4_200,
+          source: "cue",
+          state: "interrupted",
+          startedAt: new Date(base + 30_000),
+          endedAt: new Date(base + 34_200),
+          clipSessionId: "cue",
+        },
+      ],
+    });
+    const list = await plays.listSponsorPlays(prisma, {}, undefined);
+    expect(list.map((r) => r.source).sort()).toEqual(["cue", "manual", "rotation"]);
+    const summary = await plays.summarizeSponsorPlays(prisma, {});
+    expect(summary[0]!.plays).toBe(2);
+    expect(summary[0]!.actualSec).toBeCloseTo(14.2, 5);
+  });
+});

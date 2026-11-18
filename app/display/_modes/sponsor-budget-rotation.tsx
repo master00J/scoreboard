@@ -378,6 +378,8 @@ export function SponsorBudgetRotation({
   /** Sleutel van de clip waarvan het beeld echt op het scherm staat. */
   const [shownClipKey, setShownClipKey] = useState<string | null>(null);
   const accountingPaused = !!paused || offScreen;
+  const accountingPausedRef = useRef(accountingPaused);
+  accountingPausedRef.current = accountingPaused;
   const restartPendingClipKeyRef = useRef<string | null>(null);
   const followClipSessionRef = useRef<string | null>(null);
 
@@ -790,6 +792,26 @@ export function SponsorBudgetRotation({
     },
     [followMode, isPlaybackOwner, playbackTelemetry, current],
   );
+
+  /**
+   * Elke seconde de zichtbare tijd melden. Het hoofdproces bewaart die periodiek (een herstart
+   * verliest dan hoogstens een paar seconden) en vergelijkt ze met andere lagen die tegelijk melden.
+   */
+  useEffect(() => {
+    if (followMode || !isPlaybackOwner || !current) return;
+    if (shownClipKey !== visibleClipKeyRef.current) return;
+    const isVideo = current.item.type === "VIDEO";
+    const id = window.setInterval(() => {
+      const clock = playClockRef.current;
+      const pos = isVideo
+        ? playbackProgressMsRef.current
+        : clock
+          ? visiblePlayMs(clock, Date.now())
+          : 0;
+      pushActiveClipProgress(pos, { force: true, paused: accountingPausedRef.current });
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [shownClipKey, current, slideTick, followMode, isPlaybackOwner, pushActiveClipProgress]);
 
   const advanceAfterSlide = useCallback(
     (
