@@ -134,6 +134,7 @@
   },
   "shell": {
     "title": "Stadium Control",
+    "clubName": "Royal Antwerp FC",
     "noActiveMatch": "Kein aktives Spiel",
     "matchLoading": "Spiel wird geladen…",
     "openDisplay": "Scoreboard öffnen",
