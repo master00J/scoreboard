@@ -217,6 +217,8 @@ export function SetupDisplayCanvasSection({
         </div>
       </div>
 
+      <DisplayVideoCopySetting />
+
       <div className="border-t border-border pt-4 space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div>
@@ -288,5 +290,99 @@ function ScalingOption({
         {desc}
       </div>
     </button>
+  );
+}
+
+type DisplayCopyStatus = {
+  height: number | null;
+  ready: number;
+  total: number;
+  busy: boolean;
+  waitingForMatch: boolean;
+};
+
+/**
+ * Video's op het stadionscherm als 720p-kopie (lib/display-copy.ts), voor een HD-ledscherm. De livestream
+ * en de rapporten gebruiken altijd het origineel.
+ */
+function DisplayVideoCopySetting() {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<DisplayCopyStatus | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const load = () => {
+      fetch("/api/display-copies")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((next: DisplayCopyStatus | null) => {
+          if (cancelled || !next) return;
+          setStatus(next);
+          // Zolang er kopieën gemaakt worden, de teller bijwerken.
+          if (next.height != null && (next.busy || next.ready < next.total)) timer = setTimeout(load, 4000);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [status?.height]);
+
+  async function choose(height: number | null) {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/display-copies", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ height }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setStatus((await res.json()) as DisplayCopyStatus);
+    } catch (err) {
+      toast({
+        title: t("setup.videoCopySaveFailed"),
+        description: err instanceof Error ? err.message : String(err),
+        variant: "error",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const height = status?.height ?? null;
+  return (
+    <div className="border-t border-border pt-4">
+      <Label className="text-xs">{t("setup.videoCopyTitle")}</Label>
+      <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{t("setup.videoCopyHelp")}</p>
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <ScalingOption
+          active={height == null}
+          title={t("setup.videoCopyOriginal")}
+          desc={t("setup.videoCopyOriginalDesc")}
+          onClick={() => !saving && height != null && void choose(null)}
+        />
+        <ScalingOption
+          active={height === 720}
+          title={t("setup.videoCopy720")}
+          desc={t("setup.videoCopy720Desc")}
+          onClick={() => !saving && height !== 720 && void choose(720)}
+        />
+      </div>
+      {height != null && status ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {t("setup.videoCopyProgress", { ready: status.ready, total: status.total })}
+          {status.waitingForMatch
+            ? ` · ${t("setup.videoCopyWaitingForMatch")}`
+            : status.busy
+              ? ` · ${t("setup.videoCopyBusy")}`
+              : ""}
+          {" · "}
+          {t("setup.videoCopyApplies")}
+        </p>
+      ) : null}
+    </div>
   );
 }

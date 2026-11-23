@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { needsDisplayCopy, type DisplayCopyHeight } from "../lib/display-copy";
 import { resolveStoredMediaPath } from "../lib/media-file-path";
 import {
   classifyDecodeRun,
@@ -172,17 +173,53 @@ export async function prepareVideoForDisplay(
    * Zelfde resolutie en fps. Baseline + geen B-frames + GOP 1s: Chromium blijft
    * anders `waiting` geven midden in een ogenschijnlijk “gewone” libx264-Main-clip.
    */
-  const args = [
+  const args = stadiumEncodeArgs(file, tmp);
+
+  // FFmpeg schrijft naar een tijdelijk bestand. Pas na een volledige, foutloze decode krijgt het
+  // de echte naam; een omzetting die halverwege stopt, laat zo nooit een bruikbaar ogende kopie na.
+  removeQuietly(tmp);
+  try {
+    await execFileAsync(ffmpeg, args, { timeout: 180_000, windowsHide: true });
+  } catch {
+    removeQuietly(tmp);
+    return { ...inspected, path: src, transcoded: false };
+  }
+  const check = fs.existsSync(tmp) ? await decodeCheckFile(tmp, "VIDEO", expectedSec) : null;
+  if (!check || !isValidTranscodeOutput(check)) {
+    removeQuietly(tmp);
+    return {
+      ...inspected,
+      path: src,
+      transcoded: false,
+      validationFailed: check?.reason ?? "unreadable",
+    };
+  }
+  try {
+    fs.renameSync(tmp, dest);
+  } catch {
+    removeQuietly(tmp);
+    return { ...inspected, path: src, transcoded: false };
+  }
+  return { ...inspected, path: dest, transcoded: true, check: checkRecordFor(dest, check) };
+}
+
+/**
+ * FFmpeg-argumenten voor een kopie die het stadionscherm vlot afspeelt: zelfde fps, baseline H.264 zonder
+ * B-frames en een GOP van 1 s. Met `scaleHeight` wordt het beeld verkleind tot die hoogte (lanczos).
+ */
+function stadiumEncodeArgs(input: string, output: string, scaleHeight?: number): string[] {
+  return [
     "-y",
     "-hide_banner",
     "-i",
-    file,
+    input,
     "-map_metadata",
     "-1",
     "-map",
     "0:v:0",
     "-map",
     "0:a:0?",
+    ...(scaleHeight ? ["-vf", `scale=-2:${scaleHeight}:flags=lanczos`] : []),
     "-fps_mode",
     "cfr",
     "-c:v",
@@ -221,35 +258,98 @@ export async function prepareVideoForDisplay(
     "+faststart",
     "-f",
     "mp4",
-    tmp,
+    output,
   ];
+}
 
-  // FFmpeg schrijft naar een tijdelijk bestand. Pas na een volledige, foutloze decode krijgt het
-  // de echte naam; een omzetting die halverwege stopt, laat zo nooit een bruikbaar ogende kopie na.
-  removeQuietly(tmp);
-  try {
-    await execFileAsync(ffmpeg, args, { timeout: 180_000, windowsHide: true });
-  } catch {
+function displayCopyDir(height: number): string {
+  const uploads = process.env.STADIUM_UPLOADS_DIR?.trim();
+  const root = uploads && fs.existsSync(uploads) ? uploads : path.join(process.cwd(), "uploads");
+  const dir = path.join(root, `display-${height}p`);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+export type DisplayCopyResult =
+  | { kind: "copy"; path: string; sourceKey: string }
+  | { kind: "not_needed"; sourceKey: string }
+  | { kind: "failed"; reason: string };
+
+/** FFmpeg op lagere prioriteit, zodat het stadionscherm op dezelfde pc voorgaat. */
+function runFfmpegLowPriority(ffmpeg: string, args: string[], timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(ffmpeg, args, { windowsHide: true, stdio: ["ignore", "ignore", "ignore"] });
+    try {
+      if (child.pid) os.setPriority(child.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
+    } catch {
+      /* geen rechten: dan op normale prioriteit */
+    }
+    const timer = setTimeout(() => child.kill(), timeoutMs);
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0);
+    });
+  });
+}
+
+/**
+ * Maakt een kopie van een video op `height` lijnen voor het stadionscherm (lib/display-copy.ts). Een origineel
+ * dat niet hoger is, krijgt geen kopie (`not_needed`). De kopie wordt volledig gedecodeerd voor ze telt;
+ * één zware FFmpeg-taak tegelijk, op lagere prioriteit.
+ */
+export async function makeDisplayCopy(stored: string, height: DisplayCopyHeight): Promise<DisplayCopyResult> {
+  const version = mediaFileVersion(stored);
+  if (!version.exists || !version.file || !version.key) return { kind: "failed", reason: "missing_file" };
+  const ffmpeg = resolveFfmpegPath();
+  if (!ffmpeg) return { kind: "failed", reason: "ffmpeg_missing" };
+  const info = await probeWithFfmpeg(ffmpeg, version.file);
+  if (!info || !info.height) return { kind: "failed", reason: "probe_failed" };
+  if (!needsDisplayCopy(info.height, height)) return { kind: "not_needed", sourceKey: version.key };
+
+  const hash = createHash("sha1").update(version.key).digest("hex").slice(0, 12);
+  const base = path
+    .basename(version.file, path.extname(version.file))
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  const dest = path.join(displayCopyDir(height), `${base || "clip"}-${hash}-${height}p.mp4`);
+  const expectedSec = info.durationSec ?? null;
+  const sourceKey = version.key;
+  const source = version.file;
+
+  return runSerialized(async () => {
+    // Binnen deze taak rechtstreeks decoderen: `decodeCheckFile` zou op deze zelfde rij wachten.
+    const decodes = async (file: string) =>
+      isValidTranscodeOutput(
+        classifyDecodeRun({ kind: "VIDEO", expectedSec, run: await runFfmpegDecode(ffmpeg, file, decodeTimeoutMs("VIDEO", expectedSec)) }),
+      );
+    if (fs.existsSync(dest)) {
+      if (await decodes(dest)) return { kind: "copy", path: dest, sourceKey } as const;
+      removeQuietly(dest);
+    }
+    const tmp = `${dest.replace(/\.mp4$/i, "")}.partial`;
     removeQuietly(tmp);
-    return { ...inspected, path: src, transcoded: false };
-  }
-  const check = fs.existsSync(tmp) ? await decodeCheckFile(tmp, "VIDEO", expectedSec) : null;
-  if (!check || !isValidTranscodeOutput(check)) {
-    removeQuietly(tmp);
-    return {
-      ...inspected,
-      path: src,
-      transcoded: false,
-      validationFailed: check?.reason ?? "unreadable",
-    };
-  }
-  try {
-    fs.renameSync(tmp, dest);
-  } catch {
-    removeQuietly(tmp);
-    return { ...inspected, path: src, transcoded: false };
-  }
-  return { ...inspected, path: dest, transcoded: true, check: checkRecordFor(dest, check) };
+    const ok = await runFfmpegLowPriority(ffmpeg, stadiumEncodeArgs(source, tmp, height), 15 * 60_000);
+    if (!ok || !fs.existsSync(tmp)) {
+      removeQuietly(tmp);
+      return { kind: "failed", reason: "encode_failed" } as const;
+    }
+    if (!(await decodes(tmp))) {
+      removeQuietly(tmp);
+      return { kind: "failed", reason: "copy_not_decodable" } as const;
+    }
+    try {
+      fs.renameSync(tmp, dest);
+    } catch {
+      removeQuietly(tmp);
+      return { kind: "failed", reason: "rename_failed" } as const;
+    }
+    return { kind: "copy", path: dest, sourceKey } as const;
+  });
 }
 
 function removeQuietly(file: string) {

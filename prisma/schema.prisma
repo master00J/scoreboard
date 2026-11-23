@@ -182,6 +182,9 @@ model MediaItem {
   appSettingsIdleFallback AppSettings? @relation("IdleFallbackMedia")
   scheduledCues ScheduledMediaCue[]
   playLogs    SponsorPlayLog[]
+  /// Kleinere kopie voor het stadionscherm (lib/display-copy.ts); geldt alleen bij `displayCopyKey`.
+  displayCopyPath String?
+  displayCopyKey  String?
 }
 
 model ScheduledMediaCue {
@@ -382,6 +385,8 @@ model AppSettings {
   sponsorGuaranteeJson String?
   /// Reeksen: bestanden die in vaste volgorde na elkaar spelen (lib/media-sequences.ts).
   mediaSequencesJson String?
+  /// Video's op het stadionscherm als kopie op deze hoogte (720) of null = origineel (lib/display-copy.ts).
+  displayCopyHeight Int?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.
