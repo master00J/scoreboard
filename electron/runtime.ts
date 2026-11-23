@@ -128,6 +128,7 @@ import {
 import {
   checkMediaFile,
   inspectVideoForDisplay,
+  makeDisplayCopy,
   mediaFileVersion,
   prepareVideoForDisplay,
   resolveMediaFile,
@@ -150,6 +151,14 @@ import {
   type MediaSequence,
   type SequenceMember,
 } from "../lib/media-sequences";
+import {
+  displayCopyKey,
+  displayCopyMap,
+  displayCopyNotNeededKey,
+  displayCopyProgress,
+  normalizeDisplayCopyHeight,
+  type DisplayCopyHeight,
+} from "../lib/display-copy";
 import { writeScheduledCues } from "../server/scheduled-cue-writes";
 import {
   isClubRotationSponsorId,
@@ -1856,6 +1865,8 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   // stuk). Wie daarop wacht, houdt de vensters tegen, ook bij een herstart midden in een wedstrijd.
   // De omzetting meldt zelf een nieuwe stand zodra er een pad veranderd is.
   void prepareRiskyVideosInBackground();
+  // Kopieën voor het stadionscherm bijwerken als de club die koos (wacht zelf tot na een wedstrijd).
+  void queueAllDisplayCopies();
 }
 
 async function persistPreparedVideo(
@@ -1963,7 +1974,114 @@ function queueMediaCheck(...ids: string[]) {
 }
 
 /** Nieuw of vervangen bestand: meteen controleren, ook tijdens een wedstrijd, en pas daarna afspelen. */
+// --- Kleinere kopieën voor het stadionscherm (lib/display-copy.ts) ---------------------------------
+
+async function readDisplayCopyHeight(): Promise<DisplayCopyHeight | null> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ v: number | null }>>(
+      `SELECT "displayCopyHeight" AS v FROM "AppSettings" WHERE "id" = 1`,
+    );
+    return normalizeDisplayCopyHeight(rows[0]?.v ?? null);
+  } catch {
+    return null;
+  }
+}
+
+/** Video's die nog een kopie moeten krijgen. Nooit tijdens een wedstrijd: omzetten kost veel rekenwerk. */
+const displayCopyQueue = new Set<string>();
+let displayCopyWorkerRunning = false;
+let displayCopyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function queueDisplayCopy(...ids: string[]) {
+  for (const id of ids) if (id) displayCopyQueue.add(id);
+  startDisplayCopyWorker();
+}
+
+async function queueAllDisplayCopies() {
+  try {
+    const videos = await prisma.mediaItem.findMany({ where: { type: "VIDEO" }, select: { id: true } });
+    queueDisplayCopy(...videos.map((v) => v.id));
+  } catch (err) {
+    requireOpts().log(`[media] kopieën plannen mislukt: ${String(err)}`);
+  }
+}
+
+function startDisplayCopyWorker() {
+  if (displayCopyWorkerRunning || displayCopyRetryTimer || displayCopyQueue.size === 0) return;
+  displayCopyWorkerRunning = true;
+  void (async () => {
+    try {
+      while (displayCopyQueue.size > 0) {
+        const height = await readDisplayCopyHeight();
+        if (height == null) {
+          displayCopyQueue.clear();
+          return;
+        }
+        if (await isMatchInPlayNow()) {
+          displayCopyRetryTimer = setTimeout(() => {
+            displayCopyRetryTimer = null;
+            startDisplayCopyWorker();
+          }, MEDIA_CHECK_RETRY_MS);
+          return;
+        }
+        const id = displayCopyQueue.values().next().value as string;
+        displayCopyQueue.delete(id);
+        try {
+          const item = await prisma.mediaItem.findUnique({
+            where: { id },
+            select: { id: true, title: true, type: true, path: true, displayCopyPath: true, displayCopyKey: true },
+          });
+          if (!item || item.type !== "VIDEO") continue;
+          const version = mediaFileVersion(item.path);
+          if (!version.key) continue;
+          const copyOk =
+            item.displayCopyKey === displayCopyKey(height, version.key) &&
+            !!item.displayCopyPath &&
+            mediaFileVersion(item.displayCopyPath).exists;
+          if (copyOk || item.displayCopyKey === displayCopyNotNeededKey(height, version.key)) continue;
+          const result = await makeDisplayCopy(item.path, height);
+          if (result.kind === "failed") {
+            requireOpts().log(`[media] ${height}p-kopie van ${item.title} mislukt (${result.reason}); het scherm speelt het origineel`);
+            continue;
+          }
+          // Alleen bewaren als het item nog naar hetzelfde bestand wijst (niet intussen vervangen).
+          await prisma.mediaItem.updateMany({
+            where: { id: item.id, path: item.path },
+            data:
+              result.kind === "copy"
+                ? { displayCopyPath: result.path, displayCopyKey: displayCopyKey(height, result.sourceKey) }
+                : { displayCopyPath: null, displayCopyKey: displayCopyNotNeededKey(height, result.sourceKey) },
+          });
+        } catch (err) {
+          requireOpts().log(`[media] kopie ${id} mislukt: ${String(err)}`);
+        }
+      }
+    } finally {
+      displayCopyWorkerRunning = false;
+    }
+  })();
+}
+
+/** Welke kopieën het stadionscherm nu kan spelen, en hoeveel video's klaar zijn. */
+async function displayCopyStatus() {
+  const height = await readDisplayCopyHeight();
+  const rows = await prisma.mediaItem.findMany({
+    where: { type: "VIDEO" },
+    select: { path: true, type: true, displayCopyPath: true, displayCopyKey: true },
+  });
+  const currentKey = (p: string) => mediaFileVersion(p).key;
+  const exists = (p: string) => mediaFileVersion(p).exists;
+  return {
+    height,
+    copies: displayCopyMap(rows, height, currentKey, exists),
+    ...displayCopyProgress(rows, height, currentKey, exists),
+    busy: displayCopyWorkerRunning || displayCopyQueue.size > 0,
+    waitingForMatch: displayCopyRetryTimer != null,
+  };
+}
+
 function queueUrgentMediaCheck(id: string) {
+  queueDisplayCopy(id);
   urgentMediaChecks.add(id);
   mediaCheckQueue.add(id);
   if (mediaCheckRetryTimer) {
@@ -3321,6 +3439,19 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       return json(200, { ok: true });
     }
 
+    if (pathname === "/api/display-copies" && method === "GET") {
+      return json(200, await displayCopyStatus());
+    }
+
+    if (pathname === "/api/display-copies" && method === "PUT") {
+      const body = parseJsonBody(req) as { height?: unknown };
+      const height = normalizeDisplayCopyHeight(body.height);
+      await prisma.$executeRawUnsafe(`INSERT OR IGNORE INTO "AppSettings" ("id", "homeTeamId") VALUES (1, NULL)`);
+      await prisma.$executeRawUnsafe(`UPDATE "AppSettings" SET "displayCopyHeight" = ? WHERE "id" = 1`, height);
+      if (height != null) await queueAllDisplayCopies();
+      return json(200, await displayCopyStatus());
+    }
+
     if (pathname === "/api/media-sequences" && method === "GET") {
       return json(200, await readMediaSequences());
     }
@@ -3467,6 +3598,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       health = await mediaHealthForItem(media, { runDecode: false });
       await touchState();
       await broadcastDisplayState();
+      queueDisplayCopy(item.id);
       return json(200, { media, health, playbackInspect });
     }
 
@@ -3509,6 +3641,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       requireOpts().log(
         `[media] omgezet voor display ${item.title} → ${path.basename(prepared.path)}`,
       );
+      queueDisplayCopy(media.id);
       await touchState();
       await broadcastDisplayState();
       return json(200, { ...media, transcoded: true, reason: prepared.reason });
