@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import { setDisplayMediaCopies } from "@/lib/display-copy";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   PreviewSlideProgressBar,
@@ -383,6 +384,25 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       cancelled = true;
     };
   }, [previewIframe, themeJson, state?.updatedAt]);
+
+  /**
+   * Kleinere kopieën van video's (lib/display-copy.ts), alleen in het echte stadionscherm. Ze worden alleen
+   * bij het laden, een fasewissel of een andere schermmodus opgehaald: een nieuwe kopie midden in een clip
+   * zou die clip opnieuw laten starten.
+   */
+  useEffect(() => {
+    if (previewIframe || embedInControl) return;
+    let cancelled = false;
+    fetch("/api/display-copies")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((status: { copies?: Record<string, string> } | null) => {
+        if (!cancelled && status) setDisplayMediaCopies(status.copies ?? {});
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [previewIframe, embedInControl, state?.matchId, match?.status, state?.mode]);
 
   useEffect(() => {
     if (previewIframe) return;

@@ -1,3 +1,4 @@
+import { displayCopyFor } from "./display-copy";
 import { resolveStoredMediaPath } from "./media-file-path";
 
 /**
@@ -12,6 +13,8 @@ import { resolveStoredMediaPath } from "./media-file-path";
  */
 export function mediaUrl(storedPath: string | null | undefined): string {
   if (!storedPath) return "";
+  /** Op het stadionscherm: een kleinere kopie als de club die koos (lib/display-copy.ts). */
+  storedPath = displayCopyFor(storedPath);
   if (typeof window !== "undefined" && window.electronAPI) {
     if (storedPath.startsWith("/uploads/")) {
       // Zelfde vertaling als de controle en de omzetting in het hoofdproces.
