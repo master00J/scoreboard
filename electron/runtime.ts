@@ -3439,6 +3439,24 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       return json(200, { ok: true });
     }
 
+    if (pathname === "/api/club-style" && (method === "GET" || method === "PUT")) {
+      if (method === "PUT") {
+        const body = parseJsonBody(req) as { enabled?: unknown };
+        await prisma.$executeRawUnsafe(`INSERT OR IGNORE INTO "AppSettings" ("id", "homeTeamId") VALUES (1, NULL)`);
+        await prisma.$executeRawUnsafe(
+          `UPDATE "AppSettings" SET "clubStadiumStyleOff" = ? WHERE "id" = 1`,
+          body.enabled === false ? 1 : null,
+        );
+        // Het stadionscherm haalt de keuze op bij een nieuwe stand.
+        await touchState();
+        await broadcastDisplayState();
+      }
+      const rows = await prisma.$queryRawUnsafe<Array<{ v: number | null }>>(
+        `SELECT "clubStadiumStyleOff" AS v FROM "AppSettings" WHERE "id" = 1`,
+      );
+      return json(200, { enabled: rows[0]?.v !== 1 });
+    }
+
     if (pathname === "/api/display-copies" && method === "GET") {
       return json(200, await displayCopyStatus());
     }

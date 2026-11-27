@@ -387,6 +387,8 @@ model AppSettings {
   mediaSequencesJson String?
   /// Video's op het stadionscherm als kopie op deze hoogte (720) of null = origineel (lib/display-copy.ts).
   displayCopyHeight Int?
+  /// 1 = het stadionscherm toont de gewone indelingen in plaats van de clubstijl (lib/club-brand).
+  clubStadiumStyleOff Int?
 }
 
 /// Proof-of-play: één rij per voltooide sponsor-clipweergave op het stadiondisplay.
