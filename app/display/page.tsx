@@ -2,7 +2,7 @@
 
 import { CLUB_BRAND } from "@/lib/club-brand";
 import { ensureClubFont } from "@/lib/club-brand/font";
-import { RafcBigScore, RafcCard, RafcSmallScore, RafcSubstitution } from "./_modes/rafc/rafc-visuals";
+import { RAFC_SUBSTITUTION_MS, RafcBigScore, RafcCard, RafcSmallScore, RafcSubstitution } from "./_modes/rafc/rafc-visuals";
 import { setDisplayMediaCopies } from "@/lib/display-copy";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -646,7 +646,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const transitions: Record<string, { ms: number; next: string }> = {
       GOAL: { ms: 8000, next: liveReturnMode },
       GOAL_PLAYER_VIDEO: { ms: playerVideoMs, next: liveReturnMode },
-      SUBSTITUTION: { ms: 6000, next: liveReturnMode },
+      // Clubstijl RAFC: zo lang als hun wisselvideo (woord + spelers).
+      SUBSTITUTION: { ms: rafcStyle ? RAFC_SUBSTITUTION_MS : 6000, next: liveReturnMode },
       CARD: { ms: 5000, next: liveReturnMode },
       HALFTIME: { ms: 10000, next: liveReturnMode },
       FULLTIME: { ms: 15000, next: liveReturnMode },

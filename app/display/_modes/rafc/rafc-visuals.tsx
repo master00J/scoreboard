@@ -242,39 +242,149 @@ function Triangle({ up, color, size }: { up: boolean; color: string; size: numbe
   );
 }
 
-/** Woord dat binnenkomt met vervagende kopieën erboven en eronder, zoals in de wissel- en goalvideo's. */
-function EchoWord({ word }: { word: string }) {
-  const copies = [-3, -2, -1, 1, 2, 3];
+/** Seconden sinds de component op het scherm kwam, tot `untilSec` (daarna stopt de teller). */
+function useElapsedSec(untilSec: number): number {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const start = performance.now();
+    let raf = 0;
+    const tick = () => {
+      const next = (performance.now() - start) / 1000;
+      setT(Math.min(next, untilSec));
+      if (next < untilSec) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [untilSec]);
+  return t;
+}
+
+const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const easeOut = (v: number) => 1 - Math.pow(1 - clamp01(v), 3);
+/** Vast pseudo-toeval per letter en tijdstap: elke wissel flikkert hetzelfde, zonder Math.random. */
+const noise = (a: number, b: number) => {
+  const x = Math.sin(a * 127.1 + b * 311.7) * 43758.5453;
+  return x - Math.floor(x);
+};
+
+/** Tijdlijn van het woord (seconden), zoals in hun wisselvideo. */
+const INTRO = {
+  /** Twee kopieën komen van boven en onder en worden één groot woord in het midden. */
+  mergeEnd: 0.28,
+  /** De letters vliegen horizontaal uit elkaar ... */
+  burstStart: 0.4,
+  burstPeak: 0.62,
+  /** ... en komen weer samen, nu kleiner. */
+  regroupEnd: 0.9,
+  /** Kopieën stapelen zich boven en onder het woord. */
+  echoStart: 0.85,
+  /** De letters schuiven een beetje uit elkaar ... */
+  trackStart: 1.3,
+  /** ... en vliegen naar links en rechts het beeld uit. */
+  flyStart: 1.55,
+  end: 2.0,
+} as const;
+/** Doorzichtigheid van de kopieën boven en onder het woord, per afstand. */
+const ECHO_OPACITY = [1, 0.55, 0.34, 0.18];
+/** Het grote woord bij het samenkomen, ten opzichte van het woord met kopieën. */
+const BIG_WORD_SCALE = 1.24;
+
+const lerp = (a: number, b: number, v: number) => a + (b - a) * clamp01(v);
+const easeIn = (v: number) => Math.pow(clamp01(v), 3);
+
+/**
+ * "SUBSTITUTION" zoals in hun video: twee kopieën komen van boven en onder en worden één woord, de letters
+ * vliegen horizontaal uit elkaar en komen kleiner terug, kopieën stapelen zich boven en onder, en tot slot
+ * spreiden de letters naar links en rechts tot ze uit beeld zijn.
+ */
+function SubstitutionIntro({ word }: { word: string }) {
+  const t = useElapsedSec(INTRO.end);
+  const letters = Array.from(word);
+  const n = letters.length;
+  const center = (n - 1) / 2;
   const fontPx = nameFontPx(word, 120, 12);
+
+  // 1. Samenkomen: verticale afstand en bewegingsonscherpte.
+  const merge = easeOut(t / INTRO.mergeEnd);
+  const mergeOffset = (1 - merge) * 36; // cqh
+  const vBlur = t < INTRO.mergeEnd ? (1 - merge) * 26 : 0;
+
+  // 2. Uit elkaar en terug, met horizontale onscherpte.
+  const burstOut = easeOut((t - INTRO.burstStart) / (INTRO.burstPeak - INTRO.burstStart));
+  const burstBack = easeOut((t - INTRO.burstPeak) / (INTRO.regroupEnd - INTRO.burstPeak));
+  const burst = t < INTRO.burstPeak ? burstOut : 1 - burstBack;
+  const scale = t < INTRO.burstPeak ? BIG_WORD_SCALE : lerp(BIG_WORD_SCALE, 1, burstBack);
+
+  // 3. Spreiden en uitvliegen.
+  const track = easeOut((t - INTRO.trackStart) / (INTRO.flyStart - INTRO.trackStart)) * 0.12;
+  const fly = easeIn((t - INTRO.flyStart) / (INTRO.end - INTRO.flyStart));
+  const hBlur = Math.max(burst * 16, fly * 22);
+
+  /** Horizontale verplaatsing per letter in em: verder van het midden = verder weg. */
+  const letterX = (i: number) => {
+    const side = i - center;
+    const dir = side === 0 ? (noise(i, 3) > 0.5 ? 1 : -1) : Math.sign(side);
+    const burstX = (side * 1.6 + dir * noise(i, 11) * 2.2) * burst;
+    const trackX = side * track;
+    const flyX = (side * 2.4 + dir * (4 + noise(i, 5) * 6)) * fly;
+    return burstX + trackX + flyX;
+  };
+
+  const copies = t < INTRO.mergeEnd ? [-1, 1] : [0];
   return (
     <>
-      {copies.map((n) => (
-        <motion.div
-          key={n}
-          className="absolute inset-0"
-          initial={{ y: 0, opacity: 0 }}
-          animate={{ y: `${n * 7}cqh`, opacity: [0, 0.55 - Math.abs(n) * 0.12, 0] }}
-          transition={{ duration: 1.1, ease: "easeOut" }}
-        >
-          <At x={960} y={540}>
-            <span className="leading-none text-white" style={{ fontSize: cw(fontPx), fontWeight: 900 }}>
-              {word}
-            </span>
-          </At>
-        </motion.div>
-      ))}
-      <motion.div className="absolute inset-0" initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ duration: 0.35 }}>
-        <At x={960} y={540}>
-          <span className="leading-none text-white" style={{ fontSize: cw(fontPx), fontWeight: 900 }}>
-            {word}
-          </span>
+      <svg width="0" height="0" className="absolute" aria-hidden>
+        <filter id="rafc-sub-blur" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation={`${hBlur.toFixed(1)} ${vBlur.toFixed(1)}`} />
+        </filter>
+      </svg>
+      {copies.map((c) => (
+        <At key={c} x={960} y={540}>
+          <div
+            className="flex leading-none text-white"
+            style={{
+              fontSize: cw(fontPx),
+              fontWeight: 900,
+              transform: `translateY(${(c * mergeOffset).toFixed(2)}cqh) scale(${scale.toFixed(4)})`,
+              filter: hBlur > 0.3 || vBlur > 0.3 ? "url(#rafc-sub-blur)" : undefined,
+              opacity: c === 0 ? 1 : 0.85,
+            }}
+          >
+            {letters.map((letter, i) => (
+              <span key={i} className="relative inline-block" style={{ transform: `translateX(${letterX(i).toFixed(3)}em)` }}>
+                {c === 0
+                  ? [-3, -2, -1, 1, 2, 3].map((k) => {
+                      const appear = clamp01((t - INTRO.echoStart - (Math.abs(k) - 1) * 0.12) / 0.15);
+                      const opacity = ECHO_OPACITY[Math.abs(k)]! * appear;
+                      if (opacity <= 0.01) return null;
+                      return (
+                        <span key={k} aria-hidden className="absolute left-0 top-0" style={{ transform: `translateY(${k * 0.62}em)`, opacity }}>
+                          {letter}
+                        </span>
+                      );
+                    })
+                  : null}
+                <span className="relative">{letter}</span>
+              </span>
+            ))}
+          </div>
         </At>
-      </motion.div>
+      ))}
     </>
   );
 }
 
-const SUB_INTRO_MS = 1300;
+/** Rugnummer en naam die vanuit een vage, iets grotere versie scherp op hun plaats komen. */
+const zoomIn = {
+  initial: { opacity: 0, scale: 1.25, filter: "blur(26px)" },
+  animate: { opacity: 1, scale: 1, filter: "blur(0px)" },
+  transition: { duration: 0.4, ease: [0.2, 0.8, 0.2, 1] as [number, number, number, number] },
+};
+
+/** Hoe lang het woord duurt voor de spelers verschijnen. */
+const SUB_INTRO_MS = INTRO.end * 1000;
+/** Totale duur van een wissel op het scherm, zoals hun video (7,8 s). */
+export const RAFC_SUBSTITUTION_MS = 7800;
 
 /** Wissel: rood vlak, eerst "SUBSTITUTION", dan links de speler die eruit gaat (donker) en rechts wie erin komt. */
 export function RafcSubstitution({
@@ -298,11 +408,11 @@ export function RafcSubstitution({
     <motion.div className="absolute inset-0 z-[20]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.25 }}>
       <Canvas background={RAFC_RED}>
         {intro ? (
-          <EchoWord word="SUBSTITUTION" />
+          <SubstitutionIntro word="SUBSTITUTION" />
         ) : (
           <>
             {playerOut ? (
-              <motion.div className="absolute inset-0" {...slideIn}>
+              <motion.div className="absolute inset-0" {...zoomIn}>
                 <At x={459} y={451}>
                   <span className="leading-none" style={{ fontSize: cw(470), fontWeight: 900, color: RAFC_DARK_RED }}>
                     {playerOut.number}
@@ -322,7 +432,7 @@ export function RafcSubstitution({
               </motion.div>
             ) : null}
             {playerIn ? (
-              <motion.div className="absolute inset-0" {...slideIn} transition={{ ...slideIn.transition, delay: 0.12 }}>
+              <motion.div className="absolute inset-0" {...zoomIn} transition={{ ...zoomIn.transition, delay: 0.05 }}>
                 <At x={1452} y={132} style={{ gap: cw(36) }}>
                   <Triangle up color="#fff" size={94} />
                   <span className="leading-none text-white" style={{ fontSize: cw(66), fontWeight: 800 }}>
