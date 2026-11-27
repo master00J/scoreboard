@@ -144,6 +144,8 @@ export const CommandSchema = z.discriminatedUnion("type", [
     teamId: z.string(),
     playerId: z.string(),
     color: z.enum(["YELLOW", "RED", "GREEN"]),
+    /** Tweede gele kaart: toon geel en rood samen, ook als de eerste gele niet in de app staat. */
+    secondYellow: z.boolean().optional(),
   }),
   z.object({
     type: z.literal("display:setMode"),

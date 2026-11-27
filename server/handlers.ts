@@ -1512,7 +1512,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const penaltyStartsNow = !profile.penaltyFollowsClock || s.timerRunning;
       await updateState(db, {
         ...(s.mode !== "BLACKOUT" ? {
-          mode: "CARD", activePlayerId: cmd.playerId, activeCardColor: shownCardColor(cmd.color, earlierYellowCards),
+          mode: "CARD", activePlayerId: cmd.playerId, activeCardColor: shownCardColor(cmd.color, earlierYellowCards, cmd.secondYellow === true),
         } : {}),
         ...(penaltySeconds
           ? penaltyStartsNow

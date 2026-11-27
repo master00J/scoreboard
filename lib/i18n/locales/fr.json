@@ -417,6 +417,7 @@
     "lineup": "Composition terrain",
     "yellowCard": "Carton jaune",
     "redCard": "Carton rouge",
+    "secondYellow": "Deuxième carton jaune (l’écran montre jaune et rouge ensemble)",
     "selectPlayer": "Choisir joueur · {{side}}",
     "subTitle": "Remplacement · {{team}}",
     "playerOut": "Joueur sortant",

@@ -417,6 +417,7 @@
     "lineup": "Formazione in campo",
     "yellowCard": "Cartellino giallo",
     "redCard": "Cartellino rosso",
+    "secondYellow": "Secondo cartellino giallo (lo schermo mostra giallo e rosso insieme)",
     "selectPlayer": "Seleziona giocatore · {{side}}",
     "subTitle": "Sostituzione · {{team}}",
     "playerOut": "Giocatore esce",

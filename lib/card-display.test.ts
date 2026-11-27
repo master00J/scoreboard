@@ -12,4 +12,10 @@ describe("kaart op het stadionscherm", () => {
     expect(shownCardColor("YELLOW", 1)).toBe("YELLOW_RED");
     expect(shownCardColor("RED", 1)).toBe("YELLOW_RED");
   });
+
+  it("toont geel en rood samen als de operator tweede gele kaart aanvinkte", () => {
+    expect(shownCardColor("YELLOW", 0, true)).toBe("YELLOW_RED");
+    expect(shownCardColor("RED", 0, true)).toBe("YELLOW_RED");
+    expect(shownCardColor("GREEN", 0, true)).toBe("GREEN");
+  });
 });

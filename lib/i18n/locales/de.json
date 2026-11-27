@@ -417,6 +417,7 @@
     "lineup": "Aufstellung",
     "yellowCard": "Gelbe Karte",
     "redCard": "Rote Karte",
+    "secondYellow": "Zweite Gelbe Karte (Bildschirm zeigt Gelb und Rot zusammen)",
     "selectPlayer": "Spieler wählen · {{side}}",
     "subTitle": "Auswechslung · {{team}}",
     "playerOut": "Spieler raus",

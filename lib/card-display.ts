@@ -5,7 +5,12 @@
  */
 export type ShownCardColor = "YELLOW" | "RED" | "GREEN" | "YELLOW_RED";
 
-export function shownCardColor(color: "YELLOW" | "RED" | "GREEN", earlierYellowCards: number): ShownCardColor {
-  if ((color === "YELLOW" || color === "RED") && earlierYellowCards > 0) return "YELLOW_RED";
+export function shownCardColor(
+  color: "YELLOW" | "RED" | "GREEN",
+  earlierYellowCards: number,
+  /** De operator vinkte "tweede gele kaart" aan (ook als de eerste gele niet in de app staat). */
+  markedSecondYellow = false,
+): ShownCardColor {
+  if ((color === "YELLOW" || color === "RED") && (markedSecondYellow || earlierYellowCards > 0)) return "YELLOW_RED";
   return color;
 }

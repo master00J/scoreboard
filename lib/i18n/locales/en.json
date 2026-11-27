@@ -417,6 +417,7 @@
     "lineup": "Field lineup",
     "yellowCard": "Yellow card",
     "redCard": "Red card",
+    "secondYellow": "Second yellow card (screen shows yellow and red together)",
     "selectPlayer": "Select player · {{side}}",
     "subTitle": "Substitution · {{team}}",
     "playerOut": "Player out",

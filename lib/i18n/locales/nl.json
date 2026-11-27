@@ -417,6 +417,7 @@
     "lineup": "Opstelling veld",
     "yellowCard": "Gele kaart",
     "redCard": "Rode kaart",
+    "secondYellow": "Tweede gele kaart (scherm toont geel en rood samen)",
     "selectPlayer": "Selecteer speler · {{side}}",
     "subTitle": "Wissel · {{team}}",
     "playerOut": "Speler uit",
