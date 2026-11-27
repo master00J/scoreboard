@@ -2039,7 +2039,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         {/* Wissel: fullscreen (geen scorestrip); tijdens speelhelft blijft score bij handmatige SPONSOR wel zichtbaar. */}
         {state && mode === "SUBSTITUTION" && match && (
           <SubTakeover
-            key="sub-fs"
+            // Per wissel een eigen sleutel: bij meerdere wissels na elkaar begint elke wissel opnieuw.
+            key={`sub-fs-${subOut?.id ?? ""}-${subIn?.id ?? ""}`}
             team={subTeam}
             playerIn={subIn}
             playerOut={subOut}
