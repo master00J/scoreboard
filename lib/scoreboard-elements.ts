@@ -34,10 +34,23 @@ export type LayoutElementType =
   | "period"
   | "timeOfDay"
   | "text"
-  | "image";
+  | "image"
+  /** Vlak in een kleur, recht of schuin (trapezium): achtergronden, balken, tabs. */
+  | "shape"
+  /** De stand als één regel, "2-0". */
+  | "scoreLine";
 
 /** Types die een club zelf kan toevoegen; de klassieke vakken bestaan altijd precies één keer. */
-export const ADDABLE_ELEMENT_TYPES = ["teamName", "teamExtras", "period", "timeOfDay", "text", "image"] as const;
+export const ADDABLE_ELEMENT_TYPES = [
+  "teamName",
+  "teamExtras",
+  "period",
+  "timeOfDay",
+  "text",
+  "image",
+  "shape",
+  "scoreLine",
+] as const;
 export type AddableElementType = (typeof ADDABLE_ELEMENT_TYPES)[number];
 
 export type ElementAlign = "left" | "center" | "right";
@@ -51,7 +64,22 @@ export type LayoutElementStyle = {
   fontScale?: number;
   align?: ElementAlign;
   uppercase?: boolean;
+  /**
+   * Schuine zijkanten (trapezium), in procent van de breedte per kant. Positief = onderaan smaller,
+   * negatief = bovenaan smaller. 0 of leeg = recht.
+   */
+  taper?: number;
 };
+
+export const TAPER_MAX = 45;
+
+/** Trapezium: positief = onderaan smaller, negatief = bovenaan smaller (procent van de breedte per kant). */
+export function taperClipPath(taper: number): string {
+  const inset = Math.min(TAPER_MAX, Math.abs(taper));
+  return taper > 0
+    ? `polygon(0% 0%, 100% 0%, ${100 - inset}% 100%, ${inset}% 100%)`
+    : `polygon(${inset}% 0%, ${100 - inset}% 0%, 100% 100%, 0% 100%)`;
+}
 
 export type LayoutElement = LayoutSlot & {
   id: string;
@@ -149,6 +177,10 @@ export function normalizeElementStyle(raw: unknown): LayoutElementStyle | undefi
   }
   if (rec.align === "left" || rec.align === "right") style.align = rec.align;
   if (rec.uppercase === true) style.uppercase = true;
+  if (typeof rec.taper === "number" && Number.isFinite(rec.taper)) {
+    const taper = Math.round(clamp(rec.taper, -TAPER_MAX, TAPER_MAX) * 10) / 10;
+    if (taper !== 0) style.taper = taper;
+  }
   return Object.keys(style).length > 0 ? style : undefined;
 }
 
@@ -251,6 +283,8 @@ const NEW_ELEMENT_BOX: Record<AddableElementType, LayoutSlot> = {
   // Onderaan: daar is op beide standaardindelingen plaats, zonder de klok of het videovak te bedekken.
   text: { x: 3, y: 87, w: 30, h: 9 },
   image: { x: 68, y: 84, w: 14, h: 14 },
+  shape: { x: 35, y: 40, w: 30, h: 20 },
+  scoreLine: { x: 30, y: 30, w: 40, h: 30 },
 };
 
 /** Nieuw element op een standaardplek. `id` komt van de aanroeper, zodat dit zuiver blijft. */

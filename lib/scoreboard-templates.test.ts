@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { CLUB_BRAND } from "./club-brand";
 import type { LayoutRule } from "./scoreboard-elements";
 import {
   applyTemplateToThemeJson,
@@ -207,6 +208,8 @@ describe("meegeleverde layouts", () => {
     expect(a).toEqual(b);
     expect(new Set(a).size).toBe(a.length);
     expect(a).toEqual([
+      // Clubbuild (RAFC): de clubindeling staat bovenaan.
+      ...(CLUB_BRAND?.layoutTemplate ? [`builtin_${CLUB_BRAND.layoutTemplate.key}`] : []),
       "builtin_standaard",
       "builtin_pro-league",
       "builtin_amateur",

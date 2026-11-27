@@ -9,7 +9,7 @@ import { mergeScoreboardTheme, scoreboardSurfaceBackgroundPath, type ResolvedSco
 import type { LayoutElement } from "@/lib/scoreboard-elements";
 import { getSportProfile } from "@/lib/sports";
 import { DisplayMediaStage } from "@/components/display-media-stage";
-import { ExtraElement, elementBoxStyle, elementInnerStyle } from "./layout-elements";
+import { ExtraElement, elementBoxStyle, elementInnerStyle, themeTextShadow } from "./layout-elements";
 import { TeamLogo } from "./scoreboard-strip";
 import { ShotClockReadout, SportMatchMeta, SportTeamExtras, useShotClockOff } from "./sport-score-extras";
 
@@ -122,12 +122,14 @@ export function CustomScoreboardLayout({
                   ) : null}
                   {theme.showClock ? (
                     <StableClockText
+                digitEm={theme.clockDigitEm}
+                plainDigits={theme.plainDigits}
                       value={formatSportClock(match.sport, elapsed)}
                       className="font-black leading-none"
                       style={{
                         fontSize: "min(42cqh, 28cqw, 160px)",
                         color: element.style?.color ?? accent,
-                        textShadow: "0 4px 18px rgba(0,0,0,0.45)",
+                        textShadow: themeTextShadow(theme, "0 4px 18px rgba(0,0,0,0.45)"),
                       }}
                     />
                   ) : null}
@@ -257,7 +259,8 @@ function TeamScoreChip({
           style={{
             fontSize: "min(62cqh, 58cqw, 220px)",
             color: element.style?.color ?? theme.scoreColor,
-            textShadow: "0 4px 18px rgba(0,0,0,0.45)",
+            ...(theme.plainDigits ? { fontVariantNumeric: "normal", fontFeatureSettings: "normal" } : {}),
+            textShadow: themeTextShadow(theme, "0 4px 18px rgba(0,0,0,0.45)"),
           }}
         >
           {score}

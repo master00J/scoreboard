@@ -1,19 +1,17 @@
 "use client";
 
 /**
- * Stadionscherm in de huisstijl van Royal Antwerp FC (marcom i-schermen 26/27): groot scorebord,
- * klein scorebord onder een clip, gele / rode / tweede gele kaart en wissel. Maten komen uit hun
+ * Stadionscherm in de huisstijl van Royal Antwerp FC (marcom i-schermen 26/27): gele / rode / tweede
+ * gele kaart en wissel. Het grote en kleine scorebord staan als gewone indeling in "Scherm indelen"
+ * (lib/club-brand/rafc-template.ts), zodat de club ze zelf kan aanpassen. Maten komen uit hun
  * voorbeelden (3840x2160), hier in een raster van 1920x1080 en geschaald met container-eenheden, zodat
  * het op elke canvasgrootte klopt (ook een HD-ledscherm van 1280x720).
  */
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { motion } from "framer-motion";
-import { CLUB_BRAND } from "@/lib/club-brand";
 import { CLUB_FONT_STACK } from "@/lib/club-brand/font";
-import { mediaUrl } from "@/lib/media-url";
-import { formatSportClock } from "@/lib/sports";
-import type { Match, Player, Team } from "@/lib/types";
+import type { Player, Team } from "@/lib/types";
 
 export const RAFC_RED = "#C10503";
 export const RAFC_YELLOW = "#FFC422";
@@ -23,7 +21,6 @@ export const RAFC_DARK_RED = "#550000";
 /** px in het 1920x1080-raster naar container-eenheden. */
 const cw = (px: number) => `${(px / 19.2).toFixed(4)}cqw`;
 const ch = (px: number) => `${(px / 10.8).toFixed(4)}cqh`;
-const pct = (x: number, y: number) => `${((x / 1920) * 100).toFixed(3)}% ${((y / 1080) * 100).toFixed(3)}%`;
 
 function Canvas({ background, children, style }: { background: string; children: ReactNode; style?: CSSProperties }) {
   return (
@@ -45,131 +42,6 @@ function At({ x, y, children, style }: { x: number; y: number; children: ReactNo
     >
       {children}
     </div>
-  );
-}
-
-function TeamCrest({ team, x, y, height, width }: { team: Team; x: number; y: number; height: number; width: number }) {
-  const src = team.logoPath ? mediaUrl(team.logoPath) : "";
-  return (
-    <At x={x} y={y} style={{ width: cw(width), height: cw(height) }}>
-      {src ? (
-        <img src={src} alt={team.name} className="h-full w-full object-contain" draggable={false} />
-      ) : (
-        <span className="font-black uppercase text-white" style={{ fontSize: cw(Math.round(height * 0.2)) }}>
-          {team.shortName || team.name}
-        </span>
-      )}
-    </At>
-  );
-}
-
-/**
- * Klok met vaste breedte per teken, zodat hij niet verspringt. Zalando Sans Expanded heeft brede cijfers;
- * de gewone klokcomponent rekent met smallere en liet ze overlappen.
- */
-function ClubClock({ value, style }: { value: string; style: CSSProperties }) {
-  return (
-    <span role="timer" aria-label={value} className="inline-flex items-baseline justify-center leading-none" style={style}>
-      {Array.from(value).map((c, i) => (
-        <span key={i} aria-hidden className="inline-block text-center" style={{ width: c === ":" || c === "." ? "0.38em" : "0.9em" }}>
-          {c}
-        </span>
-      ))}
-    </span>
-  );
-}
-
-/** Lettergrootte van de score: smaller naarmate er meer cijfers zijn, zodat ze tussen de logo's past. */
-function scoreFontPx(text: string, base: number): number {
-  const extra = Math.max(0, text.length - 3);
-  return Math.round(base * Math.pow(0.8, extra));
-}
-
-type BoardProps = {
-  match: Match;
-  elapsed: number;
-  running: boolean;
-  period: string;
-  addedTime?: number;
-  shotClock?: number;
-  children?: ReactNode;
-  instant?: boolean;
-};
-
-/** Groot scorebord: rood vlak, logo's links en rechts, score in het midden, klok onderaan in een wit vlak. */
-export function RafcBigScore({ match, elapsed, instant = false }: BoardProps) {
-  const score = `${match.homeScore}-${match.awayScore}`;
-  const league = CLUB_BRAND?.leagueLogoSrc ?? null;
-  return (
-    <motion.div
-      className="absolute inset-0"
-      initial={instant ? false : { opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <Canvas background={RAFC_RED}>
-        {league ? (
-          <>
-            <div
-              className="absolute inset-0 bg-white"
-              style={{ clipPath: `polygon(${pct(665, 0)}, ${pct(1255, 0)}, ${pct(1216, 110)}, ${pct(704, 110)})` }}
-            />
-            <At x={960} y={55} style={{ width: cw(330), height: cw(66) }}>
-              <img src={league} alt="" className="h-full w-full object-contain" draggable={false} />
-            </At>
-          </>
-        ) : null}
-        <TeamCrest team={match.homeTeam} x={264} y={509} width={420} height={528} />
-        <TeamCrest team={match.awayTeam} x={1661} y={509} width={440} height={528} />
-        <At x={960} y={509}>
-          <span className="font-black leading-none text-white" style={{ fontSize: cw(scoreFontPx(score, 360)), fontWeight: 900 }}>
-            {score}
-          </span>
-        </At>
-        <div
-          className="absolute inset-0 bg-white"
-          style={{ clipPath: `polygon(${pct(555, 830)}, ${pct(1361, 830)}, ${pct(1421, 1080)}, ${pct(499, 1080)})` }}
-        />
-        <At x={960} y={958}>
-          <ClubClock value={formatSportClock(match.sport, elapsed)} style={{ fontSize: cw(150), fontWeight: 900, color: RAFC_RED }} />
-        </At>
-      </Canvas>
-    </motion.div>
-  );
-}
-
-/**
- * Klein scorebord tijdens een clip: de clip boven in een 16:9-vak (zwart ernaast), onderaan een rode balk
- * met logo, score, de klok in een wit vlak, score en logo.
- */
-export function RafcSmallScore({ match, elapsed, children }: BoardProps) {
-  return (
-    <Canvas background="#000">
-      <div className="absolute overflow-hidden" style={{ left: cw(192), top: 0, width: cw(1536), height: ch(864) }}>
-        {children}
-      </div>
-      <div className="absolute inset-x-0 bottom-0" style={{ height: ch(216), background: RAFC_RED }} />
-      <div
-        className="absolute inset-0 bg-white"
-        style={{ clipPath: `polygon(${pct(720, 864)}, ${pct(1200, 864)}, ${pct(1234, 1080)}, ${pct(686, 1080)})` }}
-      />
-      <TeamCrest team={match.homeTeam} x={206} y={972} width={150} height={150} />
-      <At x={494} y={972}>
-        <span className="leading-none text-white" style={{ fontSize: cw(205), fontWeight: 900 }}>
-          {match.homeScore}
-        </span>
-      </At>
-      <At x={960} y={975}>
-        <ClubClock value={formatSportClock(match.sport, elapsed)} style={{ fontSize: cw(80), fontWeight: 900, color: "#000" }} />
-      </At>
-      <At x={1440} y={972}>
-        <span className="leading-none text-white" style={{ fontSize: cw(205), fontWeight: 900 }}>
-          {match.awayScore}
-        </span>
-      </At>
-      <TeamCrest team={match.awayTeam} x={1723} y={972} width={170} height={160} />
-    </Canvas>
   );
 }
 

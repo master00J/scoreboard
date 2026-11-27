@@ -151,6 +151,7 @@ import {
   type MediaSequence,
   type SequenceMember,
 } from "../lib/media-sequences";
+import { CLUB_BRAND } from "../lib/club-brand";
 import {
   displayCopyKey,
   displayCopyMap,
@@ -1196,6 +1197,23 @@ async function setLiveCyclePhasing(next: LiveCycleStored) {
   );
 }
 
+/**
+ * Clubbuild (bv. RAFC): een database zonder eigen schermindeling krijgt de indeling van de club. Een
+ * indeling die de club al bewaarde, blijft staan; de clubindeling staat dan in de bibliotheek.
+ */
+async function seedClubLayoutIfMissing() {
+  const template = CLUB_BRAND?.layoutTemplate;
+  if (!template) return;
+  try {
+    const settings = await getAppSettings();
+    if (settings.scoreboardThemeJson) return;
+    await setScoreboardThemeJson(JSON.stringify(template.theme));
+    requireOpts().log(`[layout] standaardindeling ${template.name} gezet`);
+  } catch (err) {
+    requireOpts().log(`[layout] clubindeling zetten mislukt: ${String(err)}`);
+  }
+}
+
 async function setScoreboardThemeJson(json: string | null) {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "scoreboardThemeJson" = ? WHERE "id" = 1`,
@@ -1848,6 +1866,7 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   opts = runtimeOptions;
   await ensureSqliteSchema(runtimeOptions.log);
   await ensureBaseData();
+  await seedClubLayoutIfMissing();
   await migrateAppSettingsLiveCycleFromLegacy();
   await repairOrphanDisplayMatchId();
   await resetAutoSponsorModeOnStartup();

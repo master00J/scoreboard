@@ -31,6 +31,7 @@ import { isMatchInPlay } from "@/lib/match-in-play";
 import { exportMatch, focusDisplayWindow } from "@/lib/electron";
 import { Button } from "@/components/ui/button";
 import { CLUB_BRAND } from "@/lib/club-brand";
+import { ensureClubFont } from "@/lib/club-brand/font";
 import { MatchTabGrid, LivePreviewPanel } from "./_components/match-tab-grid";
 import { InterfaceProfileControl } from "./_components/interface-profile-control";
 import { MusicPanel, MusicPlayingIndicator } from "./_components/music-panel";
@@ -75,6 +76,11 @@ export default function ControlPage() {
   const interfaceStore = parseInterfaceProfileStore(settings?.interfaceProfilesJson);
   const [draftProfile, setDraftProfile] = useState<InterfaceProfile | null>(null);
   const interfaceProfile = draftProfile ?? activeInterfaceProfile(interfaceStore);
+
+  // Clubbuild: het lettertype van de club, voor de voorbeelden in "Scherm indelen".
+  useEffect(() => {
+    if (CLUB_BRAND) void ensureClubFont();
+  }, []);
 
   useEffect(() => {
     const onHomeTeam = () => {

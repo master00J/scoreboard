@@ -11,10 +11,16 @@ export function StableClockText({
   value,
   className,
   style,
+  digitEm = 0.65,
+  plainDigits = false,
 }: {
   value: string;
   className?: string;
   style?: CSSProperties;
+  /** Breedte per cijfer in em; brede letters hebben meer nodig. Het dubbelpunt krijgt ruim de helft. */
+  digitEm?: number;
+  /** Geen tabelcijfers: de vaste breedte per teken houdt de klok toch stil. */
+  plainDigits?: boolean;
 }) {
   return (
     <span
@@ -22,8 +28,8 @@ export function StableClockText({
       aria-label={value}
       className={cn("inline-flex items-baseline justify-center", className)}
       style={{
-        fontVariantNumeric: "tabular-nums",
-        fontFeatureSettings: '"tnum" 1',
+        fontVariantNumeric: plainDigits ? "normal" : "tabular-nums",
+        fontFeatureSettings: plainDigits ? "normal" : '"tnum" 1',
         ...style,
       }}
     >
@@ -33,7 +39,7 @@ export function StableClockText({
           aria-hidden
           className="inline-block text-center"
           style={{
-            width: ch === ":" || ch === "." ? "0.34em" : "0.65em",
+            width: ch === ":" || ch === "." ? `${(digitEm * 0.52).toFixed(3)}em` : `${digitEm}em`,
           }}
         >
           {ch}

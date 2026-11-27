@@ -2,7 +2,7 @@
 
 import { CLUB_BRAND } from "@/lib/club-brand";
 import { ensureClubFont } from "@/lib/club-brand/font";
-import { RAFC_SUBSTITUTION_MS, RafcBigScore, RafcCard, RafcSmallScore, RafcSubstitution } from "./_modes/rafc/rafc-visuals";
+import { RAFC_SUBSTITUTION_MS, RafcCard, RafcSubstitution } from "./_modes/rafc/rafc-visuals";
 import { setDisplayMediaCopies } from "@/lib/display-copy";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -424,10 +424,12 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     // updatedAt: de operator zette de clubstijl aan of uit; dat mag meteen zichtbaar worden.
   }, [state?.matchId, match?.status, state?.mode, state?.updatedAt]);
   const rafcStyle = CLUB_BRAND?.stadiumStyle === "rafc" && clubStyleOn;
+  // Het lettertype van de club: voor de kaarten en wissels, en voor een indeling die het gebruikt.
   useEffect(() => {
-    if (rafcStyle) void ensureClubFont();
-  }, [rafcStyle]);
-  const FullBoard = rafcStyle ? RafcBigScore : MatchScoreboardFull;
+    if (CLUB_BRAND) void ensureClubFont();
+  }, []);
+  // Groot scorebord: de indeling uit "Scherm indelen" (in de RAFC-build standaard hun template).
+  const FullBoard = MatchScoreboardFull;
   const SubTakeover = rafcStyle ? RafcSubstitution : SubstitutionMode;
 
   useEffect(() => {
@@ -1474,9 +1476,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
   // en een lopende geplande clip; de overige gevallen zijn exclusief fullscreen en slaan het
   // frame toch over.
   const frameKind = scoreboardFrameKind(scoreboardTheme, autoLeftLayout);
-  const ScoreFrame = rafcStyle
-    ? RafcSmallScore
-    : frameKind === "custom"
+  const ScoreFrame =
+    frameKind === "custom"
       ? CustomScoreboardLayout
       : frameKind === "strip"
         ? StripScoreboardLayout

@@ -5,6 +5,7 @@ import {
   STREAM_SURFACES,
   type LayoutRule,
 } from "./scoreboard-elements";
+import { CLUB_BRAND } from "./club-brand";
 import {
   DEFAULT_SCOREBOARD_THEME,
   SLOT_PRESETS,
@@ -306,7 +307,9 @@ export function builtInTemplateRows(): {
   isBuiltIn: boolean;
   sortIndex: number;
 }[] {
-  return BUILT_IN_TEMPLATES.map((t, i) => ({
+  // In een clubbuild (bv. RAFC) staat de indeling van de club bovenaan de bibliotheek.
+  const list = CLUB_BRAND?.layoutTemplate ? [CLUB_BRAND.layoutTemplate, ...BUILT_IN_TEMPLATES] : BUILT_IN_TEMPLATES;
+  return list.map((t, i) => ({
     id: `builtin_${t.key}`,
     name: t.name,
     label: t.label,

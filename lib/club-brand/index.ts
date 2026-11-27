@@ -8,6 +8,8 @@
 
 import { PRO_LEAGUE_LOGO_RED } from "./league-logo";
 import { RAFC_LOGO_LIGHT, svgDataUrl } from "./rafc-logos";
+import { RAFC_SCOREBOARD_THEME } from "./rafc-template";
+import type { ScoreboardTheme } from "../scoreboard-theme";
 
 export type ClubBrand = {
   id: string;
@@ -20,6 +22,11 @@ export type ClubBrand = {
   stadiumStyle: "rafc" | null;
   /** Competitielogo bovenaan het grote scorebord (data-URL of pad); null = geen logo-vak. */
   leagueLogoSrc: string | null;
+  /**
+   * Schermindeling van de club: staat bovenaan de bibliotheek van "Scherm indelen" en is de indeling
+   * van een database die er nog geen heeft.
+   */
+  layoutTemplate: { key: string; name: string; label: string; theme: ScoreboardTheme } | null;
 };
 
 export const CLUB_BRAND: ClubBrand | null = {
@@ -27,4 +34,10 @@ export const CLUB_BRAND: ClubBrand | null = {
   headerLogoSrc: svgDataUrl(RAFC_LOGO_LIGHT),
   stadiumStyle: "rafc",
   leagueLogoSrc: svgDataUrl(PRO_LEAGUE_LOGO_RED),
+  layoutTemplate: {
+    key: "rafc-2627",
+    name: "RAFC 26/27",
+    label: "Huisstijl Royal Antwerp FC: groot en klein scorebord",
+    theme: RAFC_SCOREBOARD_THEME,
+  },
 };

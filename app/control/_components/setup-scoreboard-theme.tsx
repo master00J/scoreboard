@@ -51,6 +51,7 @@ import { withLayoutPreviewMeta } from "@/lib/scoreboard-preview-match";
 import { SPORT_TYPES, type SportType } from "@/lib/sports";
 import { canRedo, canUndo } from "@/lib/undo-history";
 import { SetupScoreboardPlacer, type EditorSurface } from "./setup-scoreboard-placer";
+import { CLUB_BRAND } from "@/lib/club-brand";
 import {
   surfaceInfo,
   surfacesForDevice,
@@ -71,7 +72,11 @@ const FONT_PRESETS = [
   { id: "impact", value: 'Impact, "Arial Black", sans-serif' },
   { id: "condensed", value: '"Roboto Condensed", "Arial Narrow", Arial, sans-serif' },
   { id: "mono", value: 'ui-monospace, "Cascadia Mono", Consolas, monospace' },
-] as const;
+  // Clubbuild: het lettertype van de club (zit in de app, werkt offline).
+  ...(CLUB_BRAND?.layoutTemplate?.theme.fontFamily ? [{ id: "club", value: CLUB_BRAND.layoutTemplate.theme.fontFamily }] : []),
+];
+/** Brede letters hebben bredere klokcijfers nodig (lib/scoreboard-theme.ts `clockDigitEm`). */
+const CLUB_CLOCK_DIGIT_EM = CLUB_BRAND?.layoutTemplate?.theme.clockDigitEm ?? 0.65;
 
 function ThemeBackgroundField({
   label,
@@ -1143,7 +1148,14 @@ export function SetupScoreboardThemeSection({
               value={FONT_PRESETS.find((p) => p.value === draft.fontFamily)?.id ?? "custom"}
               onChange={(e) => {
                 const preset = FONT_PRESETS.find((p) => p.id === e.target.value);
-                if (preset) setDraft((d) => ({ ...d, fontFamily: preset.value }));
+                if (preset) {
+                  setDraft((d) => ({
+                    ...d,
+                    fontFamily: preset.value,
+                    clockDigitEm: preset.id === "club" ? CLUB_CLOCK_DIGIT_EM : 0.65,
+                    plainDigits: preset.id === "club" ? CLUB_BRAND?.layoutTemplate?.theme.plainDigits === true : false,
+                  }));
+                }
               }}
             >
               {FONT_PRESETS.map((p) => (
@@ -1159,6 +1171,15 @@ export function SetupScoreboardThemeSection({
               value={draft.fontFamily}
               onChange={(e) => setDraft((d) => ({ ...d, fontFamily: e.target.value }), { coalesce: "field:fontFamily" })}
             />
+            <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border"
+                checked={draft.textShadows}
+                onChange={(e) => setDraft((d) => ({ ...d, textShadows: e.target.checked }))}
+              />
+              {t("setup.themeTextShadows")}
+            </label>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
             {timerColor(t("setup.themeTimerRunning"), "timerRunningColor")}
