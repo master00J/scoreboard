@@ -489,7 +489,11 @@
     "shootoutOnScreen": "Sur l’écran du stade",
     "shootoutClear": "Effacer la séance",
     "shootoutClearConfirm": "Effacer la séance de tirs au but ? Le score du match reste inchangé.",
-    "shootoutHint": "Ne compte pas dans le score du match. Mort subite après les tirs réglementaires.",
+    "shootoutHint": "Ne compte pas dans le score du match. Démarrer passe le match en Fin et l’écran du stade sur le tableau d’affichage. Mort subite après les tirs réglementaires.",
+    "shootoutNotOnScreen": "Pas sur l’écran du stade : l’écran affiche autre chose (p. ex. des sponsors). La séance n’apparaît que sur le tableau d’affichage.",
+    "shootoutShowNow": "Afficher à l’écran",
+    "shootoutWaitsForEnd": "Pas sur l’écran du stade : une période de jeu est encore en cours. La séance apparaît après le coup de sifflet final.",
+    "shootoutToFullTime": "Passer en Fin",
     "shootoutMatchScore": "Match {{home}} – {{away}}"
   },
   "sponsors": {
