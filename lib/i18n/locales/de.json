@@ -491,7 +491,8 @@
     "shootoutOnScreen": "Auf der Stadionanzeige",
     "shootoutClear": "Löschen",
     "shootoutClearConfirm": "Elfmeterschießen löschen? Der Spielstand bleibt erhalten.",
-    "shootoutHint": "Zählt nicht zum Spielstand. Nach den Runden folgt Sudden Death."
+    "shootoutHint": "Zählt nicht zum Spielstand. Nach den Runden folgt Sudden Death.",
+    "shootoutMatchScore": "Spiel {{home}} – {{away}}"
   },
   "sponsors": {
     "liveTitle": "Sponsoren live · auf dem Bildschirm gemessen",

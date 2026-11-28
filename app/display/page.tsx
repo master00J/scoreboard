@@ -2130,7 +2130,9 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         {state && mode === "BLACKOUT" && <BlackoutMode key="bo" />}
       </AnimatePresence>
 
-      {showShootout && match && shootout && <ShootoutOverlay match={match} shootout={shootout} />}
+      {showShootout && match && shootout && (
+        <ShootoutOverlay match={match} shootout={shootout} theme={scoreboardTheme} />
+      )}
 
       {state &&
         match &&

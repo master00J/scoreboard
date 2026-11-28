@@ -491,7 +491,8 @@
     "shootoutOnScreen": "Op stadionscherm",
     "shootoutClear": "Reeks wissen",
     "shootoutClearConfirm": "De strafschoppenreeks wissen? De wedstrijdscore blijft staan.",
-    "shootoutHint": "Telt niet mee in de wedstrijdscore. Na de rondes volgt sudden death."
+    "shootoutHint": "Telt niet mee in de wedstrijdscore. Na de rondes volgt sudden death.",
+    "shootoutMatchScore": "Wedstrijd {{home}} – {{away}}"
   },
   "sponsors": {
     "liveTitle": "Sponsors live · gemeten op scherm",
