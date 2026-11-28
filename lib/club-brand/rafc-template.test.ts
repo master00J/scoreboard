@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeScoreboardTheme } from "../scoreboard-theme";
-import { normalizeElementStyle, taperClipPath } from "../scoreboard-elements";
+import { mediaClipSpan, normalizeElementStyle, setMediaFit, taperClipPath } from "../scoreboard-elements";
 import { RAFC_RED, RAFC_SCOREBOARD_THEME } from "./rafc-template";
 import { clubBrandAsset } from "./assets";
 
@@ -37,6 +37,11 @@ describe("RAFC-indeling als gewone elementen", () => {
       h: 80,
       style: { background: RAFC_RED, mediaFit: "left" },
     });
+    // Klok staat in het midden van de clip (80% breed), niet van het scherm.
+    const clip = mediaClipSpan(sponsor.get("sponsor")!, "left", 16 / 9);
+    expect(clip.width).toBeCloseTo(80, 1);
+    const clock = sponsor.get("clock")!;
+    expect(clock.x + clock.w / 2).toBeCloseTo(clip.left + clip.width / 2, 0);
     expect(sponsor.get("rafc-bar")).toMatchObject({ y: 80, h: 20 });
   });
 
@@ -69,5 +74,30 @@ describe("schuine vlakken", () => {
     const plain = mergeScoreboardTheme(null);
     expect(plain.textShadows).toBe(true);
     expect(plain.clockDigitEm).toBe(0.65);
+  });
+});
+
+describe("clip links of rechts in het videovak", () => {
+  const theme = mergeScoreboardTheme(JSON.stringify(RAFC_SCOREBOARD_THEME));
+  const sponsor = theme.elements.sponsor;
+
+  it("schuift score, klok en logo's mee met de clip, maar laat de balk over de hele breedte staan", () => {
+    const moved = new Map(setMediaFit(sponsor, "sponsor", "right", 16 / 9).map((e) => [e.id, e]));
+    const before = new Map(sponsor.map((e) => [e.id, e]));
+    expect(moved.get("sponsor")?.style?.mediaFit).toBe("right");
+    expect(moved.get("sponsor")?.style?.background).toBe(RAFC_RED);
+    for (const id of ["clock", "home", "away", "homeScore", "awayScore", "rafc-clock-tab"]) {
+      expect(moved.get(id)!.x).toBeCloseTo(before.get(id)!.x + 20, 1);
+    }
+    expect(moved.get("rafc-bar")!.x).toBe(0);
+    // Terug naar links zet alles weer op de oude plek.
+    const back = setMediaFit([...moved.values()], "sponsor", "left", 16 / 9);
+    expect(back.map((e) => [e.id, e.x])).toEqual(sponsor.map((e) => [e.id, e.x]));
+  });
+
+  it("schuift niets van of naar vullen en haalt de keuze weg bij vullen", () => {
+    const fill = setMediaFit(sponsor, "sponsor", undefined, 16 / 9);
+    expect(fill.find((e) => e.id === "sponsor")?.style).toEqual({ background: RAFC_RED });
+    expect(fill.map((e) => e.x)).toEqual(sponsor.map((e) => e.x));
   });
 });

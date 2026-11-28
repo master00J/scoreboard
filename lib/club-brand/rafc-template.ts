@@ -50,14 +50,16 @@ const SPONSOR: LayoutElement[] = [
   // rood, zodat het scherm gevuld is. In "Scherm indelen" kiest de club zelf links, midden of rechts.
   { id: "sponsor", type: "media", ...box(0, 0, W, 864), style: { background: RAFC_RED, mediaFit: "left" } },
   { id: "rafc-bar", type: "shape", ...box(0, 864, W, 216), style: { background: RAFC_RED } },
+  // Logo, score, klok, score en logo staan gecentreerd onder de clip (0-1536 px, midden 768), niet
+  // onder het hele scherm. Kiest de club de clip rechts, dan schuiven ze in de editor mee.
   // Wit trapezium voor de klok: bovenaan 480 px, onderaan 548 px.
-  { id: "rafc-clock-tab", type: "shape", ...box(686, 864, 548, 216), style: { background: "#ffffff", taper: -6.2 } },
-  { id: "home", type: "teamLogo", side: "home", ...around(206, 972, 200, 200) },
-  { id: "homeScore", type: "teamScore", side: "home", ...around(494, 972, 360, 216), style: { fontScale: 1.53 } },
-  { id: "clock", type: "clock", ...around(960, 972, 480, 216), style: { color: "#000000", fontScale: 0.88 } },
-  { id: "awayScore", type: "teamScore", side: "away", ...around(1440, 972, 360, 216), style: { fontScale: 1.53 } },
-  { id: "away", type: "teamLogo", side: "away", ...around(1723, 972, 220, 216) },
-  { id: "shotClock", type: "shotClock", hidden: true, ...box(1500, 880, 200, 90) },
+  { id: "rafc-clock-tab", type: "shape", ...box(494, 864, 548, 216), style: { background: "#ffffff", taper: -6.2 } },
+  { id: "home", type: "teamLogo", side: "home", ...around(122, 972, 200, 200) },
+  { id: "homeScore", type: "teamScore", side: "home", ...around(364, 972, 240, 216), style: { fontScale: 1.53 } },
+  { id: "clock", type: "clock", ...around(768, 972, 480, 216), style: { color: "#000000", fontScale: 0.88 } },
+  { id: "awayScore", type: "teamScore", side: "away", ...around(1172, 972, 240, 216), style: { fontScale: 1.53 } },
+  { id: "away", type: "teamLogo", side: "away", ...around(1414, 972, 220, 216) },
+  { id: "shotClock", type: "shotClock", hidden: true, ...box(1296, 880, 200, 90) },
 ];
 
 /** De volledige indeling zoals ze in `AppSettings.scoreboardThemeJson` en in de bibliotheek staat. */

@@ -37,6 +37,7 @@ import {
   isStreamSurface,
   moveElementLayer,
   normalizeBox,
+  setMediaFit,
   sixteenByNineHeightPct,
   type AddableElementType,
   type StreamSurface,
@@ -902,7 +903,9 @@ export function SetupScoreboardPlacer({
                       <button
                         key={fit}
                         type="button"
-                        onClick={() => patchStyle(active.id, { mediaFit: fit === "fill" ? undefined : fit })}
+                        onClick={() =>
+                          commit(setMediaFit(elements, active.id, fit === "fill" ? undefined : fit, canvasWidth / canvasHeight))
+                        }
                         className={`rounded-md border px-2 py-1 text-xs ${
                           (active.style?.mediaFit ?? "fill") === fit
                             ? "border-primary bg-primary/10 font-medium"
