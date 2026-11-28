@@ -28,6 +28,7 @@ import { computePrematchSpreadTiming } from "@/lib/prematch-spread-timing";
 import { sponsorRepeatBudgetCyclesFromThemeJson } from "@/lib/scoreboard-theme";
 import {
   ledgerActiveClipStillLiveForMatchSegment,
+  rotationLiveClipSponsorId,
   sponsorLedgerMatchesSegment,
   sponsorTelemetryActiveClipElapsedSec,
   sponsorTelemetrySegmentKey,
@@ -519,7 +520,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         restartsClip: sponsorInterrupted,
         scheduleClock: sponsorScheduleClockRef.current,
         liveClipSponsorId: match
-          ? (ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, now)?.sponsorId ?? null)
+          ? rotationLiveClipSponsorId(match, section, sponsorLedger, now)
           : null,
       });
       if (sponsorInterrupted) return base;
@@ -573,7 +574,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         restartsClip: sponsorInterrupted,
         scheduleClock: halftimeScheduleClockRef.current,
         liveClipSponsorId: match
-          ? (ledgerActiveClipStillLiveForMatchSegment(match, "halftime", sponsorLedger, now)?.sponsorId ?? null)
+          ? rotationLiveClipSponsorId(match, "halftime", sponsorLedger, now)
           : null,
       });
       if (sponsorInterrupted) return base;
@@ -666,7 +667,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       restartsClip: sponsorInterrupted,
       scheduleClock: prematchScheduleClockRef.current,
       liveClipSponsorId: match
-        ? (ledgerActiveClipStillLiveForMatchSegment(match, "prematch", sponsorLedger, now)?.sponsorId ?? null)
+        ? rotationLiveClipSponsorId(match, "prematch", sponsorLedger, now)
         : null,
     });
     if (sponsorInterrupted) return base;
@@ -728,7 +729,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       restartsClip: sponsorInterrupted,
       scheduleClock: postmatchScheduleClockRef.current,
       liveClipSponsorId: match
-        ? (ledgerActiveClipStillLiveForMatchSegment(match, "postmatch", sponsorLedger, now)?.sponsorId ?? null)
+        ? rotationLiveClipSponsorId(match, "postmatch", sponsorLedger, now)
         : null,
     });
     if (sponsorInterrupted) return base;

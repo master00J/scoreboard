@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  displayModeToResume,
   automaticSponsorMediaAllowed,
   oneOffMediaHoldMs,
   periodStartHoldsFullScoreboard,
@@ -107,5 +108,19 @@ describe("oneOffMediaHoldMs", () => {
 
   it("geeft video extra marge als ended uitblijft", () => {
     expect(oneOffMediaHoldMs({ type: "VIDEO", durationSec: 15 })).toBe(15 * 1500 + 4000);
+  });
+});
+
+describe("terug naar de vorige schermmodus", () => {
+  it("gaat na de spelerintro of een clip terug naar wat er stond", () => {
+    expect(displayModeToResume("SPONSOR_ROTATION", "MATCH")).toBe("SPONSOR_ROTATION");
+    expect(displayModeToResume("MATCH", "SPONSOR_ROTATION")).toBe("MATCH");
+    expect(displayModeToResume("IDLE", "MATCH")).toBe("IDLE");
+  });
+
+  it("valt terug op het programma als er zelf iets tijdelijks stond", () => {
+    expect(displayModeToResume("GOAL", "SPONSOR_ROTATION")).toBe("SPONSOR_ROTATION");
+    expect(displayModeToResume("PLAYER_INTRO", "MATCH")).toBe("MATCH");
+    expect(displayModeToResume(undefined, "SPONSOR_ROTATION")).toBe("SPONSOR_ROTATION");
   });
 });

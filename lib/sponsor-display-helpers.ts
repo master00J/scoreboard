@@ -9,7 +9,7 @@ import {
 import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 import type { SponsorLedgerPayload } from "./sponsor-telemetry";
 import {
-  ledgerActiveClipStillLiveForMatchSegment,
+  rotationLiveClipSponsorId,
   sponsorLedgerMatchesSegment,
 } from "./sponsor-telemetry";
 
@@ -68,7 +68,7 @@ export function finalizeSponsorDistPhase(
   budgetOf?: SponsorBudgetResolver,
 ): SponsorSpreadPhaseView {
   const liveClipSponsorId = sponsorLedger
-    ? (ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, nowMs)?.sponsorId ?? null)
+    ? rotationLiveClipSponsorId(match, section, sponsorLedger, nowMs)
     : null;
   if (freezeBudgetCap) return spreadPhaseKeepingLiveClip(base, liveClipSponsorId);
   const capOpts = {
