@@ -477,9 +477,10 @@ export function mediaClipSpan(
 }
 
 /**
- * Zet de clip in een videovak links, in het midden of rechts. Elementen die binnen de breedte van de
- * clip stonden (score, klok, logo's eronder) schuiven mee, zodat ze onder de clip uitgelijnd blijven.
- * Brede elementen (zoals een balk over het hele scherm) blijven staan. Van of naar "vullen" schuift niets.
+ * Zet de clip in een videovak links, in het midden, rechts of over het hele vak ("vullen"). Score, klok
+ * en logo's die onder of op de clip stonden, schuiven mee, zodat ze altijd onder de clip uitgelijnd
+ * blijven: hun midden houdt dezelfde verhouding tot de clip (bij een smallere clip schuiven ze dichter
+ * bij elkaar). Elementen die breder zijn dan de clip (zoals een balk over het hele scherm) blijven staan.
  */
 export function setMediaFit(
   elements: LayoutElement[],
@@ -489,26 +490,27 @@ export function setMediaFit(
 ): LayoutElement[] {
   const media = elements.find((element) => element.id === mediaId);
   if (!media || media.type !== "media") return elements;
-  const oldFit = media.style?.mediaFit;
   const style: LayoutElementStyle = { ...media.style };
   if (fit) style.mediaFit = fit;
   else delete style.mediaFit;
   const { style: _old, ...rest } = media;
   const nextMedia: LayoutElement = Object.keys(style).length > 0 ? { ...rest, style } : rest;
 
-  let delta = 0;
-  let span = { left: 0, width: 0 };
-  if (oldFit && fit && oldFit !== fit) {
-    span = mediaClipSpan(media, oldFit, aspect);
-    delta = mediaClipSpan(media, fit, aspect).left - span.left;
-  }
+  const from = mediaClipSpan(media, media.style?.mediaFit, aspect);
+  const to = mediaClipSpan(media, fit, aspect);
+  const unchanged = Math.abs(from.left - to.left) < 0.05 && Math.abs(from.width - to.width) < 0.05;
   const EPS = 0.5;
   return elements.map((element) => {
     if (element.id === mediaId) return nextMedia;
-    if (Math.abs(delta) < 0.05) return element;
-    const inside = element.x >= span.left - EPS && element.x + element.w <= span.left + span.width + EPS;
+    if (unchanged || from.width <= 0) return element;
+    const inside =
+      element.w < from.width - EPS &&
+      element.x >= from.left - EPS &&
+      element.x + element.w <= from.left + from.width + EPS;
     if (!inside) return element;
-    const x = Math.round(clamp(element.x + delta, 0, 100 - element.w) * 10) / 10;
+    const center = element.x + element.w / 2;
+    const nextCenter = to.left + ((center - from.left) / from.width) * to.width;
+    const x = Math.round(clamp(nextCenter - element.w / 2, 0, 100 - element.w) * 10) / 10;
     return { ...element, x };
   });
 }

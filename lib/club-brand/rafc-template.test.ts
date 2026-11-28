@@ -95,9 +95,17 @@ describe("clip links of rechts in het videovak", () => {
     expect(back.map((e) => [e.id, e.x])).toEqual(sponsor.map((e) => [e.id, e.x]));
   });
 
-  it("schuift niets van of naar vullen en haalt de keuze weg bij vullen", () => {
+  it("zet de klok in het midden van de clip bij 16:9 midden", () => {
+    const centred = new Map(setMediaFit(sponsor, "sponsor", "center", 16 / 9).map((e) => [e.id, e]));
+    const clock = centred.get("clock")!;
+    expect(clock.x + clock.w / 2).toBeCloseTo(50, 0);
+  });
+
+  it("spreidt de elementen over het hele vak bij vullen en haalt de keuze weg", () => {
     const fill = setMediaFit(sponsor, "sponsor", undefined, 16 / 9);
     expect(fill.find((e) => e.id === "sponsor")?.style).toEqual({ background: RAFC_RED });
-    expect(fill.map((e) => e.x)).toEqual(sponsor.map((e) => e.x));
+    const clock = fill.find((e) => e.id === "clock")!;
+    expect(clock.x + clock.w / 2).toBeCloseTo(50, 0);
+    expect(fill.find((e) => e.id === "rafc-bar")!.x).toBe(0);
   });
 });
