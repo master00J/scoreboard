@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Sponsor } from "./types";
 import type { SponsorLedgerPayload } from "./sponsor-telemetry";
+import { isManualClipSession, rotationLiveClipSponsorId } from "./sponsor-telemetry";
 import {
   HUD_UNCONFIRMED_GRACE_MS,
   applySponsorBudgetCapToSpreadPhase,
+  finalizeSponsorDistPhase,
   hudRosterPhase,
   scheduledSlotRearms,
   spreadPhaseKeepingLiveClip,
@@ -181,5 +183,44 @@ describe("scheduledSlotRearms", () => {
     const after = slot(view.sponsorFilterId, view.appearanceStartedAtMs == null ? null : String(view.appearanceStartedAtMs));
     expect(after).toEqual(slot("popup", null));
     expect(scheduledSlotRearms(before, after)).toBe(false);
+  });
+});
+
+describe("handmatig gestarte clip en het rooster", () => {
+  const match = { id: "m1", status: "PREMATCH" };
+  const now = 1_000_000;
+  const ledgerWith = (clipSessionId: string): SponsorLedgerPayload => ({
+    matchId: "m1",
+    segmentKey: "m1:prematch",
+    bySponsorSec: {},
+    activeClip: {
+      sponsorId: "plenty",
+      mediaId: "clip1",
+      startedAtMs: now - 6_000,
+      expectedPlaySec: 25,
+      clipSessionId,
+    },
+    updatedAtMs: now,
+  });
+  const idle = { phase: "scoreboard" as const, sponsorFilterId: null };
+
+  it("laat het rooster na Stop media wachten: een handmatige clip wordt niet overgenomen", () => {
+    const view = finalizeSponsorDistPhase(
+      match, "prematch", "PREMATCH", ledgerWith("manual:m1:clip1:994000"), idle,
+      { current: null }, [null, null, null], 1, [], false, now, false,
+    );
+    expect(view.phase).toBe("scoreboard");
+    expect(rotationLiveClipSponsorId(match, "prematch", ledgerWith("manual:clip1:994000"), now)).toBeNull();
+    expect(isManualClipSession("manual:m1:clip1:1")).toBe(true);
+  });
+
+  it("laat een clip van het rooster zelf wel uitspelen", () => {
+    const ledger = ledgerWith("m1-prematch-plenty-0");
+    expect(rotationLiveClipSponsorId(match, "prematch", ledger, now)).toBe("plenty");
+    const view = finalizeSponsorDistPhase(
+      match, "prematch", "PREMATCH", ledger, idle,
+      { current: null }, [null, null, null], 1, [], false, now, true,
+    );
+    expect(view).toMatchObject({ phase: "sponsor", sponsorFilterId: "plenty" });
   });
 });

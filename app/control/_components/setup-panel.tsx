@@ -31,6 +31,7 @@ import { SetupScoreboardThemeSection } from "./setup-scoreboard-theme";
 import { SetupDisplayCanvasSection } from "./setup-display-canvas";
 import { OfficialClockSection } from "./setup-official-clock";
 import { AssetHealthCheck } from "./asset-health-check";
+import { MatchPackageExportButton, MatchPackageImportButton } from "./match-package-actions";
 import { getSportProfile, SPORT_TYPES, type SportType } from "@/lib/sports";
 import { DEFAULT_VOLLEYBALL_RULES, type VolleyballMatchRules } from "@/lib/volleyball";
 import { VolleyballRulesFields } from "./volleyball-rules-form";
@@ -584,12 +585,23 @@ export function SetupPanel() {
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">{t("setup.matches")}</h2>
-          <Button onClick={() => setMatchDialog(true)}>{t("setup.newMatch")}</Button>
+          <div className="flex flex-wrap gap-2">
+            <MatchPackageImportButton
+              onImported={() => {
+                reloadMatches();
+                reloadTeams();
+              }}
+            />
+            <Button onClick={() => setMatchDialog(true)}>{t("setup.newMatch")}</Button>
+          </div>
         </div>
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground max-w-3xl">
             {t("setup.matchesHelp")}
           </p>
+          {isElectron ? (
+            <p className="text-xs text-muted-foreground max-w-3xl">{t("matchPackage.help")}</p>
+          ) : null}
           {(matches ?? []).map((m) => (
             <div
               key={m.id}
@@ -643,6 +655,7 @@ export function SetupPanel() {
                 <Button size="sm" variant="outline" onClick={() => setScheduleMatch(m)}>
                   {t("setup.kickoff", sportStartEventVars(t, m.sport))}
                 </Button>
+                <MatchPackageExportButton matchId={m.id} />
                 {state?.matchId === m.id ? (
                   <Button variant="secondary" disabled size="sm">
                     {t("common.active")}

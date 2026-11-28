@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useMemo, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +14,8 @@ import {
 import { useDisplayStore } from "@/lib/store";
 import { sendCommand } from "@/lib/use-socket";
 import { playerIntroIntervalSec } from "@/lib/operator-guards";
+import { displayModeToResume, programmedDisplayMode } from "@/lib/live-cycle-settings";
+import { useLicenseFeatures } from "@/lib/use-license-features";
 import type { Match, Player, Team } from "@/lib/types";
 
 export function PlayerIntroLauncher({ match }: { match: Match | null }) {
@@ -24,6 +26,23 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [orderDialogOpen, setOrderDialogOpen] = useState(false);
   const [introOrders, setIntroOrders] = useState<Record<string, string[]>>({});
+  const { isFeatureAllowed } = useLicenseFeatures();
+  /** Modus van het scherm vóór de intro: daar gaat het na de laatste speler naartoe terug. */
+  const resumeModeRef = useRef<"IDLE" | "MATCH" | "SPONSOR_ROTATION" | null>(null);
+
+  function programmedMode() {
+    return programmedDisplayMode({
+      matchStatus: match?.status,
+      automaticSponsorsAllowed: isFeatureAllowed("automatic_sponsor_rotation"),
+      preferSponsorRotation: state?.preferSponsorRotation,
+    });
+  }
+
+  /** Onthoud waar het scherm stond, tenzij er al een intro loopt (dan staat het al vast). */
+  function rememberResumeMode() {
+    if (state?.mode === "PLAYER_INTRO" || state?.mode === "TEAM_INTRO") return;
+    resumeModeRef.current = displayModeToResume(state?.mode, programmedMode());
+  }
 
   const currentId = state?.activePlayerId ?? null;
 
@@ -70,7 +89,11 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
       const nextIdx = idx < 0 ? 0 : idx + 1;
       if (nextIdx >= players.length) {
         setAutoAdvance(false);
-        sendCommand({ type: "display:setMode", mode: "MATCH" });
+        // Terug naar wat er stond vóór de intro (bv. scorebord met sponsors), niet altijd naar
+        // alleen het scorebord.
+        const resume = resumeModeRef.current ?? programmedMode();
+        resumeModeRef.current = null;
+        sendCommand({ type: "display:setMode", mode: resume });
         return;
       }
       sendCommand({
@@ -90,6 +113,7 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
     setSelectedTeamId(selected.id);
     const order = introOrders[selected.id] ?? defaultIntroOrder(currentMatch, selected);
     const first = playersFromOrder(selected, order)[0];
+    rememberResumeMode();
     if (!first) {
       sendCommand({ type: "display:setMode", mode: "TEAM_INTRO" });
       return;
@@ -105,6 +129,7 @@ export function PlayerIntroLauncher({ match }: { match: Match | null }) {
     const teamId =
       p.teamId === currentMatch.homeTeamId ? currentMatch.homeTeamId : currentMatch.awayTeamId;
     setSelectedTeamId(teamId);
+    rememberResumeMode();
     sendCommand({
       type: "display:setMode",
       mode: "PLAYER_INTRO",

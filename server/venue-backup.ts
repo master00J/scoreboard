@@ -10,9 +10,12 @@
  *
  * Terugzetten gebeurt bij het opstarten, vóór de database open is: de ZIP wordt eerst uitgepakt naar
  * `restore-pending/`, daarna herstart de app en wisselt `applyPendingRestore` de bestanden om.
+ * Zodra de database open is, zet `finishPendingRestore` de nieuwe paden in de database en kijkt na of
+ * alle media opent. Pas als beide gelukt zijn, is het terugzetten klaar.
  */
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 export const BACKUP_ROOT_DIR = "stadium-backup";
 export const BACKUP_MANIFEST = "backup.json";
@@ -353,7 +356,7 @@ export function compareVersions(a: string, b: string): number {
  * Kijkt een uitgepakte back-up na. De database mag in `stadium-backup/data/` staan (zo maakt de app
  * ze) of rechtstreeks in `data/` (als iemand de map zelf heeft gezipt).
  */
-export function inspectBackupDir(dir: string, appVersion: string): BackupInspection {
+export async function inspectBackupDir(dir: string, appVersion: string): Promise<BackupInspection> {
   const root = [path.join(dir, BACKUP_ROOT_DIR), dir].find((candidate) =>
     fs.existsSync(path.join(candidate, "data", DB_NAME)),
   );
@@ -364,18 +367,45 @@ export function inspectBackupDir(dir: string, appVersion: string): BackupInspect
   if (manifest?.appVersion && compareVersions(manifest.appVersion, appVersion) > 0) {
     return { ok: false, reason: "newer_version", backupVersion: manifest.appVersion };
   }
+  const { PrismaClient } = await import("@prisma/client");
+  // SQLite can checkpoint a WAL when the connection closes. Inspect private copies, since a
+  // staged rollback can be hard-linked to the only remaining safety backup.
+  const scratch = await fs.promises.mkdtemp(path.join(os.tmpdir(), "arenacue-restore-check-"));
+  const dbPath = path.join(scratch, DB_NAME).split(path.sep).join("/");
+  const copy = new PrismaClient({ datasourceUrl: `file:${dbPath}?connection_limit=1` });
+  try {
+    for (const name of [DB_NAME, DB_NAME + "-wal"]) {
+      const source = path.join(root, "data", name);
+      if (fs.existsSync(source)) await fs.promises.copyFile(source, path.join(scratch, name));
+    }
+    const rows = await copy.$queryRawUnsafe<Array<{ integrity_check: string }>>("PRAGMA integrity_check");
+    const tables = await copy.$queryRawUnsafe<Array<{ name: string }>>(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('Match', 'Team', 'MediaItem')",
+    );
+    if (rows.length !== 1 || rows[0].integrity_check !== "ok" || tables.length !== 3) {
+      return { ok: false, reason: "not_a_database" };
+    }
+  } catch {
+    return { ok: false, reason: "not_a_database" };
+  } finally {
+    try { await copy.$disconnect(); } finally { await fs.promises.rm(scratch, { recursive: true, force: true }); }
+  }
   return { ok: true, root, manifest };
 }
 
 /* ————————————————————————— terugzetten bij het opstarten ————————————————————————— */
 
 export type RestoreFollowup = {
+  /** `rollback`: de operator ging terug naar de veiligheidskopie van vóór een terugzetting. */
+  source: "backup" | "rollback";
   appliedAt: string;
   /** Datum en versie van de back-up, voor de melding aan de operator. */
   backupCreatedAt: string | null;
   backupVersion: string | null;
   /** Oud pad → nieuw pad in `/uploads/`, voor media die op deze pc niet meer op de oude plek staat. */
   remap: Record<string, string>;
+  /** True zodra de paden in de database staan; dan hoeft die stap niet opnieuw. */
+  pathsRewritten: boolean;
   safetyDir: string;
 };
 
@@ -407,7 +437,7 @@ function pruneSafetyCopies(safetyRoot: string, keepName: string): void {
   }
 }
 
-function uniqueUploadName(uploadsDir: string, wanted: string): string {
+export function uniqueUploadName(uploadsDir: string, wanted: string): string {
   if (!fs.existsSync(path.join(uploadsDir, wanted))) return wanted;
   const ext = path.extname(wanted);
   const stem = wanted.slice(0, wanted.length - ext.length);
@@ -450,13 +480,13 @@ function restoreConfigFiles(root: string, userDataDir: string): void {
  * databaseverbinding open is. Wat er stond gaat naar `restore-safety/<datum>/` (alleen de laatste
  * blijft bewaard). Gaat er iets mis, dan komt de oude toestand terug.
  */
-export function applyPendingRestore(opts: {
+export async function applyPendingRestore(opts: {
   userDataDir: string;
   appVersion: string;
   now?: Date;
   /** Bestaat dit pad op deze pc? Vervangbaar in tests. */
   fileExists?: (file: string) => boolean;
-}): RestoreApplyResult {
+}): Promise<RestoreApplyResult> {
   const pending = path.join(opts.userDataDir, RESTORE_PENDING_DIR);
   if (!fs.existsSync(pending)) return { kind: "none" };
   if (!fs.existsSync(path.join(pending, RESTORE_READY_MARKER))) {
@@ -470,18 +500,25 @@ export function applyPendingRestore(opts: {
   const uploadsDir = path.join(opts.userDataDir, "uploads");
   const stamp = (opts.now ?? new Date()).toISOString().slice(0, 19).replace(/:/g, "-");
   const safetyRoot = path.join(opts.userDataDir, RESTORE_SAFETY_DIR);
-  const safetyDir = path.join(safetyRoot, stamp);
+  let safetyName = stamp;
+  for (let suffix = 1; fs.existsSync(path.join(safetyRoot, safetyName)); suffix++) safetyName = stamp + "-" + suffix;
+  const safetyDir = path.join(safetyRoot, safetyName);
+  let safetyCreated = false;
   const movedDb: string[] = [];
   const placedDb: string[] = [];
   let movedUploads = false;
 
   try {
-    const inspection = inspectBackupDir(pending, opts.appVersion);
+    const inspection = await inspectBackupDir(pending, opts.appVersion);
     if (!inspection.ok) throw new Error(`Back-up is niet bruikbaar (${inspection.reason}).`);
     const { root, manifest } = inspection;
 
-    // 1. Wat er nu staat veiligstellen.
+    const { source } = readReadyMarker(pending);
+
+    // 1. Wat er nu staat veiligstellen, ook de instellingen naast de database (voor een weg terug).
     fs.mkdirSync(path.join(safetyDir, "data"), { recursive: true });
+    safetyCreated = true;
+    stageConfigFiles(safetyDir, opts.userDataDir);
     for (const name of DB_FILES) {
       const current = path.join(dataDir, name);
       if (fs.existsSync(current)) {
@@ -521,15 +558,19 @@ export function applyPendingRestore(opts: {
     restoreConfigFiles(root, opts.userDataDir);
 
     const followup: RestoreFollowup = {
+      source,
       appliedAt: (opts.now ?? new Date()).toISOString(),
       backupCreatedAt: manifest?.createdAt || null,
       backupVersion: manifest?.appVersion || null,
       remap,
+      pathsRewritten: Object.keys(remap).length === 0,
       safetyDir,
     };
-    fs.writeFileSync(path.join(opts.userDataDir, RESTORE_FOLLOWUP_FILE), JSON.stringify(followup, null, 2), "utf8");
+    // Een vervolg van een vorige terugzetting hoort bij de database die nu weggaat.
+    clearRestoreFollowup(opts.userDataDir);
+    writeRestoreFollowup(opts.userDataDir, followup);
     fs.rmSync(pending, { recursive: true, force: true });
-    pruneSafetyCopies(safetyRoot, stamp);
+    pruneSafetyCopies(safetyRoot, safetyName);
     return { kind: "applied", followup };
   } catch (err) {
     // Terug naar hoe het was: de app moet met de oude gegevens blijven starten. Alleen weghalen wat
@@ -541,7 +582,7 @@ export function applyPendingRestore(opts: {
         fs.rmSync(uploadsDir, { recursive: true, force: true });
         move(path.join(safetyDir, "uploads"), uploadsDir);
       }
-      fs.rmSync(safetyDir, { recursive: true, force: true });
+      if (safetyCreated) fs.rmSync(safetyDir, { recursive: true, force: true });
     } catch {
       /* de veiligheidskopie blijft dan in restore-safety staan */
     }
@@ -550,27 +591,248 @@ export function applyPendingRestore(opts: {
   }
 }
 
-/** Leest het vervolg na terugzetten en verwijdert het bestand: het wordt één keer verwerkt. */
-export function takeRestoreFollowup(userDataDir: string): RestoreFollowup | null {
-  const file = path.join(userDataDir, RESTORE_FOLLOWUP_FILE);
+function readReadyMarker(pending: string): { source: RestoreFollowup["source"] } {
   try {
-    const raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<RestoreFollowup>;
-    fs.rmSync(file, { force: true });
-    const remap: Record<string, string> = {};
-    if (raw.remap && typeof raw.remap === "object") {
-      for (const [from, to] of Object.entries(raw.remap)) {
-        if (typeof to === "string" && to.startsWith("/uploads/")) remap[from] = to;
-      }
-    }
-    return {
-      appliedAt: typeof raw.appliedAt === "string" ? raw.appliedAt : new Date().toISOString(),
-      backupCreatedAt: typeof raw.backupCreatedAt === "string" ? raw.backupCreatedAt : null,
-      backupVersion: typeof raw.backupVersion === "string" ? raw.backupVersion : null,
-      remap,
-      safetyDir: typeof raw.safetyDir === "string" ? raw.safetyDir : "",
-    };
+    const raw = JSON.parse(fs.readFileSync(path.join(pending, RESTORE_READY_MARKER), "utf8")) as { source?: unknown };
+    return { source: raw?.source === "rollback" ? "rollback" : "backup" };
   } catch {
-    fs.rmSync(file, { force: true });
-    return null;
+    return { source: "backup" };
+  }
+}
+
+/** Schrijft eerst naar een tijdelijk bestand: een stroomonderbreking laat nooit een half bestand achter. */
+function writeRestoreFollowup(userDataDir: string, followup: RestoreFollowup): void {
+  const file = path.join(userDataDir, RESTORE_FOLLOWUP_FILE);
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(followup, null, 2), "utf8");
+  fs.renameSync(tmp, file);
+}
+
+/**
+ * Leest wat er na het terugzetten nog moet gebeuren. Het bestand blijft staan tot `clearRestoreFollowup`:
+ * wordt de app onderbroken, dan pakt de volgende start het opnieuw op.
+ */
+export function readRestoreFollowup(userDataDir: string): RestoreFollowup | null {
+  const file = path.join(userDataDir, RESTORE_FOLLOWUP_FILE);
+  if (!fs.existsSync(file)) return null;
+  let raw: Partial<RestoreFollowup>;
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf8")) as Partial<RestoreFollowup>;
+  } catch {
+    // Onleesbaar: welke paden nog moesten wijzigen is niet meer te achterhalen. De database is wel
+    // teruggezet; de mediacontrole toont dan wat niet opent.
+    raw = {};
+  }
+  const remap: Record<string, string> = {};
+  if (raw.remap && typeof raw.remap === "object") {
+    for (const [from, to] of Object.entries(raw.remap)) {
+      if (typeof to === "string" && to.startsWith("/uploads/")) remap[from] = to;
+    }
+  }
+  return {
+    source: raw.source === "rollback" ? "rollback" : "backup",
+    appliedAt: typeof raw.appliedAt === "string" ? raw.appliedAt : new Date().toISOString(),
+    backupCreatedAt: typeof raw.backupCreatedAt === "string" ? raw.backupCreatedAt : null,
+    backupVersion: typeof raw.backupVersion === "string" ? raw.backupVersion : null,
+    remap,
+    pathsRewritten: raw.pathsRewritten === true || Object.keys(remap).length === 0,
+    safetyDir: typeof raw.safetyDir === "string" ? raw.safetyDir : "",
+  };
+}
+
+export function clearRestoreFollowup(userDataDir: string): void {
+  fs.rmSync(path.join(userDataDir, RESTORE_FOLLOWUP_FILE), { force: true });
+  fs.rmSync(path.join(userDataDir, `${RESTORE_FOLLOWUP_FILE}.tmp`), { force: true });
+}
+
+/* ————————————————————————— nakijken na het terugzetten ————————————————————————— */
+
+export type UnreadableMediaFile = {
+  /** Naam die de operator kent: mediatitel, team of speler. */
+  label: string;
+  /** Pad zoals het in de database staat. */
+  path: string;
+};
+
+/** Alle bestanden die op het scherm kunnen komen: actieve media, logo's, spelersbeelden, goal-intro. */
+const MEDIA_REFERENCES = [
+  `SELECT title AS label, path AS file, type AS kind FROM "MediaItem" WHERE active = 1`,
+  `SELECT name AS label, logoPath AS file, 'IMAGE' AS kind FROM "Team" WHERE logoPath IS NOT NULL`,
+  `SELECT firstName || ' ' || lastName AS label, photoPath AS file, 'IMAGE' AS kind FROM "Player" WHERE photoPath IS NOT NULL`,
+  `SELECT firstName || ' ' || lastName AS label, goalVideoPath AS file, 'VIDEO' AS kind FROM "Player" WHERE goalVideoPath IS NOT NULL`,
+  `SELECT firstName || ' ' || lastName AS label, subImagePath AS file, 'IMAGE' AS kind FROM "Player" WHERE subImagePath IS NOT NULL`,
+  `SELECT firstName || ' ' || lastName AS label, lineupVideoPath AS file, 'VIDEO' AS kind FROM "Player" WHERE lineupVideoPath IS NOT NULL`,
+  `SELECT 'Goal-intro' AS label, goalIntroVideoPath AS file, 'VIDEO' AS kind FROM "AppSettings" WHERE goalIntroVideoPath IS NOT NULL`,
+];
+
+/** Pad op schijf voor een opgeslagen pad, of null als het geen bestand op deze pc is (bv. een URL). */
+export function resolveStoredMediaPath(stored: string, uploadsDir: string): string | null {
+  const value = stored.trim();
+  if (value.startsWith("/uploads/")) {
+    const rest = value.slice("/uploads/".length).split("/").filter(Boolean);
+    return rest.length > 0 ? path.join(uploadsDir, ...rest) : null;
+  }
+  return isExternalFilePath(value) ? value : null;
+}
+
+/** Opent het bestand echt om te lezen: bestaat het, is het een bestand en mogen we erbij? */
+export function canOpenFile(file: string): boolean {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(file, "r");
+    return fs.fstatSync(fd).isFile();
+  } catch {
+    return false;
+  } finally {
+    if (fd !== null) fs.closeSync(fd);
+  }
+}
+
+/** Media waarnaar de database verwijst en die op deze pc niet opent. */
+export async function findUnreadableMediaFiles(
+  db: RawDb,
+  opts: { uploadsDir: string; canOpen?: (file: string, kind: "IMAGE" | "VIDEO") => boolean | Promise<boolean> },
+): Promise<UnreadableMediaFile[]> {
+  const canOpen = opts.canOpen ?? canOpenFile;
+  const checked = new Map<string, boolean>();
+  const seen = new Set<string>();
+  const out: UnreadableMediaFile[] = [];
+  for (const query of MEDIA_REFERENCES) {
+    const rows = await db.$queryRawUnsafe<Array<{ label: string | null; file: string | null; kind: "IMAGE" | "VIDEO" }>>(query);
+    for (const row of rows) {
+      if (typeof row.file !== "string" || !row.file.trim()) continue;
+      const resolved = resolveStoredMediaPath(row.file, opts.uploadsDir);
+      if (!resolved) continue;
+      const cacheKey = JSON.stringify([resolved, row.kind]);
+      let ok = checked.get(cacheKey);
+      if (ok === undefined) {
+        ok = await canOpen(resolved, row.kind);
+        checked.set(cacheKey, ok);
+      }
+      if (ok) continue;
+      const label = (row.label ?? "").trim() || path.basename(resolved);
+      const key = JSON.stringify([label, row.file]);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ label, path: row.file });
+    }
+  }
+  return out.sort((a, b) => a.label.localeCompare(b.label) || a.path.localeCompare(b.path));
+}
+
+export type RestoreFinishResult =
+  | { kind: "none" }
+  | { kind: "restored"; followup: RestoreFollowup; pathsChanged: number }
+  | {
+      kind: "incomplete";
+      followup: RestoreFollowup;
+      pathsChanged: number;
+      /** De paden konden niet in de database: de volgende start probeert het opnieuw. */
+      pathRewriteError: string | null;
+      /** De media kon niet worden nagekeken. */
+      checkError: string | null;
+      missingFiles: UnreadableMediaFile[];
+    };
+
+/**
+ * Tweede helft van het terugzetten, zodra de database open is:
+ *   1. de paden naar teruggezette media in de database zetten. Opnieuw uitvoerbaar: een pad dat al
+ *      vervangen is, komt niet meer overeen, dus een onderbroken stap gaat bij de volgende start verder;
+ *   2. nakijken of alle media waarnaar de database verwijst opent.
+ * Het vervolgbestand blijft staan tot beide gelukt zijn. Bij "incomplete" beslist de operator:
+ * verdergaan (`clearRestoreFollowup`) of terug naar de veiligheidskopie (`stageRollbackFromSafety`).
+ */
+export async function finishPendingRestore(
+  db: RawDb,
+  opts: { userDataDir: string; uploadsDir: string; canOpen?: (file: string, kind: "IMAGE" | "VIDEO") => boolean | Promise<boolean> },
+): Promise<RestoreFinishResult> {
+  let followup = readRestoreFollowup(opts.userDataDir);
+  if (!followup) return { kind: "none" };
+
+  let pathsChanged = 0;
+  let pathRewriteError: string | null = null;
+  if (!followup.pathsRewritten) {
+    try {
+      pathsChanged = await remapStoredFilePaths(db, followup.remap);
+      followup = { ...followup, pathsRewritten: true };
+      writeRestoreFollowup(opts.userDataDir, followup);
+    } catch (err) {
+      pathRewriteError = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  let missingFiles: UnreadableMediaFile[] = [];
+  let checkError: string | null = null;
+  try {
+    missingFiles = await findUnreadableMediaFiles(db, { uploadsDir: opts.uploadsDir, canOpen: opts.canOpen });
+  } catch (err) {
+    checkError = err instanceof Error ? err.message : String(err);
+  }
+
+  if (!pathRewriteError && !checkError && missingFiles.length === 0) {
+    clearRestoreFollowup(opts.userDataDir);
+    return { kind: "restored", followup, pathsChanged };
+  }
+  return { kind: "incomplete", followup, pathsChanged, pathRewriteError, checkError, missingFiles };
+}
+
+/**
+ * De operator gaat verder met een onvolledige terugzetting. Konden de paden niet in de database of kon
+ * de media niet nagekeken worden, dan blijft het vervolg staan zodat de volgende start het opnieuw doet.
+ */
+export function acceptIncompleteRestore(
+  userDataDir: string,
+  result: Extract<RestoreFinishResult, { kind: "incomplete" }>,
+): void {
+  if (!result.pathRewriteError && !result.checkError) clearRestoreFollowup(userDataDir);
+}
+
+/* ————————————————————————— terug naar de veiligheidskopie ————————————————————————— */
+
+/** De veiligheidskopie van deze terugzetting, alleen als die echt in `restore-safety/` staat. */
+function safetyDirFor(userDataDir: string, safetyDir: string): string | null {
+  if (!safetyDir) return null;
+  const root = path.resolve(userDataDir, RESTORE_SAFETY_DIR);
+  const dir = path.resolve(safetyDir);
+  if (path.dirname(dir) !== root) return null;
+  return isSqliteFile(path.join(dir, "data", DB_NAME)) ? dir : null;
+}
+
+/** Is er een vorige toestand om naar terug te gaan? Op een nieuwe pc stond er nog niets. */
+export function canRollbackRestore(userDataDir: string, followup: RestoreFollowup): boolean {
+  return safetyDirFor(userDataDir, followup.safetyDir) !== null;
+}
+
+/**
+ * Zet de veiligheidskopie klaar in `restore-pending/`, zodat de volgende start terugkeert naar wat er
+ * vóór het terugzetten stond. Harde koppelingen waar het kan: de veiligheidskopie zelf blijft staan
+ * tot de omwisseling gelukt is.
+ */
+export function stageRollbackFromSafety(userDataDir: string, followup: RestoreFollowup): void {
+  const safety = safetyDirFor(userDataDir, followup.safetyDir);
+  if (!safety) throw new Error("Er is geen veiligheidskopie om naar terug te gaan.");
+  const pending = path.join(userDataDir, RESTORE_PENDING_DIR);
+  fs.rmSync(pending, { recursive: true, force: true });
+  try {
+    const root = path.join(pending, BACKUP_ROOT_DIR);
+    fs.mkdirSync(path.join(root, "data"), { recursive: true });
+    for (const name of DB_FILES) {
+      const file = path.join(safety, "data", name);
+      if (fs.existsSync(file)) linkOrCopy(file, path.join(root, "data", name));
+    }
+    const skipped: BackupManifest["skipped"] = [];
+    const uploads = path.join(safety, "uploads");
+    if (fs.existsSync(uploads)) stageDirectory(uploads, path.join(root, "uploads"), skipped);
+    if (skipped.length > 0) throw new Error(`Niet alle bestanden konden klaargezet worden: ${skipped[0].path}`);
+    const config = path.join(safety, "config");
+    if (fs.existsSync(config)) fs.cpSync(config, path.join(root, "config"), { recursive: true });
+    fs.writeFileSync(
+      path.join(pending, RESTORE_READY_MARKER),
+      JSON.stringify({ at: new Date().toISOString(), source: "rollback" }),
+      "utf8",
+    );
+  } catch (err) {
+    fs.rmSync(pending, { recursive: true, force: true });
+    throw err;
   }
 }

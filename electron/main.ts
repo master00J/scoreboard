@@ -11,12 +11,14 @@ import {
   session,
   shell,
 } from "electron";
+import dgram from "dgram";
+import crypto from "crypto";
 import fs from "fs";
 import os from "os";
 import path from "path";
 import { MusicLibraryStore } from "./music-library";
 import { MUSIC_EXTENSIONS, type MusicLibraryUpdate } from "../lib/music";
-import type { DesktopApiRequest, ElectronBridge, ExportFormat } from "../lib/desktop-bridge";
+import type { DesktopApiRequest, ElectronBridge, ExportFormat, MobileBridgeInfo } from "../lib/desktop-bridge";
 import { normalizeFeatureRequestInput, type FeatureRequestResult } from "../lib/feature-request";
 import * as licenseSvc from "./license-service";
 import { licenseServerUnavailable } from "../lib/license-check-outcome";
@@ -26,15 +28,28 @@ import {
   BACKUP_ROOT_DIR,
   RESTORE_PENDING_DIR,
   RESTORE_READY_MARKER,
+  acceptIncompleteRestore,
   applyPendingRestore,
+  canRollbackRestore,
   inspectBackupDir,
   stageConfigFiles,
   stageDirectory,
   stageExternalFiles,
-  takeRestoreFollowup,
+  stageRollbackFromSafety,
   writeManifest,
   type BackupManifest,
+  type RestoreFinishResult,
 } from "../server/venue-backup";
+import {
+  MATCH_PACKAGE_DIR,
+  placeMatchFiles,
+  readMatchPackageDir,
+  stageMatchFiles,
+  writeMatchPackage,
+  type MatchImportPlan,
+  type MatchImportResult,
+  type MatchPackage,
+} from "../server/match-package";
 import {
   choiceFromScreen,
   normalizeStadiumScreenChoice,
@@ -45,6 +60,18 @@ import {
   type StadiumScreensPayload,
 } from "../lib/stadium-screen";
 import { startMobileBridge, type MobileBridgeHandle } from "./mobile-bridge";
+import {
+  ALL_INTERFACES,
+  bridgeAddresses,
+  initialBridgeNetworkChoice,
+  listNetworkAdapters,
+  normalizeBridgeNetworkChoice,
+  resolveBridgeBind,
+  type BridgeBind,
+  type BridgeNetworkChoice,
+  type BridgeNetworkInfo,
+  type NetworkAdapter,
+} from "../lib/mobile-bridge-network";
 import { startStreamDeck, type StreamDeckHandle } from "./stream-deck";
 import { createQuickMediaButtonStore } from "./quick-media-buttons";
 import { startOfficialClock, type OfficialClockHandle } from "./official-clock";
@@ -552,7 +579,7 @@ function prismaDatabaseUrl(dbPath: string): string {
   return `file:${dbPath.replace(/\\/g, "/")}?connection_limit=1`;
 }
 
-function configureDesktopContext() {
+async function configureDesktopContext() {
   const root = appRoot();
   const userDataDir = app.getPath("userData");
   const dataDir = path.join(userDataDir, "data");
@@ -580,7 +607,7 @@ function configureDesktopContext() {
   bootLog(`DATABASE_URL=${process.env.DATABASE_URL}`);
 
   // Een klaargezette venue-back-up omwisselen terwijl nog niets de database open heeft.
-  const restore = applyPendingRestore({ userDataDir, appVersion: app.getVersion() });
+  const restore = await applyPendingRestore({ userDataDir, appVersion: app.getVersion() });
   if (restore.kind === "applied") {
     bootLog(`[restore] back-up teruggezet; vorige gegevens in ${restore.followup.safetyDir}`);
   } else if (restore.kind === "failed") {
@@ -627,7 +654,7 @@ async function runOperatorCommand(cmd: any) {
 }
 
 async function loadRuntime() {
-  desktopContext = configureDesktopContext();
+  desktopContext = await configureDesktopContext();
   runtime = await import("./runtime");
   await runtime.initDesktopRuntime({
     getControlWindow: () => controlWindow,
@@ -643,7 +670,11 @@ async function loadRuntime() {
   // De telefoonbediening is een extra. Is haar poort bezet (een tweede ArenaCue, een ander
   // programma), dan start het scorebord toch; alleen de telefoon werkt dan niet.
   try {
+    const credentialsPath = mobileBridgeCredentialsFile();
+    const bridgeUsedBefore = fs.existsSync(credentialsPath);
+    const startBind = await currentBridgeBind(bridgeUsedBefore);
     mobileBridge = await startMobileBridge({
+      bindHost: startBind.host,
       runtime: {
         apiRequest: (req) => runtime!.apiRequest(req),
         getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
@@ -651,8 +682,9 @@ async function loadRuntime() {
         runCommand: (command) => runtime!.runCommand(command as any),
       },
       log: bootLog,
-      credentialsPath: path.join(app.getPath("userData"), "mobile-bridge-credentials.json"),
+      credentialsPath,
     });
+    watchBridgeNetwork();
   } catch (e) {
     mobileBridge = null;
     bootLog(`[mobile-bridge] niet gestart, telefoonbediening is niet beschikbaar: ${String(e)}`);
@@ -661,7 +693,9 @@ async function loadRuntime() {
     runtime: {
       apiRequest: (req) => runtime!.apiRequest(req),
       getDisplaySnapshot: () => runtime!.getDisplaySnapshot(),
-      runCommand: (command) => runtime!.runCommand(command as any),
+      runCloudCommand: (commandId, command) => runtime!.runCloudCommand(commandId, command),
+      markCloudCommandAcked: (commandId) => runtime!.markCloudCommandAcked(commandId),
+      pruneCloudCommandLedger: () => runtime!.pruneCloudCommandLedger(),
     },
     log: bootLog,
   });
@@ -1157,28 +1191,142 @@ ${row.active ? '<div class="t">SCOREBOARD</div>' : ""}
   }, 4000);
 }
 
-function isLikelyVirtualAdapter(name: string): boolean {
-  return /bluetooth|docker|hyper-v|loopback|npcap|tap|virtual|vmware|vethernet|wsl/i.test(name);
+function mobileBridgeCredentialsFile(): string {
+  return path.join(app.getPath("userData"), "mobile-bridge-credentials.json");
 }
 
-function localNetworkUrls(port: number): string[] {
-  const primaryUrls: string[] = [];
-  const fallbackUrls: string[] = [];
-  const nets = os.networkInterfaces();
-  for (const [name, entries] of Object.entries(nets)) {
-    for (const net of entries ?? []) {
-      if (net.family !== "IPv4" || net.internal) continue;
-      const url = `http://${net.address}:${port}`;
-      if (isLikelyVirtualAdapter(name)) fallbackUrls.push(url);
-      else primaryUrls.push(url);
-    }
+/** Op welk netwerk de telefoonbediening luistert hoort bij deze pc, net als de monitorkeuze. */
+function bridgeNetworkFile(): string {
+  return path.join(app.getPath("userData"), "mobile-bridge-network.json");
+}
+
+function readBridgeNetworkChoice(): BridgeNetworkChoice | null {
+  try {
+    return normalizeBridgeNetworkChoice(JSON.parse(fs.readFileSync(bridgeNetworkFile(), "utf8")));
+  } catch {
+    return null;
   }
-  const urls = [...primaryUrls, ...fallbackUrls];
-  return urls.length > 0 ? urls : [`http://localhost:${port}`];
 }
 
-function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, operatorPinForQr: string): string[] {
-  return localNetworkUrls(handle.port).map((bridgeUrl) =>
+function writeBridgeNetworkChoice(choice: BridgeNetworkChoice) {
+  fs.writeFileSync(bridgeNetworkFile(), JSON.stringify(choice, null, 2), "utf8");
+}
+
+function currentNetworkAdapters(): NetworkAdapter[] {
+  return listNetworkAdapters(os.networkInterfaces());
+}
+
+/**
+ * Het lokale adres van de standaardroute: het netwerk waarlangs deze pc naar buiten gaat. Een
+ * UDP-socket die "verbindt" kiest alleen een route; er gaat geen pakket de deur uit. 192.0.2.1 is
+ * een documentatieadres (RFC 5737) dat nergens bestaat.
+ */
+function defaultRouteAddress(): Promise<string | null> {
+  return new Promise((resolve) => {
+    let done = false;
+    const socket = dgram.createSocket("udp4");
+    const finish = (address: string | null) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        socket.close();
+      } catch {
+        /* al dicht */
+      }
+      resolve(address);
+    };
+    const timer = setTimeout(() => finish(null), 1000);
+    socket.on("error", () => finish(null));
+    try {
+      socket.connect(9, "192.0.2.1", () => {
+        try {
+          const address = socket.address().address;
+          finish(address && address !== "0.0.0.0" ? address : null);
+        } catch {
+          finish(null);
+        }
+      });
+    } catch {
+      finish(null);
+    }
+  });
+}
+
+/** Laatst bekende keuze; blijft gelden als het bestand niet geschreven kon worden. */
+let knownBridgeNetworkChoice: BridgeNetworkChoice | null = null;
+
+/** Leest de keuze; bij de eerste start van deze versie legt hij de beginkeuze vast. */
+function bridgeNetworkChoice(adapters: NetworkAdapter[], route: string | null, bridgeUsedBefore: boolean): BridgeNetworkChoice {
+  const stored = knownBridgeNetworkChoice ?? readBridgeNetworkChoice();
+  knownBridgeNetworkChoice = stored;
+  if (stored) return stored;
+  const initial = initialBridgeNetworkChoice(adapters, route, bridgeUsedBefore);
+  knownBridgeNetworkChoice = initial;
+  try {
+    writeBridgeNetworkChoice(initial);
+  } catch (error) {
+    bootLog(`[mobile-bridge] kon netwerkkeuze niet bewaren: ${String(error)}`);
+  }
+  if (initial.mode === "all") {
+    bootLog("[mobile-bridge] bestaande koppeling en meerdere netwerken: blijft op alle netwerken tot de club er een kiest");
+  }
+  return initial;
+}
+
+async function currentBridgeBind(
+  bridgeUsedBefore = true,
+): Promise<BridgeBind & { adapters: NetworkAdapter[]; choice: BridgeNetworkChoice }> {
+  const adapters = currentNetworkAdapters();
+  const route = await defaultRouteAddress();
+  const choice = bridgeNetworkChoice(adapters, route, bridgeUsedBefore);
+  return { ...resolveBridgeBind(choice, adapters, route), adapters, choice };
+}
+
+async function bridgeNetworkInfo(): Promise<BridgeNetworkInfo & { addresses: string[] }> {
+  const { adapters, choice, ...resolved } = await currentBridgeBind();
+  // Toon waar de bridge echt luistert; dat kan tot tien seconden achterlopen op het netwerk.
+  const listening = mobileBridge?.bindHost;
+  const bind: BridgeBind =
+    listening && listening !== resolved.host
+      ? {
+          host: listening,
+          via: listening === ALL_INTERFACES ? "all" : resolved.via,
+          adapter: adapters.find((a) => a.address === listening) ?? null,
+        }
+      : { host: resolved.host, via: resolved.via, adapter: resolved.adapter };
+  return {
+    choice,
+    bind,
+    options: adapters.map((a) => ({ name: a.name, address: a.address, virtual: a.virtual })),
+    addresses: bridgeAddresses(bind, adapters),
+  };
+}
+
+let bridgeNetworkTimer: NodeJS.Timeout | null = null;
+
+/** Netwerk komt later op, DHCP geeft een ander adres, kabel eruit: de bridge volgt. */
+function watchBridgeNetwork() {
+  if (bridgeNetworkTimer || !mobileBridge || mobileBridge.bindFixedByEnv) return;
+  let busy = false;
+  bridgeNetworkTimer = setInterval(() => {
+    if (busy || !mobileBridge) return;
+    busy = true;
+    void (async () => {
+      try {
+        const bind = await currentBridgeBind();
+        if (mobileBridge && bind.host !== mobileBridge.bindHost) await mobileBridge.rebind(bind.host);
+      } catch (error) {
+        bootLog(`[mobile-bridge] netwerkwissel mislukt: ${String(error)}`);
+      } finally {
+        busy = false;
+      }
+    })();
+  }, 10_000);
+}
+
+function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, bridgeUrls: string[], operatorPinForQr: string): string[] {
+  return bridgeUrls.map((bridgeUrl) =>
     [
       "ACPAIR:local",
       encodeURIComponent(bridgeUrl),
@@ -1188,12 +1336,38 @@ function mobileLocalPairCodesWithPin(handle: MobileBridgeHandle, operatorPinForQ
   );
 }
 
-function mobileLocalPairCodesViewer(handle: MobileBridgeHandle): string[] {
-  return mobileLocalPairCodesWithPin(handle, "");
+function mobileLocalPairCodesViewer(handle: MobileBridgeHandle, bridgeUrls: string[]): string[] {
+  return mobileLocalPairCodesWithPin(handle, bridgeUrls, "");
 }
 
-function mobileLocalPairCodesOperator(handle: MobileBridgeHandle): string[] {
-  return mobileLocalPairCodesWithPin(handle, handle.operatorPin ?? "");
+function mobileLocalPairCodesOperator(handle: MobileBridgeHandle, bridgeUrls: string[]): string[] {
+  return mobileLocalPairCodesWithPin(handle, bridgeUrls, handle.operatorPin ?? "");
+}
+
+async function mobileBridgeInfo(): Promise<MobileBridgeInfo> {
+  const bridge = mobileBridge;
+  const network = bridge ? await bridgeNetworkInfo() : null;
+  const bridgeUrls = bridge && network ? network.addresses.map((address) => `http://${address}:${bridge.port}`) : [];
+  return {
+    enabled: bridge != null,
+    port: bridge?.port ?? null,
+    pairingCode: bridge?.pairingCode ?? null,
+    operatorPin: bridge?.operatorPin ?? null,
+    bridgeUrls,
+    pairCodes: bridge ? mobileLocalPairCodesViewer(bridge, bridgeUrls) : [],
+    pairCodesOperator: bridge ? mobileLocalPairCodesOperator(bridge, bridgeUrls) : [],
+    operatorPinConfigured: !!bridge?.operatorPin,
+    network:
+      bridge && network
+        ? { choice: network.choice, bind: network.bind, options: network.options, fixedByEnv: bridge.bindFixedByEnv }
+        : null,
+    cloud: {
+      enabled: cloudAgent != null,
+      baseUrl: cloudAgent?.baseUrl ?? null,
+      venueId: cloudAgent?.venueId ?? null,
+      pairCode: cloudAgent?.customerPairCode ?? null,
+    },
+  };
 }
 
 /**
@@ -1403,6 +1577,12 @@ function ensureDisplayWindow(): BrowserWindow | null {
   return displayWindow;
 }
 
+function sendDisplayWindowVisibility(win: BrowserWindow) {
+  if (win.isDestroyed()) return;
+  const visible = win.isVisible() && !win.isMinimized();
+  win.webContents.send("display:windowVisibility", { visible });
+}
+
 function wireDisplayWindow(win: BrowserWindow) {
   win.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL) => {
     bootLog(
@@ -1416,7 +1596,16 @@ function wireDisplayWindow(win: BrowserWindow) {
   });
   win.webContents.on("did-finish-load", () => {
     void runtime?.broadcastDisplayState();
+    sendDisplayWindowVisibility(win);
   });
+  /**
+   * Verborgen of geminimaliseerd stadionscherm = onderbreking voor proof-of-play. Met
+   * `backgroundThrottling: false` blijft de pagina zelf "visible" melden, dus zeggen we het
+   * expliciet; de renderer telt dan geen sponsorseconden meer tot het venster terug is.
+   */
+  for (const event of ["hide", "show", "minimize", "restore"] as const) {
+    win.on(event as "hide", () => sendDisplayWindowVisibility(win));
+  }
   win.webContents.on("render-process-gone", (_event, details) => {
     bootLog(
       `[display] render-process-gone reason=${details.reason} exitCode=${details.exitCode}${bootPlaybackContextSuffix()}`,
@@ -1590,12 +1779,18 @@ type VenueBackupResult = {
   skipped?: BackupManifest["skipped"];
 };
 
-/** Melding voor het bedieningspaneel na een herstart waarbij een back-up is teruggezet. */
+/**
+ * Melding voor het bedieningspaneel na een herstart waarbij een back-up is teruggezet. "restored" komt
+ * pas als de paden in de database staan én alle media opent; een onvolledige terugzetting gaat via
+ * `askAboutIncompleteRestore`.
+ */
 type RestoreNotice =
-  | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
+  | { kind: "restored"; source: "backup" | "rollback"; backupCreatedAt: string | null; restoredFiles: number }
   | { kind: "failed"; error: string };
 
 let restoreNotice: RestoreNotice | null = null;
+/** Terugzetting die niet volledig lukte: de operator kiest zodra het bedieningspaneel er is. */
+let incompleteRestore: Extract<RestoreFinishResult, { kind: "incomplete" }> | null = null;
 /** Eén back-up of herstel tegelijk: beide lezen en schrijven dezelfde mappen. */
 let backupBusy = false;
 
@@ -1758,6 +1953,191 @@ function skippedSummary(skipped: BackupManifest["skipped"] | undefined, intro: s
   return `\n\n${intro}\n${lines.join("\n")}`;
 }
 
+/* ————————————————————————— wedstrijdpakket ————————————————————————— */
+
+type MatchPackageErrorCode =
+  | "busy"
+  | "not_found"
+  | "zip_failed"
+  | "unpack_failed"
+  | "not_a_match_package"
+  | "newer_version"
+  | "match_in_play"
+  | "failed";
+
+type MatchPackageExportResult = {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  filePath?: string;
+  skipped?: MatchPackage["skipped"];
+};
+
+type MatchPackageOpenResult = {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  /** Versie van de app die het pakket maakte (bij `newer_version`). */
+  packageVersion?: string;
+  token?: string;
+  plan?: MatchImportPlan;
+};
+
+type MatchPackageApplyResult = {
+  ok: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  result?: MatchImportResult;
+};
+
+/** Uitgepakte pakketten die wachten op de bevestiging van de operator. */
+const pendingMatchPackages = new Map<string, { dir: string; root: string; pkg: MatchPackage }>();
+
+function discardMatchPackage(token: string): void {
+  const pending = pendingMatchPackages.get(token);
+  pendingMatchPackages.delete(token);
+  if (pending) fs.rmSync(pending.dir, { recursive: true, force: true });
+}
+
+/** Bestandsnaam zonder tekens die Windows niet toelaat. */
+function safeFilePart(value: string): string {
+  return value.replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "").replace(/\s+/g, "-").slice(0, 40) || "team";
+}
+
+/** ZIP met één wedstrijd: beide teams, spelers, media en de bestanden waarnaar die verwijzen. */
+async function runMatchPackageExport(parent: BrowserWindow | null, matchId: string): Promise<MatchPackageExportResult> {
+  const ctx = desktopContext;
+  if (!ctx || !runtime) return { ok: false, errorCode: "failed", error: "Desktop context ontbreekt." };
+  const m = await menuTexts();
+  if (backupBusy) return { ok: false, errorCode: "busy", error: m("backupBusy") };
+
+  let collected: Awaited<ReturnType<typeof runtime.collectMatchPackageForExport>>;
+  try {
+    collected = await runtime.collectMatchPackageForExport(matchId, app.getVersion());
+  } catch (err) {
+    bootLog(`[match-package] export: ${String(err)}`);
+    return { ok: false, errorCode: "not_found", error: String(err) };
+  }
+  const { pkg, references } = collected;
+  const teamName = (id: unknown) => String(pkg.teams.find(({ team }) => team.id === id)?.team.name ?? "");
+  const day = typeof pkg.match.kickoffAt === "string" ? pkg.match.kickoffAt.slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const win = parent ?? controlWindow;
+  const dialogOpts = {
+    title: m("matchPackageExportTitle"),
+    defaultPath: path.join(
+      app.getPath("documents"),
+      `ArenaCue-${safeFilePart(teamName(pkg.match.homeTeamId))}-${safeFilePart(teamName(pkg.match.awayTeamId))}-${day}.zip`,
+    ),
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+  };
+  const save = win ? await dialog.showSaveDialog(win, dialogOpts) : await dialog.showSaveDialog(dialogOpts);
+  if (save.canceled || !save.filePath) return { ok: false, canceled: true };
+
+  backupBusy = true;
+  win?.setProgressBar(2);
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "arenacue-match-out-"));
+  try {
+    const staging = path.join(tmpRoot, MATCH_PACKAGE_DIR);
+    stageMatchFiles(staging, pkg, references, ctx.uploadsDir);
+    writeMatchPackage(staging, pkg);
+    const zipTarget = save.filePath.toLowerCase().endsWith(".zip") ? save.filePath : `${save.filePath}.zip`;
+    const r = await zipFolder(tmpRoot, MATCH_PACKAGE_DIR, zipTarget);
+    if (r.status !== 0) {
+      bootLog(`[match-package] zip mislukt: ${r.output || "onbekend"}`);
+      return { ok: false, errorCode: "zip_failed", error: r.output.trim().split(/\r?\n/)[0] || "" };
+    }
+    bootLog(`[match-package] export OK: ${zipTarget} (${pkg.files.length} bestanden, ${pkg.skipped.length} overgeslagen)`);
+    return { ok: true, filePath: zipTarget, skipped: pkg.skipped };
+  } catch (err) {
+    bootLog(`[match-package] export mislukt: ${String(err)}`);
+    return { ok: false, errorCode: "failed", error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    backupBusy = false;
+    try {
+      if (win && !win.isDestroyed()) win.setProgressBar(-1);
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Kiest een wedstrijdpakket, pakt het uit en zegt wat inlezen zou doen. Er wijzigt nog niets. */
+async function openMatchPackage(parent: BrowserWindow | null): Promise<MatchPackageOpenResult> {
+  if (!desktopContext || !runtime) return { ok: false, errorCode: "failed", error: "Desktop context ontbreekt." };
+  const m = await menuTexts();
+  if (backupBusy) return { ok: false, errorCode: "busy", error: m("backupBusy") };
+  const win = parent ?? controlWindow;
+  const openOpts = {
+    title: m("matchPackageImportTitle"),
+    filters: [{ name: "ZIP", extensions: ["zip"] }],
+    properties: ["openFile" as const],
+  };
+  const open = win ? await dialog.showOpenDialog(win, openOpts) : await dialog.showOpenDialog(openOpts);
+  const zipFile = open.filePaths[0];
+  if (open.canceled || !zipFile) return { ok: false, canceled: true };
+
+  for (const token of [...pendingMatchPackages.keys()]) discardMatchPackage(token);
+  backupBusy = true;
+  win?.setProgressBar(2);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "arenacue-match-in-"));
+  try {
+    const unzip = await unzipTo(zipFile, dir);
+    if (unzip.status !== 0) {
+      bootLog(`[match-package] uitpakken mislukt: ${unzip.output || "onbekend"}`);
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: false, errorCode: "unpack_failed" };
+    }
+    const read = readMatchPackageDir(dir, app.getVersion());
+    if (!read.ok) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: false, errorCode: read.reason, packageVersion: read.packageVersion };
+    }
+    const { plan, inPlay } = await runtime.planMatchPackageImport(read.pkg);
+    if (inPlay) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return { ok: false, errorCode: "match_in_play", plan };
+    }
+    const token = crypto.randomUUID();
+    pendingMatchPackages.set(token, { dir, root: read.root, pkg: read.pkg });
+    return { ok: true, token, plan };
+  } catch (err) {
+    bootLog(`[match-package] inlezen mislukt: ${String(err)}`);
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { ok: false, errorCode: "failed", error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    backupBusy = false;
+    if (win && !win.isDestroyed()) win.setProgressBar(-1);
+  }
+}
+
+/** Voegt een eerder geopend pakket samen met de gegevens op deze pc, na bevestiging. */
+async function applyMatchPackage(token: string): Promise<MatchPackageApplyResult> {
+  const ctx = desktopContext;
+  const pending = pendingMatchPackages.get(token);
+  if (!ctx || !runtime || !pending) return { ok: false, errorCode: "failed" };
+  if (backupBusy) return { ok: false, errorCode: "busy" };
+  backupBusy = true;
+  try {
+    const remap = placeMatchFiles(pending.root, pending.pkg, ctx.uploadsDir);
+    const result = await runtime.applyMatchPackageImport(pending.pkg, remap);
+    bootLog(
+      `[match-package] ingelezen: wedstrijd ${result.matchId} (${result.matchCreated ? "nieuw" : "bijgewerkt"}), ` +
+        `${result.playersCreated} nieuwe en ${result.playersUpdated} bijgewerkte spelers, ${Object.keys(remap).length} bestanden`,
+    );
+    return { ok: true, result };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    bootLog(`[match-package] samenvoegen mislukt: ${message}`);
+    return { ok: false, errorCode: message === "match_in_play" ? "match_in_play" : "failed", error: message };
+  } finally {
+    backupBusy = false;
+    discardMatchPackage(token);
+  }
+}
+
 /**
  * Leest een venue-back-up in. De ZIP wordt uitgepakt en nagekeken; pas na bevestiging herstart de app
  * en wisselt `applyPendingRestore` de gegevens om, vóór de database open gaat.
@@ -1799,7 +2179,7 @@ async function runVenueBackupRestore(parent: BrowserWindow | null): Promise<Venu
       discard();
       return { ok: false, error: m("restoreUnpackFailed") };
     }
-    const inspection = inspectBackupDir(pending, app.getVersion());
+    const inspection = await inspectBackupDir(pending, app.getVersion());
     if (!inspection.ok) {
       discard();
       return {
@@ -1857,22 +2237,106 @@ async function runVenueBackupRestore(parent: BrowserWindow | null): Promise<Venu
   }
 }
 
-/** Na een herstart met teruggezette back-up: paden naar teruggezette media in de database zetten. */
+/**
+ * Na een herstart met teruggezette back-up: paden naar teruggezette media in de database zetten en
+ * nakijken of alle media opent. Pas als beide lukken, krijgt de operator "teruggezet" te zien.
+ */
 async function finishRestoreAfterStart() {
-  const followup = takeRestoreFollowup(app.getPath("userData"));
-  if (!followup) return;
+  const ctx = desktopContext;
+  if (!ctx || !runtime) return;
+  let result: RestoreFinishResult;
   try {
-    const changed = (await runtime?.remapRestoredFilePaths(followup.remap)) ?? 0;
-    bootLog(`[restore] ${Object.keys(followup.remap).length} mediabestanden uit de back-up, ${changed} verwijzingen bijgewerkt`);
+    result = await runtime.finishVenueRestore({ userDataDir: ctx.userDataDir, uploadsDir: ctx.uploadsDir });
   } catch (err) {
-    bootLog(`[restore] verwijzingen bijwerken mislukt: ${String(err)}`);
+    // Het vervolgbestand blijft staan: de volgende start probeert het opnieuw.
+    bootLog(`[restore] afronden mislukt: ${String(err)}`);
+    restoreNotice = { kind: "failed", error: err instanceof Error ? err.message : String(err) };
+    return;
   }
-  restoreNotice = {
-    kind: "restored",
-    backupCreatedAt: followup.backupCreatedAt,
-    restoredFiles: Object.keys(followup.remap).length,
-  };
+  if (result.kind === "none") return;
+  const restoredFiles = Object.keys(result.followup.remap).length;
+  if (result.kind === "restored") {
+    bootLog(`[restore] klaar: ${restoredFiles} mediabestanden uit de back-up, ${result.pathsChanged} verwijzingen bijgewerkt, alle media opent`);
+    restoreNotice = {
+      kind: "restored",
+      source: result.followup.source,
+      backupCreatedAt: result.followup.backupCreatedAt,
+      restoredFiles,
+    };
+    return;
+  }
+  if (result.pathRewriteError) bootLog(`[restore] verwijzingen bijwerken mislukt: ${result.pathRewriteError}`);
+  if (result.checkError) bootLog(`[restore] media nakijken mislukt: ${result.checkError}`);
+  for (const file of result.missingFiles) bootLog(`[restore] media opent niet: ${file.label} (${file.path})`);
+  incompleteRestore = result;
 }
+
+/** Regels met media die niet opent, voor het venster na een onvolledige terugzetting. */
+function missingMediaSummary(files: Array<{ label: string; path: string }>, intro: string): string {
+  const lines = files.slice(0, 12).map((file) => `• ${file.label} (${file.path})`);
+  if (files.length > lines.length) lines.push(`… +${files.length - lines.length}`);
+  return `${intro}\n${lines.join("\n")}`;
+}
+
+/**
+ * Terugzetting onvolledig: zeg wat er misliep en laat de operator kiezen tussen verdergaan en terug
+ * naar de toestand van vóór het terugzetten (de veiligheidskopie in `restore-safety/`).
+ */
+async function askAboutIncompleteRestore(result: Extract<RestoreFinishResult, { kind: "incomplete" }>) {
+  const ctx = desktopContext;
+  if (!ctx) return;
+  const m = await menuTexts();
+  const canRollback = canRollbackRestore(ctx.userDataDir, result.followup);
+  const parts: string[] = [];
+  if (result.pathRewriteError) parts.push(m("restoreIncompletePaths"));
+  if (result.checkError) parts.push(m("restoreIncompleteCheck"));
+  if (result.missingFiles.length > 0) parts.push(missingMediaSummary(result.missingFiles, m("restoreIncompleteMissing")));
+  parts.push(canRollback ? m("restoreIncompleteChoice") : m("restoreIncompleteNoRollback"));
+  const opts = {
+    type: "warning" as const,
+    title: m("restoreTitle"),
+    message: m("restoreIncompleteMessage"),
+    detail: parts.join("\n\n"),
+    buttons: canRollback ? [m("restoreKeep"), m("restoreRollback")] : [m("restoreKeep")],
+    defaultId: 0,
+    cancelId: 0,
+    noLink: true,
+  };
+  const win = controlWindow && !controlWindow.isDestroyed() ? controlWindow : null;
+  const answer = win ? await dialog.showMessageBox(win, opts) : await dialog.showMessageBox(opts);
+  if (!canRollback || answer.response !== 1) {
+    acceptIncompleteRestore(ctx.userDataDir, result);
+    bootLog("[restore] operator gaat verder met de onvolledige terugzetting");
+    return;
+  }
+  if (backupBusy) return;
+  backupBusy = true;
+  try {
+    stageRollbackFromSafety(ctx.userDataDir, result.followup);
+    try {
+      await runtime?.checkpointDatabaseForBackup();
+    } catch {
+      /* de -wal/-shm-bestanden gaan mee naar de nieuwe veiligheidskopie */
+    }
+    bootLog(`[restore] terug naar de veiligheidskopie ${result.followup.safetyDir}; app herstart`);
+    flushBootLogSync();
+    allowQuitWithoutConfirm = true;
+    if (app.isPackaged || process.env.ARENACUE_NO_RELAUNCH !== "1") app.relaunch();
+    setTimeout(() => app.exit(0), 150);
+  } catch (err) {
+    backupBusy = false;
+    bootLog(`[restore] terugkeren naar veiligheidskopie mislukt: ${String(err)}`);
+    const failOpts = {
+      type: "error" as const,
+      title: m("restoreTitle"),
+      message: m("restoreRollbackFailed"),
+      detail: err instanceof Error ? err.message : String(err),
+    };
+    if (win) await dialog.showMessageBox(win, failOpts);
+    else await dialog.showMessageBox(failOpts);
+  }
+}
+
 async function buildMenu() {
   const uploadsDir = desktopContext?.uploadsDir ?? path.join(app.getPath("userData"), "uploads");
   let locale = normalizeMenuLocale("nl");
@@ -2220,22 +2684,30 @@ function registerIpc() {
 
   ipcMain.handle("app:getResourceMetrics", () => getAppResourceMetrics());
 
-  ipcMain.handle("mobile:getBridgeInfo", () => ({
-    enabled: mobileBridge != null,
-    port: mobileBridge?.port ?? null,
-    pairingCode: mobileBridge?.pairingCode ?? null,
-    operatorPin: mobileBridge?.operatorPin ?? null,
-    bridgeUrls: mobileBridge ? localNetworkUrls(mobileBridge.port) : [],
-    pairCodes: mobileBridge ? mobileLocalPairCodesViewer(mobileBridge) : [],
-    pairCodesOperator: mobileBridge ? mobileLocalPairCodesOperator(mobileBridge) : [],
-    operatorPinConfigured: !!mobileBridge?.operatorPin,
-    cloud: {
-      enabled: cloudAgent != null,
-      baseUrl: cloudAgent?.baseUrl ?? null,
-      venueId: cloudAgent?.venueId ?? null,
-      pairCode: cloudAgent?.customerPairCode ?? null,
-    },
-  }));
+  ipcMain.handle("mobile:getBridgeInfo", () => mobileBridgeInfo());
+
+  ipcMain.handle("mobile:setBridgeNetwork", async (_, raw: unknown) => {
+    const choice = normalizeBridgeNetworkChoice(raw);
+    if (!choice || !mobileBridge) return { ok: false, info: await mobileBridgeInfo() };
+    // De club kiest zelf, dus ook "alle netwerken" is vanaf nu haar keuze en geen erfenis van de update.
+    const saved: BridgeNetworkChoice = choice.mode === "all" ? { mode: "all" } : choice;
+    knownBridgeNetworkChoice = saved;
+    try {
+      writeBridgeNetworkChoice(saved);
+    } catch (error) {
+      bootLog(`[mobile-bridge] kon netwerkkeuze niet bewaren: ${String(error)}`);
+    }
+    let ok = true;
+    try {
+      const bind = await currentBridgeBind();
+      await mobileBridge.rebind(bind.host);
+      bootLog(`[mobile-bridge] netwerk gekozen: ${choice.mode}${bind.adapter ? ` (${bind.adapter.name})` : ""}`);
+    } catch (error) {
+      ok = false;
+      bootLog(`[mobile-bridge] netwerkkeuze niet toegepast: ${String(error)}`);
+    }
+    return { ok, info: await mobileBridgeInfo() };
+  });
 
   ipcMain.handle("backup:exportVenue", async () => {
     return runVenueBackupExport(BrowserWindow.getFocusedWindow() ?? controlWindow);
@@ -2245,8 +2717,33 @@ function registerIpc() {
     return runVenueBackupRestore(BrowserWindow.getFocusedWindow() ?? controlWindow);
   });
 
+  ipcMain.handle("matchPackage:export", async (_event, matchId: unknown) => {
+    if (typeof matchId !== "string" || !matchId) return { ok: false, errorCode: "not_found" };
+    return runMatchPackageExport(BrowserWindow.getFocusedWindow() ?? controlWindow, matchId);
+  });
+
+  ipcMain.handle("matchPackage:open", async () => {
+    return openMatchPackage(BrowserWindow.getFocusedWindow() ?? controlWindow);
+  });
+
+  ipcMain.handle("matchPackage:apply", async (_event, token: unknown) => {
+    if (typeof token !== "string") return { ok: false, errorCode: "failed" };
+    return applyMatchPackage(token);
+  });
+
+  ipcMain.handle("matchPackage:discard", async (_event, token: unknown) => {
+    if (typeof token === "string") discardMatchPackage(token);
+    return { ok: true };
+  });
+
   // Eén keer tonen na de herstart: daarna is de melding weg.
+  // Een onvolledige terugzetting vraagt de operator om een keuze, zodra het bedieningspaneel er staat.
   ipcMain.handle("backup:takeRestoreNotice", async () => {
+    if (incompleteRestore) {
+      const incomplete = incompleteRestore;
+      incompleteRestore = null;
+      void askAboutIncompleteRestore(incomplete).catch((err) => bootLog(`[restore] keuzevenster mislukt: ${String(err)}`));
+    }
     const notice = restoreNotice;
     restoreNotice = null;
     return notice;
@@ -2848,6 +3345,10 @@ app.on("before-quit", (e) => {
   }
   closeSplashWindow();
   stopDisplayPowerSaveBlocker();
+  if (bridgeNetworkTimer) {
+    clearInterval(bridgeNetworkTimer);
+    bridgeNetworkTimer = null;
+  }
   if (mobileBridge) {
     void mobileBridge.stop();
     mobileBridge = null;

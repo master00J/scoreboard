@@ -23,11 +23,23 @@ export function DisplayHeldImage({
   src,
   style,
   slot,
+  onShown,
+  onError,
+  shownKey,
 }: {
   src: string;
   style?: CSSProperties;
   /** Naam van het vak op het scherm, gedeeld door alle elementen die het om beurten vullen. */
   slot?: string;
+  /**
+   * Het eigen beeld (`src`) staat geladen en gedecodeerd op het scherm. Bewijs voor proof-of-play:
+   * pas vanaf dit moment telt de schermtijd. Opnieuw gemeld als `shownKey` wisselt terwijl het
+   * beeld al stond (dezelfde foto in een volgende cue).
+   */
+  onShown?: () => void;
+  /** Het eigen beeld kon niet geladen of gedecodeerd worden: er stond niets van deze sponsor. */
+  onError?: () => void;
+  shownKey?: string | number;
 }) {
   const [continued] = useState(() =>
     slot ? heldImageToContinue(slotMemory.get(slot), performance.now()) : null,
@@ -55,13 +67,11 @@ export function DisplayHeldImage({
       setSwapped(true);
       setShown(src);
     };
-    next.src = src;
     // Bij een fout ook wisselen: liever een ontbrekend beeld dan de vorige sponsor die blijft staan.
-    if (typeof next.decode === "function") next.decode().then(swap, swap);
-    else {
-      next.onload = swap;
-      next.onerror = swap;
-    }
+    next.onload = () => { if (typeof next.decode !== "function") swap(); };
+    next.onerror = swap;
+    next.src = src;
+    if (typeof next.decode === "function") void next.decode().then(swap, swap);
     // Een venster dat niet getekend wordt, meldt nooit dat het beeld klaar is. Dan toch wisselen.
     const fallback = window.setTimeout(swap, MAX_HOLD_MS);
     return () => {
@@ -70,6 +80,56 @@ export function DisplayHeldImage({
     };
   }, [src, shown]);
 
+  const onShownRef = useRef(onShown);
+  onShownRef.current = onShown;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const imgRef = useRef<HTMLImageElement>(null);
+  /** Per beeld en `shownKey` één melding. */
+  const reportedRef = useRef<string | null>(null);
+  const reportKey = `${src}::${shownKey ?? ""}`;
+
+  const activeReportKey = useRef(reportKey);
+  activeReportKey.current = reportKey;
+  const reportShown = () => {
+    if (activeReportKey.current !== reportKey || !imgRef.current) return;
+    if (reportedRef.current === reportKey) return;
+    reportedRef.current = reportKey;
+    onShownRef.current?.();
+  };
+
+  const confirmImage = (img: HTMLImageElement) => {
+    if (reportedRef.current === reportKey) return;
+    if (typeof img.decode !== "function") { reportShown(); return; }
+    void img.decode().then(reportShown, () => {
+      if (imgRef.current === img && activeReportKey.current === reportKey) onErrorRef.current?.();
+    });
+  };
+
+  // Hetzelfde beeld stond er al (geen nieuwe load-event): meteen melden als het klaar is.
+  useEffect(() => {
+    if (shown !== src) return;
+    const img = imgRef.current;
+    if (img && img.complete && img.naturalWidth > 0) confirmImage(img);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shown, src, reportKey]);
+
   // Na een wissel is het beeld al gedecodeerd; "sync" zet het in hetzelfde frame neer als de wissel.
-  return <img src={shown} alt="" decoding={swapped ? "sync" : "async"} style={style} />;
+  return (
+    <img
+      ref={imgRef}
+      src={shown}
+      alt=""
+      decoding={swapped ? "sync" : "async"}
+      style={style}
+      onLoad={(e) => {
+        if (shown !== src) return;
+        confirmImage(e.currentTarget);
+      }}
+      onError={() => {
+        if (shown !== src) return;
+        onErrorRef.current?.();
+      }}
+    />
+  );
 }

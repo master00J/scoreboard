@@ -63,6 +63,8 @@ export type AppSettings = {
   interfaceProfilesJson?: string | null;
   /** JSON: aftelklok naar de start en de mededeling op het stadionscherm (lib/display-extras.ts). */
   displayExtrasJson?: string | null;
+  /** Telling van sponsortijd (lib/sponsor-guarantee-settings.ts). */
+  sponsorGuaranteeJson?: string | null;
 };
 
 export type Player = {
@@ -180,8 +182,10 @@ export type MediaItem = {
   sponsorPhaseTagsJson?: string | null;
   /** Technisch item (bv. auto voor speler goalVideoPath); verborgen in Media-bibliotheek. */
   hideFromLibrary?: boolean;
-  /** VIDEO: high_fps / unsupported_codec / pixel_format / unsafe_encoder / playback_fault — risico op het stadionscherm. */
+  /** VIDEO: high_fps / unsupported_codec / pixel_format / unsafe_encoder / playback_fault — risico op het stadionscherm; probe_failed = kop niet leesbaar. */
   playbackWarning?: string | null;
+  /** JSON `MediaCheckRecord` (lib/media-health.ts): volledige decode per bestandsversie. */
+  mediaCheckJson?: string | null;
   /** Knop op Display voor manuele fullscreen (waarschuwingen e.d.). */
   quickLaunch?: boolean;
   /**
@@ -189,6 +193,10 @@ export type MediaItem = {
    * Null/leeg = niet in de sponsorrotatie. Alleen gebruikt zonder sponsorId.
    */
   clubPhaseBudgetJson?: string | null;
+  /** Vrije notitie uit het seizoensplan voor clubmedia; de operator ziet ze live. */
+  notes?: string | null;
+  /** Clubmedia met meerdere bestanden: zelfde naam = één ingang in de rotatie. Null = los bestand. */
+  clubGroup?: string | null;
   createdAt: string;
 };
 
@@ -205,6 +213,8 @@ export type ScheduledMediaCue = {
   enabled: boolean;
   /** Hele rundown van deze fase herhaalt na de laatste clip. */
   loop?: boolean;
+  /** Soort boeking: window | fullPlay | none (lib/sponsor-guarantee.ts `cueGuarantee`). */
+  guarantee?: string | null;
   createdAt: string;
 };
 
@@ -227,10 +237,17 @@ export type Sponsor = {
   sponsorPlaybackRepeatsJson?: string | null;
   /** Minuten per sport/venster. Voetbal gebruikt de kolommen hierboven, nooit deze JSON. */
   sportBudgetsJson?: string | null;
+  /** Vrije notitie uit het seizoensplan; de operator ziet ze tijdens de match. */
+  notes?: string | null;
+  /** Garantie van de boeking (lib/sponsor-guarantee.ts). Null = seconden, niet inhalen. */
+  guaranteeJson?: string | null;
   createdAt: string;
   media?: MediaItem[];
-  /** Alleen in de rotatie-API: clubmedia die meedraait zonder sponsorrij. */
-  rotationKind?: "sponsor" | "club";
+  /**
+   * Alleen in de rotatie-API: clubmedia die meedraait zonder sponsorrij, of een reeks
+   * (`lib/media-sequences.ts`): bestanden die elke beurt helemaal na elkaar spelen.
+   */
+  rotationKind?: "sponsor" | "club" | "sequence";
 };
 
 export type SponsorSection = "prematch" | "match" | "halftime" | "postmatch";

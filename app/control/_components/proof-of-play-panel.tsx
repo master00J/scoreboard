@@ -31,6 +31,9 @@ import {
   type ProofOfPlayRow,
   type ProofOfPlaySummaryRow,
 } from "@/lib/proof-of-play-export";
+import { proofOfPlayTotals } from "@/lib/sponsor-play-filters";
+import { playLogVisibleSec } from "@/lib/sponsor-play-ledger";
+import { SponsorGuaranteeSettingsCard } from "./sponsor-guarantee-settings-card";
 
 export function ProofOfPlayPanel() {
   const { t, i18n } = useTranslation();
@@ -65,6 +68,7 @@ export function ProofOfPlayPanel() {
       { value: "halftime", label: t("phases.halftime") },
       { value: "SECOND_HALF", label: t("phases.SECOND_HALF") },
       { value: "EXTRA_TIME", label: t("phases.EXTRA_TIME") },
+      { value: "postmatch", label: t("phases.postmatch") },
     ],
     [t],
   );
@@ -266,8 +270,10 @@ export function ProofOfPlayPanel() {
       setExporting(true);
       setError(null);
       try {
+        // Export: every matching play (`all=1`), totals from the uncapped per-sponsor aggregate.
+        const listQuery = queryString ? `${queryString}&all=1` : "all=1";
         const [listRes, sumRes] = await Promise.all([
-          fetch(`/api/sponsor-plays?${queryString}`),
+          fetch(`/api/sponsor-plays?${listQuery}`),
           fetch(`/api/sponsor-plays/summary?${queryString}`),
         ]);
         if (!listRes.ok) throw new Error(t("reports.listError", { status: listRes.status }));
@@ -276,20 +282,16 @@ export function ProofOfPlayPanel() {
         const sumJson = (await sumRes.json()) as { rows: ProofOfPlaySummaryRow[] };
         const exportRows = listJson.rows ?? [];
         const exportSummary = sumJson.rows ?? [];
-        const totalPlays = exportRows.length;
-        const totalActualSec = exportRows.reduce((acc, r) => acc + r.actualSec, 0);
-        const totalExpectedSec = exportRows.reduce((acc, r) => acc + r.expectedSec, 0);
-        const avgFulfillment =
-          totalExpectedSec > 0
-            ? Math.round((totalActualSec / totalExpectedSec) * 100)
-            : 0;
+        const exportTotals = proofOfPlayTotals(exportSummary);
         const meta: ProofOfPlayExportMeta = {
           generatedAtIso: new Date().toISOString(),
           filterLabel,
-          totalPlays,
-          totalActualSec,
-          totalExpectedSec,
-          avgFulfillmentPercent: avgFulfillment,
+          totalPlays: exportTotals.totalPlays,
+          totalActualSec: exportTotals.totalActualSec,
+          totalBookedSec: exportTotals.totalBookedSec,
+          totalShortfallSec: exportTotals.totalShortfallSec,
+          totalExpectedSec: exportTotals.totalExpectedSec,
+          avgFulfillmentPercent: exportTotals.avgFulfillmentPercent,
         };
         const resolvedBrand = parseProofOfPlayBrand(JSON.stringify(brand));
         if (format === "pdf") {
@@ -333,16 +335,22 @@ export function ProofOfPlayPanel() {
     [queryString, filterLabel, exportAllowed, t, exportLabels, dateLocale, brand, persistBrand],
   );
 
-  const totalPlays = rows.length;
-  const totalActualSec = rows.reduce((acc, r) => acc + r.actualSec, 0);
-  const totalExpectedSec = rows.reduce((acc, r) => acc + r.expectedSec, 0);
-  const avgFulfillment =
-    totalExpectedSec > 0
-      ? Math.round((totalActualSec / totalExpectedSec) * 100)
-      : 0;
+  // Totals from the per-sponsor aggregate: the detail list below is capped.
+  const {
+    totalPlays,
+    totalActualSec,
+    totalExpectedSec,
+    avgFulfillmentPercent: avgFulfillment,
+    totalBookedSec,
+    totalShortfallSec,
+  } = proofOfPlayTotals(summary);
 
   return (
     <div className="space-y-4">
+      <SponsorGuaranteeSettingsCard
+        sponsorGuaranteeJson={settings?.sponsorGuaranteeJson}
+        onSaved={reloadSettings}
+      />
       <section className="bg-card border border-border rounded-xl p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -587,6 +595,16 @@ export function ProofOfPlayPanel() {
             value={`${avgFulfillment}%`}
             hint={t("reports.statFulfillmentHint")}
           />
+          <Stat
+            label={t("reports.statBooked")}
+            value={formatSecForExport(totalBookedSec)}
+            hint={t("reports.statBookedHint")}
+          />
+          <Stat
+            label={t("reports.statShortfall")}
+            value={formatSecForExport(totalShortfallSec)}
+            hint={t("reports.statShortfallHint")}
+          />
         </div>
       </section>
 
@@ -606,12 +624,22 @@ export function ProofOfPlayPanel() {
                   <th className="py-2 pr-3 text-right">{t("reports.colActual")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colExpected")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colFulfillment")}</th>
+                  <th className="py-2 pr-3 text-right">{t("reports.colBooked")}</th>
+                  <th className="py-2 pr-3 text-right">{t("reports.colShortfall")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {summary.map((s) => (
                   <tr key={s.sponsorId ?? s.sponsorName}>
-                    <td className="py-2 pr-3 font-medium">{s.sponsorName}</td>
+                    <td className="py-2 pr-3 font-medium">
+                      {s.sponsorName}
+                      {s.files?.map(f => (
+                        <div key={f.mediaId} className="text-xs font-normal text-muted-foreground">
+                          {f.title} · {formatSecForExport(f.deliveredSec)} / {formatSecForExport(f.plannedSec)}
+                          {" · "}{t("reports.completePlays")} {f.completePlays} / {f.plannedPlays}
+                        </div>
+                      ))}
+                    </td>
                     <td className="py-2 pr-3 text-right tabular-nums">{s.plays}</td>
                     <td className="py-2 pr-3 text-right tabular-nums">
                       {formatSecForExport(s.actualSec)}
@@ -623,6 +651,16 @@ export function ProofOfPlayPanel() {
                       {s.expectedSec > 0
                         ? `${Math.round((s.actualSec / s.expectedSec) * 100)}%`
                         : "—"}
+                    </td>
+                    <td className="py-2 pr-3 text-right tabular-nums">
+                      {s.bookedSec ? formatSecForExport(s.bookedSec) : "—"}
+                    </td>
+                    <td
+                      className={`py-2 pr-3 text-right tabular-nums ${
+                        (s.shortfallSec ?? 0) >= 0.5 ? "font-semibold text-amber-600 dark:text-amber-400" : ""
+                      }`}
+                    >
+                      {s.bookedSec ? formatSecForExport(s.shortfallSec ?? 0) : "—"}
                     </td>
                   </tr>
                 ))}
@@ -650,6 +688,7 @@ export function ProofOfPlayPanel() {
                   <th className="py-2 pr-3">{t("reports.colMedia")}</th>
                   <th className="py-2 pr-3">{t("reports.colMatch")}</th>
                   <th className="py-2 pr-3">{t("reports.colPhase")}</th>
+                  <th className="py-2 pr-3">{t("reports.colSource")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colExpectedShort")}</th>
                   <th className="py-2 pr-3 text-right">{t("reports.colActualShort")}</th>
                 </tr>
@@ -670,8 +709,22 @@ export function ProofOfPlayPanel() {
                     <td className="py-1.5 pr-3">
                       {formatSegmentKey(r.segmentKey, exportLabels)}
                     </td>
+                    <td className="py-1.5 pr-3 whitespace-nowrap">
+                      {t(`reports.source_${r.source ?? "rotation"}`)}
+                      {r.counted === false && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.notCounted")})</span>
+                      )}
+                      {r.state === "interrupted" && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.stateInterrupted")})</span>
+                      )}
+                      {r.state === "running" && (
+                        <span className="ml-1 text-muted-foreground">({t("reports.stateRunning")})</span>
+                      )}
+                    </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">{r.expectedSec}s</td>
-                    <td className="py-1.5 pr-3 text-right tabular-nums">{r.actualSec}s</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums">
+                      {formatSecForExport(playLogVisibleSec(r))}
+                    </td>
                   </tr>
                 ))}
               </tbody>

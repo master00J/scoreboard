@@ -1,5 +1,6 @@
 import type { SponsorSection } from "./types";
 import { isClubRotationSponsorId } from "./club-media-rotation";
+import { isSequenceRotationSponsorId } from "./media-sequences";
 
 /** Sponsor-id waaronder een rundown-cue meldt als zijn media bij geen sponsor hoort. */
 export const SCHEDULED_CUE_SPONSOR_ID = "scheduled-cue";
@@ -20,7 +21,9 @@ export function sponsorPlayLogIdentity(opts: {
     return { sponsorId: opts.sponsorId, sponsorName: opts.sponsorRowName };
   }
   const ownMedia =
-    isClubRotationSponsorId(opts.sponsorId) || opts.sponsorId === SCHEDULED_CUE_SPONSOR_ID;
+    isClubRotationSponsorId(opts.sponsorId) ||
+    isSequenceRotationSponsorId(opts.sponsorId) ||
+    opts.sponsorId === SCHEDULED_CUE_SPONSOR_ID;
   return {
     sponsorId: null,
     sponsorName: ownMedia ? (opts.mediaTitle ?? "Club") : "(verwijderd)",
@@ -47,7 +50,7 @@ export function sponsorTelemetrySegmentKey(
 export type SponsorLedgerPayload = {
   matchId: string;
   segmentKey: string;
-  /** Afgeronde opgeslagen seconden per sponsor-id (after voltooide clips). */
+  /** Echt zichtbare seconden per sponsor-id van afgesloten clips, onafgerond (afronden bij tonen). */
   bySponsorSec: Record<string, number>;
   /** Huidige slide op het stadionscherm (display-venster). */
   activeClip: {
@@ -63,6 +66,18 @@ export type SponsorLedgerPayload = {
   updatedAtMs: number;
 };
 
+/**
+ * Welke laag een vertoning meldde: de sponsorrotatie, een cue uit de rundown, of een clip die
+ * de operator met de hand startte. Bepaalt mee welke vertoning telt als er twee tegelijk melden.
+ */
+export type SponsorPlaySource = "rotation" | "cue" | "manual";
+
+export const SPONSOR_PLAY_SOURCES: readonly SponsorPlaySource[] = ["rotation", "cue", "manual"];
+
+export function normalizeSponsorPlaySource(value: unknown): SponsorPlaySource {
+  return value === "cue" || value === "manual" ? value : "rotation";
+}
+
 export type SponsorTelemetryClipStart = {
   matchId: string;
   segmentKey: string;
@@ -73,6 +88,10 @@ export type SponsorTelemetryClipStart = {
   startedAtMs: number;
   playbackPositionMs?: number;
   paused?: boolean;
+  /** Laag die de vertoning meldt; ontbreekt bij oudere renderers (= rotatie). */
+  source?: SponsorPlaySource;
+  /** Echt zichtbare ms tot nu (0 bij de start). */
+  visibleMs?: number;
 };
 
 export type SponsorTelemetryClipEnd = {
@@ -80,6 +99,7 @@ export type SponsorTelemetryClipEnd = {
   segmentKey: string;
   sponsorId: string;
   mediaId: string;
+  /** Echt zichtbare seconden, onafgerond. */
   actualSec: number;
   clipSessionId: string;
   startedAtMs: number;
@@ -99,6 +119,8 @@ export type SponsorTelemetryClipProgress = {
   paused?: boolean;
   /** `Date.now() - playbackPositionMs` zodat elapsed = positie in de video. */
   startedAtMs?: number;
+  /** Echt zichtbare ms tot nu; wordt periodiek bewaard zodat een herstart niets verliest. */
+  visibleMs?: number;
 };
 
 /** Zelfde logica als display `MediaRenderer` / commit-timers. */
@@ -138,6 +160,29 @@ export function ledgerActiveClipStillLiveForMatchSegment(
   }
   const ac = sponsorLedger.activeClip;
   return sponsorTelemetryActiveClipStillLive(ac, nowMs) ? ac : null;
+}
+
+/** Een clip die de operator zelf startte (snelle knop, "Speel af", cue): geen vertoning van het rooster. */
+export function isManualClipSession(clipSessionId: string | null | undefined): boolean {
+  return typeof clipSessionId === "string" && clipSessionId.startsWith("manual:");
+}
+
+/**
+ * Sponsor van de clip die het sponsorrooster zelf nog speelt, of null.
+ *
+ * Het rooster laat een lopende clip uitspelen. Een clip die de operator met de hand startte
+ * hoort daar niet bij: na "Stop media" nam het rooster die clip anders over en startte hem
+ * opnieuw vanaf het begin, terwijl het rooster nog moest wachten tot de volgende vertoning.
+ */
+export function rotationLiveClipSponsorId(
+  match: { id: string; status?: string },
+  section: SponsorSection,
+  sponsorLedger: SponsorLedgerPayload | null | undefined,
+  nowMs: number = Date.now(),
+): string | null {
+  const ac = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger ?? null, nowMs);
+  if (!ac || isManualClipSession(ac.clipSessionId)) return null;
+  return ac.sponsorId;
 }
 
 /** Zelfde marge als hierboven, zonder segmentcontrole (die doet de aanroeper). */

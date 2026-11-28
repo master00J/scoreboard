@@ -18,6 +18,10 @@ const cfg = {
   pollMs: Number(process.env.E2E_POLL_MS ?? "400"),
   eventDwellMs: Number(process.env.E2E_EVENT_DWELL_MS ?? "3500"),
   modeWaitMs: Number(process.env.E2E_MODE_WAIT_MS ?? "4000"),
+  /** Zo lang wachten op de sponsorclip die na een wedstrijdmoment terugkomt. */
+  returnWaitMs: Number(process.env.E2E_RETURN_WAIT_MS ?? "8000"),
+  /** Marge (s) tussen de klok van dit script en de klok van het scherm bij het vergelijken van boekingen. */
+  bookingSlackSec: Number(process.env.E2E_BOOKING_SLACK_SEC ?? "1.5"),
   bootLogPath: process.env.E2E_BOOT_LOG
     ? path.resolve(process.env.E2E_BOOT_LOG)
     : firstExisting([
@@ -239,10 +243,21 @@ async function prepareRoster(token, match) {
   };
 }
 
+/**
+ * Een wedstrijdmoment (goal, kaart, wissel) gaat meteen op het scherm. De sponsorclip die op dat
+ * moment speelde, wordt afgesloten met de tijd die echt zichtbaar was; na het moment start
+ * dezelfde clip opnieuw met een nieuwe sessie (de oude "zelfde sessie pauzeren"-strategie
+ * bestaat niet meer). Dit controleert:
+ * - hoe snel het moment op het scherm stond;
+ * - welke media terugkomt (en of het dezelfde clip is, opnieuw gestart);
+ * - hoeveel er voor de onderbroken vertoning echt geboekt werd: nooit meer dan de tijd die hij
+ *   voor het moment op het scherm stond.
+ */
 async function fireMoment(token, plan, issues, observations) {
   const before = await snapshot(token);
   const beforeMode = displayMode(before);
   const beforeClip = activeClip(before);
+  const sentAtMs = Date.now();
   const sent = await cmd(token, plan.command);
   if (!sent.ok) {
     issues.push(`${plan.label}: command faalde (${sent.status ?? "?"} ${sent.payload?.error ?? ""})`.trim());
@@ -250,6 +265,7 @@ async function fireMoment(token, plan, issues, observations) {
     return { ok: false };
   }
   const modeResult = await waitForMode(token, plan.expectModes, cfg.modeWaitMs, plan.label);
+  const latencyMs = Date.now() - sentAtMs;
   if (!modeResult.ok) {
     if (plan.optionalMode) {
       log("warn", "moment-mode-optional-miss", {
@@ -263,25 +279,9 @@ async function fireMoment(token, plan, issues, observations) {
       );
     }
   } else {
-    log("info", "moment-mode-ok", { label: plan.label, mode: modeResult.mode });
+    log("info", "moment-mode-ok", { label: plan.label, mode: modeResult.mode, latencyMs });
   }
   const visualInterrupt = modeResult.ok && modeResult.mode !== "SPONSOR_ROTATION" && modeResult.mode !== "SPONSOR";
-  let duringClip = activeClip(modeResult.snap);
-  let sessionKept = Boolean(
-    beforeClip && duringClip && beforeClip.clipSessionId === duringClip.clipSessionId,
-  );
-  let sponsorPaused = Boolean(sessionKept && duringClip?.paused);
-  const pauseDeadline = Date.now() + 1500;
-  while (visualInterrupt && beforeClip && Date.now() < pauseDeadline && !sponsorPaused) {
-    const mid = await snapshot(token);
-    duringClip = activeClip(mid);
-    sessionKept = Boolean(
-      beforeClip && duringClip && beforeClip.clipSessionId === duringClip.clipSessionId,
-    );
-    sponsorPaused = Boolean(sessionKept && duringClip?.paused);
-    if (sponsorPaused) break;
-    await sleep(cfg.pollMs);
-  }
   await sleep(cfg.eventDwellMs);
   if (plan.clearCommand) {
     const cleared = await cmd(token, plan.clearCommand);
@@ -290,22 +290,104 @@ async function fireMoment(token, plan, issues, observations) {
     }
   }
   const resume = await waitForMode(token, ["SPONSOR_ROTATION", "SPONSOR", "MATCH"], cfg.modeWaitMs, `${plan.label}-resume`);
-  if (visualInterrupt && beforeClip && !sessionKept) {
-    issues.push(`${plan.label}: sponsorclip-sessie verdween i.p.v. te pauzeren.`);
-  } else if (visualInterrupt && beforeClip && sessionKept && !sponsorPaused) {
-    issues.push(`${plan.label}: zelfde clip-sessie bleef staan maar paused werd niet true.`);
+
+  // Welke media komt terug na het moment?
+  let returnedClip = null;
+  const returnDeadline = Date.now() + cfg.returnWaitMs;
+  while (beforeClip && Date.now() < returnDeadline) {
+    const clip = activeClip(await snapshot(token));
+    if (clip && clip.clipSessionId !== beforeClip.clipSessionId) {
+      returnedClip = clip;
+      break;
+    }
+    await sleep(cfg.pollMs);
   }
+
+  // Hoeveel werd er voor de onderbroken vertoning echt geboekt?
+  let interrupted = null;
+  if (visualInterrupt && beforeClip?.clipSessionId) {
+    await sleep(1200); // de afsluitende melding wordt asynchroon bewaard
+    const row = await findPlay(token, beforeClip.clipSessionId);
+    // Zichtbaar vóór het moment: van de (gecorrigeerde) start van de clip tot het commando.
+    const visibleBeforeSec = Math.max(0, (sentAtMs - Number(beforeClip.startedAtMs ?? sentAtMs)) / 1000);
+    const bookedSec = row ? playSec(row) : 0;
+    interrupted = {
+      clipSessionId: beforeClip.clipSessionId,
+      sponsorId: beforeClip.sponsorId,
+      mediaId: beforeClip.mediaId,
+      visibleBeforeSec: Math.round(visibleBeforeSec * 10) / 10,
+      bookedSec: Math.round(bookedSec * 10) / 10,
+      rowState: row?.state ?? null,
+    };
+    if (!row && visibleBeforeSec >= 1.5) {
+      issues.push(`${plan.label}: onderbroken vertoning (${visibleBeforeSec.toFixed(1)} s zichtbaar) staat niet in het afspeellog.`);
+    } else if (row && bookedSec > visibleBeforeSec + cfg.bookingSlackSec) {
+      issues.push(
+        `${plan.label}: onderbroken vertoning boekte ${bookedSec.toFixed(1)} s terwijl ze maar ${visibleBeforeSec.toFixed(1)} s op het scherm stond.`,
+      );
+    }
+    if (beforeClip && !returnedClip) {
+      issues.push(`${plan.label}: na het moment kwam binnen ${cfg.returnWaitMs / 1000} s geen sponsorclip terug.`);
+    }
+  }
+
   observations.push({
     ...plan.meta,
     ok: sent.ok && (modeResult.ok || plan.optionalMode),
     beforeMode,
     afterMode: modeResult.mode,
     resumeMode: resume.mode,
-    sponsorSessionKept: sessionKept,
-    sponsorPaused,
+    latencyMs,
+    interrupted,
+    returned: returnedClip
+      ? {
+          sponsorId: returnedClip.sponsorId,
+          mediaId: returnedClip.mediaId,
+          sameMedia: !!beforeClip && returnedClip.mediaId === beforeClip.mediaId,
+          newSession: !!beforeClip && returnedClip.clipSessionId !== beforeClip.clipSessionId,
+        }
+      : null,
     warning: sent.payload?.warning ?? null,
   });
   return { ok: modeResult.ok || plan.optionalMode };
+}
+
+/** Zichtbare seconden van een rij uit het afspeellog (ms als die er is). */
+function playSec(row) {
+  const ms = Number(row?.actualMs ?? 0);
+  return ms > 0 ? ms / 1000 : Number(row?.actualSec ?? 0);
+}
+
+async function findPlay(token, clipSessionId) {
+  const rows = await matchPlays(token, currentMatchId);
+  return rows.find((r) => r.clipSessionId === clipSessionId) ?? null;
+}
+
+async function matchPlays(token, matchId) {
+  if (!matchId) return [];
+  const r = await getJson(
+    `${cfg.baseUrl}/mobile/api/sponsor-plays?matchId=${encodeURIComponent(matchId)}&all=1`,
+    token,
+  );
+  return Array.isArray(r.payload?.rows) ? r.payload.rows : [];
+}
+
+async function guarantees(token, matchId) {
+  const r = await getJson(
+    `${cfg.baseUrl}/mobile/api/sponsor-guarantees?matchId=${encodeURIComponent(matchId)}`,
+    token,
+  );
+  return r.ok && r.payload && Array.isArray(r.payload.sponsors) ? r.payload : null;
+}
+
+let currentMatchId = null;
+/** Muurklok per fase, om te controleren dat er nooit meer geboekt wordt dan de fase duurde. */
+const phaseWindows = [];
+function phaseStart(segment) {
+  const now = Date.now();
+  const open = phaseWindows[phaseWindows.length - 1];
+  if (open && open.endMs == null) open.endMs = now;
+  phaseWindows.push({ segment, startMs: now, endMs: null });
 }
 
 async function main() {
@@ -369,6 +451,7 @@ async function main() {
 
   const roster = await prepareRoster(token, created.payload);
   const match = roster.match;
+  currentMatchId = match.id;
   const eventsSince = new Date().toISOString();
   const settingsRes = await getJson(`${cfg.baseUrl}/mobile/api/settings`, token);
   const settings = settingsRes.payload && typeof settingsRes.payload === "object" ? settingsRes.payload : {};
@@ -396,6 +479,7 @@ async function main() {
   await cmd(token, { type: "timer:set", seconds: 0 });
 
   log("info", "phase-start", { label: "PREMATCH" });
+  phaseStart("prematch");
   await pollUntil(cfg.prematchSec, async () => {
     const snap = await snapshot(token);
     if (snap) trackSponsors(prematch, snap);
@@ -409,6 +493,7 @@ async function main() {
   await cmd(token, { type: "timer:set", seconds: 0 });
   await cmd(token, { type: "timer:start" });
   log("info", "phase-start", { label: "FIRST_HALF" });
+  phaseStart("FIRST_HALF");
 
   await pollUntil(6, async () => {
     const snap = await snapshot(token);
@@ -501,6 +586,7 @@ async function main() {
   await cmd(token, { type: "match:setStatus", status: "HALF_TIME" });
   await cmd(token, { type: "display:setMode", mode: "SPONSOR_ROTATION" });
   log("info", "phase-start", { label: "HALF_TIME" });
+  phaseStart("halftime");
   await pollUntil(cfg.halftimeSec, async () => {
     const snap = await snapshot(token);
     if (snap) trackSponsors(halfTime, snap);
@@ -514,6 +600,7 @@ async function main() {
   await cmd(token, { type: "display:setMode", mode: "SPONSOR_ROTATION" });
   await cmd(token, { type: "timer:start" });
   log("info", "phase-start", { label: "SECOND_HALF" });
+  phaseStart("SECOND_HALF");
 
   await pollUntil(6, async () => {
     const snap = await snapshot(token);
@@ -622,6 +709,7 @@ async function main() {
   await cmd(token, { type: "match:setStatus", status: "POST_MATCH" });
   await cmd(token, { type: "display:setMode", mode: "SPONSOR_ROTATION" });
   log("info", "phase-start", { label: "POST_MATCH" });
+  phaseStart("postmatch");
   await pollUntil(cfg.postMatchSec, async () => {
     const snap = await snapshot(token);
     if (snap) trackSponsors(postMatch, snap);
@@ -629,6 +717,54 @@ async function main() {
 
   const finalSnap = await snapshot(token);
   const finalMatch = await getMatch(token, match.id);
+  phaseStart("end");
+
+  // Echt geboekt per fase: nooit meer dan de fase op de muurklok duurde (één scherm, één beeld tegelijk).
+  await sleep(1500);
+  const plays = await matchPlays(token, match.id);
+  const counted = plays.filter((r) => r.counted !== false);
+  const bookedByPhase = {};
+  for (const w of phaseWindows.filter((x) => x.segment !== "end")) {
+    const rows = counted.filter((r) => String(r.segmentKey ?? "").endsWith(`:${w.segment}`));
+    const sec = rows.reduce((sum, r) => sum + playSec(r), 0);
+    const wallSec = ((w.endMs ?? Date.now()) - w.startMs) / 1000;
+    bookedByPhase[w.segment] = {
+      plays: rows.length,
+      bookedSec: Math.round(sec * 10) / 10,
+      wallSec: Math.round(wallSec * 10) / 10,
+      interrupted: rows.filter((r) => r.state === "interrupted").length,
+    };
+    if (sec > wallSec + cfg.bookingSlackSec) {
+      issues.push(`${w.segment}: ${sec.toFixed(1)} s sponsortijd geboekt in een fase van ${wallSec.toFixed(1)} s.`);
+    }
+  }
+  const stillRunning = plays.filter((r) => r.state === "running" && !String(r.segmentKey ?? "").endsWith(":postmatch"));
+  if (stillRunning.length) {
+    issues.push(`${stillRunning.length} vertoning(en) uit afgesloten fases staan nog op "running".`);
+  }
+
+  // Nog verschuldigd per sponsor en per fase.
+  const g = await guarantees(token, match.id);
+  if (!g) issues.push("Garanties: /api/sponsor-guarantees gaf geen antwoord.");
+  const owed = (g?.sponsors ?? []).map((s) => ({
+    sponsor: s.name,
+    kind: s.guarantee?.kind ?? "seconds",
+    segments: Object.fromEntries(
+      Object.entries(s.segments ?? {}).map(([seg, v]) => [
+        seg,
+        { booked: v.bookedSec, delivered: Math.round(v.deliveredSec * 10) / 10, short: Math.round(v.shortSec * 10) / 10 },
+      ]),
+    ),
+  }));
+  const summaryRes = await getJson(
+    `${cfg.baseUrl}/mobile/api/sponsor-plays/summary?matchId=${encodeURIComponent(match.id)}`,
+    token,
+  );
+  const reportRows = Array.isArray(summaryRes.payload?.rows) ? summaryRes.payload.rows : [];
+  if (!summaryRes.ok) issues.push(`Rapport: samenvatting faalde (${summaryRes.status}).`);
+  else if (reportRows.some((r) => typeof r.bookedSec !== "number" || typeof r.shortfallSec !== "number")) {
+    issues.push("Rapport: samenvatting mist geboekt/open tekort.");
+  }
   const matchEvents = (Array.isArray(finalMatch?.events) ? finalMatch.events : []).filter(
     (e) => !e.createdAt || e.createdAt >= eventsSince,
   );
@@ -678,6 +814,14 @@ async function main() {
       postMatch: { unique: postMatch.mediaIds.size, clipStarts: postMatch.clipStarts },
     },
     eventCounts: counts,
+    bookedByPhase,
+    owed,
+    report: reportRows.map((r) => ({
+      sponsor: r.sponsorName,
+      actualSec: Math.round((r.actualSec ?? 0) * 10) / 10,
+      bookedSec: r.bookedSec ?? null,
+      shortfallSec: r.shortfallSec == null ? null : Math.round(r.shortfallSec * 10) / 10,
+    })),
     observations,
     bootLogPath: cfg.bootLogPath,
     bootProblems,
@@ -703,11 +847,36 @@ async function main() {
 | 2e helft | ${secondHalf.mediaIds.size} | ${secondHalf.clipStarts} |
 | Post-match (${cfg.postMatchSec}s) | ${postMatch.mediaIds.size} | ${postMatch.clipStarts} |
 
+## Echt geboekt per fase
+| Fase | Vertoningen | Geboekt (s) | Fase op muurklok (s) | Onderbroken |
+| --- | --- | --- | --- | --- |
+${Object.entries(bookedByPhase)
+  .map(([seg, v]) => `| ${seg} | ${v.plays} | ${v.bookedSec} | ${v.wallSec} | ${v.interrupted} |`)
+  .join("\n")}
+
+## Nog verschuldigd (geboekt / geleverd / tekort, s)
+${owed.length === 0 ? "Geen geboekte sponsortijd." : owed
+  .map(
+    (o) =>
+      `- ${o.sponsor} (${o.kind}): ${Object.entries(o.segments)
+        .map(([seg, v]) => `${seg} ${v.booked}/${v.delivered}/${v.short}`)
+        .join(", ")}`,
+  )
+  .join("\n")}
+
+## Rapport (per sponsor)
+${summary.report.map((r) => `- ${r.sponsor}: ${r.actualSec} s op scherm, geboekt ${r.bookedSec ?? "—"} s, open ${r.shortfallSec ?? "—"} s`).join("\n") || "Leeg."}
+
 ## Wedstrijdmomenten
 ${observations
   .map(
     (o) =>
-      `- ${o.ok ? "OK" : "FAIL"} ${o.phase} ${o.kind}${o.color ? ` ${o.color}` : ""} ${o.side} (${o.player}): modus ${o.beforeMode} → ${o.afterMode}, resume ${o.resumeMode}${o.note ? ` — ${o.note}` : ""}`,
+      `- ${o.ok ? "OK" : "FAIL"} ${o.phase} ${o.kind}${o.color ? ` ${o.color}` : ""} ${o.side} (${o.player}): modus ${o.beforeMode} → ${o.afterMode} in ${o.latencyMs ?? "?"} ms, resume ${o.resumeMode}` +
+      (o.interrupted
+        ? `; onderbroken clip ${o.interrupted.visibleBeforeSec} s zichtbaar, ${o.interrupted.bookedSec} s geboekt`
+        : "") +
+      (o.returned ? `; terug: ${o.returned.sameMedia ? "zelfde clip, opnieuw gestart" : "andere clip"}` : "") +
+      (o.note ? ` — ${o.note}` : ""),
   )
   .join("\n")}
 

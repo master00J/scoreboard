@@ -39,6 +39,8 @@ const bridge: ElectronBridge = {
   onSponsorLedger: (listener) =>
     subscribe<SponsorLedgerPayload | null>("display:sponsorLedger", listener),
   onDisplayError: (listener) => subscribe("display:error", listener),
+  onDisplayWindowVisibility: (listener) =>
+    subscribe<{ visible: boolean }>("display:windowVisibility", listener),
   focusDisplayWindow: () => ipcRenderer.invoke("window:focusDisplay"),
   reloadDisplayWindow: () => ipcRenderer.invoke("window:reloadDisplay"),
   saveProofOfPlayExport: (opts) => ipcRenderer.invoke("sponsorPlays:saveExport", opts),
@@ -54,6 +56,7 @@ const bridge: ElectronBridge = {
   licenseActivate: (opts: { licenseKey: string }) => ipcRenderer.invoke("license:activate", opts),
   submitFeatureRequest: (input) => ipcRenderer.invoke("feature:submit", input),
   getMobileBridgeInfo: () => ipcRenderer.invoke("mobile:getBridgeInfo"),
+  setMobileBridgeNetwork: (choice) => ipcRenderer.invoke("mobile:setBridgeNetwork", choice),
   getStreamDeckInfo: () => ipcRenderer.invoke("streamdeck:getInfo"),
   setQuickMediaButtons: (mediaIds: string[]) => {
     ipcRenderer.send("control:setQuickMediaButtons", mediaIds);
@@ -69,6 +72,10 @@ const bridge: ElectronBridge = {
   getAppResourceMetrics: () => ipcRenderer.invoke("app:getResourceMetrics"),
   exportVenueBackup: () => ipcRenderer.invoke("backup:exportVenue"),
   restoreVenueBackup: () => ipcRenderer.invoke("backup:restoreVenue"),
+  exportMatchPackage: (matchId) => ipcRenderer.invoke("matchPackage:export", matchId),
+  openMatchPackage: () => ipcRenderer.invoke("matchPackage:open"),
+  applyMatchPackage: (token) => ipcRenderer.invoke("matchPackage:apply", token),
+  discardMatchPackage: (token) => ipcRenderer.invoke("matchPackage:discard", token),
   takeRestoreNotice: () => ipcRenderer.invoke("backup:takeRestoreNotice"),
   listStadiumScreens: () => ipcRenderer.invoke("display:listScreens"),
   setStadiumScreen: (id) => ipcRenderer.invoke("display:setStadiumScreen", id),

@@ -49,6 +49,12 @@ function sponsor(prematchSeconds: number, clips: number[]): Sponsor {
 }
 
 describe("sponsor appearance plan — één vertoning = één clip", () => {
+  it("houdt aaneensluitende vertoningen van dezelfde sponsor uit elkaar", () => {
+    const map = buildSponsorSlotMap([sponsor(60, [2, 8])], "prematch", 60);
+    expect([0, 1, 2, 4, 10, 12, 20, 52].map(t => sponsorAppearanceIndexAt(map, "sp", t)))
+      .toEqual([0, 0, 1, 1, 2, 3, 4, 11]);
+  });
+
   it("vult het budget met opeenvolgende clips uit de rotatie", () => {
     // 3 clips van 20s, budget 120s → 6 vertoningen van 20s, samen precies 120s.
     const plan = buildSponsorAppearancePlan([sponsor(120, [20, 20, 20])], "prematch");

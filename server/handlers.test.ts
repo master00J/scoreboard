@@ -138,6 +138,32 @@ describe("voetbal", () => {
     expect((await state()).timerRunning).toBe(false);
   });
 
+  it("registreert een doelpunt zonder een blackout of de klaargezette clip op te heffen", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const file = await prisma.mediaItem.create({ data: { title: "Spot", path: "spot.png", type: "IMAGE", durationSec: 4 } });
+    await run({ type: "display:setMode", mode: "SPONSOR", meta: { activeMediaId: file.id } });
+    await run({ type: "display:blackout" });
+    await run({ type: "goal:prepare", side: "home" });
+    await run({ type: "goal:trigger", side: "home" });
+    expect(await state()).toMatchObject({ mode: "BLACKOUT", activeMediaId: file.id });
+    expect((await matchRow(m.id)).homeScore).toBe(1);
+    await run({ type: "display:blackout" });
+    expect(await state()).toMatchObject({ mode: "SPONSOR", activeMediaId: file.id });
+  });
+
+  it("behoudt toegevoegde tijd en een later doelpunt bij herhaalde of oudere opdrachten", async () => {
+    const m = await seedMatch("FOOTBALL");
+    await run({ type: "match:setStatus", status: "FIRST_HALF" });
+    await run({ type: "timer:setAddedTime", minutes: 4 });
+    await run({ type: "match:setStatus", status: "FIRST_HALF" });
+    expect((await state()).addedTimeMinutes).toBe(4);
+    await run({ type: "score:set", homeScore: 2, awayScore: 0 });
+    const edit = await prisma.matchEvent.findFirstOrThrow({ where: { matchId: m.id, type: "SCORE_SET" } });
+    await run({ type: "goal:trigger", side: "home" });
+    await expect(run({ type: "event:undo", eventId: edit.id })).rejects.toMatchObject({ code: "undoLaterEventFirst" });
+    expect((await matchRow(m.id)).homeScore).toBe(3);
+  });
+
   it("logt een doelpunt met periode en klokstand en draait het terug via undo", async () => {
     const m = await seedMatch("FOOTBALL");
     await run({ type: "timer:set", seconds: 1500 });
@@ -178,6 +204,145 @@ describe("voetbal", () => {
     await run({ type: "timer:preset", preset: "SECOND_HALF" });
     expect((await state()).mode).toBe("SPONSOR_ROTATION");
     expect((await state()).preferSponsorRotation).toBe(true);
+  });
+});
+
+describe("wissels", () => {
+  async function homePlayer(matchId: string, number: number) {
+    const m = await matchRow(matchId);
+    const p = await prisma.player.findFirst({ where: { teamId: m.homeTeamId, number } });
+    if (!p) throw new Error(`no player ${number}`);
+    return p;
+  }
+
+  async function homeField(matchId: string): Promise<string[]> {
+    return JSON.parse((await matchRow(matchId)).homeFieldPlayerIdsJson ?? "[]") as string[];
+  }
+
+  async function subEvents(matchId: string) {
+    return prisma.matchEvent.findMany({
+      where: { matchId, type: "SUB" },
+      orderBy: { createdAt: "asc" },
+    });
+  }
+
+  it("draait de tweede wissel terug in de opstelling, het log en de animatiewachtrij", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const [p1, p2, p12] = await Promise.all([1, 2, 12].map(n => homePlayer(m.id, n)));
+    await run({ type: "sub:triggerBatch", substitutions: [
+      { teamId: m.homeTeamId, playerOutId: p1.id, playerInId: p12.id },
+      { teamId: m.homeTeamId, playerOutId: p2.id, playerInId: p1.id },
+    ] });
+    const [first, second] = await subEvents(m.id);
+    await expect(run({ type: "event:undo", eventId: first.id })).rejects.toMatchObject({ code: "undoLaterEventFirst" });
+    await run({ type: "event:undo", eventId: second.id });
+    expect(await homeField(m.id)).toContain(p2.id);
+    expect(await homeField(m.id)).not.toContain(p1.id);
+    expect(await subEvents(m.id)).toHaveLength(1);
+    await run({ type: "sub:queueAdvance" });
+    expect((await state()).activeSubInId).toBeNull();
+  });
+
+  it("registreert een dubbele wissel meteen, ook als daarna een clip handmatig start", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const [p1, p2, p12] = await Promise.all([
+      homePlayer(m.id, 1),
+      homePlayer(m.id, 2),
+      homePlayer(m.id, 12),
+    ]);
+    const media = await prisma.mediaItem.create({
+      data: { type: "VIDEO", path: "clip.mp4", title: "Clip", durationSec: 10 },
+    });
+
+    // 12 in voor 1, daarna 1 terug in voor 2: de tweede kan pas na de eerste.
+    await run({
+      type: "sub:triggerBatch",
+      substitutions: [
+        { teamId: m.homeTeamId, playerOutId: p1.id, playerInId: p12.id },
+        { teamId: m.homeTeamId, playerOutId: p2.id, playerInId: p1.id },
+      ],
+    });
+    let s = await state();
+    expect(s.mode).toBe("SUBSTITUTION");
+    expect(s.activeSubInId).toBe(p12.id);
+    expect((await subEvents(m.id)).map((e) => [e.playerOutId, e.playerInId])).toEqual([
+      [p1.id, p12.id],
+      [p2.id, p1.id],
+    ]);
+
+    // De operator start een clip voor de tweede animatie: de wachtrij vervalt, de wissel niet.
+    await run({
+      type: "display:setMode",
+      mode: "SPONSOR",
+      meta: { activeMediaId: media.id },
+    });
+    s = await state();
+    expect(s.mode).toBe("SPONSOR");
+    expect(s.substitutionQueueJson).toBe("[]");
+
+    const field = await homeField(m.id);
+    expect(field).toContain(p12.id);
+    expect(field).toContain(p1.id);
+    expect(field).not.toContain(p2.id);
+    expect(await subEvents(m.id)).toHaveLength(2);
+    await prisma.mediaItem.delete({ where: { id: media.id } });
+  });
+
+  it("toont de volgende animatie zonder de wissel opnieuw te registreren", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const [p1, p2, p3, p12] = await Promise.all([
+      homePlayer(m.id, 1),
+      homePlayer(m.id, 2),
+      homePlayer(m.id, 3),
+      homePlayer(m.id, 12),
+    ]);
+    await run({
+      type: "sub:triggerBatch",
+      substitutions: [
+        { teamId: m.homeTeamId, playerOutId: p1.id, playerInId: p12.id },
+        { teamId: m.homeTeamId, playerOutId: p2.id, playerInId: p1.id },
+      ],
+    });
+    // Nog een wissel terwijl de eerste animatie loopt: ook die staat meteen in de opstelling.
+    await run({ type: "sub:trigger", teamId: m.homeTeamId, playerOutId: p3.id, playerInId: p2.id });
+    expect(await subEvents(m.id)).toHaveLength(3);
+    expect(await homeField(m.id)).not.toContain(p3.id);
+
+    await run({ type: "sub:queueAdvance" });
+    let s = await state();
+    expect(s.mode).toBe("SUBSTITUTION");
+    expect(s.activeSubInId).toBe(p1.id);
+    expect(s.activeSubOutId).toBe(p2.id);
+
+    await run({ type: "sub:queueAdvance" });
+    s = await state();
+    expect(s.activeSubInId).toBe(p2.id);
+    expect(s.activeSubOutId).toBe(p3.id);
+
+    await run({ type: "sub:queueAdvance" });
+    s = await state();
+    expect(s.mode).not.toBe("SUBSTITUTION");
+    expect(await subEvents(m.id)).toHaveLength(3);
+  });
+
+  it("registreert een wachtrij uit een oudere versie nog bij het tonen", async () => {
+    const m = await seedMatch("FOOTBALL");
+    const [p1, p12] = await Promise.all([homePlayer(m.id, 1), homePlayer(m.id, 12)]);
+    await run({ type: "sub:trigger", teamId: m.homeTeamId, playerOutId: p1.id, playerInId: p12.id });
+    const p2 = await homePlayer(m.id, 2);
+    // Zoals 0.2.2 hem achterliet: nog niet in de opstelling of het log.
+    await prisma.displayState.update({
+      where: { id: 1 },
+      data: {
+        substitutionQueueJson: JSON.stringify([
+          { teamId: m.homeTeamId, playerOutId: p2.id, playerInId: p1.id },
+        ]),
+      },
+    });
+    await run({ type: "sub:queueAdvance" });
+    expect((await state()).activeSubInId).toBe(p1.id);
+    expect(await subEvents(m.id)).toHaveLength(2);
+    expect(await homeField(m.id)).not.toContain(p2.id);
   });
 });
 

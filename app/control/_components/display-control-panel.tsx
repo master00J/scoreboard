@@ -22,7 +22,7 @@ import { useLicenseFeatures } from "@/lib/use-license-features";
 import { toast } from "@/components/ui/toast";
 import type { Match, MatchEvent, Player, MediaItem } from "@/lib/types";
 import type { DisplayModeT, MatchStatusT } from "@/lib/validation/commands";
-import { isLivePlayingMatchStatus, programmedDisplayMode } from "@/lib/live-cycle-settings";
+import { displayModeToResume, isLivePlayingMatchStatus, programmedDisplayMode } from "@/lib/live-cycle-settings";
 import { getSportProfile, sportMaxPeriod } from "@/lib/sports";
 import { applyLivePeriod, applyLivePhase } from "@/lib/live-phase-commands";
 import { tPeriodButton } from "@/lib/i18n/t-sport";
@@ -288,14 +288,14 @@ export function DisplayControlPanel({ activeMatch }: { activeMatch: Match | null
 
   async function playMediaItem(item: MediaItem) {
     if (mode !== "SPONSOR") {
-      quickMediaResumeMode =
-        mode === "MATCH" || mode === "SPONSOR_ROTATION" || mode === "IDLE"
-          ? mode
-          : programmedDisplayMode({
-              matchStatus: activeMatch?.status,
-              automaticSponsorsAllowed,
-              preferSponsorRotation: state?.preferSponsorRotation,
-            });
+      quickMediaResumeMode = displayModeToResume(
+        mode,
+        programmedDisplayMode({
+          matchStatus: activeMatch?.status,
+          automaticSponsorsAllowed,
+          preferSponsorRotation: state?.preferSponsorRotation,
+        }),
+      );
     }
     if (quickMediaAutoReturnTimer) {
       clearTimeout(quickMediaAutoReturnTimer);

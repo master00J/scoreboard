@@ -1,3 +1,4 @@
+import { sequencePassSeconds } from "./media-sequences";
 import type { Match, Playlist, PlaylistSlot, Sponsor, SponsorSection } from "./types";
 import {
   activeSponsorsForSection,
@@ -8,10 +9,8 @@ import {
 import { mediaAllowedForSponsorPhase } from "./sponsor-media-phases";
 import type { SponsorLedgerPayload } from "./sponsor-telemetry";
 import {
-  ledgerActiveClipStillLiveForMatchSegment,
+  rotationLiveClipSponsorId,
   sponsorLedgerMatchesSegment,
-  sponsorTelemetryActiveClipStillLive,
-  sponsorTelemetryConsumedSec,
 } from "./sponsor-telemetry";
 
 export type SponsorSpreadPhaseView = {
@@ -69,7 +68,7 @@ export function finalizeSponsorDistPhase(
   budgetOf?: SponsorBudgetResolver,
 ): SponsorSpreadPhaseView {
   const liveClipSponsorId = sponsorLedger
-    ? (ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, nowMs)?.sponsorId ?? null)
+    ? rotationLiveClipSponsorId(match, section, sponsorLedger, nowMs)
     : null;
   if (freezeBudgetCap) return spreadPhaseKeepingLiveClip(base, liveClipSponsorId);
   const capOpts = {
@@ -354,19 +353,24 @@ export function allActiveSponsorSectionBudgetsExhausted(
       ledgerMatchesSegment,
       nowMs,
     });
-    if (consumed < budget) return false;
+    if (consumed < budgetCapSeconds(sponsor, budget)) return false;
   }
   return true;
 }
 
 /**
- * Verbruik waarop het budgetplafond beslist: max van slotrooster en telemetry. Loopt er
- * volgens de ledger nog een clip van deze sponsor, dan telt alleen de telemetry. Het
- * slotrooster is een projectie die vóórloopt op het scherm (slots starten op hele
- * seconden, het display pas bij de volgende tick) en op hele seconden afrondt; zo kapte
- * het plafond de laatste clip van een sponsor tot ~0,5 s te vroeg af. In de rust bleef
- * die clip daarna gepauzeerd als "bezig" in de ledger staan en blokkeerde hij de
- * volgende slots. Een lopende clip speelt dus altijd uit; nieuwe clips stoppen wel.
+ * Vanaf hoeveel verbruikte seconden het plafond een deelnemer stopt. Een reeks krijgt een halve reeks
+ * speling: haar minuten zijn al op hele reeksen afgerond, en tussen twee bestanden van dezelfde reeks
+ * mag ze niet stoppen omdat de gemeten clips samen iets langer duurden dan de catalogus zegt.
+ */
+export function budgetCapSeconds(sponsor: Sponsor, budget: number): number {
+  if (sponsor.rotationKind !== "sequence" || budget <= 0) return budget;
+  return budget + sequencePassSeconds(sponsor) / 2;
+}
+
+/**
+ * Zodra de speler deze fase meet, bepaalt de gemeten tijd of een nieuwe clip mag starten.
+ * Een lopende clip mag uitspelen. Alleen zonder meting gebruiken we het voorspelde rooster.
  */
 function sponsorConsumedForBudgetCap(
   sponsorId: string,
@@ -381,27 +385,11 @@ function sponsorConsumedForBudgetCap(
     nowMs: number;
   },
 ): number {
-  const consumedSlot = sponsorScreenSecondsConsumed(
-    opts.slotMap,
-    opts.sponsors,
-    opts.section,
-    opts.matchStatus,
-    opts.slotT,
-    sponsorId,
-  );
   const ledger = opts.ledgerMatchesSegment ? opts.sponsorLedger : null;
-  if (!ledger) return consumedSlot;
-  const ac = ledger.activeClip;
-  if (ac && ac.sponsorId === sponsorId && sponsorTelemetryActiveClipStillLive(ac, opts.nowMs)) {
-    /**
-     * De lopende clip telt pas mee als hij klaar is. Het rooster start een clip zolang er
-     * budget over is en laat die helemaal uitspelen, ook over het budget heen. Telde het
-     * lopende deel hier al mee, dan haalde het plafond een clip van 25 s met nog 15 s budget
-     * na 15 s van het scherm.
-     */
-    return ledger.bySponsorSec[sponsorId] ?? 0;
-  }
-  return Math.max(consumedSlot, sponsorTelemetryConsumedSec(ledger, sponsorId, opts.nowMs));
+  if (ledger) return ledger.bySponsorSec[sponsorId] ?? 0;
+  return sponsorScreenSecondsConsumed(
+    opts.slotMap, opts.sponsors, opts.section, opts.matchStatus, opts.slotT, sponsorId,
+  );
 }
 
 /**
@@ -445,7 +433,7 @@ export function applySponsorBudgetCapToSpreadPhase(
   const budget = opts.budgetOf
     ? opts.budgetOf(sponsor)
     : sponsorSectionBudgetSeconds(sponsor, opts.section, opts.matchStatus);
-  if (budget > 0 && sponsorConsumedForBudgetCap(sponsor.id, opts) >= budget) {
+  if (budget > 0 && sponsorConsumedForBudgetCap(sponsor.id, opts) >= budgetCapSeconds(sponsor, budget)) {
     return { phase: "scoreboard", sponsorFilterId: null };
   }
   return base;

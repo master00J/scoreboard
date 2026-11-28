@@ -5,6 +5,7 @@ import {
   cueIsDueAtElapsed,
   cueLeftClockWindow,
   cueResumesAfterInterruption,
+  pickOwedScheduledCue,
   cueClipSessionId,
   pickDueScheduledCue,
   cuePhaseMatches,
@@ -299,13 +300,13 @@ describe("sponsorwissel in een rundown", () => {
   });
 
   it("telt de schermtijd na een onderbreking als een apart stuk voor de sponsor", () => {
-    const eerste = cueClipSessionId({ cueId: "b", cycle: 2, mediaId: "m1" });
-    // Zelfde naam als vóór deze wijziging: lopende rapportage blijft aansluiten.
-    expect(eerste).toBe("cue:b:2:m1");
-    expect(cueClipSessionId({ cueId: "b", cycle: 2, mediaId: "m1", stint: 0 })).toBe(eerste);
-    const terug = cueClipSessionId({ cueId: "b", cycle: 2, mediaId: "m1", stint: 1 });
+    const id = { matchId: "m", cueId: "b", cycle: 2, mediaId: "m1" };
+    const eerste = cueClipSessionId(id);
+    expect(eerste).toBe("cue:m:b:2:m1");
+    expect(cueClipSessionId({ ...id, stint: 0 })).toBe(eerste);
+    const terug = cueClipSessionId({ ...id, stint: 1 });
     expect(terug).not.toBe(eerste);
-    expect(cueClipSessionId({ cueId: "b", cycle: 2, mediaId: "m1", stint: 2 })).not.toBe(terug);
+    expect(cueClipSessionId({ ...id, stint: 2 })).not.toBe(terug);
   });
 
   it("slaat cues over die uit staan, zonder actieve media of van een andere fase", () => {
@@ -348,5 +349,61 @@ describe("sponsorwissel in een rundown", () => {
     expect(cueExpectedPlaySec({ triggerSec: 20, endSec: null, media: { durationSec: 12 } })).toBe(12);
     expect(cueExpectedPlaySec({ triggerSec: 20, media: { durationSec: 0 } })).toBe(15);
     expect(cueExpectedPlaySec({ triggerSec: 20, media: null }, 21)).toBe(15);
+  });
+});
+
+describe("cueClipSessionId", () => {
+  const base = { cueId: "cue1", cycle: 0, mediaId: "m1" };
+
+  it("differs per match so a cue in match B does not overwrite the row of match A", () => {
+    expect(cueClipSessionId({ ...base, matchId: "matchA" })).not.toBe(
+      cueClipSessionId({ ...base, matchId: "matchB" }),
+    );
+    expect(cueClipSessionId({ ...base, matchId: "matchA", stint: 1 })).not.toBe(
+      cueClipSessionId({ ...base, matchId: "matchB", stint: 1 }),
+    );
+  });
+
+  it("is stable for repeated reports about the same play", () => {
+    expect(cueClipSessionId({ ...base, matchId: "matchA" })).toBe(
+      cueClipSessionId({ ...base, matchId: "matchA" }),
+    );
+    expect(cueClipSessionId({ ...base, matchId: "matchA" })).toBe("cue:matchA:cue1:0:m1");
+    expect(cueClipSessionId({ ...base, matchId: "matchA", stint: 1 })).toBe("cue:matchA:cue1:0:m1:r1");
+  });
+
+  it("differs per cycle and per media", () => {
+    const a = cueClipSessionId({ ...base, matchId: "matchA" });
+    expect(cueClipSessionId({ ...base, matchId: "matchA", cycle: 1 })).not.toBe(a);
+    expect(cueClipSessionId({ ...base, matchId: "matchA", mediaId: "m2" })).not.toBe(a);
+  });
+});
+
+describe("one-off cue that owes one full play", () => {
+  const cue = (over: Record<string, unknown> = {}) => ({
+    id: "c1",
+    enabled: true,
+    matchStatus: "FIRST_HALF",
+    triggerSec: 600,
+    endSec: null as number | null,
+    guarantee: "fullPlay" as string | null,
+    media: { active: true },
+    ...over,
+  });
+
+  it("resumes after an interruption only when the booking says so", () => {
+    expect(cueResumesAfterInterruption(cue())).toBe(true);
+    expect(cueResumesAfterInterruption(cue({ guarantee: null }))).toBe(false);
+    expect(cueResumesAfterInterruption(cue({ guarantee: "none" }))).toBe(false);
+  });
+
+  it("gets its turn again in the same phase while the clock runs", () => {
+    const owed = new Set(["c1"]);
+    const opts = { matchStatus: "FIRST_HALF", clockRuns: true, owed: (c: { id: string }) => owed.has(c.id) };
+    expect(pickOwedScheduledCue([cue()], opts)?.id).toBe("c1");
+    expect(pickOwedScheduledCue([cue()], { ...opts, clockRuns: false })).toBeNull();
+    expect(pickOwedScheduledCue([cue()], { ...opts, matchStatus: "SECOND_HALF" })).toBeNull();
+    expect(pickOwedScheduledCue([cue({ guarantee: null })], opts)).toBeNull();
+    expect(pickOwedScheduledCue([cue()], { ...opts, owed: () => false })).toBeNull();
   });
 });

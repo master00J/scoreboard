@@ -9,7 +9,8 @@ import {
   pdfHeaderTitle,
   serializeProofOfPlayBrand,
 } from "./proof-of-play-brand";
-import { buildProofOfPlayPdf, type ProofOfPlayExportLabels } from "./proof-of-play-export";
+import ExcelJS from "exceljs";
+import { buildProofOfPlayXlsx, buildProofOfPlayPdf, type ProofOfPlayExportLabels } from "./proof-of-play-export";
 
 const labels: ProofOfPlayExportLabels = {
   title: "ArenaCue · Proof-of-play",
@@ -48,6 +49,13 @@ const labels: ProofOfPlayExportLabels = {
   segmentFirstHalf: "1e",
   segmentSecondHalf: "2e",
   segmentExtraTime: "Verlenging",
+  segmentPostmatch: "Na",
+  colBooked: "Geboekt",
+  plannedPlays: "Geplande vertoningen",
+  completePlays: "Volledige vertoningen",
+  colShortfall: "Open tekort",
+  totalBooked: "Totaal geboekt",
+  totalShortfall: "Totaal open tekort",
 };
 
 describe("proof-of-play brand", () => {
@@ -112,6 +120,20 @@ describe("proof-of-play brand", () => {
     expect(pdfHeaderTitle(again, "ArenaCue · Proof-of-play")).toBe("ArenaCue · Proof-of-play");
   });
 
+  it("exports a planned file with zero plays to the workbook", async () => {
+    const bytes = await buildProofOfPlayXlsx([], [{
+      sponsorName: "Bakkerij", sponsorId: "s", plays: 0, actualSec: 0, expectedSec: 0,
+      files: [{ mediaId: "a", title: "Brood", plannedSec: 10, deliveredSec: 0, plannedPlays: 2, completePlays: 0 }],
+    }], {
+      generatedAtIso: "2026-08-20T15:00:00.000Z", filterLabel: "Match", totalPlays: 0,
+      totalActualSec: 0, totalExpectedSec: 0, avgFulfillmentPercent: 0,
+    }, labels);
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer);
+    const rows = workbook.getWorksheet(labels.sheetReport)!.getSheetValues();
+    expect(rows).toContainEqual([undefined, "Bakkerij", "Brood", "10s", "0s", 2, 0]);
+  });
+
   it("bouwt een PDF met clubnaam en eigen kleur", () => {
     const brand = parseProofOfPlayBrand(
       JSON.stringify({
@@ -124,7 +146,8 @@ describe("proof-of-play brand", () => {
     );
     const pdf = buildProofOfPlayPdf(
       [],
-      [{ sponsorId: "1", sponsorName: "Bakkerij", plays: 2, actualSec: 40, expectedSec: 60 }],
+      [{ sponsorId: "1", sponsorName: "Bakkerij", plays: 2, actualSec: 40, expectedSec: 60,
+        files: [{ mediaId: "a", title: "Brood", plannedSec: 60, deliveredSec: 40, plannedPlays: 3, completePlays: 2 }] }],
       {
         generatedAtIso: "2026-08-20T15:00:00.000Z",
         filterLabel: "Alle wedstrijden",
@@ -141,5 +164,6 @@ describe("proof-of-play brand", () => {
     const asText = Buffer.from(pdf).toString("latin1");
     expect(asText).toContain("Sponsorrapport");
     expect(asText).toContain("Test Club");
+    expect(asText).toContain("Brood");
   });
 });

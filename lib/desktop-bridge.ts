@@ -9,6 +9,7 @@ import type { Command } from "./validation/commands";
 import type { FeatureRequestDraft, FeatureRequestResult } from "./feature-request";
 import type { MusicLibrary, MusicLibraryUpdate, MusicImportResult } from "./music";
 import type { OfficialClockSettings, OfficialClockStatus } from "./official-clock/types";
+import type { BridgeNetworkChoice, MobileBridgeNetworkState } from "./mobile-bridge-network";
 import type { StadiumScreensPayload } from "./stadium-screen";
 import type { StreamDeckInfo } from "./stream-deck";
 import type { SerializedDisplayState } from "./timer";
@@ -181,11 +182,72 @@ export type MobileBridgeInfo = {
   /** Zelfde URLs als `pairCodes`, mét operator-PIN — alleen tonen in vertrouwde omgeving. */
   pairCodesOperator: string[];
   operatorPinConfigured: boolean;
+  /** Op welk netwerk de bridge luistert en welke netwerken deze pc heeft. `null` als de bridge niet draait. */
+  network?: MobileBridgeNetworkState | null;
   cloud: {
     enabled: boolean;
     baseUrl: string | null;
     venueId: string | null;
     pairCode: string | null;
+  };
+};
+
+export type MatchPackageErrorCode =
+  | "busy"
+  | "not_found"
+  | "zip_failed"
+  | "unpack_failed"
+  | "not_a_match_package"
+  | "newer_version"
+  | "match_in_play"
+  | "failed";
+
+/** Wat inlezen van een wedstrijdpakket zou doen (zie server/match-package.ts). */
+export type MatchPackageImportPlan = {
+  matchId: string;
+  homeName: string;
+  awayName: string;
+  sport: string;
+  kickoffAt: string | null;
+  matchExists: boolean;
+  teams: Array<{ name: string; action: "create" | "update"; playersNew: number; playersUpdated: number }>;
+  mediaNew: number;
+  files: number;
+  packageCreatedAt: string;
+  packageVersion: string;
+};
+
+export type MatchPackageExportResult = {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  filePath?: string;
+  skipped?: Array<{ path: string; reason: "missing" | "too_large" }>;
+};
+
+export type MatchPackageOpenResult = {
+  ok: boolean;
+  canceled?: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  packageVersion?: string;
+  token?: string;
+  plan?: MatchPackageImportPlan;
+};
+
+export type MatchPackageApplyResult = {
+  ok: boolean;
+  errorCode?: MatchPackageErrorCode;
+  error?: string;
+  result?: {
+    matchId: string;
+    matchCreated: boolean;
+    teamsCreated: number;
+    teamsUpdated: number;
+    playersCreated: number;
+    playersUpdated: number;
+    mediaCreated: number;
   };
 };
 
@@ -198,8 +260,9 @@ export type VenueBackupResult = {
   skipped?: Array<{ path: string; reason: "missing" | "too_large" }>;
 };
 
+/** "restored" komt pas als de paden in de database staan en alle media opent. */
 export type RestoreNotice =
-  | { kind: "restored"; backupCreatedAt: string | null; restoredFiles: number }
+  | { kind: "restored"; source?: "backup" | "rollback"; backupCreatedAt: string | null; restoredFiles: number }
   | { kind: "failed"; error: string };
 
 export type NetworkSourceResetInfo = { mode: "copy" | "h264" };
@@ -237,6 +300,8 @@ export type ElectronBridge = {
   onDisplayHorn?: (listener: (payload: HornPayload) => void) => () => void;
   onSponsorLedger: (listener: (ledger: SponsorLedgerPayload | null) => void) => () => void;
   onDisplayError: (listener: (payload: { message: string; code?: string; params?: Record<string, string | number> }) => void) => () => void;
+  /** Stadionscherm verborgen/geminimaliseerd of weer zichtbaar (alleen het display-venster krijgt dit). */
+  onDisplayWindowVisibility?: (listener: (payload: { visible: boolean }) => void) => () => void;
   focusDisplayWindow: () => Promise<void>;
   reloadDisplayWindow: () => Promise<{ ok: boolean }>;
   /** Proof-of-play: sla renderer-gegenereerde PDF of Excel op (save dialog). */
@@ -265,6 +330,8 @@ export type ElectronBridge = {
   /** Stuurt een feature-aanvraag naar arenacue.be met de licentie van deze pc. */
   submitFeatureRequest?: (input: FeatureRequestDraft) => Promise<FeatureRequestResult>;
   getMobileBridgeInfo: () => Promise<MobileBridgeInfo>;
+  /** Kiest het netwerk van de telefoonbediening op deze pc. */
+  setMobileBridgeNetwork?: (choice: BridgeNetworkChoice) => Promise<{ ok: boolean; info: MobileBridgeInfo }>;
   getStreamDeckInfo: () => Promise<StreamDeckInfo | null>;
   /**
    * Meldt welke media de regie als snelle knop heeft vastgepind, in haar volgorde, zodat de
@@ -290,6 +357,13 @@ export type ElectronBridge = {
   exportVenueBackup: () => Promise<VenueBackupResult>;
   /** Leest een venue-back-up in; na bevestiging herstart de app met die gegevens. */
   restoreVenueBackup?: () => Promise<VenueBackupResult>;
+  /** ZIP met één wedstrijd, beide teams, spelers en hun media. */
+  exportMatchPackage?: (matchId: string) => Promise<MatchPackageExportResult>;
+  /** Kiest en opent een wedstrijdpakket; wijzigt nog niets. */
+  openMatchPackage?: () => Promise<MatchPackageOpenResult>;
+  /** Voegt een geopend wedstrijdpakket samen met de gegevens op deze pc. */
+  applyMatchPackage?: (token: string) => Promise<MatchPackageApplyResult>;
+  discardMatchPackage?: (token: string) => Promise<{ ok: boolean }>;
   /** Melding na een herstart waarbij een back-up is teruggezet (één keer op te halen). */
   takeRestoreNotice?: () => Promise<RestoreNotice | null>;
   /** Aangesloten monitoren en welke het stadionscherm toont. */

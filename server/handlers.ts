@@ -128,6 +128,8 @@ async function updateState(db: Db, data: StateUpdate): Promise<DisplayState> {
     where: { id: 1 },
     data: {
       ...data,
+      ...(current.mode === "BLACKOUT" && data.blackoutResumeMode === undefined && data.matchId === undefined
+        ? { mode: "BLACKOUT" } : {}),
       ...(shotClockDisabled ? suppressShotClock() : {}),
       // Nooit lager dan de vorige stempel, ook niet als de systeemklok terugspringt.
       updatedAt: nextStateUpdatedAt(current.updatedAt),
@@ -233,19 +235,34 @@ async function ensureMediaItemForVideoPath(
   return created.id;
 }
 
-function parseSubQueue(raw: string | null | undefined): SubPair[] {
+/**
+ * A substitution waiting for its animation on the stadium screen. `registered: true` means it is
+ * already in the lineup and the match log (every substitution is registered when it is
+ * confirmed); the queue only says which animations still have to be shown. Entries without the
+ * flag were written by an older version and are registered when they come up.
+ */
+type QueuedSub = SubPair & { registered?: true };
+
+function parseSubQueue(raw: string | null | undefined): QueuedSub[] {
   if (!raw || raw === "[]") return [];
   try {
     const v = JSON.parse(raw) as unknown;
     if (!Array.isArray(v)) return [];
-    return v.filter(
-      (x): x is SubPair =>
-        typeof x === "object" &&
-        x !== null &&
-        typeof (x as SubPair).teamId === "string" &&
-        typeof (x as SubPair).playerOutId === "string" &&
-        typeof (x as SubPair).playerInId === "string",
-    );
+    return v
+      .filter(
+        (x): x is QueuedSub =>
+          typeof x === "object" &&
+          x !== null &&
+          typeof (x as SubPair).teamId === "string" &&
+          typeof (x as SubPair).playerOutId === "string" &&
+          typeof (x as SubPair).playerInId === "string",
+      )
+      .map((x) => ({
+        teamId: x.teamId,
+        playerOutId: x.playerOutId,
+        playerInId: x.playerInId,
+        ...(x.registered === true ? { registered: true as const } : {}),
+      }));
   } catch {
     return [];
   }
@@ -696,36 +713,54 @@ async function applySubstitutionPairs(db: Db, pairs: SubPair[]) {
 
   for (const p of pairs) await validateSubPair(db, s.matchId, p);
 
-  const queue = parseSubQueue(s.substitutionQueueJson);
+  // Only while an animation is on screen does the existing queue still count.
+  const queue = s.mode === "SUBSTITUTION" ? parseSubQueue(s.substitutionQueueJson) : [];
+  const unregistered: SubPair[] = queue
+    .filter((q) => !q.registered)
+    .map(({ teamId, playerOutId, playerInId }) => ({ teamId, playerOutId, playerInId }));
+  const toRegister = [...unregistered, ...pairs];
+  await validateSubPairsSequential(s.matchId, toRegister, db);
 
-  if (s.mode === "SUBSTITUTION") {
-    const merged = [...queue, ...pairs];
-    await validateSubPairsSequential(s.matchId, merged, db);
-    await updateState(db, { substitutionQueueJson: JSON.stringify(merged) });
+  // Every confirmed substitution goes into the lineup and the match log right away (same
+  // transaction). A manual clip or mode change that clears the animation queue can then no
+  // longer lose a substitution.
+  const match = await activeMatchOrNull(db, s);
+  const ctx = eventClockContext(s, match);
+  for (const pair of toRegister) {
+    await logMatchEvent(db, s.matchId, {
+      type: "SUB",
+      minute: ctx.minute,
+      period: ctx.period,
+      clockSec: ctx.clockSec,
+      teamId: pair.teamId,
+      playerInId: pair.playerInId,
+      playerOutId: pair.playerOutId,
+    });
+    await applySubToFieldRoster(s.matchId, pair, db);
+  }
+
+  if (s.mode === "BLACKOUT") {
+    await updateState(db, {});
     return;
   }
 
-  await validateSubPairsSequential(s.matchId, pairs, db);
+  const shown: QueuedSub[] = pairs.map((p) => ({ ...p, registered: true }));
+  if (s.mode === "SUBSTITUTION") {
+    const animations: QueuedSub[] = [
+      ...queue.map((q) => ({ ...q, registered: true as const })),
+      ...shown,
+    ];
+    await updateState(db, { substitutionQueueJson: JSON.stringify(animations) });
+    return;
+  }
 
-  const match = await activeMatchOrNull(db, s);
-  const ctx = eventClockContext(s, match);
-  const [first, ...rest] = pairs;
-  await logMatchEvent(db, s.matchId, {
-    type: "SUB",
-    minute: ctx.minute,
-    period: ctx.period,
-    clockSec: ctx.clockSec,
-    teamId: first.teamId,
-    playerInId: first.playerInId,
-    playerOutId: first.playerOutId,
-  });
+  const [first, ...rest] = shown;
   await updateState(db, {
     mode: "SUBSTITUTION",
     activeSubInId: first.playerInId,
     activeSubOutId: first.playerOutId,
     substitutionQueueJson: JSON.stringify(rest),
   });
-  await applySubToFieldRoster(s.matchId, first, db);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1041,6 +1076,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
     case "match:setStatus": {
       const s = await getState(db);
       const match = await activeMatchOrNull(db, s);
+      if (match?.status === cmd.status) return { ok: true, result: { unchanged: true } };
       if (match) {
         const data: MatchUpdate = { status: cmd.status };
         if (cmd.status === "FIRST_HALF" || cmd.status === "SECOND_HALF" || cmd.status === "EXTRA_TIME") {
@@ -1312,7 +1348,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       // fullscreen while the operator is picking the scorer.
       const s = await getState(db);
       if (!s.matchId) cmdErr("noActiveMatch");
-      if (!(await goalVisualEnabledForSide(db, cmd.side))) {
+      if (s.mode === "BLACKOUT" || !(await goalVisualEnabledForSide(db, cmd.side))) {
         return { ok: true };
       }
       let activeMediaId: string | null = null;
@@ -1343,6 +1379,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
     }
     case "goal:cancel": {
       const s = await getState(db);
+      if (s.mode === "BLACKOUT") return { ok: true };
       await updateState(db, {
         mode: liveModeAfterPeriodChange(s.preferSponsorRotation),
         activeMediaId: null,
@@ -1372,6 +1409,10 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
         meta: { side: cmd.side, delta: 1, from: m[column], to: m[column] + 1 },
       });
 
+      if (s.mode === "BLACKOUT") {
+        await updateState(db, {});
+        return { ok: true };
+      }
       if (!(await goalVisualEnabledForSide(db, cmd.side))) {
         await updateState(db, {
           mode: s.mode,
@@ -1443,6 +1484,20 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
 
       while (queue.length > 0) {
         const [next, ...rest] = queue;
+        if (next.registered) {
+          // Already in the lineup and the match log: only show the animation.
+          await updateState(db, {
+            mode: "SUBSTITUTION",
+            activeSubInId: next.playerInId,
+            activeSubOutId: next.playerOutId,
+            substitutionQueueJson: JSON.stringify(rest),
+          });
+          return {
+            ok: true,
+            ...(warnings.length ? { warning: warnings.join(" · ") } : {}),
+          };
+        }
+        // Queue entry from an older version: register it now (old behaviour).
         try {
           await validateSubPair(db, s.matchId, next);
           await validateSubPairAgainstField(s.matchId, next, db);
@@ -1518,9 +1573,9 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const side = cmd.teamId === match.homeTeamId ? "home" : "away";
       const penaltyStartsNow = !profile.penaltyFollowsClock || s.timerRunning;
       await updateState(db, {
-        mode: "CARD",
-        activePlayerId: cmd.playerId,
-        activeCardColor: cmd.color,
+        ...(s.mode !== "BLACKOUT" ? {
+          mode: "CARD", activePlayerId: cmd.playerId, activeCardColor: cmd.color,
+        } : {}),
         ...(penaltySeconds
           ? penaltyStartsNow
             ? runPenaltyFrom(side, penaltySeconds)
@@ -1627,7 +1682,33 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
         const profile = getSportProfile(m.sport);
         const metaSide: Side | null = meta.side === "home" || meta.side === "away" ? meta.side : null;
 
-        if (ev.type === "GOAL" && ev.teamId) {
+        if (ev.type === "POINT" || ev.type === "GOAL") {
+          const later = await db.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM MatchEvent WHERE matchId = ${m.id} AND type = 'SCORE_SET'
+              AND rowid > (SELECT rowid FROM MatchEvent WHERE id = ${ev.id}) LIMIT 1`;
+          if (later.length) cmdErr("undoLaterEventFirst");
+        }
+        if (ev.type === "SUB" && ev.teamId && ev.playerOutId && ev.playerInId) {
+          const later = await db.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM MatchEvent WHERE matchId = ${m.id} AND type = 'SUB'
+              AND rowid > (SELECT rowid FROM MatchEvent WHERE id = ${ev.id})
+              AND (playerInId IN (${ev.playerInId}, ${ev.playerOutId})
+                OR playerOutId IN (${ev.playerInId}, ${ev.playerOutId})) LIMIT 1`;
+          if (later.length) cmdErr("undoLaterEventFirst");
+          const reverse = { teamId: ev.teamId, playerOutId: ev.playerInId, playerInId: ev.playerOutId };
+          await validateSubPairAgainstField(m.id, reverse, db);
+          await applySubToFieldRoster(m.id, reverse, db);
+          if (ds.matchId === m.id) {
+            const queue = parseSubQueue(ds.substitutionQueueJson).filter(q =>
+              q.playerInId !== ev.playerInId || q.playerOutId !== ev.playerOutId);
+            await updateState(db, { substitutionQueueJson: JSON.stringify(queue) });
+            if (ds.activeSubInId === ev.playerInId && ds.activeSubOutId === ev.playerOutId) {
+              if (ds.mode === "SUBSTITUTION") await handleCommand({ type: "sub:queueAdvance" }, db);
+              else await updateState(db, { activeSubInId: null, activeSubOutId: null,
+                ...(ds.blackoutResumeMode === "SUBSTITUTION" ? { blackoutResumeMode: liveModeAfterPeriodChange(ds.preferSponsorRotation) } : {}) });
+            }
+          }
+        } else if (ev.type === "GOAL" && ev.teamId) {
           const column = ev.teamId === m.homeTeamId ? "homeScore" : "awayScore";
           await db.match.update({
             where: { id: m.id },
@@ -1659,6 +1740,10 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
             });
           }
         } else if (ev.type === "SCORE_SET") {
+          const later = await db.$queryRaw<Array<{ id: string }>>`
+            SELECT id FROM MatchEvent WHERE matchId = ${m.id} AND type IN ('GOAL','POINT','SCORE_SET','SET_WON')
+              AND rowid > (SELECT rowid FROM MatchEvent WHERE id = ${ev.id}) LIMIT 1`;
+          if (later.length) cmdErr("undoLaterEventFirst");
           const fromHome = Number(meta.fromHome);
           const fromAway = Number(meta.fromAway);
           if (Number.isFinite(fromHome) && Number.isFinite(fromAway)) {

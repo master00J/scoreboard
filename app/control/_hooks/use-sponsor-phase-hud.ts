@@ -28,6 +28,7 @@ import { computePrematchSpreadTiming } from "@/lib/prematch-spread-timing";
 import { sponsorRepeatBudgetCyclesFromThemeJson } from "@/lib/scoreboard-theme";
 import {
   ledgerActiveClipStillLiveForMatchSegment,
+  rotationLiveClipSponsorId,
   sponsorLedgerMatchesSegment,
   sponsorTelemetryActiveClipElapsedSec,
   sponsorTelemetrySegmentKey,
@@ -79,6 +80,8 @@ export type SponsorPhaseHudModel =
       contextLabel: string;
       phase: "scoreboard" | "sponsor";
       sponsorName: string | null;
+      /** Notitie uit het seizoensplan van de sponsor in beeld ("direct na sponsor X"). */
+      sponsorNotes?: string | null;
       mediaTitle: string | null;
       mediaFileName: string | null;
       mediaKind?: "IMAGE" | "VIDEO" | null;
@@ -517,7 +520,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         restartsClip: sponsorInterrupted,
         scheduleClock: sponsorScheduleClockRef.current,
         liveClipSponsorId: match
-          ? (ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, now)?.sponsorId ?? null)
+          ? rotationLiveClipSponsorId(match, section, sponsorLedger, now)
           : null,
       });
       if (sponsorInterrupted) return base;
@@ -571,7 +574,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         restartsClip: sponsorInterrupted,
         scheduleClock: halftimeScheduleClockRef.current,
         liveClipSponsorId: match
-          ? (ledgerActiveClipStillLiveForMatchSegment(match, "halftime", sponsorLedger, now)?.sponsorId ?? null)
+          ? rotationLiveClipSponsorId(match, "halftime", sponsorLedger, now)
           : null,
       });
       if (sponsorInterrupted) return base;
@@ -664,7 +667,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       restartsClip: sponsorInterrupted,
       scheduleClock: prematchScheduleClockRef.current,
       liveClipSponsorId: match
-        ? (ledgerActiveClipStillLiveForMatchSegment(match, "prematch", sponsorLedger, now)?.sponsorId ?? null)
+        ? rotationLiveClipSponsorId(match, "prematch", sponsorLedger, now)
         : null,
     });
     if (sponsorInterrupted) return base;
@@ -726,7 +729,7 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
       restartsClip: sponsorInterrupted,
       scheduleClock: postmatchScheduleClockRef.current,
       liveClipSponsorId: match
-        ? (ledgerActiveClipStillLiveForMatchSegment(match, "postmatch", sponsorLedger, now)?.sponsorId ?? null)
+        ? rotationLiveClipSponsorId(match, "postmatch", sponsorLedger, now)
         : null,
     });
     if (sponsorInterrupted) return base;
@@ -821,6 +824,9 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         contextLabel: tMatchStatus(tUi, match.status, match.sport),
         phase: "sponsor" as const,
         sponsorName: cueSponsor,
+        sponsorNotes: cueMedia.sponsorId
+          ? (sponsors.find((s) => s.id === cueMedia.sponsorId)?.notes ?? null)
+          : null,
         mediaTitle: cueLabel.title,
         mediaFileName: cueLabel.fileName,
         mediaKind: cueMedia.type === "IMAGE" || cueMedia.type === "VIDEO" ? cueMedia.type : null,
@@ -1032,6 +1038,13 @@ export function useSponsorPhaseHud(match: Match | null): SponsorPhaseHudModel {
         contextLabel,
         phase: effectivePhase,
         sponsorName: name,
+        sponsorNotes:
+          effectivePhase === "sponsor"
+            ? ((effectiveSponsorId != null
+                ? sponsors.find((s) => s.id === effectiveSponsorId)
+                : sponsors.find((s) => playingMediaId != null && (s.media ?? []).some((m) => m.id === playingMediaId))
+              )?.notes ?? null)
+            : null,
         mediaTitle: media?.title ?? null,
         mediaFileName: media?.fileName ?? null,
         mediaKind: media?.kind ?? null,

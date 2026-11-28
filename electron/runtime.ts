@@ -53,7 +53,37 @@ import type {
   SponsorTelemetryClipProgress,
   SponsorTelemetryClipStart,
 } from "../lib/sponsor-telemetry";
-import { sponsorPlayLogIdentity } from "../lib/sponsor-telemetry";
+import {
+  normalizeSponsorPlaySource,
+  sponsorPlayLogIdentity,
+  sponsorTelemetrySegmentKey,
+} from "../lib/sponsor-telemetry";
+import {
+  SPONSOR_PLAY_SOURCE_LAYER,
+  applyVisibleProgress,
+  createPlaySessionState,
+  ledgerSecondsFromRows,
+  playLogVisibleSec,
+  playRowActualMs,
+  playSourceCounts,
+  shouldPersistPlayProgress,
+  type PlayRowState,
+  type PlaySessionState,
+} from "../lib/sponsor-play-ledger";
+import {
+  defaultSponsorGuaranteeSettings,
+  parseSponsorGuaranteeSettings,
+  serializeSponsorGuaranteeSettings,
+  type SponsorGuaranteeSettings,
+} from "../lib/sponsor-guarantee-settings";
+import { sectionForStatus } from "../lib/sponsor-display-helpers";
+import {
+  mergeBookingsIntoSummary,
+  snapshotPhaseBookings,
+  sponsorGuaranteeLive,
+  summarizeSponsorBookings,
+} from "../server/sponsor-guarantees";
+import { normalizeCueGuarantee, parseSponsorGuarantee, serializeSponsorGuarantee } from "../lib/sponsor-guarantee";
 import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
@@ -61,10 +91,31 @@ import {
 } from "../lib/scoreboard-templates";
 import { displayExtrasFromJson, serializeDisplayExtras } from "../lib/display-extras";
 import { isMatchInPlay } from "../lib/match-in-play";
-import { listExternalFileReferences, remapStoredFilePaths } from "../server/venue-backup";
+import { finishPendingRestore, listExternalFileReferences, type RestoreFinishResult } from "../server/venue-backup";
+import {
+  applyMatchImport,
+  collectMatchPackage,
+  planMatchImport,
+  type MatchImportPlan,
+  type MatchImportResult,
+  type MatchPackage,
+} from "../server/match-package";
 import { isCommandUserError } from "../lib/command-user-error";
 import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import { handleCommand } from "../server/handlers";
+import {
+  buildSponsorPlayWhere,
+  listSponsorPlays,
+  parseSponsorPlayFilters,
+  sponsorPlayListLimit,
+  summarizeSponsorPlays,
+} from "../server/sponsor-plays";
+import type { Prisma } from "@prisma/client";
+import {
+  markCloudCommandAcked as markLedgerAcked,
+  pruneAppliedCloudCommands,
+  runCloudCommandOnce,
+} from "../server/cloud-command-ledger";
 import { ensureDefaultMatchFieldLineups } from "../server/match-lineup";
 import { parsePlayerIdArrayJson } from "../lib/match-field-lineup";
 import { startupDisplayStatePatch } from "../lib/display-startup";
@@ -72,9 +123,43 @@ import {
   isCurrentStadiumCompatPath,
   isDisplayPlaybackRisk,
   isStadiumPlaybackHangEvent,
+  playbackWarningForReason,
 } from "../lib/media-playback-compat";
-import { inspectVideoForDisplay, prepareVideoForDisplay } from "./media-transcode";
-import { cueEndSec } from "../lib/scheduled-media-cue";
+import {
+  checkMediaFile,
+  inspectVideoForDisplay,
+  makeDisplayCopy,
+  mediaFileVersion,
+  prepareVideoForDisplay,
+  resolveMediaFile,
+} from "./media-transcode";
+import {
+  isPlayableMedia,
+  mediaHealthFor,
+  nextMediaCheckId,
+  parseMediaCheckRecord,
+  type MediaCheckRecord,
+  type MediaHealth,
+} from "../lib/media-health";
+import {
+  applyMediaSequences,
+  isSequenceRotationSponsorId,
+  normalizeMediaSequences,
+  parseMediaSequencesJson,
+  sequencedMediaIds,
+  serializeMediaSequences,
+  type MediaSequence,
+  type SequenceMember,
+} from "../lib/media-sequences";
+import {
+  displayCopyKey,
+  displayCopyMap,
+  displayCopyNotNeededKey,
+  displayCopyProgress,
+  normalizeDisplayCopyHeight,
+  type DisplayCopyHeight,
+} from "../lib/display-copy";
+import { writeScheduledCues } from "../server/scheduled-cue-writes";
 import {
   isClubRotationSponsorId,
   mergeSponsorsWithClubMedia,
@@ -106,10 +191,7 @@ function requireOpts() {
   return opts;
 }
 
-function parseCueEndSec(endSec: number | null | undefined, startSec: number): number | null {
-  if (endSec == null) return null;
-  return cueEndSec({ triggerSec: startSec, endSec });
-}
+
 
 function windows() {
   const { getControlWindow, getDisplayWindow, getStreamWindow } = requireOpts();
@@ -132,13 +214,37 @@ function sendControl(channel: string, payload: unknown) {
 }
 
 let sponsorLedgerSnapshot: SponsorLedgerPayload | null = null;
+
 /**
- * Per clipSessionId de hoogste gerapporteerde werkelijke duur (sec, afgerond).
- * React Strict Mode kan een effect-cleanup direct na mount laten lopen met ~0s;
- * de echte clipEnd komt daarna met de juiste waarde — dan tellen we enkel het verschil
- * bij en overschrijven we proof-of-play niet meer met 0.
+ * Vertoningen die het stadionscherm meldt, per clipSessionId. De zichtbare tijd is monotoon:
+ * React Strict Mode kan een effect-cleanup direct na mount laten lopen met ~0s; de echte
+ * clipEnd komt daarna met de juiste waarde — dan tellen we enkel het verschil bij. Niet
+ * afronden: elk fragment van 0,6 s telde vroeger als 1 s. Afronden gebeurt pas bij tonen.
+ *
+ * Elke vertoning krijgt bij de start meteen een rij (`state = running`) en de voortgang wordt
+ * om de paar seconden bewaard. Een herstart midden in een clip verliest zo hoogstens die paar
+ * seconden, en de lopende stand per fase wordt na de start opnieuw uit de rijen opgebouwd.
  */
-const sponsorClipBestActualSec = new Map<string, number>();
+type RuntimePlaySession = PlaySessionState & {
+  matchId: string;
+  segmentKey: string;
+  sponsorId: string;
+  mediaId: string;
+  expectedSec: number;
+  startedAtMs: number;
+  /** Deel van `countedMs` dat al in `sponsorLedgerSnapshot.bySponsorSec` staat. */
+  ledgerAddedMs: number;
+  lastPersistAtMs: number;
+  rowState: PlayRowState | null;
+  persist: Promise<void>;
+  endedAtMs: number | null;
+};
+
+const playSessions = new Map<string, RuntimePlaySession>();
+/** Vertoningen waarvan de tijd al in de lopende stand van deze fase zit (voor de heropbouw). */
+const ledgerSessionIds = new Set<string>();
+
+let sponsorGuaranteeSettings: SponsorGuaranteeSettings = defaultSponsorGuaranteeSettings();
 
 export function getSponsorLedgerSnapshot(): SponsorLedgerPayload | null {
   return sponsorLedgerSnapshot;
@@ -158,31 +264,120 @@ function ensureSponsorLedger(matchId: string, segmentKey: string): SponsorLedger
       activeClip: null,
       updatedAtMs: now,
     };
+    ledgerSessionIds.clear();
+    // Vangnet: de geboekte tijd van deze fase vastleggen als dat bij de fasewissel niet lukte.
+    void snapshotPhaseBookingsFor(matchId);
   }
   return sponsorLedgerSnapshot;
+}
+
+function prunePlaySessions(now: number) {
+  if (playSessions.size < 300) return;
+  for (const [id, s] of playSessions) {
+    if (s.endedAtMs != null && now - s.endedAtMs > 10 * 60_000) playSessions.delete(id);
+  }
+}
+
+function playSessionFor(payload: {
+  clipSessionId: string;
+  matchId: string;
+  segmentKey: string;
+  sponsorId: string;
+  mediaId: string;
+  startedAtMs: number;
+  source?: unknown;
+  expectedPlaySec?: number;
+  paused?: boolean;
+}): RuntimePlaySession {
+  const existing = playSessions.get(payload.clipSessionId);
+  if (existing) return existing;
+  const source = normalizeSponsorPlaySource(payload.source);
+  const session: RuntimePlaySession = {
+    ...createPlaySessionState({
+      clipSessionId: payload.clipSessionId,
+      source,
+      counted: playSourceCounts(source, sponsorGuaranteeSettings.countManualPlays),
+      paused: payload.paused,
+    }),
+    matchId: payload.matchId,
+    segmentKey: payload.segmentKey,
+    sponsorId: payload.sponsorId,
+    mediaId: payload.mediaId,
+    expectedSec: Math.max(0, payload.expectedPlaySec ?? 0),
+    startedAtMs: payload.startedAtMs,
+    ledgerAddedMs: 0,
+    lastPersistAtMs: 0,
+    rowState: null,
+    persist: Promise.resolve(),
+    endedAtMs: null,
+  };
+  playSessions.set(payload.clipSessionId, session);
+  prunePlaySessions(Date.now());
+  return session;
+}
+
+/** De HUD toont de clip die bovenaan op het scherm ligt; een lagere laag neemt die plek niet over. */
+function mayTakeActiveClip(ledger: SponsorLedgerPayload, session: RuntimePlaySession): boolean {
+  const ac = ledger.activeClip;
+  if (!ac || ac.clipSessionId === session.clipSessionId) return true;
+  const other = playSessions.get(ac.clipSessionId);
+  if (!other || other.endedAtMs != null) return true;
+  return SPONSOR_PLAY_SOURCE_LAYER[session.source] >= SPONSOR_PLAY_SOURCE_LAYER[other.source];
+}
+
+function feedVisibleMs(session: RuntimePlaySession, visibleMs: number, now: number): void {
+  applyVisibleProgress(playSessions.values(), session, visibleMs, now);
+}
+
+/** Bewaart de stand van een vertoning; schrijfacties per vertoning lopen na elkaar. */
+function queuePlayRowWrite(session: RuntimePlaySession, state: PlayRowState | "delete"): void {
+  session.lastPersistAtMs = Date.now();
+  session.persist = session.persist
+    .then(() => writePlayRow(session, state))
+    .catch((err) => {
+      console.warn("[runtime] kon proof-of-play niet opslaan", err);
+    });
 }
 
 export function sponsorTelemetryClipStart(payload: SponsorTelemetryClipStart): SponsorLedgerPayload {
   const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
   const now = Date.now();
-  ledger.activeClip = {
-    sponsorId: payload.sponsorId,
-    mediaId: payload.mediaId,
-    startedAtMs: payload.startedAtMs,
-    expectedPlaySec: payload.expectedPlaySec,
-    clipSessionId: payload.clipSessionId,
-    playbackPositionMs: payload.playbackPositionMs,
-    paused: payload.paused,
-  };
+  const isNew = !playSessions.has(payload.clipSessionId);
+  const session = playSessionFor(payload);
+  session.paused = !!payload.paused;
+  if (payload.expectedPlaySec > session.expectedSec) session.expectedSec = payload.expectedPlaySec;
+  if (payload.visibleMs != null) feedVisibleMs(session, payload.visibleMs, now);
+  if (mayTakeActiveClip(ledger, session)) {
+    ledger.activeClip = {
+      sponsorId: payload.sponsorId,
+      mediaId: payload.mediaId,
+      startedAtMs: payload.startedAtMs,
+      expectedPlaySec: payload.expectedPlaySec,
+      clipSessionId: payload.clipSessionId,
+      playbackPositionMs: payload.playbackPositionMs,
+      paused: payload.paused,
+    };
+  }
   ledger.updatedAtMs = now;
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
+  // Het begin van een vertoning meteen vastleggen: een herstart verliest hem dan niet.
+  if (isNew) queuePlayRowWrite(session, "running");
   return ledger;
 }
 
 export function sponsorTelemetryClipProgress(
   payload: SponsorTelemetryClipProgress,
 ): SponsorLedgerPayload | null {
+  const now = Date.now();
+  const session = playSessions.get(payload.clipSessionId);
+  if (session && session.endedAtMs == null) {
+    if (payload.paused != null) session.paused = payload.paused;
+    if (payload.visibleMs != null) {
+      feedVisibleMs(session, payload.visibleMs, now);
+      if (shouldPersistPlayProgress(session.lastPersistAtMs, now)) queuePlayRowWrite(session, "running");
+    }
+  }
   const ledger = sponsorLedgerSnapshot;
   if (!ledger || ledger.matchId !== payload.matchId || ledger.segmentKey !== payload.segmentKey) {
     return null;
@@ -195,135 +390,231 @@ export function sponsorTelemetryClipProgress(
   ac.playbackPositionMs = Math.max(0, payload.playbackPositionMs);
   if (payload.paused != null) ac.paused = payload.paused;
   if (payload.startedAtMs != null) ac.startedAtMs = payload.startedAtMs;
-  ledger.updatedAtMs = Date.now();
+  ledger.updatedAtMs = now;
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
   return ledger;
 }
 
 export function sponsorTelemetryClipEnd(payload: SponsorTelemetryClipEnd): SponsorLedgerPayload {
+  const now = Date.now();
   const sessionId = payload.clipSessionId;
-  const rounded = Math.max(0, Math.round(payload.actualSec));
-  const prevBest = sponsorClipBestActualSec.get(sessionId) ?? 0;
-  const bestActual = Math.max(prevBest, rounded);
-  const delta = bestActual - prevBest;
-  sponsorClipBestActualSec.set(sessionId, bestActual);
-  if (sponsorClipBestActualSec.size > 4000) {
-    sponsorClipBestActualSec.clear();
-  }
+  const reported = Number.isFinite(payload.actualSec) ? Math.max(0, payload.actualSec) : 0;
+  const session = playSessionFor(payload);
+  const prevVisibleMs = session.visibleMs;
+  if (!payload.discard) feedVisibleMs(session, reported * 1000, now);
 
-  const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
-  if (delta > 0) {
-    const prevSpent = ledger.bySponsorSec[payload.sponsorId] ?? 0;
-    ledger.bySponsorSec[payload.sponsorId] = prevSpent + delta;
+  // The previous phase can finish after the new phase has already started reporting.
+  // Persist that last fragment without replacing the live ledger of the new phase.
+  if (sponsorLedgerSnapshot && (sponsorLedgerSnapshot.matchId !== payload.matchId ||
+      sponsorLedgerSnapshot.segmentKey !== payload.segmentKey)) {
+    session.endedAtMs = now;
+    queuePlayRowWrite(session, playRowActualMs(session) > 0 ? "done" : "delete");
+    return sponsorLedgerSnapshot;
   }
+  const ledger = ensureSponsorLedger(payload.matchId, payload.segmentKey);
+  const ledgerDeltaMs = session.countedMs - session.ledgerAddedMs;
+  if (ledgerDeltaMs > 0) {
+    session.ledgerAddedMs = session.countedMs;
+    ledger.bySponsorSec[payload.sponsorId] =
+      (ledger.bySponsorSec[payload.sponsorId] ?? 0) + ledgerDeltaMs / 1000;
+  }
+  ledgerSessionIds.add(sessionId);
 
   const ac = ledger.activeClip;
-  let expectedSecForLog = 0;
   const clipMatches =
     ac &&
     ac.clipSessionId === sessionId &&
     ac.sponsorId === payload.sponsorId &&
     ac.mediaId === payload.mediaId;
   if (clipMatches) {
-    expectedSecForLog = Math.max(0, Math.round(ac.expectedPlaySec || 0));
-    if (payload.discard) {
-      ledger.activeClip = null;
-    }
+    if (ac.expectedPlaySec > session.expectedSec) session.expectedSec = ac.expectedPlaySec;
     // Geen activeClip wissen op een spuriëne 0s-melding direct na mount (Strict Mode).
     // Wél wissen als er na enige tijd nog steeds 0s binnenkomt: anders blijft de HUD "Bezig"
     // terwijl het display al op scorebord-fallback staat.
-    const startedMs = ac.startedAtMs;
     const allowStaleZeroClear =
-      delta === 0 &&
-      rounded === 0 &&
-      prevBest === 0 &&
-      Date.now() - startedMs >= 2000;
-    if (delta > 0 || allowStaleZeroClear) {
+      reported === 0 && prevVisibleMs === 0 && now - ac.startedAtMs >= 2000;
+    if (payload.discard || reported > 0 || allowStaleZeroClear) {
       ledger.activeClip = null;
     }
   }
 
-  ledger.updatedAtMs = Date.now();
+  ledger.updatedAtMs = now;
   sponsorLedgerSnapshot = ledger;
   sendAll("display:sponsorLedger", ledger);
 
-  if (payload.discard || bestActual <= 0) {
+  if (playRowActualMs(session) === 0) {
+    // Niets zichtbaar gespeeld: geen vertoning. Een al aangemaakte rij verdwijnt weer.
+    queuePlayRowWrite(session, "delete");
+    if (payload.discard || reported > 0 || now - session.startedAtMs >= 2000) session.endedAtMs = now;
     return ledger;
   }
 
-  // Proof-of-play: sla de beste bekende werkelijke duur op (monotoon stijgend).
-  void persistSponsorPlayLog(payload, expectedSecForLog, bestActual).catch((err) => {
-    console.warn("[runtime] kon proof-of-play niet opslaan", err);
-  });
-
+  session.endedAtMs = now;
+  queuePlayRowWrite(session, "done");
   return ledger;
 }
 
-async function persistSponsorPlayLog(
-  payload: SponsorTelemetryClipEnd,
-  expectedSec: number,
-  bestActualSec: number,
-): Promise<void> {
-  const clubClip = isClubRotationSponsorId(payload.sponsorId);
-  const [sponsor, media, match] = await Promise.all([
-    clubClip
+async function writePlayRow(session: RuntimePlaySession, state: PlayRowState | "delete"): Promise<void> {
+  if (state === "delete") {
+    await prisma.sponsorPlayLog.deleteMany({ where: { clipSessionId: session.clipSessionId } });
+    session.rowState = null;
+    return;
+  }
+  const actualMs = playRowActualMs(session);
+  /** Oude kolom in hele seconden voor oudere lezers; optellen gebeurt op `actualMs`. */
+  const actualSec = Math.round(actualMs / 1000);
+  const endedAt = new Date();
+  if (session.rowState != null) {
+    await prisma.sponsorPlayLog.updateMany({
+      where: { clipSessionId: session.clipSessionId },
+      data: { actualMs, actualSec, endedAt, state, counted: session.counted },
+    });
+    session.rowState = state;
+    return;
+  }
+  const clubClip = isClubRotationSponsorId(session.sponsorId);
+  /** Een reeks is geen sponsor: elk bestand telt onder de sponsor waar het bij hoort. */
+  const sequenceClip = isSequenceRotationSponsorId(session.sponsorId);
+  const [ownerSponsor, media, match] = await Promise.all([
+    clubClip || sequenceClip
       ? Promise.resolve(null)
       : prisma.sponsor.findUnique({
-          where: { id: payload.sponsorId },
-          select: { name: true },
+          where: { id: session.sponsorId },
+          select: { id: true, name: true },
         }),
     prisma.mediaItem.findUnique({
-      where: { id: payload.mediaId },
-      select: { title: true, durationSec: true },
+      where: { id: session.mediaId },
+      select: { title: true, durationSec: true, sponsor: { select: { id: true, name: true } } },
     }),
     prisma.match.findUnique({
-      where: { id: payload.matchId },
+      where: { id: session.matchId },
       select: { status: true },
     }),
   ]);
-
-  const expected =
-    expectedSec > 0 ? expectedSec : (media?.durationSec ?? 0);
-  const actual = Math.max(0, Math.round(bestActualSec));
-
-  const existing = await prisma.sponsorPlayLog.findUnique({
-    where: { clipSessionId: payload.clipSessionId },
-    select: { actualSec: true },
+  const expected = Math.round(session.expectedSec > 0 ? session.expectedSec : (media?.durationSec ?? 0));
+  const sponsor = sequenceClip ? (media?.sponsor ?? null) : ownerSponsor;
+  const identity = sponsorPlayLogIdentity({
+    sponsorId: sponsor?.id ?? session.sponsorId,
+    sponsorRowName: sponsor?.name,
+    mediaTitle: media?.title,
   });
+  await prisma.sponsorPlayLog.upsert({
+    where: { clipSessionId: session.clipSessionId },
+    create: {
+      matchId: match ? session.matchId : null,
+      sponsorId: identity.sponsorId,
+      mediaId: media ? session.mediaId : null,
+      sponsorName: identity.sponsorName,
+      mediaTitle: media?.title ?? "(verwijderd)",
+      segmentKey: session.segmentKey,
+      matchStatus: match?.status ?? null,
+      expectedSec: expected,
+      actualSec,
+      actualMs,
+      startedAt: new Date(session.startedAtMs),
+      endedAt,
+      clipSessionId: session.clipSessionId,
+      source: session.source,
+      state,
+      counted: session.counted,
+      ledgerSponsorId: session.sponsorId,
+    },
+    update: { actualMs, actualSec, endedAt, state, counted: session.counted },
+  });
+  session.rowState = state;
+}
 
-  if (!existing) {
-    const identity = sponsorPlayLogIdentity({
-      sponsorId: payload.sponsorId,
-      sponsorRowName: sponsor?.name,
-      mediaTitle: media?.title,
+/**
+ * Bij de start: rijen die nog op `running` stonden, zijn vertoningen die een herstart of crash
+ * onderbrak. Wat zichtbaar was (de laatst bewaarde voortgang) blijft als `interrupted`; een rij
+ * die nooit zichtbare tijd kreeg, is geen vertoning.
+ */
+async function recoverSponsorPlaysOnStartup(): Promise<void> {
+  try {
+    await prisma.sponsorPlayLog.deleteMany({ where: { state: "running", actualMs: 0 } });
+    const r = await prisma.sponsorPlayLog.updateMany({
+      where: { state: "running" },
+      data: { state: "interrupted" },
     });
-    await prisma.sponsorPlayLog.create({
-      data: {
-        matchId: payload.matchId,
-        sponsorId: identity.sponsorId,
-        mediaId: payload.mediaId,
-        sponsorName: identity.sponsorName,
-        mediaTitle: media?.title ?? "(verwijderd)",
-        segmentKey: payload.segmentKey,
-        matchStatus: match?.status ?? null,
-        expectedSec: expected,
-        actualSec: actual,
-        startedAt: new Date(payload.startedAtMs),
-        endedAt: new Date(),
-        clipSessionId: payload.clipSessionId,
+    if (r.count > 0) requireOpts().log(`[sponsor] ${r.count} onderbroken vertoning(en) na herstart bewaard`);
+  } catch (err) {
+    console.warn("[runtime] kon onderbroken vertoningen niet herstellen", err);
+  }
+}
+
+/**
+ * Bouwt de lopende stand van de huidige fase opnieuw op uit de bewaarde rijen, zodat de
+ * tellers in "Sponsors live" na een herstart niet op 0 beginnen.
+ */
+async function restoreSponsorLedgerOnStartup(): Promise<void> {
+  try {
+    const state = await prisma.displayState.findUnique({ where: { id: 1 }, select: { matchId: true } });
+    if (!state?.matchId) return;
+    const match = await prisma.match.findUnique({
+      where: { id: state.matchId },
+      select: { id: true, status: true },
+    });
+    if (!match) return;
+    const segmentKey = sponsorTelemetrySegmentKey(match.id, match.status, sectionForStatus(match.status));
+    if (!segmentKey) return;
+    const rows = await prisma.sponsorPlayLog.findMany({
+      where: { matchId: match.id, segmentKey },
+      select: {
+        clipSessionId: true,
+        matchId: true,
+        segmentKey: true,
+        sponsorId: true,
+        ledgerSponsorId: true,
+        actualSec: true,
+        actualMs: true,
+        counted: true,
       },
     });
-    return;
+    const ledger = ensureSponsorLedger(match.id, segmentKey);
+    const restored = ledgerSecondsFromRows(rows, {
+      matchId: match.id,
+      segmentKey,
+      skipSessionIds: new Set([...ledgerSessionIds, ...playSessions.keys()]),
+    });
+    for (const [id, sec] of Object.entries(restored)) {
+      ledger.bySponsorSec[id] = (ledger.bySponsorSec[id] ?? 0) + sec;
+    }
+    for (const r of rows) ledgerSessionIds.add(r.clipSessionId);
+    ledger.updatedAtMs = Date.now();
+    broadcastSponsorLedger();
+  } catch (err) {
+    console.warn("[runtime] kon sponsorstand niet herstellen", err);
   }
+}
 
-  await prisma.sponsorPlayLog.update({
-    where: { clipSessionId: payload.clipSessionId },
-    data: {
-      actualSec: Math.max(existing.actualSec, actual),
-      endedAt: new Date(),
-    },
-  });
+/** Legt de geboekte sponsortijd van de lopende fase vast (idempotent). */
+async function snapshotPhaseBookingsFor(matchId: string | null | undefined): Promise<void> {
+  if (!matchId) return;
+  try {
+    await snapshotPhaseBookings(prisma, matchId);
+  } catch (err) {
+    console.warn("[runtime] kon geboekte sponsortijd niet vastleggen", err);
+  }
+}
+
+async function snapshotPhaseBookingsForCurrentMatch(): Promise<void> {
+  try {
+    const state = await prisma.displayState.findUnique({ where: { id: 1 }, select: { matchId: true } });
+    await snapshotPhaseBookingsFor(state?.matchId);
+  } catch {
+    /* geen stand: niets vast te leggen */
+  }
+}
+
+async function refreshSponsorGuaranteeSettings(): Promise<SponsorGuaranteeSettings> {
+  try {
+    const s = await getAppSettings();
+    sponsorGuaranteeSettings = parseSponsorGuaranteeSettings(s.sponsorGuaranteeJson);
+  } catch {
+    /* tabel/kolom nog niet klaar: standaard houden */
+  }
+  return sponsorGuaranteeSettings;
 }
 
 function broadcastSponsorLedger() {
@@ -336,7 +627,7 @@ function broadcastSponsorLedger() {
  */
 export function resetSponsorLedger(): void {
   sponsorLedgerSnapshot = null;
-  sponsorClipBestActualSec.clear();
+  ledgerSessionIds.clear();
   sendAll("display:sponsorLedger", null);
 }
 
@@ -440,6 +731,7 @@ type AppSettingsRow = {
   sponsorLayoutsJson?: string | null;
   interfaceProfilesJson?: string | null;
   displayExtrasJson?: string | null;
+  sponsorGuaranteeJson?: string | null;
 };
 
 function defaultLiveCycle(): LiveCycleStored {
@@ -489,6 +781,7 @@ async function getAppSettings(): Promise<{
   sponsorLayoutsJson: string | null;
   interfaceProfilesJson: string | null;
   displayExtrasJson: string | null;
+  sponsorGuaranteeJson: string | null;
 } & LiveCycleStored> {
   const defaults = defaultLiveCycle();
   const rows = await prisma.$queryRawUnsafe<Array<AppSettingsRow>>(
@@ -500,7 +793,8 @@ async function getAppSettings(): Promise<{
       "scoreboardThemeJson", "proofOfPlayBrandJson",
       "displayCanvasWidth", "displayCanvasHeight",
       "displayScalingMode", "displaySafeZoneVisible", "displaySafeZoneMarginPx",
-      "uiLocale", "sponsorLayoutsJson", "interfaceProfilesJson", "displayExtrasJson"
+      "uiLocale", "sponsorLayoutsJson", "interfaceProfilesJson", "displayExtrasJson",
+      "sponsorGuaranteeJson"
      FROM "AppSettings" WHERE "id" = 1`,
   );
   const row = rows[0];
@@ -532,6 +826,7 @@ async function getAppSettings(): Promise<{
       sponsorLayoutsJson: row.sponsorLayoutsJson ?? null,
       interfaceProfilesJson: row.interfaceProfilesJson ?? null,
       displayExtrasJson: row.displayExtrasJson ?? null,
+      sponsorGuaranteeJson: row.sponsorGuaranteeJson ?? null,
     };
   }
   await prisma.$executeRawUnsafe(
@@ -555,8 +850,52 @@ async function getAppSettings(): Promise<{
     sponsorLayoutsJson: null,
     interfaceProfilesJson: null,
     displayExtrasJson: null,
+    sponsorGuaranteeJson: null,
     ...defaults,
   };
+}
+
+/** Reeksen uit `AppSettings.mediaSequencesJson` (lib/media-sequences.ts). */
+async function readMediaSequences(): Promise<MediaSequence[]> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ v: string | null }>>(
+      `SELECT "mediaSequencesJson" AS v FROM "AppSettings" WHERE "id" = 1`,
+    );
+    return parseMediaSequencesJson(rows[0]?.v ?? null);
+  } catch {
+    return [];
+  }
+}
+
+async function writeMediaSequences(sequences: MediaSequence[]): Promise<MediaSequence[]> {
+  await prisma.$executeRawUnsafe(`INSERT OR IGNORE INTO "AppSettings" ("id", "homeTeamId") VALUES (1, NULL)`);
+  const serialized = serializeMediaSequences(sequences);
+  await prisma.$executeRawUnsafe(`UPDATE "AppSettings" SET "mediaSequencesJson" = ? WHERE "id" = 1`, serialized);
+  return parseMediaSequencesJson(serialized);
+}
+
+/**
+ * Zet de reeksen in de rotatie: haalt hun bestanden op (alleen speelbare), met de fotoduur van hun
+ * sponsor, en laat `applyMediaSequences` de rest doen.
+ */
+async function withMediaSequences(participants: Sponsor[]): Promise<Sponsor[]> {
+  const sequences = await readMediaSequences();
+  const ids = [...sequencedMediaIds(sequences)];
+  if (ids.length === 0) return participants;
+  const items = await prisma.mediaItem.findMany({
+    where: { id: { in: ids } },
+    include: { sponsor: { select: { name: true, imageDefaultSec: true } } },
+  });
+  const members = new Map<string, SequenceMember>();
+  for (const item of items) {
+    if (!item.active || !availableForPlayback(item)) continue;
+    const { sponsor, ...media } = item;
+    members.set(item.id, {
+      media: { ...(media as unknown as MediaItem), sponsorName: sponsor?.name ?? null },
+      imageDefaultSec: sponsor?.imageDefaultSec ?? undefined,
+    });
+  }
+  return applyMediaSequences(participants, sequences, members);
 }
 
 async function setHomeTeamId(homeTeamId: string | null) {
@@ -685,12 +1024,8 @@ export async function clubLogoFilePath(): Promise<string | null> {
   const team = await prisma.team.findUnique({ where: { id: s.homeTeamId }, select: { logoPath: true } });
   const stored = team?.logoPath?.trim();
   if (!stored) return null;
-  let resolved = stored;
-  if (stored.startsWith("/uploads/")) {
-    const uploadsDir = process.env.STADIUM_UPLOADS_DIR;
-    if (!uploadsDir) return null;
-    resolved = path.join(uploadsDir, stored.replace(/^\/uploads\//, ""));
-  }
+  const resolved = resolveMediaFile(stored);
+  if (!resolved) return null;
   return path.isAbsolute(resolved) && fs.existsSync(resolved) ? resolved : null;
 }
 
@@ -764,6 +1099,9 @@ async function buildSettingsApiJson() {
     sponsorLayoutsJson: s.sponsorLayoutsJson,
     interfaceProfilesJson: s.interfaceProfilesJson,
     displayExtrasJson: s.displayExtrasJson,
+    sponsorGuaranteeJson: serializeSponsorGuaranteeSettings(
+      parseSponsorGuaranteeSettings(s.sponsorGuaranteeJson),
+    ),
   };
 }
 
@@ -1447,14 +1785,21 @@ export async function listExternalFilesForBackup(): Promise<string[]> {
   return listExternalFileReferences(prisma);
 }
 
-/** Na het terugzetten van een back-up: verwijs naar de teruggezette kopieën in uploads. */
-export async function remapRestoredFilePaths(remap: Record<string, string>): Promise<number> {
-  const changed = await remapStoredFilePaths(prisma, remap);
-  if (changed > 0) {
+/**
+ * Na het terugzetten van een back-up: verwijs naar de teruggezette kopieën in uploads en kijk na of
+ * alle media opent. Zie `finishPendingRestore`.
+ */
+export async function finishVenueRestore(opts: { userDataDir: string; uploadsDir: string }): Promise<RestoreFinishResult> {
+  const result = await finishPendingRestore(prisma, {
+    ...opts,
+    canOpen: async (file, kind) => (await checkMediaFile(file, kind)).record?.status === "ok",
+  });
+  // Ook na een onderbroken padwijziging: een deel van de paden kan al nieuw zijn.
+  if (result.kind !== "none" && Object.keys(result.followup.remap).length > 0) {
     await touchState();
     await broadcastDisplayState();
   }
-  return changed;
+  return result;
 }
 
 /** Loopt er nu een wedstrijd? Dan geen ingrepen die de app herstarten. */
@@ -1470,6 +1815,35 @@ export async function isMatchInPlayNow(): Promise<boolean> {
   );
 }
 
+/** Gegevens van één wedstrijd voor een wedstrijdpakket, en de bestanden waarnaar ze verwijzen. */
+export async function collectMatchPackageForExport(matchId: string, appVersion: string) {
+  return collectMatchPackage(prisma, matchId, { appVersion });
+}
+
+/**
+ * Wat inlezen van een wedstrijdpakket zou doen. `inPlay`: dezelfde wedstrijd speelt nu op het
+ * scherm; die mag een pakket niet overschrijven.
+ */
+export async function planMatchPackageImport(pkg: MatchPackage): Promise<{ plan: MatchImportPlan; inPlay: boolean }> {
+  const plan = await planMatchImport(prisma, pkg);
+  const state = await getStateRow();
+  const inPlay = plan.matchExists && state.matchId === plan.matchId && (await isMatchInPlayNow());
+  return { plan, inPlay };
+}
+
+/** Voegt een wedstrijdpakket samen met de database, in één transactie. */
+export async function applyMatchPackageImport(pkg: MatchPackage, remap: Record<string, string>): Promise<MatchImportResult> {
+  const { inPlay } = await planMatchPackageImport(pkg);
+  if (inPlay) throw new Error("match_in_play");
+  const result = await prisma.$transaction((tx) => applyMatchImport(tx, pkg, remap), {
+    maxWait: 10_000,
+    timeout: 60_000,
+  });
+  await touchState();
+  await broadcastDisplayState();
+  return result;
+}
+
 export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   opts = runtimeOptions;
   await ensureSqliteSchema(runtimeOptions.log);
@@ -1480,6 +1854,10 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   await resetAnnouncementOnStartup();
   await seedLiveWallCueClockIfMissing();
   await seedCuePhaseClocksIfMissing();
+  await refreshSponsorGuaranteeSettings();
+  await recoverSponsorPlaysOnStartup();
+  await restoreSponsorLedgerOnStartup();
+  await snapshotPhaseBookingsForCurrentMatch();
   startTickLoop();
   await broadcastDisplayState();
   broadcastSponsorLedger();
@@ -1487,6 +1865,8 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   // stuk). Wie daarop wacht, houdt de vensters tegen, ook bij een herstart midden in een wedstrijd.
   // De omzetting meldt zelf een nieuwe stand zodra er een pad veranderd is.
   void prepareRiskyVideosInBackground();
+  // Kopieën voor het stadionscherm bijwerken als de club die koos (wacht zelf tot na een wedstrijd).
+  void queueAllDisplayCopies();
 }
 
 async function persistPreparedVideo(
@@ -1501,6 +1881,11 @@ async function persistPreparedVideo(
         data: { playbackWarning: null },
       });
     }
+    if (prepared.validationFailed) {
+      requireOpts().log(
+        `[media] omgezette kopie van ${item.title} niet volledig afspeelbaar (${prepared.validationFailed}): origineel blijft`,
+      );
+    }
     return false;
   }
   await prisma.mediaItem.update({
@@ -1511,6 +1896,8 @@ async function persistPreparedVideo(
         ? Math.max(1, Math.round(prepared.durationSec))
         : item.durationSec,
       playbackWarning: null,
+      // De kopie is net volledig gedecodeerd: niet nog eens controleren.
+      mediaCheckJson: prepared.check ? JSON.stringify(prepared.check) : null,
     },
   });
   requireOpts().log(
@@ -1537,10 +1924,11 @@ async function prepareRiskyVideosInBackground() {
         if (!item || item.type !== "VIDEO") continue;
         const inspect = await inspectVideoForDisplay(item.path);
         if (!isDisplayPlaybackRisk(inspect.reason)) {
-          if (item.playbackWarning) {
+          const warning = playbackWarningForReason(inspect.reason);
+          if ((item.playbackWarning ?? null) !== warning) {
             await prisma.mediaItem.update({
               where: { id: item.id },
-              data: { playbackWarning: null },
+              data: { playbackWarning: warning },
             });
           }
           continue;
@@ -1557,6 +1945,263 @@ async function prepareRiskyVideosInBackground() {
   } catch (err) {
     requireOpts().log(`[media] automatische omzetting mislukt: ${String(err)}`);
   }
+  // Daarna elk bestand volledig decoderen; wat sinds de vorige keer niet veranderde, wordt overgeslagen.
+  try {
+    const all = await prisma.mediaItem.findMany({ select: { id: true } });
+    queueMediaCheck(...all.map((m) => m.id));
+  } catch (err) {
+    requireOpts().log(`[media] controle plannen mislukt: ${String(err)}`);
+  }
+}
+
+/** Media die nog volledig gedecodeerd moet worden (na import, vervangen of bij het opstarten). */
+const mediaCheckQueue = new Set<string>();
+/**
+ * Bestanden die in deze sessie zijn toegevoegd of vervangen en nog niet gecontroleerd zijn. Ze
+ * spelen pas na hun controle (zie `isPlayableMedia`), en de controle wacht niet op het einde van
+ * de wedstrijd: zo kan een club tijdens de wedstrijd clips toevoegen zonder dat er een haperende
+ * clip op het scherm komt.
+ */
+const urgentMediaChecks = new Set<string>();
+let mediaCheckWorkerRunning = false;
+let mediaCheckRetryTimer: ReturnType<typeof setTimeout> | null = null;
+/** Tijdens een wedstrijd wachten we; zo vaak kijken we of hij voorbij is. */
+const MEDIA_CHECK_RETRY_MS = 60_000;
+
+function queueMediaCheck(...ids: string[]) {
+  for (const id of ids) if (id) mediaCheckQueue.add(id);
+  startMediaCheckWorker();
+}
+
+/** Nieuw of vervangen bestand: meteen controleren, ook tijdens een wedstrijd, en pas daarna afspelen. */
+// --- Kleinere kopieën voor het stadionscherm (lib/display-copy.ts) ---------------------------------
+
+async function readDisplayCopyHeight(): Promise<DisplayCopyHeight | null> {
+  try {
+    const rows = await prisma.$queryRawUnsafe<Array<{ v: number | null }>>(
+      `SELECT "displayCopyHeight" AS v FROM "AppSettings" WHERE "id" = 1`,
+    );
+    return normalizeDisplayCopyHeight(rows[0]?.v ?? null);
+  } catch {
+    return null;
+  }
+}
+
+/** Video's die nog een kopie moeten krijgen. Nooit tijdens een wedstrijd: omzetten kost veel rekenwerk. */
+const displayCopyQueue = new Set<string>();
+let displayCopyWorkerRunning = false;
+let displayCopyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function queueDisplayCopy(...ids: string[]) {
+  for (const id of ids) if (id) displayCopyQueue.add(id);
+  startDisplayCopyWorker();
+}
+
+async function queueAllDisplayCopies() {
+  try {
+    const videos = await prisma.mediaItem.findMany({ where: { type: "VIDEO" }, select: { id: true } });
+    queueDisplayCopy(...videos.map((v) => v.id));
+  } catch (err) {
+    requireOpts().log(`[media] kopieën plannen mislukt: ${String(err)}`);
+  }
+}
+
+function startDisplayCopyWorker() {
+  if (displayCopyWorkerRunning || displayCopyRetryTimer || displayCopyQueue.size === 0) return;
+  displayCopyWorkerRunning = true;
+  void (async () => {
+    try {
+      while (displayCopyQueue.size > 0) {
+        const height = await readDisplayCopyHeight();
+        if (height == null) {
+          displayCopyQueue.clear();
+          return;
+        }
+        if (await isMatchInPlayNow()) {
+          displayCopyRetryTimer = setTimeout(() => {
+            displayCopyRetryTimer = null;
+            startDisplayCopyWorker();
+          }, MEDIA_CHECK_RETRY_MS);
+          return;
+        }
+        const id = displayCopyQueue.values().next().value as string;
+        displayCopyQueue.delete(id);
+        try {
+          const item = await prisma.mediaItem.findUnique({
+            where: { id },
+            select: { id: true, title: true, type: true, path: true, displayCopyPath: true, displayCopyKey: true },
+          });
+          if (!item || item.type !== "VIDEO") continue;
+          const version = mediaFileVersion(item.path);
+          if (!version.key) continue;
+          const copyOk =
+            item.displayCopyKey === displayCopyKey(height, version.key) &&
+            !!item.displayCopyPath &&
+            mediaFileVersion(item.displayCopyPath).exists;
+          if (copyOk || item.displayCopyKey === displayCopyNotNeededKey(height, version.key)) continue;
+          const result = await makeDisplayCopy(item.path, height);
+          if (result.kind === "failed") {
+            requireOpts().log(`[media] ${height}p-kopie van ${item.title} mislukt (${result.reason}); het scherm speelt het origineel`);
+            continue;
+          }
+          // Alleen bewaren als het item nog naar hetzelfde bestand wijst (niet intussen vervangen).
+          await prisma.mediaItem.updateMany({
+            where: { id: item.id, path: item.path },
+            data:
+              result.kind === "copy"
+                ? { displayCopyPath: result.path, displayCopyKey: displayCopyKey(height, result.sourceKey) }
+                : { displayCopyPath: null, displayCopyKey: displayCopyNotNeededKey(height, result.sourceKey) },
+          });
+        } catch (err) {
+          requireOpts().log(`[media] kopie ${id} mislukt: ${String(err)}`);
+        }
+      }
+    } finally {
+      displayCopyWorkerRunning = false;
+    }
+  })();
+}
+
+/** Welke kopieën het stadionscherm nu kan spelen, en hoeveel video's klaar zijn. */
+async function displayCopyStatus() {
+  const height = await readDisplayCopyHeight();
+  const rows = await prisma.mediaItem.findMany({
+    where: { type: "VIDEO" },
+    select: { path: true, type: true, displayCopyPath: true, displayCopyKey: true },
+  });
+  const currentKey = (p: string) => mediaFileVersion(p).key;
+  const exists = (p: string) => mediaFileVersion(p).exists;
+  return {
+    height,
+    copies: displayCopyMap(rows, height, currentKey, exists),
+    ...displayCopyProgress(rows, height, currentKey, exists),
+    busy: displayCopyWorkerRunning || displayCopyQueue.size > 0,
+    waitingForMatch: displayCopyRetryTimer != null,
+  };
+}
+
+function queueUrgentMediaCheck(id: string) {
+  queueDisplayCopy(id);
+  urgentMediaChecks.add(id);
+  mediaCheckQueue.add(id);
+  if (mediaCheckRetryTimer) {
+    clearTimeout(mediaCheckRetryTimer);
+    mediaCheckRetryTimer = null;
+  }
+  startMediaCheckWorker();
+}
+
+function startMediaCheckWorker() {
+  if (mediaCheckWorkerRunning || mediaCheckRetryTimer || mediaCheckQueue.size === 0) return;
+  mediaCheckWorkerRunning = true;
+  void (async () => {
+    try {
+      while (mediaCheckQueue.size > 0) {
+        // Een volledige decode kost CPU. Tijdens een wedstrijd speelt het scherm op deze pc:
+        // dan alleen nieuwe of vervangen bestanden (één tegelijk, lage prioriteit), de rest erna.
+        const id = nextMediaCheckId(mediaCheckQueue, urgentMediaChecks, await isMatchInPlayNow());
+        if (!id) {
+          mediaCheckRetryTimer = setTimeout(() => {
+            mediaCheckRetryTimer = null;
+            startMediaCheckWorker();
+          }, MEDIA_CHECK_RETRY_MS);
+          return;
+        }
+        mediaCheckQueue.delete(id);
+        const urgent = urgentMediaChecks.has(id);
+        try {
+          const item = await prisma.mediaItem.findUnique({ where: { id } });
+          if (!item) continue;
+          const health = await mediaHealthForItem(item, { runDecode: true, duringMatch: urgent });
+          if (health.status === "broken") {
+            requireOpts().log(`[media] ${item.title} kan niet volledig afspelen (${health.reason})`);
+          }
+        } catch (err) {
+          requireOpts().log(`[media] controle ${id} mislukt: ${String(err)}`);
+        } finally {
+          // Ook als de controle niet kon (geen FFmpeg, fout): dan speelt het bestand zoals vroeger.
+          if (urgentMediaChecks.delete(id)) {
+            await touchState().catch(() => undefined);
+            await broadcastDisplayState().catch(() => undefined);
+          }
+        }
+      }
+    } finally {
+      mediaCheckWorkerRunning = false;
+    }
+  })();
+}
+
+function availableForPlayback(item: { id: string; path: string; mediaCheckJson: string | null }): boolean {
+  return isPlayableMedia({
+    record: parseMediaCheckRecord(item.mediaCheckJson),
+    awaitingCheck: urgentMediaChecks.has(item.id),
+    version: () => mediaFileVersion(item.path),
+  });
+}
+
+type MediaItemForCheck = {
+  id: string;
+  type: string;
+  path: string;
+  durationSec: number;
+  playbackWarning: string | null;
+  mediaCheckJson: string | null;
+};
+
+export type MediaItemHealth = MediaHealth & { id: string; fileName: string };
+
+function storedFileName(stored: string): string {
+  return stored.split(/[\\/]/).filter(Boolean).pop() ?? stored;
+}
+
+/**
+ * Status van één mediabestand voor de media-check. Met `runDecode` wordt een bestand dat sinds de
+ * vorige controle veranderde volledig gedecodeerd, behalve tijdens een wedstrijd: dan komt het in
+ * de wachtrij en meldt de check "na de wedstrijd".
+ */
+async function mediaHealthForItem(
+  item: MediaItemForCheck,
+  opts: { runDecode: boolean; duringMatch?: boolean },
+): Promise<MediaItemHealth> {
+  const kind = item.type === "VIDEO" ? "VIDEO" : "IMAGE";
+  const previous = parseMediaCheckRecord(item.mediaCheckJson);
+  const version = mediaFileVersion(item.path);
+  let record: MediaCheckRecord | null = previous && previous.key === version.key ? previous : null;
+  let deferred = false;
+  let ffmpegMissing = false;
+  const urgent = urgentMediaChecks.has(item.id);
+  if (version.exists && !record) {
+    const inPlay = await isMatchInPlayNow();
+    if (opts.runDecode && (!inPlay || opts.duringMatch)) {
+      const result = await checkMediaFile(item.path, kind, {
+        fallbackDurationSec: item.durationSec,
+        previous,
+      });
+      ffmpegMissing = result.ffmpegMissing;
+      if (result.record) {
+        record = result.record;
+        // Alleen bewaren als het item nog naar hetzelfde bestand wijst (niet intussen vervangen).
+        await prisma.mediaItem.updateMany({
+          where: { id: item.id, path: item.path },
+          data: { mediaCheckJson: JSON.stringify(result.record) },
+        });
+      }
+    } else {
+      deferred = inPlay && !urgent;
+      mediaCheckQueue.add(item.id);
+      if (!deferred) startMediaCheckWorker();
+    }
+  }
+  const health = mediaHealthFor({
+    fileExists: version.exists,
+    currentKey: version.key,
+    record,
+    probeReason: ffmpegMissing ? "ffmpeg_missing" : kind === "VIDEO" ? item.playbackWarning : null,
+    deferred,
+    checking: urgent && !record && !ffmpegMissing,
+  });
+  return { ...health, id: item.id, fileName: storedFileName(item.path) };
 }
 
 /** Eén omzetpoging per media-id per sessie — voorkomt een ffmpeg-storm als de watchdog blijft vuren. */
@@ -1598,70 +2243,23 @@ export function disposeDesktopRuntime() {
     tickInterval = null;
   }
   hangingPrepareQueued.clear();
+  mediaCheckQueue.clear();
+  if (mediaCheckRetryTimer) {
+    clearTimeout(mediaCheckRetryTimer);
+    mediaCheckRetryTimer = null;
+  }
   sponsorLedgerSnapshot = null;
-  sponsorClipBestActualSec.clear();
+  playSessions.clear();
+  ledgerSessionIds.clear();
   cachedState = null;
   tickMatchCache = null;
-}
-
-type SponsorPlayFilters = {
-  matchId?: string;
-  sponsorId?: string;
-  segmentKey?: string;
-  fromIso?: string;
-  toIso?: string;
-};
-
-function parseSponsorPlayFilters(params: URLSearchParams): SponsorPlayFilters {
-  return {
-    matchId: params.get("matchId") ?? undefined,
-    sponsorId: params.get("sponsorId") ?? undefined,
-    segmentKey: params.get("segmentKey") ?? undefined,
-    fromIso: params.get("from") ?? undefined,
-    toIso: params.get("to") ?? undefined,
-  };
-}
-
-function buildSponsorPlayWhere(f: SponsorPlayFilters) {
-  const where: Record<string, unknown> = {};
-  if (f.matchId) where.matchId = f.matchId;
-  if (f.sponsorId) where.sponsorId = f.sponsorId;
-  if (f.segmentKey) where.segmentKey = { startsWith: f.segmentKey };
-  if (f.fromIso || f.toIso) {
-    const range: Record<string, Date> = {};
-    if (f.fromIso) {
-      const d = new Date(f.fromIso);
-      if (!Number.isNaN(d.valueOf())) range.gte = d;
-    }
-    if (f.toIso) {
-      const d = new Date(f.toIso);
-      if (!Number.isNaN(d.valueOf())) range.lte = d;
-    }
-    if (Object.keys(range).length > 0) where.endedAt = range;
-  }
-  return where;
 }
 
 async function handleSponsorPlaysList(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const limit = Math.min(2000, Math.max(1, Number(params.get("limit") ?? 500)));
-  const rows = await prisma.sponsorPlayLog.findMany({
-    where: buildSponsorPlayWhere(filters),
-    orderBy: { endedAt: "desc" },
-    take: limit,
-    include: {
-      match: {
-        select: {
-          id: true,
-          kickoffAt: true,
-          homeTeam: { select: { name: true, shortName: true } },
-          awayTeam: { select: { name: true, shortName: true } },
-        },
-      },
-    },
-  });
+  const rows = await listSponsorPlays(prisma, filters, sponsorPlayListLimit(params));
   return json(200, { rows });
 }
 
@@ -1669,22 +2267,11 @@ async function handleSponsorPlaysSummary(
   params: URLSearchParams,
 ): Promise<DesktopApiResponse> {
   const filters = parseSponsorPlayFilters(params);
-  const grouped = await prisma.sponsorPlayLog.groupBy({
-    by: ["sponsorId", "sponsorName"],
-    where: buildSponsorPlayWhere(filters),
-    _count: { _all: true },
-    _sum: { actualSec: true, expectedSec: true },
-  });
-  const rows = grouped
-    .map((g) => ({
-      sponsorId: g.sponsorId,
-      sponsorName: g.sponsorName,
-      plays: g._count._all,
-      actualSec: g._sum.actualSec ?? 0,
-      expectedSec: g._sum.expectedSec ?? 0,
-    }))
-    .sort((a, b) => b.actualSec - a.actualSec);
-  return json(200, { rows });
+  const [plays, bookings] = await Promise.all([
+    summarizeSponsorPlays(prisma, filters),
+    summarizeSponsorBookings(prisma, filters),
+  ]);
+  return json(200, { rows: mergeBookingsIntoSummary(plays, bookings) });
 }
 
 function csvEscape(value: unknown): string {
@@ -1724,6 +2311,9 @@ async function handleSponsorPlaysCsv(
     "Gestart op",
     "Beëindigd op",
     "Sessie-id",
+    "Bron",
+    "Status",
+    "Telt mee",
   ];
   const lines: string[] = [header.map(csvEscape).join(",")];
   for (const r of rows) {
@@ -1740,10 +2330,13 @@ async function handleSponsorPlaysCsv(
         r.segmentKey,
         r.matchStatus ?? "",
         r.expectedSec,
-        r.actualSec,
+        Math.round(playLogVisibleSec(r) * 10) / 10,
         r.startedAt.toISOString(),
         r.endedAt.toISOString(),
         r.clipSessionId,
+        r.source,
+        r.state,
+        r.counted ? "ja" : "nee",
       ]
         .map(csvEscape)
         .join(","),
@@ -1769,13 +2362,8 @@ function readLocalImageAsDataUrl(rawPath: string | null): string | null {
             ? "image/gif"
             : null;
   if (!mime) return null;
-  let resolved = stored;
-  if (stored.startsWith("/uploads/")) {
-    const uploadsDir = process.env.STADIUM_UPLOADS_DIR;
-    if (!uploadsDir) return null;
-    resolved = path.join(uploadsDir, stored.replace(/^\/uploads\//, ""));
-  }
-  if (!path.isAbsolute(resolved)) return null;
+  const resolved = resolveMediaFile(stored);
+  if (!resolved || !path.isAbsolute(resolved)) return null;
   try {
     const buf = fs.readFileSync(resolved);
     if (buf.length < 8 || buf.length > 4_000_000) return null;
@@ -1992,6 +2580,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           sponsorLayoutsJson?: string | null;
           interfaceProfilesJson?: string | null;
           displayExtrasJson?: string | null;
+          sponsorGuaranteeJson?: string | null;
         }) ?? {};
       if ("uiLocale" in body && body.uiLocale) {
         await setUiLocale(normalizeUiLocale(body.uiLocale));
@@ -2050,6 +2639,15 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           return json(400, { error: "Interfaceprofiel is te groot" });
         }
         await setInterfaceProfilesJson(raw === null || raw === undefined ? null : String(raw));
+      }
+      if ("sponsorGuaranteeJson" in body) {
+        const raw = body.sponsorGuaranteeJson;
+        // Altijd genormaliseerd opslaan; het hoofdproces leest dit bij elke nieuwe vertoning.
+        await prisma.$executeRawUnsafe(
+          `UPDATE "AppSettings" SET "sponsorGuaranteeJson" = ? WHERE "id" = 1`,
+          serializeSponsorGuaranteeSettings(parseSponsorGuaranteeSettings(raw == null ? null : String(raw))),
+        );
+        await refreshSponsorGuaranteeSettings();
       }
       if ("displayExtrasJson" in body) {
         const raw = body.displayExtrasJson;
@@ -2289,7 +2887,9 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         });
         return json(
           200,
-          mergeSponsorsWithClubMedia(sponsors as unknown as Sponsor[], clubMedia as unknown as MediaItem[]),
+          await withMediaSequences(
+            mergeSponsorsWithClubMedia(sponsors.map(s => ({ ...s, media: s.media.filter(availableForPlayback) })) as unknown as Sponsor[], clubMedia.filter(availableForPlayback) as unknown as MediaItem[]),
+          ),
         );
       }
       return json(200, sponsors);
@@ -2304,6 +2904,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         postmatchSeconds?: number;
         imageDefaultSec?: number;
         active?: boolean;
+        notes?: string | null;
+        guaranteeJson?: string | null;
       };
       const m1 = (body as { matchFirstHalfSeconds?: number }).matchFirstHalfSeconds ?? 0;
       const m2 = (body as { matchSecondHalfSeconds?: number }).matchSecondHalfSeconds ?? 0;
@@ -2321,6 +2923,10 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           postmatchSeconds: body.postmatchSeconds ?? 0,
           imageDefaultSec: body.imageDefaultSec ?? 10,
           active: body.active ?? true,
+          notes: typeof body.notes === "string" && body.notes.trim() ? body.notes.trim() : null,
+          guaranteeJson: serializeSponsorGuarantee(
+            parseSponsorGuarantee(typeof body.guaranteeJson === "string" ? body.guaranteeJson : null),
+          ),
         },
       });
       await touchState();
@@ -2344,10 +2950,19 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         sponsorPlaybackOrderJson: true,
         sponsorPlaybackRepeatsJson: true,
         sportBudgetsJson: true,
+        notes: true,
+        guaranteeJson: true,
       };
       const data: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(body)) {
         if (allowed[key]) data[key] = value;
+      }
+      if ("guaranteeJson" in data) {
+        // Altijd genormaliseerd: null voor de standaard (seconden, niet inhalen).
+        const raw = data.guaranteeJson;
+        data.guaranteeJson = serializeSponsorGuarantee(
+          parseSponsorGuarantee(typeof raw === "string" ? raw : null),
+        );
       }
       const sponsor = await prisma.sponsor.update({
         where: { id: sponsorId },
@@ -2750,12 +3365,14 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           enabled: boolean | number;
           createdAt: Date | string;
           loop: boolean | number | null;
+          guarantee: string | null;
           mediaType: string;
           mediaPath: string;
           mediaTitle: string;
           mediaDurationSec: number;
           mediaSponsorName: string | null;
           mediaSponsorId: string | null;
+          mediaCheckJson: string | null;
           mediaActive: boolean | number;
           mediaPlayAudio: boolean | number;
           mediaSponsorPhaseTagsJson: string | null;
@@ -2763,10 +3380,10 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         }>
       >(
         `SELECT
-          c."id", c."mediaId", c."matchStatus", c."triggerSec", c."endSec", c."enabled", c."loop", c."createdAt",
+          c."id", c."mediaId", c."matchStatus", c."triggerSec", c."endSec", c."enabled", c."loop", c."guarantee", c."createdAt",
           m."type" AS "mediaType", m."path" AS "mediaPath", m."title" AS "mediaTitle",
           m."durationSec" AS "mediaDurationSec", m."sponsorName" AS "mediaSponsorName",
-          m."sponsorId" AS "mediaSponsorId", m."active" AS "mediaActive",
+          m."sponsorId" AS "mediaSponsorId", m."active" AS "mediaActive", m."mediaCheckJson" AS "mediaCheckJson",
           m."playAudio" AS "mediaPlayAudio", m."sponsorPhaseTagsJson" AS "mediaSponsorPhaseTagsJson",
           m."createdAt" AS "mediaCreatedAt"
         FROM "ScheduledMediaCue" c
@@ -2783,6 +3400,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           endSec: c.endSec == null ? null : Number(c.endSec),
           enabled: Boolean(c.enabled),
           loop: Boolean(c.loop),
+          guarantee: normalizeCueGuarantee(c.guarantee),
           createdAt: c.createdAt instanceof Date ? c.createdAt.toISOString() : String(c.createdAt),
           media: {
             id: c.mediaId,
@@ -2792,7 +3410,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
             durationSec: Number(c.mediaDurationSec),
             sponsorName: c.mediaSponsorName,
             sponsorId: c.mediaSponsorId,
-            active: Boolean(c.mediaActive),
+            active: Boolean(c.mediaActive) && availableForPlayback({ id: c.mediaId, path: c.mediaPath, mediaCheckJson: c.mediaCheckJson }),
             playAudio: Boolean(c.mediaPlayAudio),
             sponsorPhaseTagsJson: c.mediaSponsorPhaseTagsJson,
             createdAt: c.mediaCreatedAt instanceof Date ? c.mediaCreatedAt.toISOString() : String(c.mediaCreatedAt),
@@ -2801,92 +3419,17 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       );
     }
 
-    if (pathname === "/api/scheduled-media-cues" && method === "POST") {
-      const body = (parseJsonBody(req) as {
-        mediaId?: string;
-        matchStatus?: string;
-        triggerSec?: number;
-        endSec?: number | null;
-        enabled?: boolean;
-        loop?: boolean;
-      }) ?? {};
-      if (!body.mediaId || !body.matchStatus || !Number.isFinite(body.triggerSec)) {
-        return json(400, { error: "Media, fase en tijdstip zijn verplicht." });
-      }
-      const startSec = Math.max(0, Math.round(body.triggerSec ?? 0));
-      const endSec = parseCueEndSec(body.endSec, startSec);
-      if (body.endSec != null && endSec == null) {
-        return json(400, { error: "Eindtijd moet na de starttijd liggen." });
-      }
-      const media = await prisma.mediaItem.findUnique({ where: { id: body.mediaId } });
-      if (!media) return json(400, { error: "Media niet gevonden." });
-      const id = `cue-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO "ScheduledMediaCue" ("id", "mediaId", "matchStatus", "triggerSec", "endSec", "enabled", "loop")
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        id,
-        body.mediaId,
-        body.matchStatus,
-        startSec,
-        endSec,
-        body.enabled === false ? 0 : 1,
-        body.loop === true ? 1 : 0,
-      );
-      await touchState();
-      await broadcastDisplayState();
-      return json(200, { id });
-    }
-
     const scheduledCueId = pathname.match(/^\/api\/scheduled-media-cues\/([^/]+)$/)?.[1];
-    if (scheduledCueId && method === "PATCH") {
-      const body = (parseJsonBody(req) as {
-        mediaId?: string;
-        matchStatus?: string;
-        triggerSec?: number;
-        endSec?: number | null;
-        enabled?: boolean;
-        loop?: boolean;
-      }) ?? {};
-      const updates: string[] = [];
-      const values: unknown[] = [];
-      if (typeof body.mediaId === "string") {
-        const media = await prisma.mediaItem.findUnique({ where: { id: body.mediaId } });
-        if (!media) return json(400, { error: "Media niet gevonden." });
-        updates.push(`"mediaId" = ?`);
-        values.push(body.mediaId);
+    const batch = pathname === "/api/scheduled-media-cues/batch" && method === "POST";
+    if (batch || (pathname === "/api/scheduled-media-cues" && method === "POST") || (scheduledCueId && method === "PATCH")) {
+      const body = parseJsonBody(req) as Record<string, unknown> | null;
+      const input = batch ? body?.edits : [{ ...body, id: scheduledCueId }];
+      const result = await writeScheduledCues(prisma, input);
+      if (result.status === 200) {
+        await touchState();
+        await broadcastDisplayState();
       }
-      if (typeof body.matchStatus === "string") {
-        updates.push(`"matchStatus" = ?`);
-        values.push(body.matchStatus);
-      }
-      if (Number.isFinite(body.triggerSec)) {
-        updates.push(`"triggerSec" = ?`);
-        values.push(Math.max(0, Math.round(body.triggerSec ?? 0)));
-      }
-      if (body.endSec === null) {
-        updates.push(`"endSec" = ?`);
-        values.push(null);
-      } else if (Number.isFinite(body.endSec)) {
-        updates.push(`"endSec" = ?`);
-        values.push(Math.max(0, Math.round(body.endSec as number)));
-      }
-      if (typeof body.enabled === "boolean") {
-        updates.push(`"enabled" = ?`);
-        values.push(body.enabled ? 1 : 0);
-      }
-      if (typeof body.loop === "boolean") {
-        updates.push(`"loop" = ?`);
-        values.push(body.loop ? 1 : 0);
-      }
-      if (updates.length === 0) return json(400, { error: "Geen wijzigingen." });
-      await prisma.$executeRawUnsafe(
-        `UPDATE "ScheduledMediaCue" SET ${updates.join(", ")} WHERE "id" = ?`,
-        ...values,
-        scheduledCueId,
-      );
-      await touchState();
-      await broadcastDisplayState();
-      return json(200, { ok: true });
+      return json(result.status, result.body);
     }
 
     if (scheduledCueId && method === "DELETE") {
@@ -2894,6 +3437,32 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       await touchState();
       await broadcastDisplayState();
       return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/display-copies" && method === "GET") {
+      return json(200, await displayCopyStatus());
+    }
+
+    if (pathname === "/api/display-copies" && method === "PUT") {
+      const body = parseJsonBody(req) as { height?: unknown };
+      const height = normalizeDisplayCopyHeight(body.height);
+      await prisma.$executeRawUnsafe(`INSERT OR IGNORE INTO "AppSettings" ("id", "homeTeamId") VALUES (1, NULL)`);
+      await prisma.$executeRawUnsafe(`UPDATE "AppSettings" SET "displayCopyHeight" = ? WHERE "id" = 1`, height);
+      if (height != null) await queueAllDisplayCopies();
+      return json(200, await displayCopyStatus());
+    }
+
+    if (pathname === "/api/media-sequences" && method === "GET") {
+      return json(200, await readMediaSequences());
+    }
+
+    if (pathname === "/api/media-sequences" && method === "PUT") {
+      const body = parseJsonBody(req) as { sequences?: unknown };
+      if (!Array.isArray(body.sequences)) return json(400, { error: "sequences_required" });
+      const saved = await writeMediaSequences(normalizeMediaSequences(body.sequences));
+      await touchState();
+      await broadcastDisplayState();
+      return json(200, saved);
     }
 
     if (pathname === "/api/media" && method === "GET") {
@@ -2909,8 +3478,9 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       let playbackWarning: string | null = null;
       if (body.type === "VIDEO" && typeof body.path === "string") {
         playbackInspect = await inspectVideoForDisplay(body.path);
+        // probe_failed blijft als waarschuwing staan; omzetten gebeurt alleen bij een afspeelrisico.
+        playbackWarning = playbackWarningForReason(playbackInspect.reason);
         if (isDisplayPlaybackRisk(playbackInspect.reason)) {
-          playbackWarning = playbackInspect.reason;
           const fpsBit = playbackInspect.fps ? ` ${playbackInspect.fps}fps` : "";
           const codecBit = playbackInspect.codec ? ` ${playbackInspect.codec}` : "";
           requireOpts().log(
@@ -2921,13 +3491,20 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       const media = await prisma.mediaItem.create({
         data: { ...body, playbackWarning } as never,
       });
-      if (playbackWarning && typeof body.path === "string") {
-        const preparedOk = await persistPreparedVideo({
-          id: media.id,
-          title: media.title,
-          path: media.path,
-          durationSec: media.durationSec,
-        });
+      // Meteen uit de rotatie houden, ook terwijl een risicovideo hieronder wordt omgezet.
+      urgentMediaChecks.add(media.id);
+      if (playbackInspect && isDisplayPlaybackRisk(playbackInspect.reason) && typeof body.path === "string") {
+        let preparedOk = false;
+        try {
+          preparedOk = await persistPreparedVideo({
+            id: media.id,
+            title: media.title,
+            path: media.path,
+            durationSec: media.durationSec,
+          });
+        } finally {
+          queueUrgentMediaCheck(media.id);
+        }
         if (preparedOk) {
           const updated = await prisma.mediaItem.findUnique({ where: { id: media.id } });
           await touchState();
@@ -2935,6 +3512,8 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
           return json(200, { ...(updated ?? media), playbackInspect, transcoded: true });
         }
       }
+      // Volledige decode meteen, ook tijdens een wedstrijd; het bestand speelt pas als die klaar is.
+      queueUrgentMediaCheck(media.id);
       await touchState();
       await broadcastDisplayState();
       return json(200, { ...media, playbackInspect });
@@ -2945,7 +3524,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       const rows = [];
       for (const item of videos) {
         const inspect = await inspectVideoForDisplay(item.path);
-        const warning = isDisplayPlaybackRisk(inspect.reason) ? inspect.reason : null;
+        const warning = playbackWarningForReason(inspect.reason);
         if (item.playbackWarning !== warning) {
           await prisma.mediaItem.update({
             where: { id: item.id },
@@ -2961,6 +3540,66 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
         });
       }
       return json(200, rows);
+    }
+
+    const checkId = pathname.match(/^\/api\/media\/([^/]+)\/check$/)?.[1];
+    if (checkId && method === "POST") {
+      const item = await prisma.mediaItem.findUnique({ where: { id: checkId } });
+      if (!item) return json(404, { error: "No media" });
+      return json(200, await mediaHealthForItem(item, { runDecode: true }));
+    }
+
+    /** Ander bestand voor hetzelfde media-item: sponsor, playlists en cues blijven gekoppeld. */
+    const replaceId = pathname.match(/^\/api\/media\/([^/]+)\/replace$/)?.[1];
+    if (replaceId && method === "POST") {
+      const body = parseJsonBody(req) as { path?: unknown };
+      const newPath = typeof body.path === "string" ? body.path.trim() : "";
+      if (!newPath) return json(400, { error: "path_required" });
+      const resolved = resolveMediaFile(newPath);
+      if (!resolved || !fs.existsSync(resolved)) return json(400, { error: "file_not_found" });
+      const item = await prisma.mediaItem.findUnique({ where: { id: replaceId } });
+      if (!item) return json(404, { error: "No media" });
+      let playbackInspect: Awaited<ReturnType<typeof inspectVideoForDisplay>> | null = null;
+      let durationSec = item.durationSec;
+      if (item.type === "VIDEO") {
+        playbackInspect = await inspectVideoForDisplay(newPath);
+        if (playbackInspect.durationSec && playbackInspect.durationSec > 0) {
+          durationSec = Math.max(1, Math.round(playbackInspect.durationSec));
+        }
+      }
+      const stored = await prisma.mediaItem.findFirst({ where: { path: newPath, type: item.type, mediaCheckJson: { not: null } } });
+      const candidate = { ...item, path: newPath, durationSec, mediaCheckJson: stored?.mediaCheckJson ?? null,
+        playbackWarning: playbackInspect ? playbackWarningForReason(playbackInspect.reason) : null };
+      const version = mediaFileVersion(newPath);
+      const previous = parseMediaCheckRecord(candidate.mediaCheckJson);
+      const cached = previous && previous.key === version.key ? previous : null;
+      // Ook tijdens een wedstrijd: het nieuwe bestand wordt eerst volledig gecontroleerd (één decode
+      // tegelijk, lage prioriteit). Tot het is goedgekeurd, blijft het oude bestand spelen.
+      const check = await checkMediaFile(newPath, item.type === "VIDEO" ? "VIDEO" : "IMAGE", { fallbackDurationSec: durationSec, previous: cached });
+      let health = { ...mediaHealthFor({ fileExists: version.exists, currentKey: version.key, record: check.record,
+        probeReason: check.ffmpegMissing ? "ffmpeg_missing" : candidate.playbackWarning }),
+        fileName: storedFileName(newPath), id: item.id };
+      if (health.status !== "ok" || !check.record) return json(422, { health });
+      let acceptedPath = newPath;
+      let acceptedRecord = check.record;
+      if (playbackInspect && isDisplayPlaybackRisk(playbackInspect.reason)) {
+        const prepared = await prepareVideoForDisplay(newPath);
+        if (!prepared.transcoded || !prepared.check) return json(422, { error: "prepare_failed" });
+        acceptedPath = prepared.path;
+        acceptedRecord = prepared.check;
+      }
+      if (mediaFileVersion(acceptedPath).key !== acceptedRecord.key) return json(409, { error: "file_changed" });
+      const saved = await prisma.mediaItem.updateMany({
+        where: { id: item.id, path: item.path, type: item.type },
+        data: { path: acceptedPath, durationSec, playbackWarning: null, mediaCheckJson: JSON.stringify(acceptedRecord) },
+      });
+      if (saved.count !== 1) return json(409, { error: "media_changed" });
+      const media = await prisma.mediaItem.findUniqueOrThrow({ where: { id: item.id } });
+      health = await mediaHealthForItem(media, { runDecode: false });
+      await touchState();
+      await broadcastDisplayState();
+      queueDisplayCopy(item.id);
+      return json(200, { media, health, playbackInspect });
     }
 
     const prepareId = pathname.match(/^\/api\/media\/([^/]+)\/prepare$/)?.[1];
@@ -3002,6 +3641,7 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       requireOpts().log(
         `[media] omgezet voor display ${item.title} → ${path.basename(prepared.path)}`,
       );
+      queueDisplayCopy(media.id);
       await touchState();
       await broadcastDisplayState();
       return json(200, { ...media, transcoded: true, reason: prepared.reason });
@@ -3113,6 +3753,13 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
     if (pathname === "/api/sponsor-plays/export.csv" && method === "GET") {
       return await handleSponsorPlaysCsv(searchParams);
     }
+    if (pathname === "/api/sponsor-guarantees" && method === "GET") {
+      const matchId = searchParams.get("matchId");
+      if (!matchId) return json(400, { error: "matchId ontbreekt" });
+      const payload = await sponsorGuaranteeLive(prisma, matchId);
+      if (!payload) return json(404, { error: "Wedstrijd niet gevonden" });
+      return json(200, { ...payload, reserveSec: sponsorGuaranteeSettings.reserveSec });
+    }
     if (pathname === "/api/sponsor-plays/summary" && method === "GET") {
       return await handleSponsorPlaysSummary(searchParams);
     }
@@ -3172,15 +3819,65 @@ function commandLeftStateUnchanged(result: CommandAck): boolean {
 }
 
 export async function runCommand(input: Command): Promise<CommandAck> {
+  return executeCommand(input, null);
+}
+
+/**
+ * Commando uit de cloud-relay (telefoon over internet). Wordt per cloud-id hoogstens één keer
+ * uitgevoerd: een herhaalde levering, omdat de bevestiging naar de cloud mislukte, wijzigt niets en
+ * geeft de oorspronkelijke uitkomst terug (`server/cloud-command-ledger.ts`).
+ */
+export async function runCloudCommand(
+  cloudCommandId: string,
+  input: unknown,
+): Promise<{ ack: CommandAck; duplicate: boolean }> {
+  let duplicate = false;
+  const ack = await executeCommand(input as Command, cloudCommandId, () => {
+    duplicate = true;
+  });
+  return { ack, duplicate };
+}
+
+export async function markCloudCommandAcked(cloudCommandId: string): Promise<void> {
+  await markLedgerAcked(prisma, cloudCommandId);
+}
+
+export async function pruneCloudCommandLedger(): Promise<number> {
+  return pruneAppliedCloudCommands(prisma);
+}
+
+async function executeCommand(
+  input: Command,
+  cloudCommandId: string | null,
+  onDuplicate?: () => void,
+): Promise<CommandAck> {
   const run = async (): Promise<CommandAck> => {
     try {
-      const cmd = CommandSchema.parse(input);
-      const result = await prisma.$transaction((tx) => handleCommand(cmd, tx), {
-        maxWait: 10_000,
-        timeout: 20_000,
-      });
-      if (result.ok && commandResetsSponsorTelemetry(cmd) && !commandLeftStateUnchanged(result)) {
+      const parsed = CommandSchema.safeParse(input);
+      const execute = (tx: Prisma.TransactionClient) => {
+        if (!parsed.success) throw parsed.error;
+        return handleCommand(parsed.data, tx);
+      };
+      let result: CommandAck;
+      if (cloudCommandId !== null) {
+        const outcome = await runCloudCommandOnce(prisma, cloudCommandId, execute);
+        if (outcome.duplicate) {
+          requireOpts().log(`[cloud-control] commando ${cloudCommandId} was al uitgevoerd; niet opnieuw`);
+          onDuplicate?.();
+          return outcome.ack;
+        }
+        result = outcome.ack;
+      } else {
+        result = await prisma.$transaction(execute, {
+          maxWait: 10_000,
+          timeout: 20_000,
+        });
+      }
+      const cmd = parsed.success ? parsed.data : null;
+      if (cmd && result.ok && commandResetsSponsorTelemetry(cmd) && !commandLeftStateUnchanged(result)) {
         resetSponsorLedger();
+        // Nieuwe fase: vastleggen wat elke sponsor hier geboekt heeft (en mag inhalen).
+        void snapshotPhaseBookingsForCurrentMatch();
       }
       await broadcastDisplayState();
       if (result.ok && result.warning) {
