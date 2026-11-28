@@ -26,6 +26,7 @@ import {
 } from "@/lib/layout-geometry";
 import {
   ADDABLE_ELEMENT_TYPES,
+  TAPER_MAX,
   ELEMENT_LIMIT,
   ELEMENT_TEXT_MAX,
   FONT_SCALE_MAX,
@@ -36,6 +37,7 @@ import {
   isStreamSurface,
   moveElementLayer,
   normalizeBox,
+  setMediaFit,
   sixteenByNineHeightPct,
   type AddableElementType,
   type StreamSurface,
@@ -83,6 +85,8 @@ const TYPE_TONE: Record<LayoutElement["type"], string> = {
   timeOfDay: "border-teal-300",
   text: "border-fuchsia-300",
   image: "border-orange-300",
+  shape: "border-rose-300",
+  scoreLine: "border-sky-200",
 };
 
 const HANDLE_CLASS: Record<ResizeHandle, string> = {
@@ -377,7 +381,7 @@ export function SetupScoreboardPlacer({
   }
 
   function ratioFor(element: LayoutElement): number | null {
-    return element.type === "media" && lockMediaRatio ? mediaRatio : null;
+    return element.type === "media" && lockMediaRatio && !element.style?.mediaFit ? mediaRatio : null;
   }
 
   function othersOf(id: string): LayoutSlot[] {
@@ -571,7 +575,8 @@ export function SetupScoreboardPlacer({
     </div>
   );
 
-  const hasText = active && active.type !== "image" && active.type !== "media" && active.type !== "shotClock";
+  const hasText =
+    active && active.type !== "image" && active.type !== "media" && active.type !== "shotClock" && active.type !== "shape";
   const safeXPct = (safeZonePx / Math.max(1, canvasWidth)) * 100;
   const safeYPct = (safeZonePx / Math.max(1, canvasHeight)) * 100;
   const px = (pct: number, total: number) => Math.round((pct / 100) * total);
@@ -891,6 +896,31 @@ export function SetupScoreboardPlacer({
               </div>
 
               {active.type === "media" ? (
+                <div>
+                  <Label className="text-[11px]">{t("layoutEditor.mediaFit")}</Label>
+                  <div className="mt-1 grid grid-cols-2 gap-1">
+                    {(["fill", "left", "center", "right"] as const).map((fit) => (
+                      <button
+                        key={fit}
+                        type="button"
+                        onClick={() =>
+                          commit(setMediaFit(elements, active.id, fit === "fill" ? undefined : fit, canvasWidth / canvasHeight))
+                        }
+                        className={`rounded-md border px-2 py-1 text-xs ${
+                          (active.style?.mediaFit ?? "fill") === fit
+                            ? "border-primary bg-primary/10 font-medium"
+                            : "border-border hover:bg-muted/50"
+                        }`}
+                      >
+                        {t(`layoutEditor.mediaFit_${fit}`)}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{t("layoutEditor.mediaFitHelp")}</p>
+                </div>
+              ) : null}
+
+              {active.type === "media" && !active.style?.mediaFit ? (
                 <label className="flex cursor-pointer items-center gap-2 text-xs">
                   <input type="checkbox" checked={lockMediaRatio} onChange={(e) => setLockMediaRatio(e.target.checked)} />
                   {t("layoutEditor.lockRatio")}
@@ -928,7 +958,37 @@ export function SetupScoreboardPlacer({
                 </div>
               ) : null}
 
-              {active.type !== "media" ? (
+              {active.type === "shape" ? (
+                <div>
+                  <Label className="text-[11px]">
+                    {t("layoutEditor.taper")}: {active.style?.taper ?? 0}%
+                  </Label>
+                  <input
+                    type="range"
+                    className="mt-1 w-full"
+                    min={-TAPER_MAX}
+                    max={TAPER_MAX}
+                    step={0.5}
+                    value={active.style?.taper ?? 0}
+                    aria-label={t("layoutEditor.taper")}
+                    onPointerDown={() => {
+                      sliderDragRef.current = true;
+                      onGestureStart();
+                    }}
+                    onPointerUp={() => {
+                      sliderDragRef.current = false;
+                      onGestureEnd();
+                    }}
+                    onChange={(e) => {
+                      const taper = Number(e.target.value);
+                      patchStyle(active.id, { taper: taper === 0 ? undefined : taper }, { live: sliderDragRef.current });
+                    }}
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">{t("layoutEditor.taperHelp")}</p>
+                </div>
+              ) : null}
+
+              {active.type !== "media" && active.type !== "shape" ? (
                 <div>
                   <Label className="text-[11px]">
                     {t("layoutEditor.fontScale")}: {Math.round((active.style?.fontScale ?? 1) * 100)}%

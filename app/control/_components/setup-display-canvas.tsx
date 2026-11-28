@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/form";
 import { toast } from "@/components/ui/toast";
 import type { AppSettings } from "@/lib/types";
+import { CLUB_BRAND } from "@/lib/club-brand";
 import { KickoffCountdownSettingsBlock, StadiumScreenPicker } from "./setup-display-extras";
 
 export function SetupDisplayCanvasSection({
@@ -217,6 +218,8 @@ export function SetupDisplayCanvasSection({
         </div>
       </div>
 
+      {CLUB_BRAND?.stadiumStyle ? <ClubStadiumStyleSetting /> : null}
+
       <DisplayVideoCopySetting />
 
       <div className="border-t border-border pt-4 space-y-3">
@@ -383,6 +386,52 @@ function DisplayVideoCopySetting() {
           {t("setup.videoCopyApplies")}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** Clubstijl op het stadionscherm aan of uit (alleen in een clubbuild, zoals RAFC). */
+function ClubStadiumStyleSetting() {
+  const { t } = useTranslation();
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  useEffect(() => {
+    fetch("/api/club-style")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: { enabled?: boolean } | null) => setEnabled(s ? s.enabled !== false : true))
+      .catch(() => setEnabled(true));
+  }, []);
+  async function choose(next: boolean) {
+    setEnabled(next);
+    try {
+      const res = await fetch("/api/club-style", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      setEnabled(!next);
+      toast({ title: t("setup.clubStyleSaveFailed"), description: err instanceof Error ? err.message : String(err), variant: "error" });
+    }
+  }
+  return (
+    <div className="border-t border-border pt-4">
+      <Label className="text-xs">{t("setup.clubStyleTitle")}</Label>
+      <p className="text-[11px] text-muted-foreground mt-1 leading-snug">{t("setup.clubStyleHelp")}</p>
+      <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <ScalingOption
+          active={enabled !== false}
+          title={t("setup.clubStyleOn")}
+          desc={t("setup.clubStyleOnDesc")}
+          onClick={() => enabled === false && void choose(true)}
+        />
+        <ScalingOption
+          active={enabled === false}
+          title={t("setup.clubStyleOff")}
+          desc={t("setup.clubStyleOffDesc")}
+          onClick={() => enabled !== false && void choose(false)}
+        />
+      </div>
     </div>
   );
 }

@@ -1,5 +1,8 @@
 ﻿"use client";
 
+import { CLUB_BRAND } from "@/lib/club-brand";
+import { ensureClubFont } from "@/lib/club-brand/font";
+import { RAFC_SUBSTITUTION_MS, RafcCard, RafcSubstitution } from "./_modes/rafc/rafc-visuals";
 import { setDisplayMediaCopies } from "@/lib/display-copy";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
@@ -404,6 +407,31 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     };
   }, [previewIframe, embedInControl, state?.matchId, match?.status, state?.mode]);
 
+  /** Clubstijl op het stadionscherm (lib/club-brand): aan tenzij de club ze uitzette. */
+  const [clubStyleOn, setClubStyleOn] = useState<boolean>(CLUB_BRAND?.stadiumStyle != null);
+  useEffect(() => {
+    if (!CLUB_BRAND?.stadiumStyle) return;
+    let cancelled = false;
+    fetch("/api/club-style")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((status: { enabled?: boolean } | null) => {
+        if (!cancelled && status) setClubStyleOn(status.enabled !== false);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // updatedAt: de operator zette de clubstijl aan of uit; dat mag meteen zichtbaar worden.
+  }, [state?.matchId, match?.status, state?.mode, state?.updatedAt]);
+  const rafcStyle = CLUB_BRAND?.stadiumStyle === "rafc" && clubStyleOn;
+  // Het lettertype van de club: voor de kaarten en wissels, en voor een indeling die het gebruikt.
+  useEffect(() => {
+    if (CLUB_BRAND) void ensureClubFont();
+  }, []);
+  // Groot scorebord: de indeling uit "Scherm indelen" (in de RAFC-build standaard hun template).
+  const FullBoard = MatchScoreboardFull;
+  const SubTakeover = rafcStyle ? RafcSubstitution : SubstitutionMode;
+
   useEffect(() => {
     if (previewIframe) return;
     fetch("/api/sponsors?rotation=1")
@@ -620,7 +648,8 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     const transitions: Record<string, { ms: number; next: string }> = {
       GOAL: { ms: 8000, next: liveReturnMode },
       GOAL_PLAYER_VIDEO: { ms: playerVideoMs, next: liveReturnMode },
-      SUBSTITUTION: { ms: 6000, next: liveReturnMode },
+      // Clubstijl RAFC: zo lang als hun wisselvideo (woord + spelers).
+      SUBSTITUTION: { ms: rafcStyle ? RAFC_SUBSTITUTION_MS : 6000, next: liveReturnMode },
       CARD: { ms: 5000, next: liveReturnMode },
       HALFTIME: { ms: 10000, next: liveReturnMode },
       FULLTIME: { ms: 15000, next: liveReturnMode },
@@ -712,7 +741,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     if (!state) return null;
     if (match) {
       return (
-        <MatchScoreboardFull
+        <FullBoard
           match={match}
           elapsed={scoreboardClock}
           shotClock={shotClock}
@@ -1403,11 +1432,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     previewFollowClip != null &&
     sponsorBesideConfigured &&
     sponsorDistView.phase === "sponsor";
-  const allowScoreFrame = scoreFrameAllowed({
-    mode,
-    matchStatus: match?.status,
-    previewForcesSponsorBeside,
-  });
+  const allowScoreFrame =
+    scoreFrameAllowed({
+      mode,
+      matchStatus: match?.status,
+      previewForcesSponsorBeside,
+    }) &&
+    // Clubstijl RAFC: een kaart vult het hele scherm (wit vlak), niet het vak boven de scorebalk.
+    !(rafcStyle && mode === "CARD" && state?.activeCardColor !== "GREEN");
   const playFullscreenBoard =
     !!match &&
     shouldShowFullScreenMatchBoard(
@@ -1688,12 +1720,26 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     }
     if (mode === "CARD" && match) {
       return (
-        <CardMode
-          key="card"
-          player={cardPlayer}
-          color={(state?.activeCardColor === "RED" || state?.activeCardColor === "GREEN" ? state.activeCardColor : "YELLOW")}
-          minute={currentMinute}
-        />
+        rafcStyle && state?.activeCardColor !== "GREEN" ? (
+          <RafcCard
+            key="card"
+            player={cardPlayer}
+            color={state?.activeCardColor === "YELLOW_RED" ? "YELLOW_RED" : state?.activeCardColor === "RED" ? "RED" : "YELLOW"}
+          />
+        ) : (
+          <CardMode
+            key="card"
+            player={cardPlayer}
+            color={
+              state?.activeCardColor === "RED" || state?.activeCardColor === "YELLOW_RED"
+                ? "RED"
+                : state?.activeCardColor === "GREEN"
+                  ? "GREEN"
+                  : "YELLOW"
+            }
+            minute={currentMinute}
+          />
+        )
       );
     }
     if (mode === "SPONSOR" && match && sponsorClipBesideLiveBoard) {
@@ -1713,7 +1759,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         );
       }
       return (
-        <MatchScoreboardFull
+        <FullBoard
           key="sponsor-panel-scoreboard"
           match={match}
           elapsed={scoreboardClock}
@@ -1781,7 +1827,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               <DisplaySpreadLayers
                 key="idle-prematch-spread"
                 scoreboard={
-                  <MatchScoreboardFull
+                  <FullBoard
                     match={match}
                     elapsed={scoreboardClock}
                     shotClock={shotClock}
@@ -1848,7 +1894,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
               postmatchSpread={postmatchSpreadActive ? postmatchDistView : null}
               prematchScoreboardNode={
                 match && state ? (
-                  <MatchScoreboardFull
+                  <FullBoard
                     key="prematch-spread-gap-board"
                     match={match}
                     elapsed={scoreboardClock}
@@ -1878,7 +1924,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           !previewForcesSponsorBeside &&
           !showLiveSponsorBeside && (
             <div className="absolute inset-0 z-[8]">
-            <MatchScoreboardFull
+            <FullBoard
               key="match-board-full"
               match={match}
               elapsed={scoreboardClock}
@@ -1947,7 +1993,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           mode === "PLAYER_INTRO" &&
           match &&
           !activePlayer && (
-            <MatchScoreboardFull
+            <FullBoard
               key="player-intro-fallback-board"
               match={match}
               elapsed={scoreboardClock}
@@ -1981,10 +2027,22 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           <FullTimeMode key="ft" match={match} />
         )}
 
+        {/* Clubstijl RAFC: een kaart vult het hele scherm (wit vlak), zoals de wissel. */}
+        {state && mode === "CARD" && match && rafcStyle && state.activeCardColor !== "GREEN" && (
+          <div className="absolute inset-0 z-[20]">
+            <RafcCard
+              key="card-fs"
+              player={cardPlayer}
+              color={state.activeCardColor === "YELLOW_RED" ? "YELLOW_RED" : state.activeCardColor === "RED" ? "RED" : "YELLOW"}
+            />
+          </div>
+        )}
+
         {/* Wissel: fullscreen (geen scorestrip); tijdens speelhelft blijft score bij handmatige SPONSOR wel zichtbaar. */}
         {state && mode === "SUBSTITUTION" && match && (
-          <SubstitutionMode
-            key="sub-fs"
+          <SubTakeover
+            // Per wissel een eigen sleutel: bij meerdere wissels na elkaar begint elke wissel opnieuw.
+            key={`sub-fs-${subOut?.id ?? ""}-${subIn?.id ?? ""}`}
             team={subTeam}
             playerIn={subIn}
             playerOut={subOut}
@@ -2014,7 +2072,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
           !(match && sponsorRotationBesideScoreboard(match.status)) &&
           !activeMedia &&
           match && (
-            <MatchScoreboardFull
+            <FullBoard
               key="sponsor-fs-scoreboard"
               match={match}
               elapsed={scoreboardClock}

@@ -1,4 +1,5 @@
 import path from "path";
+import { shownCardColor } from "../lib/card-display";
 import type { DisplayState, Match } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import type { Db } from "./db";
@@ -1487,6 +1488,10 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const ctx = eventClockContext(s, match);
       const eventType =
         cmd.color === "GREEN" ? "CARD_GREEN" : cmd.color === "YELLOW" ? "CARD_YELLOW" : "CARD_RED";
+      /** Een tweede gele kaart toont het scherm als geel en rood samen (lib/card-display.ts). */
+      const earlierYellowCards = cmd.playerId
+        ? await db.matchEvent.count({ where: { matchId: match.id, type: "CARD_YELLOW", playerInId: cmd.playerId } })
+        : 0;
       await logMatchEvent(db, match.id, {
         type: eventType,
         minute: ctx.minute,
@@ -1507,7 +1512,7 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
       const penaltyStartsNow = !profile.penaltyFollowsClock || s.timerRunning;
       await updateState(db, {
         ...(s.mode !== "BLACKOUT" ? {
-          mode: "CARD", activePlayerId: cmd.playerId, activeCardColor: cmd.color,
+          mode: "CARD", activePlayerId: cmd.playerId, activeCardColor: shownCardColor(cmd.color, earlierYellowCards, cmd.secondYellow === true),
         } : {}),
         ...(penaltySeconds
           ? penaltyStartsNow

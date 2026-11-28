@@ -11,6 +11,7 @@ import { layoutDraftIsDirty, useLayoutEditorStore } from "@/lib/layout-editor-st
 import { mergeScoreboardTheme } from "@/lib/scoreboard-theme";
 import { teamFromHomeBranding } from "@/lib/scoreboard-preview-match";
 import {
+  libraryTemplates,
   sameVisualLayout,
   templateMediaKind,
   type ScoreboardTemplate,
@@ -57,7 +58,7 @@ export function SetupScoreboardTemplatesSection({
     void load();
   }, [load, settings?.scoreboardThemeJson]);
 
-  const customTemplates = useMemo(() => templates.filter((tpl) => !tpl.isBuiltIn), [templates]);
+  const customTemplates = useMemo(() => libraryTemplates(templates), [templates]);
 
   async function applyTemplate(tpl: ScoreboardTemplate) {
     // Toepassen vervangt de opgeslagen indeling; de editor begint dan opnieuw en het concept is weg.

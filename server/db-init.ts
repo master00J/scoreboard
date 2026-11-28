@@ -205,6 +205,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("AppSettings", "sponsorGuaranteeJson", "TEXT");
   await addColumnIfMissing("AppSettings", "mediaSequencesJson", "TEXT");
   await addColumnIfMissing("AppSettings", "displayCopyHeight", "INTEGER");
+  await addColumnIfMissing("AppSettings", "clubStadiumStyleOff", "INTEGER");
   await addColumnIfMissing("MediaItem", "displayCopyPath", "TEXT");
   await addColumnIfMissing("MediaItem", "displayCopyKey", "TEXT");
   await addColumnIfMissing("DisplayState", "externalCaptureSourceId", "TEXT");

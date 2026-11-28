@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { CLUB_BRAND } from "./club-brand";
 import type { LayoutRule } from "./scoreboard-elements";
 import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
+  clubTemplateId,
+  libraryTemplates,
   extractVisualTheme,
   layoutsToUpdateOnSave,
   resolveScoreboardThemeJson,
@@ -195,7 +198,9 @@ describe("meegeleverde layouts", () => {
       } else {
         expect(templateMediaKind(row.themeJson)).toBe("overlay");
         if (theme.layoutMode === "custom") {
-          expect(slotIsSixteenByNine(theme.slots.sponsor)).toBe(true);
+          // Een vak met "16:9 links/midden/rechts" zet de clip zelf op 16:9; anders moet het vak 16:9 zijn.
+          const media = theme.elements.sponsor.find((e) => e.type === "media");
+          if (!media?.style?.mediaFit) expect(slotIsSixteenByNine(theme.slots.sponsor)).toBe(true);
         }
       }
     }
@@ -207,6 +212,8 @@ describe("meegeleverde layouts", () => {
     expect(a).toEqual(b);
     expect(new Set(a).size).toBe(a.length);
     expect(a).toEqual([
+      // Clubbuild (RAFC): de clubindeling staat bovenaan.
+      ...(CLUB_BRAND?.layoutTemplate ? [`builtin_${CLUB_BRAND.layoutTemplate.key}`] : []),
       "builtin_standaard",
       "builtin_pro-league",
       "builtin_amateur",
@@ -326,5 +333,18 @@ describe("layoutsToUpdateOnSave", () => {
     };
     const out = layoutsToUpdateOnSave([{ layout: template() }, { layout: rust }], current, situation);
     expect(out.map((layout) => layout.id)).toEqual(["eigen"]);
+  });
+});
+
+describe("layout-bibliotheek", () => {
+  it("toont eigen layouts en, in een clubbuild, de clubindeling bovenaan; andere meegeleverde niet", () => {
+    const rows = [
+      ...builtInTemplateRows(),
+      { id: "eigen1", isBuiltIn: false },
+    ];
+    const ids = libraryTemplates(rows).map((row) => row.id);
+    const clubId = clubTemplateId();
+    expect(ids).toEqual(clubId ? [clubId, "eigen1"] : ["eigen1"]);
+    expect(clubId).toBe(CLUB_BRAND?.layoutTemplate ? `builtin_${CLUB_BRAND.layoutTemplate.key}` : null);
   });
 });

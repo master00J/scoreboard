@@ -3,12 +3,13 @@
 import type { CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { StableClockText } from "@/components/stable-clock-text";
+import { FitText } from "@/components/fit-text";
 import type { Match } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
 import { type ResolvedScoreboardTheme, mergeScoreboardTheme, scoreboardSurfaceBackgroundPath } from "@/lib/scoreboard-theme";
 import type { LayoutElement } from "@/lib/scoreboard-elements";
 import { formatSportClock, getSportProfile } from "@/lib/sports";
-import { ExtraElement, elementBoxStyle, elementInnerStyle } from "./layout-elements";
+import { ExtraElement, elementBoxStyle, elementInnerStyle, themeTextShadow } from "./layout-elements";
 import { TeamLogo } from "./scoreboard-strip";
 import { ShotClockReadout, SportMatchMeta, SportTeamExtras, useShotClockOff } from "./sport-score-extras";
 
@@ -172,7 +173,7 @@ function TeamSide({
       style={{
         fontSize: `min(${theme.fullTeamNamePx}px, 14cqh, 12cqw)`,
         color: element.style?.color ?? theme.teamNameColor,
-        textShadow: "0 4px 24px rgba(0,0,0,0.45)",
+        textShadow: themeTextShadow(theme, "0 4px 24px rgba(0,0,0,0.45)"),
       }}
     >
       <span className="line-clamp-3">{team.shortName || team.name}</span>
@@ -231,21 +232,24 @@ function TeamScore({
 }) {
   if (!theme.showScores) return null;
   return (
-    <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
+    <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }} data-fit-box>
       <div
         className="flex h-full w-full flex-col items-center justify-center gap-[6cqh] px-[4cqw] py-[4cqh]"
         style={inner}
       >
-        <div
+        <FitText
+          as="div"
+          boost={element.style?.fontScale ?? 1}
           className="shrink-0 font-black tabular-nums leading-none"
           style={{
             fontSize: `min(${theme.fullScorePx}px, 72cqh, 70cqw)`,
             color: element.style?.color ?? theme.scoreColor,
-            textShadow: "0 8px 40px rgba(0,0,0,0.55)",
+            ...(theme.plainDigits ? { fontVariantNumeric: "normal", fontFeatureSettings: "normal" } : {}),
+            textShadow: themeTextShadow(theme, "0 8px 40px rgba(0,0,0,0.55)"),
           }}
         >
           {score}
-        </div>
+        </FitText>
         <div className="w-full min-w-0 shrink-0">
           <SportTeamExtras match={match} side={side} compact />
         </div>
@@ -282,6 +286,7 @@ function CenterBlock({
     <div
       className="absolute box-border overflow-hidden"
       style={{ ...style, containerType: "size" }}
+      data-fit-box
     >
       <div
         className="flex h-full w-full flex-col items-center justify-center min-w-0"
@@ -298,12 +303,15 @@ function CenterBlock({
         {theme.showClock ? (
           <div className="flex items-end justify-center gap-4">
             <StableClockText
+              digitEm={theme.clockDigitEm}
+              plainDigits={theme.plainDigits}
+              fitBoost={element.style?.fontScale ?? 1}
               value={formatSportClock(match.sport, elapsed)}
               className="font-black leading-none"
               style={{
                 fontSize: `min(${theme.fullTimerPx}px, 48cqh, 36cqw)`,
                 color: element.style?.color ?? accent,
-                textShadow: "0 6px 36px rgba(0,0,0,0.5)",
+                textShadow: themeTextShadow(theme, "0 6px 36px rgba(0,0,0,0.5)"),
                 opacity: running ? 1 : 0.82,
               }}
             />

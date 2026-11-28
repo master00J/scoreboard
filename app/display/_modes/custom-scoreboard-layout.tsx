@@ -9,7 +9,8 @@ import { mergeScoreboardTheme, scoreboardSurfaceBackgroundPath, type ResolvedSco
 import type { LayoutElement } from "@/lib/scoreboard-elements";
 import { getSportProfile } from "@/lib/sports";
 import { DisplayMediaStage } from "@/components/display-media-stage";
-import { ExtraElement, elementBoxStyle, elementInnerStyle } from "./layout-elements";
+import { FitText } from "@/components/fit-text";
+import { ExtraElement, elementBoxStyle, elementInnerStyle, themeTextShadow } from "./layout-elements";
 import { TeamLogo } from "./scoreboard-strip";
 import { ShotClockReadout, SportMatchMeta, SportTeamExtras, useShotClockOff } from "./sport-score-extras";
 
@@ -68,12 +69,32 @@ export function CustomScoreboardLayout({
         const inner = elementInnerStyle(element);
         const side = element.side === "away" ? "away" : "home";
         switch (element.type) {
-          case "media":
+          case "media": {
+            const fit = element.style?.mediaFit;
+            if (!fit) {
+              return (
+                <div key={element.id} className="absolute overflow-hidden" style={box}>
+                  <DisplayMediaStage>{children}</DisplayMediaStage>
+                </div>
+              );
+            }
+            // Clip als 16:9 links, midden of rechts in het vak; de rest toont de achtergrondkleur.
             return (
-              <div key={element.id} className="absolute overflow-hidden" style={box}>
-                <DisplayMediaStage>{children}</DisplayMediaStage>
+              <div key={element.id} className="absolute overflow-hidden" style={{ ...box, containerType: "size" }}>
+                <div
+                  className="absolute inset-0 flex items-center"
+                  style={{ justifyContent: fit === "left" ? "flex-start" : fit === "right" ? "flex-end" : "center" }}
+                >
+                  <div
+                    className="relative shrink-0 overflow-hidden"
+                    style={{ width: "min(100cqw, 100cqh * 16 / 9)", aspectRatio: "16 / 9" }}
+                  >
+                    <DisplayMediaStage>{children}</DisplayMediaStage>
+                  </div>
+                </div>
               </div>
             );
+          }
           case "teamLogo":
             return (
               <TeamLogoChip
@@ -107,6 +128,7 @@ export function CustomScoreboardLayout({
                 key={element.id}
                 className="absolute box-border overflow-hidden"
                 style={{ ...box, containerType: "size" }}
+                data-fit-box
               >
                 <div
                   className="flex h-full w-full flex-col items-center justify-center px-[8cqw] py-[10cqh]"
@@ -122,12 +144,15 @@ export function CustomScoreboardLayout({
                   ) : null}
                   {theme.showClock ? (
                     <StableClockText
+                      digitEm={theme.clockDigitEm}
+                      plainDigits={theme.plainDigits}
+                      fitBoost={element.style?.fontScale ?? 1}
                       value={formatSportClock(match.sport, elapsed)}
                       className="font-black leading-none"
                       style={{
                         fontSize: "min(42cqh, 28cqw, 160px)",
                         color: element.style?.color ?? accent,
-                        textShadow: "0 4px 18px rgba(0,0,0,0.45)",
+                        textShadow: themeTextShadow(theme, "0 4px 18px rgba(0,0,0,0.45)"),
                       }}
                     />
                   ) : null}
@@ -247,21 +272,24 @@ function TeamScoreChip({
 }) {
   if (!theme.showScores) return null;
   return (
-    <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
+    <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }} data-fit-box>
       <div
         className="flex h-full w-full flex-col items-center justify-center gap-[6cqh] px-[6cqw] py-[6cqh]"
         style={inner}
       >
-        <div
+        <FitText
+          as="div"
+          boost={element.style?.fontScale ?? 1}
           className="shrink-0 font-black tabular-nums leading-none"
           style={{
             fontSize: "min(62cqh, 58cqw, 220px)",
             color: element.style?.color ?? theme.scoreColor,
-            textShadow: "0 4px 18px rgba(0,0,0,0.45)",
+            ...(theme.plainDigits ? { fontVariantNumeric: "normal", fontFeatureSettings: "normal" } : {}),
+            textShadow: themeTextShadow(theme, "0 4px 18px rgba(0,0,0,0.45)"),
           }}
         >
           {score}
-        </div>
+        </FitText>
         <div className="w-full min-w-0 shrink-0">
           <SportTeamExtras match={match} side={side} compact />
         </div>

@@ -736,6 +736,8 @@ function CardPicker({
   const { t } = useTranslation();
   const [teamId, setTeamId] = useState<string>(match.homeTeamId);
   const [playerId, setPlayerId] = useState<string | null>(null);
+  /** Tweede gele kaart: het scherm toont geel en rood samen. Zonder vinkje herkent de app het zelf. */
+  const [secondYellow, setSecondYellow] = useState(false);
   const team = teamId === match.homeTeamId ? match.homeTeam : match.awayTeam;
 
   return (
@@ -776,6 +778,17 @@ function CardPicker({
           selectedId={playerId}
           onSelect={setPlayerId}
         />
+        {color !== "GREEN" ? (
+          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={secondYellow}
+              onChange={(e) => setSecondYellow(e.target.checked)}
+            />
+            {t("matchLive.secondYellow")}
+          </label>
+        ) : null}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             {t("common.cancel")}
@@ -788,6 +801,7 @@ function CardPicker({
                 teamId,
                 playerId: playerId!,
                 color,
+                ...(secondYellow && color !== "GREEN" ? { secondYellow: true } : {}),
               });
               onClose();
             }}

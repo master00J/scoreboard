@@ -209,6 +209,15 @@ export type ScoreboardTheme = {
   leftFrameBackgroundPath?: string;
   /** CSS font-family stack */
   fontFamily?: string;
+  /** Schaduw achter scores, klok en tekst. Uit voor een vlakke huisstijl zonder schaduw. */
+  textShadows?: boolean;
+  /** Breedte per cijfer van de klok, in em. Brede letters (zoals Zalando Sans Expanded) hebben meer nodig. */
+  clockDigitEm?: number;
+  /**
+   * Gewone cijfers in plaats van tabelcijfers. Sommige lettertypes (zoals Zalando Sans Expanded) tekenen
+   * de nul als tabelcijfer met een schuine streep.
+   */
+  plainDigits?: boolean;
   /** Volgorde blokken in linkerkolom */
   leftColumnOrder?: LeftStripSegment[];
   /** Linker L-layout */
@@ -288,6 +297,9 @@ export type ResolvedScoreboardTheme = Required<
     | "fullBackgroundPath"
     | "leftFrameBackgroundPath"
     | "fontFamily"
+    | "textShadows"
+    | "clockDigitEm"
+    | "plainDigits"
     | "leftColumnOrder"
     | "leftLogoPx"
     | "leftScorePx"
@@ -342,6 +354,9 @@ export const DEFAULT_SCOREBOARD_THEME: ResolvedScoreboardTheme = {
   leftFrameBackgroundPath: "",
   fontFamily:
     'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+  textShadows: true,
+  clockDigitEm: 0.65,
+  plainDigits: false,
   leftColumnOrder: [...DEFAULT_ORDER],
   leftLogoPx: 160,
   leftScorePx: 160,
@@ -864,6 +879,12 @@ export function mergeScoreboardTheme(raw: string | null | undefined): ResolvedSc
     fullBackgroundPath: normalizeMediaPath(patch.fullBackgroundPath),
     leftFrameBackgroundPath: normalizeMediaPath(patch.leftFrameBackgroundPath),
     fontFamily: patch.fontFamily?.trim() || DEFAULT_SCOREBOARD_THEME.fontFamily,
+    textShadows: patch.textShadows !== false,
+    clockDigitEm:
+      typeof patch.clockDigitEm === "number" && Number.isFinite(patch.clockDigitEm)
+        ? clamp(Math.round(patch.clockDigitEm * 100) / 100, 0.5, 1.2)
+        : DEFAULT_SCOREBOARD_THEME.clockDigitEm,
+    plainDigits: patch.plainDigits === true,
     timerRunningColor: patch.timerRunningColor ?? DEFAULT_SCOREBOARD_THEME.timerRunningColor,
     timerPausedColor: patch.timerPausedColor ?? DEFAULT_SCOREBOARD_THEME.timerPausedColor,
   };

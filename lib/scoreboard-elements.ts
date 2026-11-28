@@ -34,10 +34,23 @@ export type LayoutElementType =
   | "period"
   | "timeOfDay"
   | "text"
-  | "image";
+  | "image"
+  /** Vlak in een kleur, recht of schuin (trapezium): achtergronden, balken, tabs. */
+  | "shape"
+  /** De stand als één regel, "2-0". */
+  | "scoreLine";
 
 /** Types die een club zelf kan toevoegen; de klassieke vakken bestaan altijd precies één keer. */
-export const ADDABLE_ELEMENT_TYPES = ["teamName", "teamExtras", "period", "timeOfDay", "text", "image"] as const;
+export const ADDABLE_ELEMENT_TYPES = [
+  "teamName",
+  "teamExtras",
+  "period",
+  "timeOfDay",
+  "text",
+  "image",
+  "shape",
+  "scoreLine",
+] as const;
 export type AddableElementType = (typeof ADDABLE_ELEMENT_TYPES)[number];
 
 export type ElementAlign = "left" | "center" | "right";
@@ -51,7 +64,29 @@ export type LayoutElementStyle = {
   fontScale?: number;
   align?: ElementAlign;
   uppercase?: boolean;
+  /**
+   * Schuine zijkanten (trapezium), in procent van de breedte per kant. Positief = onderaan smaller,
+   * negatief = bovenaan smaller. 0 of leeg = recht.
+   */
+  taper?: number;
+  /**
+   * Alleen voor het videovak: de clip als 16:9 tegen de linkerkant, in het midden of tegen de
+   * rechterkant van het vak; de rest van het vak krijgt de achtergrondkleur. Leeg = clip vult het vak.
+   */
+  mediaFit?: MediaFit;
 };
+
+export const TAPER_MAX = 45;
+
+export type MediaFit = "left" | "center" | "right";
+
+/** Trapezium: positief = onderaan smaller, negatief = bovenaan smaller (procent van de breedte per kant). */
+export function taperClipPath(taper: number): string {
+  const inset = Math.min(TAPER_MAX, Math.abs(taper));
+  return taper > 0
+    ? `polygon(0% 0%, 100% 0%, ${100 - inset}% 100%, ${inset}% 100%)`
+    : `polygon(${inset}% 0%, ${100 - inset}% 0%, 100% 100%, 0% 100%)`;
+}
 
 export type LayoutElement = LayoutSlot & {
   id: string;
@@ -149,6 +184,11 @@ export function normalizeElementStyle(raw: unknown): LayoutElementStyle | undefi
   }
   if (rec.align === "left" || rec.align === "right") style.align = rec.align;
   if (rec.uppercase === true) style.uppercase = true;
+  if (typeof rec.taper === "number" && Number.isFinite(rec.taper)) {
+    const taper = Math.round(clamp(rec.taper, -TAPER_MAX, TAPER_MAX) * 10) / 10;
+    if (taper !== 0) style.taper = taper;
+  }
+  if (rec.mediaFit === "left" || rec.mediaFit === "center" || rec.mediaFit === "right") style.mediaFit = rec.mediaFit;
   return Object.keys(style).length > 0 ? style : undefined;
 }
 
@@ -251,6 +291,8 @@ const NEW_ELEMENT_BOX: Record<AddableElementType, LayoutSlot> = {
   // Onderaan: daar is op beide standaardindelingen plaats, zonder de klok of het videovak te bedekken.
   text: { x: 3, y: 87, w: 30, h: 9 },
   image: { x: 68, y: 84, w: 14, h: 14 },
+  shape: { x: 35, y: 40, w: 30, h: 20 },
+  scoreLine: { x: 30, y: 30, w: 40, h: 30 },
 };
 
 /** Nieuw element op een standaardplek. `id` komt van de aanroeper, zodat dit zuiver blijft. */
@@ -417,4 +459,58 @@ export function overviewSportForEditor(input: {
     if (candidate != null && String(candidate).trim() !== "") return normalizeSport(candidate);
   }
   return normalizeSport(input.rules.find((rule) => rule.sport !== "*")?.sport);
+}
+
+/**
+ * Horizontale plek (in % van het scherm) van de clip in een videovak. `aspect` = breedte / hoogte van
+ * het scherm. Zonder `mediaFit` vult de clip het hele vak.
+ */
+export function mediaClipSpan(
+  box: LayoutSlot,
+  fit: MediaFit | undefined,
+  aspect: number,
+): { left: number; width: number } {
+  if (!fit || !(aspect > 0)) return { left: box.x, width: box.w };
+  const width = Math.min(box.w, (box.h * (16 / 9)) / aspect);
+  const left = fit === "left" ? box.x : fit === "right" ? box.x + box.w - width : box.x + (box.w - width) / 2;
+  return { left, width };
+}
+
+/**
+ * Zet de clip in een videovak links, in het midden, rechts of over het hele vak ("vullen"). Score, klok
+ * en logo's die onder of op de clip stonden, schuiven mee, zodat ze altijd onder de clip uitgelijnd
+ * blijven: hun midden houdt dezelfde verhouding tot de clip (bij een smallere clip schuiven ze dichter
+ * bij elkaar). Elementen die breder zijn dan de clip (zoals een balk over het hele scherm) blijven staan.
+ */
+export function setMediaFit(
+  elements: LayoutElement[],
+  mediaId: string,
+  fit: MediaFit | undefined,
+  aspect: number,
+): LayoutElement[] {
+  const media = elements.find((element) => element.id === mediaId);
+  if (!media || media.type !== "media") return elements;
+  const style: LayoutElementStyle = { ...media.style };
+  if (fit) style.mediaFit = fit;
+  else delete style.mediaFit;
+  const { style: _old, ...rest } = media;
+  const nextMedia: LayoutElement = Object.keys(style).length > 0 ? { ...rest, style } : rest;
+
+  const from = mediaClipSpan(media, media.style?.mediaFit, aspect);
+  const to = mediaClipSpan(media, fit, aspect);
+  const unchanged = Math.abs(from.left - to.left) < 0.05 && Math.abs(from.width - to.width) < 0.05;
+  const EPS = 0.5;
+  return elements.map((element) => {
+    if (element.id === mediaId) return nextMedia;
+    if (unchanged || from.width <= 0) return element;
+    const inside =
+      element.w < from.width - EPS &&
+      element.x >= from.left - EPS &&
+      element.x + element.w <= from.left + from.width + EPS;
+    if (!inside) return element;
+    const center = element.x + element.w / 2;
+    const nextCenter = to.left + ((center - from.left) / from.width) * to.width;
+    const x = Math.round(clamp(nextCenter - element.w / 2, 0, 100 - element.w) * 10) / 10;
+    return { ...element, x };
+  });
 }

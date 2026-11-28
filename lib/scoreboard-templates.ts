@@ -5,6 +5,7 @@ import {
   STREAM_SURFACES,
   type LayoutRule,
 } from "./scoreboard-elements";
+import { CLUB_BRAND } from "./club-brand";
 import {
   DEFAULT_SCOREBOARD_THEME,
   SLOT_PRESETS,
@@ -298,6 +299,21 @@ export const BUILT_IN_TEMPLATES: BuiltIn[] = [
   },
 ];
 
+/** Id van de clubindeling in de bibliotheek (clubbuild, bv. RAFC), anders null. */
+export function clubTemplateId(): string | null {
+  return CLUB_BRAND?.layoutTemplate ? `builtin_${CLUB_BRAND.layoutTemplate.key}` : null;
+}
+
+/**
+ * Wat de layout-bibliotheek toont: de eigen layouts van de club en, in een clubbuild, ook de
+ * meegeleverde clubindeling (bovenaan), zodat die met "Toepassen" terug te zetten is.
+ */
+export function libraryTemplates<T extends { id: string; isBuiltIn?: boolean }>(templates: T[]): T[] {
+  const clubId = clubTemplateId();
+  const club = clubId ? templates.filter((tpl) => tpl.id === clubId) : [];
+  return [...club, ...templates.filter((tpl) => !tpl.isBuiltIn)];
+}
+
 export function builtInTemplateRows(): {
   id: string;
   name: string;
@@ -306,7 +322,9 @@ export function builtInTemplateRows(): {
   isBuiltIn: boolean;
   sortIndex: number;
 }[] {
-  return BUILT_IN_TEMPLATES.map((t, i) => ({
+  // In een clubbuild (bv. RAFC) staat de indeling van de club bovenaan de bibliotheek.
+  const list = CLUB_BRAND?.layoutTemplate ? [CLUB_BRAND.layoutTemplate, ...BUILT_IN_TEMPLATES] : BUILT_IN_TEMPLATES;
+  return list.map((t, i) => ({
     id: `builtin_${t.key}`,
     name: t.name,
     label: t.label,

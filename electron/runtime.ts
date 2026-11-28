@@ -151,6 +151,7 @@ import {
   type MediaSequence,
   type SequenceMember,
 } from "../lib/media-sequences";
+import { CLUB_BRAND } from "../lib/club-brand";
 import {
   displayCopyKey,
   displayCopyMap,
@@ -1196,6 +1197,23 @@ async function setLiveCyclePhasing(next: LiveCycleStored) {
   );
 }
 
+/**
+ * Clubbuild (bv. RAFC): een database zonder eigen schermindeling krijgt de indeling van de club. Een
+ * indeling die de club al bewaarde, blijft staan; de clubindeling staat dan in de bibliotheek.
+ */
+async function seedClubLayoutIfMissing() {
+  const template = CLUB_BRAND?.layoutTemplate;
+  if (!template) return;
+  try {
+    const settings = await getAppSettings();
+    if (settings.scoreboardThemeJson) return;
+    await setScoreboardThemeJson(JSON.stringify(template.theme));
+    requireOpts().log(`[layout] standaardindeling ${template.name} gezet`);
+  } catch (err) {
+    requireOpts().log(`[layout] clubindeling zetten mislukt: ${String(err)}`);
+  }
+}
+
 async function setScoreboardThemeJson(json: string | null) {
   await prisma.$executeRawUnsafe(
     `UPDATE "AppSettings" SET "scoreboardThemeJson" = ? WHERE "id" = 1`,
@@ -1848,6 +1866,7 @@ export async function initDesktopRuntime(runtimeOptions: RuntimeOptions) {
   opts = runtimeOptions;
   await ensureSqliteSchema(runtimeOptions.log);
   await ensureBaseData();
+  await seedClubLayoutIfMissing();
   await migrateAppSettingsLiveCycleFromLegacy();
   await repairOrphanDisplayMatchId();
   await resetAutoSponsorModeOnStartup();
@@ -3437,6 +3456,24 @@ export async function apiRequest(req: DesktopApiRequest): Promise<DesktopApiResp
       await touchState();
       await broadcastDisplayState();
       return json(200, { ok: true });
+    }
+
+    if (pathname === "/api/club-style" && (method === "GET" || method === "PUT")) {
+      if (method === "PUT") {
+        const body = parseJsonBody(req) as { enabled?: unknown };
+        await prisma.$executeRawUnsafe(`INSERT OR IGNORE INTO "AppSettings" ("id", "homeTeamId") VALUES (1, NULL)`);
+        await prisma.$executeRawUnsafe(
+          `UPDATE "AppSettings" SET "clubStadiumStyleOff" = ? WHERE "id" = 1`,
+          body.enabled === false ? 1 : null,
+        );
+        // Het stadionscherm haalt de keuze op bij een nieuwe stand.
+        await touchState();
+        await broadcastDisplayState();
+      }
+      const rows = await prisma.$queryRawUnsafe<Array<{ v: number | null }>>(
+        `SELECT "clubStadiumStyleOff" AS v FROM "AppSettings" WHERE "id" = 1`,
+      );
+      return json(200, { enabled: rows[0]?.v !== 1 });
     }
 
     if (pathname === "/api/display-copies" && method === "GET") {
