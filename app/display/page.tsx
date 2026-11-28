@@ -140,6 +140,7 @@ import { HalfTimeMode, FullTimeMode } from "./_modes/halftime-fulltime";
 import { TimeoutOverlay } from "./_modes/timeout-overlay";
 import { DisplayExtrasLayer } from "./_modes/display-extras-overlay";
 import { ShootoutOverlay } from "./_modes/shootout-overlay";
+import { RafcShootout } from "./_modes/rafc/rafc-shootout";
 import { parseShootout, shootoutScreenBlock } from "@/lib/penalty-shootout";
 import { DEFAULT_DISPLAY_EXTRAS, displayExtrasFromJson, type DisplayExtras } from "@/lib/display-extras";
 import { BreakOverlay } from "./_modes/break-overlay";
@@ -2132,9 +2133,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         {state && mode === "BLACKOUT" && <BlackoutMode key="bo" />}
       </AnimatePresence>
 
-      {showShootout && match && shootout && (
-        <ShootoutOverlay match={match} shootout={shootout} theme={scoreboardTheme} />
-      )}
+      {showShootout && match && shootout ? (
+        rafcStyle ? (
+          <RafcShootout match={match} shootout={shootout} />
+        ) : (
+          <ShootoutOverlay match={match} shootout={shootout} theme={scoreboardTheme} />
+        )
+      ) : null}
 
       {state &&
         match &&
