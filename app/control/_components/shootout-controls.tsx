@@ -9,6 +9,7 @@ import {
   shootoutIsSuddenDeath,
   shootoutMarks,
   shootoutNextSide,
+  shootoutScreenBlock,
   shootoutTally,
   shootoutWinner,
   SHOOTOUT_DEFAULT_ROUNDS,
@@ -17,6 +18,8 @@ import {
 } from "@/lib/penalty-shootout";
 import { normalizeSport } from "@/lib/sports";
 import { isLivePlayingMatchStatus } from "@/lib/live-cycle-settings";
+import { sponsorRotationBesideScoreboard } from "@/lib/sponsor-display-helpers";
+import { useDisplayStore } from "@/lib/store";
 import type { Match } from "@/lib/types";
 
 const ROUND_CHOICES = [3, 5] as const;
@@ -37,22 +40,37 @@ function MarkDot({ mark }: { mark: ShootoutMark }) {
   return <span className={`inline-block h-3.5 w-3.5 shrink-0 rounded-full border-2 ${cls}`} aria-hidden />;
 }
 
+/** Zet het stadionscherm op het scorebord, waar de reeks overheen komt. */
+function showScoreboardOnScreen() {
+  return sendCommand({ type: "display:setMode", mode: "MATCH" });
+}
+
 /**
  * Een reeks volgt op het eindsignaal. Loopt de wedstrijd nog, dan eerst naar "Einde": de klok
  * stopt en er draaien geen sponsorclips meer naast het scorebord die de overlay zou afdekken.
+ * Toont het scherm iets anders dan het scorebord (bv. sponsors), dan gaat het naar het scorebord,
+ * zodat de reeks meteen in beeld komt.
  */
-async function startShootout(match: Match, firstSide: ShootoutSide, rounds: number) {
+async function startShootout(
+  match: Match,
+  firstSide: ShootoutSide,
+  rounds: number,
+  displayMode: string | null | undefined,
+) {
   if (isLivePlayingMatchStatus(match.status)) {
     const ended = await sendCommand({ type: "match:setStatus", status: "FULL_TIME" });
     if (!ended?.ok) return;
   }
-  await sendCommand({ type: "shootout:start", firstSide, rounds });
+  const started = await sendCommand({ type: "shootout:start", firstSide, rounds });
+  if (!started?.ok) return;
+  if (displayMode !== "MATCH" && displayMode !== "FULLTIME") await showScoreboardOnScreen();
 }
 
 /** Strafschoppenreeks (voetbal, futsal) of shoot-out (hockey) bedienen vanuit het live-paneel. */
 export function ShootoutControls({ match }: { match: Match }) {
   const { t } = useTranslation();
   const [rounds, setRounds] = useState<number>(SHOOTOUT_DEFAULT_ROUNDS);
+  const displayMode = useDisplayStore((s) => s.state?.mode);
   const shootout = parseShootout(match.shootoutJson);
   const title = normalizeSport(match.sport) === "HOCKEY" ? t("matchLive.shootoutTitleHockey") : t("matchLive.shootoutTitle");
 
@@ -83,7 +101,7 @@ export function ShootoutControls({ match }: { match: Match }) {
               size="sm"
               className="h-8 px-2 text-[10px]"
               variant="outline"
-              onClick={() => void startShootout(match, side, rounds)}
+              onClick={() => void startShootout(match, side, rounds, displayMode)}
             >
               {t("matchLive.shootoutStartWith", { team: teamLabel(match, side) })}
             </Button>
@@ -100,6 +118,11 @@ export function ShootoutControls({ match }: { match: Match }) {
   const marks = shootoutMarks(shootout);
   const suddenDeath = !winner && shootoutIsSuddenDeath(shootout);
   const noKicksYet = shootout.kicks.length === 0;
+  const screenBlock = shootoutScreenBlock({
+    onScreen: shootout.onScreen,
+    displayMode,
+    periodPlaying: sponsorRotationBesideScoreboard(match.status),
+  });
 
   return (
     <div className="space-y-2 border-t border-border pt-2">
@@ -124,6 +147,24 @@ export function ShootoutControls({ match }: { match: Match }) {
           {t("matchLive.shootoutOnScreen")}
         </label>
       </div>
+
+      {screenBlock === "screenMode" || screenBlock === "playing" ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-100">
+          <span>{t(screenBlock === "playing" ? "matchLive.shootoutWaitsForEnd" : "matchLive.shootoutNotOnScreen")}</span>
+          <Button
+            size="sm"
+            className="h-7 px-2 text-[10px]"
+            variant="outline"
+            onClick={() =>
+              void (screenBlock === "playing"
+                ? sendCommand({ type: "match:setStatus", status: "FULL_TIME" })
+                : showScoreboardOnScreen())
+            }
+          >
+            {t(screenBlock === "playing" ? "matchLive.shootoutToFullTime" : "matchLive.shootoutShowNow")}
+          </Button>
+        </div>
+      ) : null}
 
       <div className="grid gap-2 sm:grid-cols-2">
         {SIDES.map((side) => {

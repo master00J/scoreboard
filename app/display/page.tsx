@@ -140,7 +140,7 @@ import { HalfTimeMode, FullTimeMode } from "./_modes/halftime-fulltime";
 import { TimeoutOverlay } from "./_modes/timeout-overlay";
 import { DisplayExtrasLayer } from "./_modes/display-extras-overlay";
 import { ShootoutOverlay } from "./_modes/shootout-overlay";
-import { parseShootout } from "@/lib/penalty-shootout";
+import { parseShootout, shootoutScreenBlock } from "@/lib/penalty-shootout";
 import { DEFAULT_DISPLAY_EXTRAS, displayExtrasFromJson, type DisplayExtras } from "@/lib/display-extras";
 import { BreakOverlay } from "./_modes/break-overlay";
 import { DisplayWatchdog } from "./_components/watchdog";
@@ -1583,11 +1583,13 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
    */
   const showShootout =
     !!shootout &&
-    shootout.onScreen &&
     !!match &&
     !layoutPreviewActive &&
-    (mode === "MATCH" || mode === "FULLTIME") &&
-    !sponsorRotationBesideScoreboard(match.status);
+    shootoutScreenBlock({
+      onScreen: shootout.onScreen,
+      displayMode: mode,
+      periodPlaying: sponsorRotationBesideScoreboard(match.status),
+    }) === null;
   const showLiveSponsorBeside = liveSponsorBesideVisible({
     mounted: keepLiveSponsorBesideMounted,
     phase: sponsorDistView.phase,

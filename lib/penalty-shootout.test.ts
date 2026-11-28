@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  shootoutScreenBlock,
   addShootoutKick,
   createShootout,
   parseShootout,
@@ -122,5 +123,21 @@ describe("penalty shootout", () => {
     expect(sportSupportsShootout("HOCKEY")).toBe(true);
     expect(sportSupportsShootout("BASKETBALL")).toBe(false);
     expect(sportSupportsShootout("VOLLEYBALL")).toBe(false);
+  });
+});
+
+describe("wanneer de reeks op het stadionscherm staat", () => {
+  it("staat er na het eindsignaal over het scorebord", () => {
+    expect(shootoutScreenBlock({ onScreen: true, displayMode: "MATCH", periodPlaying: false })).toBeNull();
+    expect(shootoutScreenBlock({ onScreen: true, displayMode: "FULLTIME", periodPlaying: false })).toBeNull();
+  });
+
+  it("zegt waarom niet: uitgezet, nog aan het spelen, of het scherm toont sponsors", () => {
+    expect(shootoutScreenBlock({ onScreen: false, displayMode: "MATCH", periodPlaying: false })).toBe("hidden");
+    expect(shootoutScreenBlock({ onScreen: true, displayMode: "MATCH", periodPlaying: true })).toBe("playing");
+    expect(shootoutScreenBlock({ onScreen: true, displayMode: "SPONSOR_ROTATION", periodPlaying: false })).toBe(
+      "screenMode",
+    );
+    expect(shootoutScreenBlock({ onScreen: true, displayMode: undefined, periodPlaying: false })).toBe("screenMode");
   });
 });

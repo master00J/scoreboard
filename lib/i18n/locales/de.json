@@ -491,7 +491,11 @@
     "shootoutOnScreen": "Auf der Stadionanzeige",
     "shootoutClear": "Löschen",
     "shootoutClearConfirm": "Elfmeterschießen löschen? Der Spielstand bleibt erhalten.",
-    "shootoutHint": "Zählt nicht zum Spielstand. Nach den Runden folgt Sudden Death.",
+    "shootoutHint": "Zählt nicht zum Spielstand. Der Start setzt das Spiel auf Ende und den Stadionbildschirm auf die Anzeigetafel. Nach den Runden folgt Sudden Death.",
+    "shootoutNotOnScreen": "Nicht auf dem Stadionbildschirm: Der Bildschirm zeigt gerade etwas anderes (z. B. Sponsoren). Das Elfmeterschießen erscheint nur über der Anzeigetafel.",
+    "shootoutShowNow": "Auf Bildschirm zeigen",
+    "shootoutWaitsForEnd": "Nicht auf dem Stadionbildschirm: Es läuft noch eine Spielzeit. Das Elfmeterschießen erscheint nach dem Schlusspfiff.",
+    "shootoutToFullTime": "Auf Ende setzen",
     "shootoutMatchScore": "Spiel {{home}} – {{away}}"
   },
   "sponsors": {

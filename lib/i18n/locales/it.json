@@ -491,7 +491,11 @@
     "shootoutOnScreen": "Sul maxischermo",
     "shootoutClear": "Cancella serie",
     "shootoutClearConfirm": "Cancellare la serie di rigori? Il risultato della partita resta invariato.",
-    "shootoutHint": "Non conta nel risultato della partita. Dopo i tiri si va ad oltranza.",
+    "shootoutHint": "Non conta nel risultato della partita. L’avvio porta la partita a Fine e lo schermo dello stadio sul tabellone. Dopo i tiri si va ad oltranza.",
+    "shootoutNotOnScreen": "Non sullo schermo dello stadio: lo schermo mostra altro (ad es. sponsor). La serie appare solo sopra il tabellone.",
+    "shootoutShowNow": "Mostra sullo schermo",
+    "shootoutWaitsForEnd": "Non sullo schermo dello stadio: è ancora in corso un periodo di gioco. La serie appare dopo il fischio finale.",
+    "shootoutToFullTime": "Imposta su Fine",
     "shootoutMatchScore": "Partita {{home}} – {{away}}"
   },
   "sponsors": {

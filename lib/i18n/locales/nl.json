@@ -491,7 +491,11 @@
     "shootoutOnScreen": "Op stadionscherm",
     "shootoutClear": "Reeks wissen",
     "shootoutClearConfirm": "De strafschoppenreeks wissen? De wedstrijdscore blijft staan.",
-    "shootoutHint": "Telt niet mee in de wedstrijdscore. Na de rondes volgt sudden death.",
+    "shootoutHint": "Telt niet mee in de wedstrijdscore. Starten zet de wedstrijd op Einde en het stadionscherm op het scorebord. Na de rondes volgt sudden death.",
+    "shootoutNotOnScreen": "Niet op het stadionscherm: het scherm toont nu iets anders (bv. sponsors). De reeks verschijnt alleen over het scorebord.",
+    "shootoutShowNow": "Toon op scherm",
+    "shootoutWaitsForEnd": "Niet op het stadionscherm: er loopt nog een speelperiode. De reeks verschijnt na het eindsignaal.",
+    "shootoutToFullTime": "Zet op Einde",
     "shootoutMatchScore": "Wedstrijd {{home}} – {{away}}"
   },
   "sponsors": {
