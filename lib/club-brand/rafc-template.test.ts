@@ -29,12 +29,16 @@ describe("RAFC-indeling als gewone elementen", () => {
     // Het rode vlak ligt onderaan.
     expect(full[0]?.id).toBe("rafc-bg");
     const sponsor = new Map(theme.elements.sponsor.map((e) => [e.id, e]));
-    expect(sponsor.get("sponsor")).toMatchObject({ x: 10, y: 0, w: 80, h: 80 });
+    expect(sponsor.get("sponsor")).toMatchObject({ x: 0, y: 0, w: 80, h: 80 });
+    // Zijbalk vult de rest van de breedte naast de 16:9-clip, zonder zwarte rand.
+    expect(sponsor.get("rafc-side")).toMatchObject({ type: "shape", x: 80, y: 0, w: 20, h: 80 });
+    expect(sponsor.get("rafc-side-crest")).toMatchObject({ type: "image", src: "brand:crest" });
     expect(sponsor.get("rafc-bar")).toMatchObject({ y: 80, h: 20 });
   });
 
   it("leest het competitielogo uit de app", () => {
     expect(clubBrandAsset("brand:league")).toMatch(/^data:image\/svg\+xml/);
+    expect(clubBrandAsset("brand:crest")).toMatch(/^data:image\/svg\+xml/);
     expect(clubBrandAsset("brand:onbekend")).toBe("");
   });
 });
