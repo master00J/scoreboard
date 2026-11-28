@@ -196,7 +196,9 @@ describe("meegeleverde layouts", () => {
       } else {
         expect(templateMediaKind(row.themeJson)).toBe("overlay");
         if (theme.layoutMode === "custom") {
-          expect(slotIsSixteenByNine(theme.slots.sponsor)).toBe(true);
+          // Een vak met "16:9 links/midden/rechts" zet de clip zelf op 16:9; anders moet het vak 16:9 zijn.
+          const media = theme.elements.sponsor.find((e) => e.type === "media");
+          if (!media?.style?.mediaFit) expect(slotIsSixteenByNine(theme.slots.sponsor)).toBe(true);
         }
       }
     }

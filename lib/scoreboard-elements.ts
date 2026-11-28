@@ -69,9 +69,16 @@ export type LayoutElementStyle = {
    * negatief = bovenaan smaller. 0 of leeg = recht.
    */
   taper?: number;
+  /**
+   * Alleen voor het videovak: de clip als 16:9 tegen de linkerkant, in het midden of tegen de
+   * rechterkant van het vak; de rest van het vak krijgt de achtergrondkleur. Leeg = clip vult het vak.
+   */
+  mediaFit?: MediaFit;
 };
 
 export const TAPER_MAX = 45;
+
+export type MediaFit = "left" | "center" | "right";
 
 /** Trapezium: positief = onderaan smaller, negatief = bovenaan smaller (procent van de breedte per kant). */
 export function taperClipPath(taper: number): string {
@@ -181,6 +188,7 @@ export function normalizeElementStyle(raw: unknown): LayoutElementStyle | undefi
     const taper = Math.round(clamp(rec.taper, -TAPER_MAX, TAPER_MAX) * 10) / 10;
     if (taper !== 0) style.taper = taper;
   }
+  if (rec.mediaFit === "left" || rec.mediaFit === "center" || rec.mediaFit === "right") style.mediaFit = rec.mediaFit;
   return Object.keys(style).length > 0 ? style : undefined;
 }
 

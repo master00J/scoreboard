@@ -380,7 +380,7 @@ export function SetupScoreboardPlacer({
   }
 
   function ratioFor(element: LayoutElement): number | null {
-    return element.type === "media" && lockMediaRatio ? mediaRatio : null;
+    return element.type === "media" && lockMediaRatio && !element.style?.mediaFit ? mediaRatio : null;
   }
 
   function othersOf(id: string): LayoutSlot[] {
@@ -895,6 +895,29 @@ export function SetupScoreboardPlacer({
               </div>
 
               {active.type === "media" ? (
+                <div>
+                  <Label className="text-[11px]">{t("layoutEditor.mediaFit")}</Label>
+                  <div className="mt-1 grid grid-cols-2 gap-1">
+                    {(["fill", "left", "center", "right"] as const).map((fit) => (
+                      <button
+                        key={fit}
+                        type="button"
+                        onClick={() => patchStyle(active.id, { mediaFit: fit === "fill" ? undefined : fit })}
+                        className={`rounded-md border px-2 py-1 text-xs ${
+                          (active.style?.mediaFit ?? "fill") === fit
+                            ? "border-primary bg-primary/10 font-medium"
+                            : "border-border hover:bg-muted/50"
+                        }`}
+                      >
+                        {t(`layoutEditor.mediaFit_${fit}`)}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">{t("layoutEditor.mediaFitHelp")}</p>
+                </div>
+              ) : null}
+
+              {active.type === "media" && !active.style?.mediaFit ? (
                 <label className="flex cursor-pointer items-center gap-2 text-xs">
                   <input type="checkbox" checked={lockMediaRatio} onChange={(e) => setLockMediaRatio(e.target.checked)} />
                   {t("layoutEditor.lockRatio")}

@@ -29,10 +29,14 @@ describe("RAFC-indeling als gewone elementen", () => {
     // Het rode vlak ligt onderaan.
     expect(full[0]?.id).toBe("rafc-bg");
     const sponsor = new Map(theme.elements.sponsor.map((e) => [e.id, e]));
-    expect(sponsor.get("sponsor")).toMatchObject({ x: 0, y: 0, w: 80, h: 80 });
-    // Zijbalk vult de rest van de breedte naast de 16:9-clip, zonder zwarte rand.
-    expect(sponsor.get("rafc-side")).toMatchObject({ type: "shape", x: 80, y: 0, w: 20, h: 80 });
-    expect(sponsor.get("rafc-side-crest")).toMatchObject({ type: "image", src: "brand:crest" });
+    // Videovak over de volle breedte: clip als 16:9 links, de rest rood (geen zwarte rand).
+    expect(sponsor.get("sponsor")).toMatchObject({
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 80,
+      style: { background: RAFC_RED, mediaFit: "left" },
+    });
     expect(sponsor.get("rafc-bar")).toMatchObject({ y: 80, h: 20 });
   });
 
@@ -48,6 +52,12 @@ describe("schuine vlakken", () => {
     expect(normalizeElementStyle({ taper: 6.64 })).toEqual({ taper: 6.6 });
     expect(normalizeElementStyle({ taper: -80 })).toEqual({ taper: -45 });
     expect(normalizeElementStyle({ taper: 0 })).toBeUndefined();
+  });
+
+  it("bewaart links, midden of rechts voor de clip in het videovak en negeert de rest", () => {
+    expect(normalizeElementStyle({ mediaFit: "right" })).toEqual({ mediaFit: "right" });
+    expect(normalizeElementStyle({ mediaFit: "center" })).toEqual({ mediaFit: "center" });
+    expect(normalizeElementStyle({ mediaFit: "boven" })).toBeUndefined();
   });
 
   it("tekent een trapezium dat onderaan of bovenaan smaller is", () => {

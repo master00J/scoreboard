@@ -68,12 +68,32 @@ export function CustomScoreboardLayout({
         const inner = elementInnerStyle(element);
         const side = element.side === "away" ? "away" : "home";
         switch (element.type) {
-          case "media":
+          case "media": {
+            const fit = element.style?.mediaFit;
+            if (!fit) {
+              return (
+                <div key={element.id} className="absolute overflow-hidden" style={box}>
+                  <DisplayMediaStage>{children}</DisplayMediaStage>
+                </div>
+              );
+            }
+            // Clip als 16:9 links, midden of rechts in het vak; de rest toont de achtergrondkleur.
             return (
-              <div key={element.id} className="absolute overflow-hidden" style={box}>
-                <DisplayMediaStage>{children}</DisplayMediaStage>
+              <div key={element.id} className="absolute overflow-hidden" style={{ ...box, containerType: "size" }}>
+                <div
+                  className="absolute inset-0 flex items-center"
+                  style={{ justifyContent: fit === "left" ? "flex-start" : fit === "right" ? "flex-end" : "center" }}
+                >
+                  <div
+                    className="relative shrink-0 overflow-hidden"
+                    style={{ width: "min(100cqw, 100cqh * 16 / 9)", aspectRatio: "16 / 9" }}
+                  >
+                    <DisplayMediaStage>{children}</DisplayMediaStage>
+                  </div>
+                </div>
               </div>
             );
+          }
           case "teamLogo":
             return (
               <TeamLogoChip
