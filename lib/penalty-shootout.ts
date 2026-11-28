@@ -192,3 +192,24 @@ export function sportSupportsShootout(sport: unknown): boolean {
   const id = normalizeSport(sport);
   return id === "FOOTBALL" || id === "FUTSAL" || id === "HOCKEY";
 }
+
+/**
+ * Waarom de reeks nu niet op het stadionscherm staat, of null als hij er wel staat.
+ * - "hidden": de operator zette "Op stadionscherm" uit.
+ * - "playing": er loopt nog een speelperiode; de reeks hoort na het eindsignaal.
+ * - "screenMode": het scherm toont iets anders dan het scorebord (bv. sponsors); de reeks
+ *   verschijnt alleen over het scorebord, zodat hij geen sponsorclip afdekt die zendtijd telt.
+ */
+export type ShootoutScreenBlock = "hidden" | "playing" | "screenMode";
+
+export function shootoutScreenBlock(opts: {
+  onScreen: boolean;
+  displayMode: string | null | undefined;
+  /** Eerste/tweede helft of verlenging: dan staan er sponsorclips naast het scorebord. */
+  periodPlaying: boolean;
+}): ShootoutScreenBlock | null {
+  if (!opts.onScreen) return "hidden";
+  if (opts.periodPlaying) return "playing";
+  if (opts.displayMode !== "MATCH" && opts.displayMode !== "FULLTIME") return "screenMode";
+  return null;
+}

@@ -489,7 +489,11 @@
     "shootoutOnScreen": "On stadium screen",
     "shootoutClear": "Clear shootout",
     "shootoutClearConfirm": "Clear the penalty shootout? The match score stays as it is.",
-    "shootoutHint": "Does not count towards the match score. Sudden death follows after the rounds.",
+    "shootoutHint": "Does not count towards the match score. Starting sets the match to Full time and the stadium screen to the scoreboard. Sudden death follows after the rounds.",
+    "shootoutNotOnScreen": "Not on the stadium screen: the screen shows something else now (e.g. sponsors). The shootout only appears over the scoreboard.",
+    "shootoutShowNow": "Show on screen",
+    "shootoutWaitsForEnd": "Not on the stadium screen: a playing period is still running. The shootout appears after the final whistle.",
+    "shootoutToFullTime": "Set to Full time",
     "shootoutMatchScore": "Match {{home}} – {{away}}"
   },
   "sponsors": {
