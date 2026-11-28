@@ -489,7 +489,8 @@
     "shootoutOnScreen": "Sur l’écran du stade",
     "shootoutClear": "Effacer la séance",
     "shootoutClearConfirm": "Effacer la séance de tirs au but ? Le score du match reste inchangé.",
-    "shootoutHint": "Ne compte pas dans le score du match. Mort subite après les tirs réglementaires."
+    "shootoutHint": "Ne compte pas dans le score du match. Mort subite après les tirs réglementaires.",
+    "shootoutMatchScore": "Match {{home}} – {{away}}"
   },
   "sponsors": {
     "liveTitle": "Sponsors live · mesuré à l’écran",

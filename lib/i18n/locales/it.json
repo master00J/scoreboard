@@ -489,7 +489,8 @@
     "shootoutOnScreen": "Sul maxischermo",
     "shootoutClear": "Cancella serie",
     "shootoutClearConfirm": "Cancellare la serie di rigori? Il risultato della partita resta invariato.",
-    "shootoutHint": "Non conta nel risultato della partita. Dopo i tiri si va ad oltranza."
+    "shootoutHint": "Non conta nel risultato della partita. Dopo i tiri si va ad oltranza.",
+    "shootoutMatchScore": "Partita {{home}} – {{away}}"
   },
   "sponsors": {
     "liveTitle": "Sponsor live · misurato sullo schermo",
