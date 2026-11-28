@@ -4,6 +4,8 @@ import type { LayoutRule } from "./scoreboard-elements";
 import {
   applyTemplateToThemeJson,
   builtInTemplateRows,
+  clubTemplateId,
+  libraryTemplates,
   extractVisualTheme,
   layoutsToUpdateOnSave,
   resolveScoreboardThemeJson,
@@ -331,5 +333,18 @@ describe("layoutsToUpdateOnSave", () => {
     };
     const out = layoutsToUpdateOnSave([{ layout: template() }, { layout: rust }], current, situation);
     expect(out.map((layout) => layout.id)).toEqual(["eigen"]);
+  });
+});
+
+describe("layout-bibliotheek", () => {
+  it("toont eigen layouts en, in een clubbuild, de clubindeling bovenaan; andere meegeleverde niet", () => {
+    const rows = [
+      ...builtInTemplateRows(),
+      { id: "eigen1", isBuiltIn: false },
+    ];
+    const ids = libraryTemplates(rows).map((row) => row.id);
+    const clubId = clubTemplateId();
+    expect(ids).toEqual(clubId ? [clubId, "eigen1"] : ["eigen1"]);
+    expect(clubId).toBe(CLUB_BRAND?.layoutTemplate ? `builtin_${CLUB_BRAND.layoutTemplate.key}` : null);
   });
 });

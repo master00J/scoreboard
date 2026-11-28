@@ -299,6 +299,21 @@ export const BUILT_IN_TEMPLATES: BuiltIn[] = [
   },
 ];
 
+/** Id van de clubindeling in de bibliotheek (clubbuild, bv. RAFC), anders null. */
+export function clubTemplateId(): string | null {
+  return CLUB_BRAND?.layoutTemplate ? `builtin_${CLUB_BRAND.layoutTemplate.key}` : null;
+}
+
+/**
+ * Wat de layout-bibliotheek toont: de eigen layouts van de club en, in een clubbuild, ook de
+ * meegeleverde clubindeling (bovenaan), zodat die met "Toepassen" terug te zetten is.
+ */
+export function libraryTemplates<T extends { id: string; isBuiltIn?: boolean }>(templates: T[]): T[] {
+  const clubId = clubTemplateId();
+  const club = clubId ? templates.filter((tpl) => tpl.id === clubId) : [];
+  return [...club, ...templates.filter((tpl) => !tpl.isBuiltIn)];
+}
+
 export function builtInTemplateRows(): {
   id: string;
   name: string;

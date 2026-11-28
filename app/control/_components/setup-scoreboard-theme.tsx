@@ -42,6 +42,7 @@ import {
   type LayoutRule,
 } from "@/lib/scoreboard-elements";
 import {
+  clubTemplateId,
   layoutsToUpdateOnSave,
   sameVisualLayout,
   templateDisplayName,
@@ -650,11 +651,15 @@ export function SetupScoreboardThemeSection({
   async function resetDefault() {
     // Dit wist de opgeslagen indeling van de club; ongedaan maken kan daarna niet meer.
     if (!confirm(t("layoutEditor.resetConfirm"))) return;
-    const res = await fetch("/api/settings", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scoreboardThemeJson: null }),
-    });
+    // Clubbuild: "standaard" is de indeling van de club, niet de algemene van de app.
+    const clubId = clubTemplateId();
+    const res = clubId
+      ? await fetch(`/api/scoreboard-templates/${encodeURIComponent(clubId)}/apply`, { method: "POST" })
+      : await fetch("/api/settings", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scoreboardThemeJson: null }),
+        });
     if (!res.ok) {
       toast({ title: t("setup.themeResetFailed"), variant: "error" });
       return;
