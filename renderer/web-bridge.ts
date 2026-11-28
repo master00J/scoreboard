@@ -10,6 +10,14 @@ import { applyTemplateToThemeJson, builtInTemplateRows, sanitizeTemplateThemeJso
 import type { CommandAck, DesktopApiRequest, DesktopApiResponse, ElectronBridge, TickPayload } from "@/lib/desktop-bridge";
 import type { SerializedDisplayState } from "@/lib/timer";
 import { mergeSponsorsWithClubMedia } from "@/lib/club-media-rotation";
+import {
+  addShootoutKick,
+  createShootout,
+  parseShootout,
+  serializeShootout,
+  sportSupportsShootout,
+  undoShootoutKick,
+} from "@/lib/penalty-shootout";
 
 const CHANNEL = "arenacue-web-scoreboard";
 const STORAGE_KEY = "arenacue_web_scoreboard_v5";
@@ -1111,6 +1119,35 @@ function handleCommand(raw: Command): CommandAck {
         break;
       case "display:setExternalCaptureAudio":
         display.externalCaptureAudio = cmd.enabled;
+        break;
+      case "shootout:start": {
+        if (!match) throw new Error("No active match");
+        if (!sportSupportsShootout(match.sport)) throw new Error("shootoutNotActive");
+        const current = parseShootout(match.shootoutJson);
+        if (current && current.kicks.length > 0) throw new Error("shootoutAlreadyStarted");
+        updateMatch({ shootoutJson: serializeShootout(createShootout(cmd.firstSide, cmd.rounds)) });
+        break;
+      }
+      case "shootout:kick": {
+        const current = parseShootout(match?.shootoutJson);
+        if (!current) throw new Error("shootoutNotStarted");
+        const result = addShootoutKick(current, cmd.side, cmd.scored);
+        if (!result.ok) throw new Error(result.reason === "wrongSide" ? "shootoutWrongSide" : "shootoutDecided");
+        updateMatch({ shootoutJson: serializeShootout(result.shootout) });
+        break;
+      }
+      case "shootout:undo": {
+        const current = parseShootout(match?.shootoutJson);
+        if (current) updateMatch({ shootoutJson: serializeShootout(undoShootoutKick(current)) });
+        break;
+      }
+      case "shootout:setVisible": {
+        const current = parseShootout(match?.shootoutJson);
+        if (current) updateMatch({ shootoutJson: serializeShootout({ ...current, onScreen: cmd.visible }) });
+        break;
+      }
+      case "shootout:clear":
+        updateMatch({ shootoutJson: null });
         break;
       case "event:undo": {
         const event = store.events.find((e) => e.id === cmd.eventId);

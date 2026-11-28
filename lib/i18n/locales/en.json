@@ -129,7 +129,12 @@
     "eventNotFound": "Event not found",
     "volleyballUndoLastOnly": "In volleyball only the last point can be undone (or use −1).",
     "matchClosed": "This match is closed (report saved). Reopen it in Setup → Matches or pick another match.",
-    "licenseNoAutoSponsors": "Automatic sponsor rotation is not available on this license plan."
+    "licenseNoAutoSponsors": "Automatic sponsor rotation is not available on this license plan.",
+    "shootoutNotActive": "Penalty shootouts are not used in {{sport}}.",
+    "shootoutNotStarted": "No penalty shootout is running.",
+    "shootoutAlreadyStarted": "The shootout has already started. Undo the kicks or clear the shootout to start again.",
+    "shootoutWrongSide": "It is the other team’s turn.",
+    "shootoutDecided": "The shootout is already decided."
   },
   "shell": {
     "title": "Stadium Control",
@@ -468,7 +473,22 @@
     "overtimeButton": "Overtime",
     "penaltyFollowsClock": "Penalty time runs with the game clock",
     "clearPenalty": "Clear",
-    "periodEnded": "Period over — select the next period"
+    "periodEnded": "Period over — select the next period",
+    "shootoutTitle": "Penalty shootout",
+    "shootoutTitleHockey": "Shoot-out",
+    "shootoutFirstSide": "Who kicks first?",
+    "shootoutStartWith": "{{team}} first",
+    "shootoutRounds": "{{n}} rounds",
+    "shootoutScored": "Scored",
+    "shootoutMissed": "Missed",
+    "shootoutNextUp": "Up next: {{team}}",
+    "shootoutSuddenDeath": "Sudden death",
+    "shootoutWinner": "{{team}} wins",
+    "shootoutUndo": "Undo last kick",
+    "shootoutOnScreen": "On stadium screen",
+    "shootoutClear": "Clear shootout",
+    "shootoutClearConfirm": "Clear the penalty shootout? The match score stays as it is.",
+    "shootoutHint": "Does not count towards the match score. Sudden death follows after the rounds."
   },
   "sponsors": {
     "liveTitle": "Sponsors live · measured on screen",

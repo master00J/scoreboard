@@ -21,6 +21,8 @@ import {
 import { useLiveBreakSeconds, useLiveTimerSeconds } from "@/lib/use-timer";
 import { applyLivePeriod, applyLivePhase } from "@/lib/live-phase-commands";
 import { OfficialClockBadge } from "./official-clock-badge";
+import { ShootoutControls } from "./shootout-controls";
+import { sportSupportsShootout } from "@/lib/penalty-shootout";
 import { tPeriodButton, tPeriodName, tSportLabel, tStatLabel } from "@/lib/i18n/t-sport";
 import { formatTechnicalTimeoutScores, volleyballRulesFromMatch } from "@/lib/volleyball";
 import type { Match } from "@/lib/types";
@@ -446,6 +448,7 @@ export function SportLiveControls({ match }: { match: Match }) {
           </div>
         </div>
       )}
+      {sportSupportsShootout(match.sport) && <ShootoutControls match={match} />}
     </div>
   );
 }

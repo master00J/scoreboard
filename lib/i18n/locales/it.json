@@ -129,7 +129,12 @@
     "eventNotFound": "Evento non trovato",
     "volleyballUndoLastOnly": "Nella pallavolo si può annullare solo l’ultimo punto (o usa −1).",
     "matchClosed": "Questa partita è chiusa (report salvato). Riapri in Prepara → Partite o scegli un’altra partita.",
-    "licenseNoAutoSponsors": "La rotazione automatica degli sponsor non è disponibile in questo piano."
+    "licenseNoAutoSponsors": "La rotazione automatica degli sponsor non è disponibile in questo piano.",
+    "shootoutNotActive": "I tiri di rigore non si usano nella {{sport}}.",
+    "shootoutNotStarted": "Nessuna serie di rigori in corso.",
+    "shootoutAlreadyStarted": "La serie è già iniziata. Annulla i tiri o cancella la serie per ricominciare.",
+    "shootoutWrongSide": "Tocca all’altra squadra.",
+    "shootoutDecided": "La serie è già decisa."
   },
   "shell": {
     "title": "Stadium Control",
@@ -468,7 +473,22 @@
     "serving": "Servizio",
     "resumePlay": "Riprendi il gioco",
     "penaltyClock": "Tempo di penalità",
-    "greenCard": "Cartellino verde"
+    "greenCard": "Cartellino verde",
+    "shootoutTitle": "Rigori",
+    "shootoutTitleHockey": "Shoot-out",
+    "shootoutFirstSide": "Chi inizia?",
+    "shootoutStartWith": "Inizia {{team}}",
+    "shootoutRounds": "{{n}} tiri",
+    "shootoutScored": "Segnato",
+    "shootoutMissed": "Sbagliato",
+    "shootoutNextUp": "Al tiro: {{team}}",
+    "shootoutSuddenDeath": "Ad oltranza",
+    "shootoutWinner": "Vince {{team}}",
+    "shootoutUndo": "Annulla ultimo tiro",
+    "shootoutOnScreen": "Sul maxischermo",
+    "shootoutClear": "Cancella serie",
+    "shootoutClearConfirm": "Cancellare la serie di rigori? Il risultato della partita resta invariato.",
+    "shootoutHint": "Non conta nel risultato della partita. Dopo i tiri si va ad oltranza."
   },
   "sponsors": {
     "liveTitle": "Sponsor live · misurato sullo schermo",
