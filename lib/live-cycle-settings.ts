@@ -98,6 +98,20 @@ export function programmedDisplayMode(opts: {
 }
 
 /**
+ * Naar welke modus het scherm terugkeert na iets tijdelijks (een clip met de hand, de spelerintro):
+ * de modus die er stond, als dat een gewone schermkeuze was (alleen scorebord, scorebord met sponsors,
+ * leeg). Stond er zelf iets tijdelijks, dan wat het programma voor deze fase voorschrijft.
+ */
+export function displayModeToResume(
+  currentMode: string | null | undefined,
+  programmed: "IDLE" | "MATCH" | "SPONSOR_ROTATION",
+): "IDLE" | "MATCH" | "SPONSOR_ROTATION" {
+  return currentMode === "MATCH" || currentMode === "SPONSOR_ROTATION" || currentMode === "IDLE"
+    ? currentMode
+    : programmed;
+}
+
+/**
  * Stilstaande klok aan het begin van een speelhelft: volledig scorebord, geen sponsorclips
  * tot de operator op Start drukt.
  */
