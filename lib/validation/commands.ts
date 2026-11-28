@@ -140,6 +140,19 @@ export const CommandSchema = z.discriminatedUnion("type", [
     side: z.enum(["home", "away"]),
   }),
   z.object({
+    type: z.literal("shootout:start"),
+    firstSide: z.enum(["home", "away"]),
+    rounds: z.number().int().min(1).max(10).optional(),
+  }),
+  z.object({
+    type: z.literal("shootout:kick"),
+    side: z.enum(["home", "away"]),
+    scored: z.boolean(),
+  }),
+  z.object({ type: z.literal("shootout:undo") }),
+  z.object({ type: z.literal("shootout:setVisible"), visible: z.boolean() }),
+  z.object({ type: z.literal("shootout:clear") }),
+  z.object({
     type: z.literal("card:trigger"),
     teamId: z.string(),
     playerId: z.string(),

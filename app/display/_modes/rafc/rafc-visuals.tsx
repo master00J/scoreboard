@@ -19,10 +19,10 @@ export const RAFC_YELLOW = "#FFC422";
 export const RAFC_DARK_RED = "#550000";
 
 /** px in het 1920x1080-raster naar container-eenheden. */
-const cw = (px: number) => `${(px / 19.2).toFixed(4)}cqw`;
-const ch = (px: number) => `${(px / 10.8).toFixed(4)}cqh`;
+export const cw = (px: number) => `${(px / 19.2).toFixed(4)}cqw`;
+export const ch = (px: number) => `${(px / 10.8).toFixed(4)}cqh`;
 
-function Canvas({ background, children, style }: { background: string; children: ReactNode; style?: CSSProperties }) {
+export function Canvas({ background, children, style }: { background: string; children: ReactNode; style?: CSSProperties }) {
   return (
     <div
       className="absolute inset-0 overflow-hidden"
@@ -34,7 +34,7 @@ function Canvas({ background, children, style }: { background: string; children:
 }
 
 /** Tekst of beeld met het midden op (x, y) in het raster. */
-function At({ x, y, children, style }: { x: number; y: number; children: ReactNode; style?: CSSProperties }) {
+export function At({ x, y, children, style }: { x: number; y: number; children: ReactNode; style?: CSSProperties }) {
   return (
     <div
       className="absolute flex items-center justify-center whitespace-nowrap"

@@ -130,7 +130,12 @@
     "undoLaterEventFirst": "Annulez d’abord l’action de match ultérieure qui en dépend.",
     "volleyballUndoLastOnly": "Au volley-ball, seul le dernier point peut être annulé (ou utilisez −1).",
     "matchClosed": "Ce match est clôturé (rapport enregistré). Rouvrez-le dans Préparer → Matchs ou choisissez un autre match.",
-    "licenseNoAutoSponsors": "La rotation automatique des sponsors n’est pas disponible avec cette licence."
+    "licenseNoAutoSponsors": "La rotation automatique des sponsors n’est pas disponible avec cette licence.",
+    "shootoutNotActive": "Les tirs au but ne s’utilisent pas en {{sport}}.",
+    "shootoutNotStarted": "Aucune séance de tirs au but en cours.",
+    "shootoutAlreadyStarted": "La séance a déjà commencé. Annulez les tirs ou effacez la séance pour recommencer.",
+    "shootoutWrongSide": "C’est au tour de l’autre équipe.",
+    "shootoutDecided": "La séance est déjà terminée."
   },
   "shell": {
     "title": "Stadium Control",
@@ -471,7 +476,27 @@
     "overtimeButton": "Prolongation",
     "penaltyFollowsClock": "La pénalité suit le chrono du match",
     "clearPenalty": "Effacer",
-    "periodEnded": "Période terminée — choisissez la période suivante"
+    "periodEnded": "Période terminée — choisissez la période suivante",
+    "shootoutTitle": "Tirs au but",
+    "shootoutTitleHockey": "Shoot-out",
+    "shootoutFirstSide": "Qui commence ?",
+    "shootoutStartWith": "{{team}} commence",
+    "shootoutRounds": "{{n}} tirs",
+    "shootoutScored": "Marqué",
+    "shootoutMissed": "Raté",
+    "shootoutNextUp": "À tirer : {{team}}",
+    "shootoutSuddenDeath": "Mort subite",
+    "shootoutWinner": "{{team}} gagne",
+    "shootoutUndo": "Annuler le dernier tir",
+    "shootoutOnScreen": "Sur l’écran du stade",
+    "shootoutClear": "Effacer la séance",
+    "shootoutClearConfirm": "Effacer la séance de tirs au but ? Le score du match reste inchangé.",
+    "shootoutHint": "Ne compte pas dans le score du match. Démarrer passe le match en Fin et l’écran du stade sur le tableau d’affichage. Mort subite après les tirs réglementaires.",
+    "shootoutNotOnScreen": "Pas sur l’écran du stade : l’écran affiche autre chose (p. ex. des sponsors). La séance n’apparaît que sur le tableau d’affichage.",
+    "shootoutShowNow": "Afficher à l’écran",
+    "shootoutWaitsForEnd": "Pas sur l’écran du stade : une période de jeu est encore en cours. La séance apparaît après le coup de sifflet final.",
+    "shootoutToFullTime": "Passer en Fin",
+    "shootoutMatchScore": "Match {{home}} – {{away}}"
   },
   "sponsors": {
     "liveTitle": "Sponsors live · mesuré à l’écran",

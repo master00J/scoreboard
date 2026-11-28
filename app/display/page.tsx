@@ -139,6 +139,9 @@ import { SponsorBudgetRotation } from "./_modes/sponsor-budget-rotation";
 import { HalfTimeMode, FullTimeMode } from "./_modes/halftime-fulltime";
 import { TimeoutOverlay } from "./_modes/timeout-overlay";
 import { DisplayExtrasLayer } from "./_modes/display-extras-overlay";
+import { ShootoutOverlay } from "./_modes/shootout-overlay";
+import { RafcShootout } from "./_modes/rafc/rafc-shootout";
+import { parseShootout, shootoutScreenBlock } from "@/lib/penalty-shootout";
 import { DEFAULT_DISPLAY_EXTRAS, displayExtrasFromJson, type DisplayExtras } from "@/lib/display-extras";
 import { BreakOverlay } from "./_modes/break-overlay";
 import { DisplayWatchdog } from "./_components/watchdog";
@@ -1574,6 +1577,20 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
     liveSponsorBesideContent != null;
   const besideInterruptOverlay = isBesideInterruptOverlay(mode, !!activeMedia);
   const exclusiveFullscreen = isExclusiveFullscreenDisplayMode(mode);
+  const shootout = useMemo(() => parseShootout(match?.shootoutJson), [match?.shootoutJson]);
+  /**
+   * Alleen over het scorebord na het eindsignaal: dan draait er geen sponsorclip ernaast die de
+   * overlay zou afdekken (en als zendtijd zou tellen). Goal-, kaart- en mediaschermen gaan voor.
+   */
+  const showShootout =
+    !!shootout &&
+    !!match &&
+    !layoutPreviewActive &&
+    shootoutScreenBlock({
+      onScreen: shootout.onScreen,
+      displayMode: mode,
+      periodPlaying: sponsorRotationBesideScoreboard(match.status),
+    }) === null;
   const showLiveSponsorBeside = liveSponsorBesideVisible({
     mounted: keepLiveSponsorBesideMounted,
     phase: sponsorDistView.phase,
@@ -2115,6 +2132,14 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
 
         {state && mode === "BLACKOUT" && <BlackoutMode key="bo" />}
       </AnimatePresence>
+
+      {showShootout && match && shootout ? (
+        rafcStyle ? (
+          <RafcShootout match={match} shootout={shootout} />
+        ) : (
+          <ShootoutOverlay match={match} shootout={shootout} theme={scoreboardTheme} />
+        )
+      ) : null}
 
       {state &&
         match &&

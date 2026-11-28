@@ -118,6 +118,8 @@ model Match {
   homeFieldPlayerIdsJson String?
   /// JSON string[] — spelers op het veld (uit).
   awayFieldPlayerIdsJson String?
+  /// JSON strafschoppenreeks / shoot-out (lib/penalty-shootout.ts). Leeg = geen reeks.
+  shootoutJson    String?
   events          MatchEvent[]
   sponsorPlays    SponsorPlayLog[]
   createdAt       DateTime     @default(now())

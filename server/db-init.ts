@@ -293,6 +293,7 @@ export async function ensureSqliteSchema(log: (line: string) => void = () => {})
   await addColumnIfMissing("Match", "technicalTimeoutDurationSec", "INTEGER NOT NULL DEFAULT 60");
   await addColumnIfMissing("Match", "timeoutsPerSet", "INTEGER NOT NULL DEFAULT 2");
   await addColumnIfMissing("Match", "timeoutDurationSec", "INTEGER NOT NULL DEFAULT 30");
+  await addColumnIfMissing("Match", "shootoutJson", "TEXT");
   await addColumnIfMissing("MatchEvent", "period", "INTEGER");
   await addColumnIfMissing("MatchEvent", "clockSec", "REAL");
   await addColumnIfMissing("MatchEvent", "metaJson", "TEXT");
