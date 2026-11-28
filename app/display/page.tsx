@@ -106,6 +106,7 @@ import {
 } from "@/lib/auto-left-layout-latch";
 import {
   ledgerActiveClipStillLiveForMatchSegment,
+  rotationLiveClipSponsorId,
   sponsorLedgerMatchesSegment,
   type SponsorLedgerPayload,
 } from "@/lib/sponsor-telemetry";
@@ -1114,7 +1115,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         restartsClip: sponsorInterrupted,
         scheduleClock: sponsorScheduleClockRef.current,
         liveClipSponsorId: match
-          ? (ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger, now)?.sponsorId ?? null)
+          ? rotationLiveClipSponsorId(match, section, sponsorLedger, now)
           : null,
       });
       return finalizeSponsorDistPhase(
@@ -1168,7 +1169,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
         restartsClip: sponsorInterrupted,
         scheduleClock: halftimeScheduleClockRef.current,
         liveClipSponsorId: match
-          ? (ledgerActiveClipStillLiveForMatchSegment(match, "halftime", sponsorLedger, now)?.sponsorId ?? null)
+          ? rotationLiveClipSponsorId(match, "halftime", sponsorLedger, now)
           : null,
       });
       return finalizeSponsorDistPhase(
@@ -1263,7 +1264,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       restartsClip: sponsorInterrupted,
       scheduleClock: prematchScheduleClockRef.current,
       liveClipSponsorId: match
-        ? (ledgerActiveClipStillLiveForMatchSegment(match, "prematch", sponsorLedger, now)?.sponsorId ?? null)
+        ? rotationLiveClipSponsorId(match, "prematch", sponsorLedger, now)
         : null,
     });
     /**
@@ -1343,7 +1344,7 @@ export default function DisplayPage({ embedInControl = false }: { embedInControl
       restartsClip: sponsorInterrupted,
       scheduleClock: postmatchScheduleClockRef.current,
       liveClipSponsorId: match
-        ? (ledgerActiveClipStillLiveForMatchSegment(match, "postmatch", sponsorLedger, now)?.sponsorId ?? null)
+        ? rotationLiveClipSponsorId(match, "postmatch", sponsorLedger, now)
         : null,
     });
     return finalizeSponsorDistPhase(

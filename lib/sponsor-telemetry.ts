@@ -162,6 +162,29 @@ export function ledgerActiveClipStillLiveForMatchSegment(
   return sponsorTelemetryActiveClipStillLive(ac, nowMs) ? ac : null;
 }
 
+/** Een clip die de operator zelf startte (snelle knop, "Speel af", cue): geen vertoning van het rooster. */
+export function isManualClipSession(clipSessionId: string | null | undefined): boolean {
+  return typeof clipSessionId === "string" && clipSessionId.startsWith("manual:");
+}
+
+/**
+ * Sponsor van de clip die het sponsorrooster zelf nog speelt, of null.
+ *
+ * Het rooster laat een lopende clip uitspelen. Een clip die de operator met de hand startte
+ * hoort daar niet bij: na "Stop media" nam het rooster die clip anders over en startte hem
+ * opnieuw vanaf het begin, terwijl het rooster nog moest wachten tot de volgende vertoning.
+ */
+export function rotationLiveClipSponsorId(
+  match: { id: string; status?: string },
+  section: SponsorSection,
+  sponsorLedger: SponsorLedgerPayload | null | undefined,
+  nowMs: number = Date.now(),
+): string | null {
+  const ac = ledgerActiveClipStillLiveForMatchSegment(match, section, sponsorLedger ?? null, nowMs);
+  if (!ac || isManualClipSession(ac.clipSessionId)) return null;
+  return ac.sponsorId;
+}
+
 /** Zelfde marge als hierboven, zonder segmentcontrole (die doet de aanroeper). */
 export function sponsorTelemetryActiveClipStillLive(
   activeClip: NonNullable<SponsorLedgerPayload["activeClip"]>,
