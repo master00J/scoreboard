@@ -68,6 +68,14 @@ import {
   type VolleyballLive,
 } from "../lib/volleyball";
 import { CommandUserError } from "../lib/command-user-error";
+import {
+  addShootoutKick,
+  createShootout,
+  parseShootout,
+  serializeShootout,
+  sportSupportsShootout,
+  undoShootoutKick,
+} from "../lib/penalty-shootout";
 import { nextStateUpdatedAt } from "../lib/state-updated-at";
 import type { SubPair } from "./match-lineup";
 import {
@@ -940,6 +948,65 @@ export async function handleCommand(cmd: Command, db: Db = prisma): Promise<Comm
     }
     case "penalty:clear": {
       await updateState(db, pausePenaltyAt(cmd.side, 0));
+      return { ok: true };
+    }
+    case "shootout:start": {
+      const s = await getState(db);
+      const match = await requireActiveMatch(db, s);
+      if (!sportSupportsShootout(match.sport)) cmdErr("shootoutNotActive", { sport: match.sport });
+      const current = parseShootout(match.shootoutJson);
+      // Beginnend team of aantal rondes wijzigen mag zolang er nog niet getrapt is.
+      if (current && current.kicks.length > 0) cmdErr("shootoutAlreadyStarted");
+      const next = createShootout(cmd.firstSide, cmd.rounds);
+      await db.match.update({ where: { id: match.id }, data: { shootoutJson: serializeShootout(next) } });
+      await updateState(db, { mode: s.mode });
+      return { ok: true };
+    }
+    case "shootout:kick": {
+      const s = await getState(db);
+      const match = await requireActiveMatch(db, s);
+      const current = parseShootout(match.shootoutJson);
+      if (!current) cmdErr("shootoutNotStarted");
+      const result = addShootoutKick(current, cmd.side, cmd.scored);
+      if (!result.ok) {
+        cmdErr(result.reason === "wrongSide" ? "shootoutWrongSide" : "shootoutDecided");
+      }
+      await db.match.update({
+        where: { id: match.id },
+        data: { shootoutJson: serializeShootout(result.shootout) },
+      });
+      await updateState(db, { mode: s.mode });
+      return { ok: true };
+    }
+    case "shootout:undo": {
+      const s = await getState(db);
+      const match = await requireActiveMatch(db, s);
+      const current = parseShootout(match.shootoutJson);
+      if (!current) cmdErr("shootoutNotStarted");
+      await db.match.update({
+        where: { id: match.id },
+        data: { shootoutJson: serializeShootout(undoShootoutKick(current)) },
+      });
+      await updateState(db, { mode: s.mode });
+      return { ok: true };
+    }
+    case "shootout:setVisible": {
+      const s = await getState(db);
+      const match = await requireActiveMatch(db, s);
+      const current = parseShootout(match.shootoutJson);
+      if (!current) cmdErr("shootoutNotStarted");
+      await db.match.update({
+        where: { id: match.id },
+        data: { shootoutJson: serializeShootout({ ...current, onScreen: cmd.visible }) },
+      });
+      await updateState(db, { mode: s.mode });
+      return { ok: true };
+    }
+    case "shootout:clear": {
+      const s = await getState(db);
+      const match = await requireActiveMatch(db, s);
+      await db.match.update({ where: { id: match.id }, data: { shootoutJson: null } });
+      await updateState(db, { mode: s.mode });
       return { ok: true };
     }
     case "timeout:start": {

@@ -130,7 +130,12 @@
     "undoLaterEventFirst": "Maak eerst de latere, afhankelijke wedstrijdactie ongedaan.",
     "volleyballUndoLastOnly": "Bij volleybal kan alleen het laatste punt ongedaan gemaakt worden (of gebruik −1).",
     "matchClosed": "Deze wedstrijd is afgesloten (rapportage bewaard). Heropen in Setup → Matches of kies een andere wedstrijd.",
-    "licenseNoAutoSponsors": "Automatische sponsorrotatie is niet beschikbaar in dit licentieplan."
+    "licenseNoAutoSponsors": "Automatische sponsorrotatie is niet beschikbaar in dit licentieplan.",
+    "shootoutNotActive": "Strafschoppen of shoot-outs worden niet gebruikt bij {{sport}}.",
+    "shootoutNotStarted": "Er loopt geen strafschoppenreeks.",
+    "shootoutAlreadyStarted": "De reeks is al begonnen. Draai de trappen terug of wis de reeks om opnieuw te beginnen.",
+    "shootoutWrongSide": "Het andere team is aan de beurt.",
+    "shootoutDecided": "De reeks is al beslist."
   },
   "shell": {
     "title": "Stadium Control",
@@ -471,7 +476,22 @@
     "overtimeButton": "Verlenging",
     "penaltyFollowsClock": "Straftijd loopt mee met de wedstrijdklok",
     "clearPenalty": "Wissen",
-    "periodEnded": "Periode voorbij — kies de volgende periode"
+    "periodEnded": "Periode voorbij — kies de volgende periode",
+    "shootoutTitle": "Strafschoppen",
+    "shootoutTitleHockey": "Shoot-out",
+    "shootoutFirstSide": "Wie begint?",
+    "shootoutStartWith": "{{team}} begint",
+    "shootoutRounds": "{{n}} rondes",
+    "shootoutScored": "Raak",
+    "shootoutMissed": "Mis",
+    "shootoutNextUp": "Aan de beurt: {{team}}",
+    "shootoutSuddenDeath": "Sudden death",
+    "shootoutWinner": "{{team}} wint",
+    "shootoutUndo": "Laatste trap terug",
+    "shootoutOnScreen": "Op stadionscherm",
+    "shootoutClear": "Reeks wissen",
+    "shootoutClearConfirm": "De strafschoppenreeks wissen? De wedstrijdscore blijft staan.",
+    "shootoutHint": "Telt niet mee in de wedstrijdscore. Na de rondes volgt sudden death."
   },
   "sponsors": {
     "liveTitle": "Sponsors live · gemeten op scherm",

@@ -130,7 +130,12 @@
     "undoLaterEventFirst": "Zuerst die spätere abhängige Spielaktion rückgängig machen.",
     "volleyballUndoLastOnly": "Im Volleyball kann nur der letzte Punkt rückgängig gemacht werden (oder −1 verwenden).",
     "matchClosed": "Dieses Spiel ist abgeschlossen (Bericht gespeichert). Öffnen Sie es erneut unter Vorbereitung → Spiele oder wählen Sie ein anderes Spiel.",
-    "licenseNoAutoSponsors": "Automatische Sponsorrotation ist in diesem Lizenzplan nicht verfügbar."
+    "licenseNoAutoSponsors": "Automatische Sponsorrotation ist in diesem Lizenzplan nicht verfügbar.",
+    "shootoutNotActive": "Elfmeterschießen wird in {{sport}} nicht verwendet.",
+    "shootoutNotStarted": "Es läuft kein Elfmeterschießen.",
+    "shootoutAlreadyStarted": "Das Elfmeterschießen läuft bereits. Mach die Schüsse rückgängig oder lösche es, um neu zu beginnen.",
+    "shootoutWrongSide": "Das andere Team ist an der Reihe.",
+    "shootoutDecided": "Das Elfmeterschießen ist bereits entschieden."
   },
   "shell": {
     "title": "Stadium Control",
@@ -471,7 +476,22 @@
     "overtimeButton": "Verlängerung",
     "penaltyFollowsClock": "Die Strafzeit läuft mit der Spieluhr",
     "clearPenalty": "Löschen",
-    "periodEnded": "Periode vorbei — wählen Sie die nächste Periode"
+    "periodEnded": "Periode vorbei — wählen Sie die nächste Periode",
+    "shootoutTitle": "Elfmeterschießen",
+    "shootoutTitleHockey": "Penalty-Schießen",
+    "shootoutFirstSide": "Wer beginnt?",
+    "shootoutStartWith": "{{team}} beginnt",
+    "shootoutRounds": "{{n}} Runden",
+    "shootoutScored": "Getroffen",
+    "shootoutMissed": "Verschossen",
+    "shootoutNextUp": "Am Zug: {{team}}",
+    "shootoutSuddenDeath": "Sudden Death",
+    "shootoutWinner": "{{team}} gewinnt",
+    "shootoutUndo": "Letzten Schuss zurück",
+    "shootoutOnScreen": "Auf der Stadionanzeige",
+    "shootoutClear": "Löschen",
+    "shootoutClearConfirm": "Elfmeterschießen löschen? Der Spielstand bleibt erhalten.",
+    "shootoutHint": "Zählt nicht zum Spielstand. Nach den Runden folgt Sudden Death."
   },
   "sponsors": {
     "liveTitle": "Sponsoren live · auf dem Bildschirm gemessen",

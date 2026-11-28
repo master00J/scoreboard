@@ -851,3 +851,45 @@ describe("gelijktijdige commando's", () => {
     expect((await matchRow(m.id)).homeScore).toBe(3);
   });
 });
+
+describe("strafschoppenreeks", () => {
+  it("houdt de reeks apart van de wedstrijdscore en stopt als hij beslist is", async () => {
+    const m = await seedMatch("FOOTBALL", { status: "FULL_TIME", homeScore: 2, awayScore: 2 });
+    await run({ type: "shootout:start", firstSide: "away", rounds: 1 });
+    await expect(run({ type: "shootout:kick", side: "home", scored: true })).rejects.toThrow(/shootoutWrongSide/);
+    await run({ type: "shootout:kick", side: "away", scored: false });
+    await run({ type: "shootout:kick", side: "home", scored: true });
+    await expect(run({ type: "shootout:kick", side: "away", scored: true })).rejects.toThrow(/shootoutDecided/);
+    const row = await matchRow(m.id);
+    expect(row.homeScore).toBe(2);
+    expect(row.awayScore).toBe(2);
+    expect(JSON.parse(row.shootoutJson ?? "null")).toMatchObject({
+      firstSide: "away",
+      rounds: 1,
+      onScreen: true,
+      kicks: [
+        { side: "away", scored: false },
+        { side: "home", scored: true },
+      ],
+    });
+    // Eerste team wisselen kan niet meer na de eerste trap.
+    await expect(run({ type: "shootout:start", firstSide: "home" })).rejects.toThrow(/shootoutAlreadyStarted/);
+  });
+
+  it("draait de laatste trap terug, verbergt de overlay en wist de reeks", async () => {
+    const m = await seedMatch("HOCKEY", { status: "FULL_TIME" });
+    await run({ type: "shootout:start", firstSide: "home" });
+    await run({ type: "shootout:kick", side: "home", scored: true });
+    await run({ type: "shootout:undo" });
+    await run({ type: "shootout:setVisible", visible: false });
+    expect(JSON.parse((await matchRow(m.id)).shootoutJson ?? "null")).toMatchObject({ kicks: [], onScreen: false });
+    await run({ type: "shootout:clear" });
+    expect((await matchRow(m.id)).shootoutJson).toBeNull();
+    await expect(run({ type: "shootout:kick", side: "home", scored: true })).rejects.toThrow(/shootoutNotStarted/);
+  });
+
+  it("weigert een reeks bij basketbal", async () => {
+    await seedMatch("BASKETBALL", { periodDurationSec: 600 });
+    await expect(run({ type: "shootout:start", firstSide: "home" })).rejects.toThrow(/shootoutNotActive/);
+  });
+});

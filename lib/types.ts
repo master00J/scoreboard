@@ -139,6 +139,8 @@ export type Match = {
   /** Spelers op het veld (thuis); leeg tot API default of handmatige opstelling. */
   homeFieldPlayerIds?: string[];
   awayFieldPlayerIds?: string[];
+  /** JSON strafschoppenreeks / shoot-out; lees via `parseShootout` (lib/penalty-shootout.ts). */
+  shootoutJson?: string | null;
   events?: MatchEvent[];
   createdAt: string;
   /** ISO-tijdstip wanneer de wedstrijd is afgesloten; null = nog open voor live. */
