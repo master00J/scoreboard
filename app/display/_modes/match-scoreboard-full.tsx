@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { motion } from "framer-motion";
 import { StableClockText } from "@/components/stable-clock-text";
+import { FitText } from "@/components/fit-text";
 import type { Match } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
 import { type ResolvedScoreboardTheme, mergeScoreboardTheme, scoreboardSurfaceBackgroundPath } from "@/lib/scoreboard-theme";
@@ -231,12 +232,14 @@ function TeamScore({
 }) {
   if (!theme.showScores) return null;
   return (
-    <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }}>
+    <div className="absolute box-border overflow-hidden" style={{ ...style, containerType: "size" }} data-fit-box>
       <div
         className="flex h-full w-full flex-col items-center justify-center gap-[6cqh] px-[4cqw] py-[4cqh]"
         style={inner}
       >
-        <div
+        <FitText
+          as="div"
+          boost={element.style?.fontScale ?? 1}
           className="shrink-0 font-black tabular-nums leading-none"
           style={{
             fontSize: `min(${theme.fullScorePx}px, 72cqh, 70cqw)`,
@@ -246,7 +249,7 @@ function TeamScore({
           }}
         >
           {score}
-        </div>
+        </FitText>
         <div className="w-full min-w-0 shrink-0">
           <SportTeamExtras match={match} side={side} compact />
         </div>
@@ -283,6 +286,7 @@ function CenterBlock({
     <div
       className="absolute box-border overflow-hidden"
       style={{ ...style, containerType: "size" }}
+      data-fit-box
     >
       <div
         className="flex h-full w-full flex-col items-center justify-center min-w-0"
@@ -299,8 +303,9 @@ function CenterBlock({
         {theme.showClock ? (
           <div className="flex items-end justify-center gap-4">
             <StableClockText
-                digitEm={theme.clockDigitEm}
-                plainDigits={theme.plainDigits}
+              digitEm={theme.clockDigitEm}
+              plainDigits={theme.plainDigits}
+              fitBoost={element.style?.fontScale ?? 1}
               value={formatSportClock(match.sport, elapsed)}
               className="font-black leading-none"
               style={{

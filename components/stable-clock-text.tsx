@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { cn } from "@/lib/utils";
+import { useFitToBox } from "./use-fit-to-box";
 
 /**
  * Kloktekst (bv. `01:11`) met vaste tekenbreedte zodat `1` vs `0` de layout
@@ -13,6 +14,7 @@ export function StableClockText({
   style,
   digitEm = 0.65,
   plainDigits = false,
+  fitBoost,
 }: {
   value: string;
   className?: string;
@@ -21,9 +23,17 @@ export function StableClockText({
   digitEm?: number;
   /** Geen tabelcijfers: de vaste breedte per teken houdt de klok toch stil. */
   plainDigits?: boolean;
+  /**
+   * Binnen het vak houden (`data-fit-box`): de vergroting van het vak ("Tekstgrootte"). Zonder deze
+   * waarde krimpt de klok niet.
+   */
+  fitBoost?: number;
 }) {
+  const fit = useFitToBox<HTMLSpanElement>(fitBoost ?? 1);
+  const fits = fitBoost !== undefined;
   return (
     <span
+      ref={fits ? fit.ref : undefined}
       role="timer"
       aria-label={value}
       className={cn("inline-flex items-baseline justify-center", className)}
@@ -31,6 +41,7 @@ export function StableClockText({
         fontVariantNumeric: plainDigits ? "normal" : "tabular-nums",
         fontFeatureSettings: plainDigits ? "normal" : '"tnum" 1',
         ...style,
+        ...(fits ? fit.style : {}),
       }}
     >
       {Array.from(value).map((ch, i) => (

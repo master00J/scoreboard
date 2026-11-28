@@ -7,6 +7,7 @@ import type { Match } from "@/lib/types";
 import { mediaUrl } from "@/lib/media-url";
 import { clubBrandAsset } from "@/lib/club-brand/assets";
 import { SportTeamExtras } from "./sport-score-extras";
+import { FitText, fitOrigin } from "@/components/fit-text";
 
 /** Laag van een element: de volgorde in de lijst, boven achtergrondbeeld en teamgloed. */
 export function elementLayer(index: number): number {
@@ -68,12 +69,25 @@ function useClockMinute(): string {
   return now;
 }
 
-function TimeOfDay({ style }: { style: CSSProperties }) {
+function TimeOfDay({
+  style,
+  boost,
+  origin,
+}: {
+  style: CSSProperties;
+  boost: number;
+  origin: CSSProperties["transformOrigin"];
+}) {
   const now = useClockMinute();
   return (
-    <span className="font-black tabular-nums leading-none" style={{ ...style, fontSize: fitFontSize("00:00", 70) }}>
+    <FitText
+      boost={boost}
+      origin={origin}
+      className="font-black tabular-nums leading-none"
+      style={{ ...style, fontSize: fitFontSize("00:00", 70) }}
+    >
       {now}
-    </span>
+    </FitText>
   );
 }
 
@@ -98,6 +112,7 @@ export function ExtraElement({
   const align = element.style?.align ?? "center";
   const justify = align === "left" ? "flex-start" : align === "right" ? "flex-end" : "center";
   const scale = element.style?.fontScale;
+  const origin = fitOrigin(align);
   const text: CSSProperties = {
     color: element.style?.color,
     textTransform: element.style?.uppercase ? "uppercase" : undefined,
@@ -109,12 +124,14 @@ export function ExtraElement({
     case "teamName": {
       const name = team.name || team.shortName;
       content = (
-        <span
+        <FitText
+          boost={scale ?? 1}
+          origin={origin}
           className="font-bold leading-none"
           style={{ ...text, color: text.color ?? theme.teamNameColor, fontSize: fitFontSize(name) }}
         >
           {name}
-        </span>
+        </FitText>
       );
       break;
     }
@@ -127,33 +144,39 @@ export function ExtraElement({
       break;
     case "period":
       content = (
-        <span
+        <FitText
+          boost={scale ?? 1}
+          origin={origin}
           className="font-semibold uppercase leading-none tracking-[0.2em]"
           style={{ ...text, color: text.color ?? "rgba(255,255,255,0.6)", fontSize: fitFontSize(`${period}  `) }}
         >
           {period}
-        </span>
+        </FitText>
       );
       break;
     case "timeOfDay":
-      content = <TimeOfDay style={{ ...text, color: text.color ?? "#ffffff" }} />;
+      content = <TimeOfDay style={{ ...text, color: text.color ?? "#ffffff" }} boost={scale ?? 1} origin={origin} />;
       break;
     case "text": {
       const value = element.text ?? "";
       content = value ? (
-        <span
+        <FitText
+          boost={scale ?? 1}
+          origin={origin}
           className="font-bold leading-none"
           style={{ ...text, color: text.color ?? "#ffffff", fontSize: fitFontSize(value) }}
         >
           {value}
-        </span>
+        </FitText>
       ) : null;
       break;
     }
     case "scoreLine": {
       const line = `${match.homeScore}-${match.awayScore}`;
       content = (
-        <span
+        <FitText
+          boost={scale ?? 1}
+          origin={origin}
           className="font-black leading-none"
           style={{
             ...text,
@@ -163,7 +186,7 @@ export function ExtraElement({
           }}
         >
           {line}
-        </span>
+        </FitText>
       );
       break;
     }
@@ -185,6 +208,7 @@ export function ExtraElement({
       className="absolute box-border overflow-hidden"
       style={{ ...elementBoxStyle(element, index), containerType: "size" }}
       data-layout-element={element.id}
+      data-fit-box
     >
       <div
         className="flex h-full w-full items-center"
