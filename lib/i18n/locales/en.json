@@ -489,7 +489,8 @@
     "shootoutOnScreen": "On stadium screen",
     "shootoutClear": "Clear shootout",
     "shootoutClearConfirm": "Clear the penalty shootout? The match score stays as it is.",
-    "shootoutHint": "Does not count towards the match score. Sudden death follows after the rounds."
+    "shootoutHint": "Does not count towards the match score. Sudden death follows after the rounds.",
+    "shootoutMatchScore": "Match {{home}} – {{away}}"
   },
   "sponsors": {
     "liveTitle": "Sponsors live · measured on screen",
